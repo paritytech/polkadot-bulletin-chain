@@ -31,9 +31,16 @@ Without bounds, at sustained-peak block usage one window of fresh `store` data a
 ## Storage types
 
 - **Temporary storage** — happens through the `store` call. Lives on chain for one `RetentionPeriod` from its `store` block.
-- **Renewed storage** — happens through the `renew` call. The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
+- **Renewed storage** — re-anchors an existing entry. The renewed entry itself lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
 
-`store`, `store_with_cid_config`, `renew`, and `renew_content_hash` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
+The renew-family extrinsics:
+
+- `force_renew(entry: TransactionRef)` — synchronous renewal at dispatch time. `TransactionRef::Position { block, index }` or `TransactionRef::ContentHash(_)`.
+- `renew(entry: TransactionRef)` — one-shot scheduler. The extension's `check_signed` pre-pays the renewal at registration (same hard-cap charge as `force_renew`); the cycle delivers without re-charging.
+- `enable_auto_renew(content_hash)` — recurring scheduler. Same pre-paid first cycle as `renew`; cycle 1 delivers without re-charging, cycle 2 onward charges per cycle.
+- `disable_auto_renew(content_hash)` — cancels the registration. Signed callers are rejected with `CannotDisablePrepaidAutoRenewal` while the registration is in its prepaid window (`paid: true`); they must wait for the first cycle to consume the prepayment. Root can disable regardless (governance / cleanup), but the prepayment is forfeit.
+
+`store`, `store_with_cid_config`, `force_renew`, `renew`, `enable_auto_renew`, and `disable_auto_renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
 Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`. The kind is what `on_initialize`'s obsolete-block cleanup uses to tell which entries should decrement the chain-wide renewed-bytes counter when they age out — see [Hard limit on renewed storage](#hard-limit-on-renewed-storage).
 
@@ -131,7 +138,7 @@ Preimage slots carry `transactions_allowance = 2`. The slot model gates the tran
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. `renew` and preimage-scoped stores get `0`.
-- The strategy is fed the **post-this-tx, folded** extent — `Pallet::account_authorization_extent(who)` (`lib.rs:2068–2117`) sums per-slot `bytes` and `transactions` across *active* slots, **clamping each slot's used counters to that slot's own allowance** before adding. The clamp matters: without it an over-cap soft store on one slot would inflate the folded `bytes` past the folded `bytes_allowance` and mask another slot's remaining room from the boost.
+- The strategy is fed the **post-this-tx, folded** extent — `Pallet::account_authorization_extent(who)` sums per-slot `bytes` and `transactions` across *active* slots, **clamping each slot's used counters to that slot's own allowance** before adding. The clamp matters: without it an over-cap soft store on one slot would inflate the folded `bytes` past the folded `bytes_allowance` and mask another slot's remaining room from the boost.
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while folded-in-budget on both axes, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
 
@@ -264,9 +271,11 @@ A single account, even via stacked `_window` grants, cannot push concurrent on-c
 
 ## Migration
 
-`STORAGE_VERSION = 4`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4}` modules for the wiring.
+`STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring.
 
-`v3 → v4` (`MigrateV3ToV4`, a `SteppedMigration`) translates each legacy `Authorizations[scope]` entry into a single-slot `AuthorizationSlots[scope] = [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }]` and clears the old map. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
+`v3 → v4` (`migrations::v4::MigrateV3ToV4`, a `SteppedMigration`) translates each legacy `Authorizations[scope]` entry into a single-slot `Authorizations[scope] = Authorization { slots: [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }] }` in place (shared storage prefix), dropping zero-allowance or already-expired entries. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
+
+`v4 → v5` (`migrations::v5::MigrateV4ToV5`, a `SteppedMigration`) re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring: true, paid: false }`. All pre-existing entries were written by the old fee-paying `enable_auto_renew`, which is the forever-renewal path and did **not** pre-pay against the owner's authorization — so they migrate as `{ recurring: true, paid: false }` and `do_process_auto_renewals` charges them per-cycle, preserving their on-chain behaviour across the upgrade. New one-shot (`recurring: false`) and new prepaid (`paid: true`) entries are only reachable through the v5 extrinsics, which can't have written any entries before the migration runs.
 
 ## Capacity planning operational steps
 
@@ -277,20 +286,28 @@ When `PermanentStorageNearCap` fires, governance can either:
 
 ## Auto-renewal
 
-`enable_auto_renew` snapshots the **folded** authorization extent for the caller (`bytes_allowance - bytes >= tx_info.size` and `transactions_allowance > transactions`). It is a sanity check; nothing is reserved against any slot at registration time.
+`AutoRenewals` entries carry `{ account, recurring: bool, paid: bool }`:
 
-The actual renewal flows through `process_auto_renewals` (driven by the `apply_block_inherents` mandatory inherent), which calls the same `check_authorization` → `pick_slot_for_consumption` path as a user `renew`. The per-slot hard cap, chain-wide `PermanentStorageUsed` cap, `kind = Renew` stamp in `Transactions`, and obsolete-cleanup decrement all fire consistently. No separate accounting path.
+- `recurring: false` — one-shot, set by [`renew`](#storage-types). The first cycle consumes the prepayment and removes the registration.
+- `recurring: true` — forever, set by `enable_auto_renew`. The first cycle consumes the prepayment; cycle 2 onward charges per-cycle from the owner's authorization.
+- `paid: true` — the next cycle has already been charged at registration time (`bytes_permanent` + 1 tx slot picked atomically against an active slot in the extension's `check_signed`, plus the chain-wide `PermanentStorageUsed` increment). The first cycle delivers without re-charging and flips `paid` to `false`.
 
-If a queued auto-renewal can no longer pass the gate (slot expired, per-slot cap, or chain-wide cap), `process_auto_renewals` removes the registration and emits `AutoRenewalFailed`; the data ages out normally on its `RetentionPeriod`.
+### Registration
+
+`renew` and `enable_auto_renew` route through `extension::check_signed` with `is_renew = true`, which calls `check_authorization` and atomically picks an active slot with `bytes_permanent + size <= bytes_allowance`. Failure surfaces immediately at pool ingress (`PermanentAllowanceExceeded` per-slot, `ChainPermanentCapReached` chain-wide). Spam is bounded structurally by this up-front charge — a caller cannot over-schedule past `bytes_allowance` or `MaxPermanentStorageSize`. The pallet body then writes the `AutoRenewals` entry with `paid: true`; it does **not** re-invoke `do_renew`, otherwise `bytes_permanent` would be double-charged (once at registration, once on the prepaid cycle).
+
+`disable_auto_renew` is rejected for signed owners while `paid: true` (`CannotDisablePrepaidAutoRenewal`) — the prepayment has already been deducted and cannot be reclaimed before the first cycle fires. Root bypasses the check (governance / cleanup); the prepayment is then forfeit.
+
+### Cycle delivery
+
+The actual renewal flows through `process_auto_renewals` (driven by the `apply_block_inherents` mandatory inherent). It drains `PendingAutoRenewals` (populated by the obsolete-block cleanup in `on_initialize`) entry-by-entry:
+
+1. If `paid: true`: deliver the renewal **without** charging the owner, then flip `paid` to `false` so subsequent cycles charge per-cycle. For `recurring: false`, the registration is removed immediately after the prepaid cycle.
+2. If `paid: false`: call the same `check_authorization` → `pick_slot_for_consumption` path as a user `renew`. The per-slot hard cap, chain-wide `PermanentStorageUsed` cap, `kind = Renew` stamp in `Transactions`, and obsolete-cleanup decrement all fire consistently. No separate accounting path.
+
+If a queued auto-renewal can no longer pass the gate (no active slot, per-slot cap, or chain-wide cap), `process_auto_renewals` removes the registration and emits `AutoRenewalFailed`; the data ages out normally on its `RetentionPeriod`. The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
 ## TODO
 
-### Align with auto-renewal ([PR #313](https://github.com/paritytech/polkadot-bulletin-chain/pull/313))
-
-PR #313 introduced `TransactionByContentHash`, `AutoRenewals`, `PendingAutoRenewals`, and `process_auto_renewals`. Items still open under the slot model:
-
-- **Centralized accounting in `do_renew`.** Hard-cap checks (per-slot, chain-wide) and the `kind = Renew` stamp live in `do_renew`, called by `renew`, `renew_content_hash`, and `process_auto_renewals`. (The slot pick happens inside `check_authorization`, which `do_renew` already invokes.)
-- **Specify `process_auto_renewals` behavior on chain-wide cap rejection.** If `do_renew` rejects an auto-renewal because of `MaxPermanentStorageSize`, treat it the same as PR #313's "block full" path: remove the registration, emit `AutoRenewalFailed`, let the data expire normally.
-- **Re-examine the snapshot check in `enable_auto_renew`** (or replace with a real reservation). The current check now reads the *folded* extent over active slots, but it is still only a snapshot — slot expiry between registration and the next renewal can drop the holder under cap with no warning. The reservation-vs-snapshot tension is unchanged from the pre-slot design.
-- **Reserve block-transaction slots for user txs.** `process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store`/`renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
-- **Per-content dedup of re-renewals (nice-to-have).** On `renew(X)`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
+- **Reserve block-transaction slots for user txs.** `process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
+- **Per-content dedup of re-renewals (nice-to-have).** On a renew of `X`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
