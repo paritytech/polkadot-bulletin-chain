@@ -67,6 +67,6 @@ export const WEB3_STORAGE_NETWORKS: Record<string, Network> = {
 };
 
 export const DEFAULT_NETWORKS = {
-  bulletin: "paseo",
+  bulletin: "paseo-next-v2",
   web3storage: "local",
 } as const;
