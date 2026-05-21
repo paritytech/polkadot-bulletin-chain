@@ -172,6 +172,10 @@ jobs:
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
 
+      - name: Test HOP round trip
+        working-directory: examples
+        run: just run-test-hop-round-trip "$TEST_DIR"
+
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"

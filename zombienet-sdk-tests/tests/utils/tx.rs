@@ -230,6 +230,12 @@ pub async fn authorize_and_store_items(
 }
 
 /// Returns (block_number, next_nonce). Waits for best block.
+/// Best-only inclusion for both the authorize and store extrinsics — caller gets fast
+/// turnaround (~1 block) so any follow-up like `enable_auto_renew` can land before
+/// `store_block + RP`. Returns the canonical inclusion block number read at the
+/// inclusion-block hash. Callers that later assert against finalized state accept that a
+/// rare reorg between best-inclusion and finality can leave the captured block number
+/// pointing at an orphaned chain.
 pub async fn authorize_and_store_data(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
@@ -290,7 +296,8 @@ pub async fn authorize_and_store_data(
 	Ok((block_number, nonce))
 }
 
-/// Returns (block_number, next_nonce). Waits for finalization (for LDB tests).
+/// Returns (block_number, next_nonce). Waits for finalization (for LDB / sync tests where
+/// the captured block number must be on the canonical chain *before* the test proceeds).
 pub async fn authorize_and_store_data_finalized(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
@@ -437,7 +444,8 @@ pub async fn top_up_alice_authorization(
 }
 
 /// Signed `store(data)` from Alice; caller ensures Alice is authorized. Returns the
-/// canonical inclusion block number (see [`canonical_store_block`]).
+/// canonical inclusion block number (see [`canonical_store_block`]). Waits for best-only
+/// inclusion; callers accept the rare-reorg risk on later finalized-state reads.
 pub async fn submit_store_signed(
 	client: &OnlineClient<SubstrateConfig>,
 	data: &[u8],
@@ -462,6 +470,52 @@ pub async fn submit_store_signed(
 	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
 	tracing::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
+}
+
+/// Resolve the canonical store block by walking the **finalized** chain backward from the
+/// latest finalized block until a `TransactionStorage::Stored` event whose payload contains
+/// `content_hash` is found. Robust against best-vs-finalized reorgs: subxt's
+/// `wait_for_in_best_block` can name an inclusion block that gets orphaned, so the eager
+/// `canonical_store_block` reading at that hash returns a number not on the new canonical
+/// chain. This walk re-anchors against finality.
+///
+/// Caller must already have waited for finality to cover the expected store block (e.g. via
+/// `wait_for_finalized_height`). `search_from_inclusive` bounds how far back the walk
+/// descends — pass the best-reported store block minus a small reorg-depth buffer.
+pub async fn resolve_canonical_store_block(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	search_from_inclusive: u64,
+) -> Result<u64> {
+	// 32-byte sliding-window match against the event's scale-encoded field bytes —
+	// `Stored { index: u32, content_hash: [u8; 32], cid: Option<Cid> }`. Random collisions
+	// at 32 bytes are astronomically unlikely.
+	let mut current = client.blocks().at_latest().await?;
+	loop {
+		let block_n = current.number() as u64;
+		if block_n < search_from_inclusive {
+			break;
+		}
+		let events = current.events().await?;
+		for ev in events.iter().filter_map(|e| e.ok()) {
+			if ev.pallet_name() == "TransactionStorage" &&
+				ev.variant_name() == "Stored" &&
+				ev.field_bytes().windows(32).any(|w| w == content_hash)
+			{
+				return Ok(block_n);
+			}
+		}
+		if block_n == 0 {
+			break;
+		}
+		let parent_hash = current.header().parent_hash;
+		current = client.blocks().at(parent_hash).await?;
+	}
+	anyhow::bail!(
+		"Stored event for content_hash 0x{} not found on finalized chain at/above block {}",
+		hex::encode(content_hash),
+		search_from_inclusive,
+	)
 }
 
 /// Canonical store/renew block number, read from `TransactionByContentHash` at the
@@ -505,9 +559,9 @@ pub async fn canonical_store_block(
 	Ok(block_number as u64)
 }
 
-/// Two `renew` calls signed by Alice and Bob respectively. `validate_signed` tags renewals
-/// with `(who, content_hash)`, so two renews of the same data from the same signer would
-/// conflict in the pool.
+/// Two `force_renew` calls signed by Alice and Bob respectively — synchronous immediate
+/// renewals (each emits `Renewed`). `validate_signed` tags renewals with
+/// `(who, content_hash)`, so two from the same signer would conflict in the pool.
 pub async fn submit_renew_pair(
 	client: &OnlineClient<SubstrateConfig>,
 	block: u32,
@@ -518,16 +572,19 @@ pub async fn submit_renew_pair(
 ) -> Result<(u64, u64)> {
 	let alice = dev::alice();
 	let bob = dev::bob();
-	let renew_call = tx(
-		"TransactionStorage",
-		"renew",
-		vec![Value::u128(block as u128), Value::u128(index as u128)],
+	let entry = Value::named_variant(
+		"Position",
+		[
+			("block".to_string(), Value::u128(block as u128)),
+			("index".to_string(), Value::u128(index as u128)),
+		],
 	);
+	let renew_call = tx("TransactionStorage", "force_renew", vec![entry]);
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
 	tracing::info!(
-		"Submitting two renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
+		"Submitting two force_renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
 		block,
 		index,
 		alice_nonce,
@@ -557,7 +614,7 @@ pub async fn submit_renew_pair(
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
 	tracing::info!(
-		"renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
+		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,
 		index,
 		block_alice,

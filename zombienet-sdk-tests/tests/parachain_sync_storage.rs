@@ -110,7 +110,6 @@ use crate::{
 	test_log,
 	utils::{
 		authorize_and_store_data, authorize_and_store_data_finalized, authorize_and_store_items,
-		build_parachain_network_config_single_collator,
 		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
 		get_para_id, get_parachain_binary_path, get_parachain_chain_id, initialize_network,
@@ -169,7 +168,7 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args();
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -263,7 +262,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(PRUNING_BLOCKS);
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -570,7 +569,7 @@ async fn parachain_full_sync_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args();
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -656,7 +655,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(PRUNING_BLOCKS);
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -876,7 +875,7 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args();
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -1007,7 +1006,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		"--".into(),
 		"--network-backend=libp2p".into(),
 	];
-	let config = build_parachain_network_config_single_collator(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
