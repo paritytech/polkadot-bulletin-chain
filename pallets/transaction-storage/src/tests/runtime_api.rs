@@ -3,7 +3,7 @@
 
 use crate::{
 	mock::{
-		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeOrigin, Test,
+		new_test_ext, run_to_block, set_relay_now, MaxPermanentStorageSize, RuntimeOrigin, Test,
 		TransactionStorage,
 	},
 	TransactionRef, CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_TRANSACTION_SIZE,
@@ -24,11 +24,13 @@ fn account_authorization_returns_none_when_missing_or_expired() {
 		// No authorization yet.
 		assert_eq!(TransactionStorage::account_authorization(who), None);
 
-		// Authorize, then advance past expiry.
+		// Authorize, then advance the mock relay past the slot's expiration.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 4000));
 		assert!(TransactionStorage::account_authorization(who).is_some());
 
-		run_to_block(100, || None);
+		// Slot created at relay block 1 with `DefaultAuthorizationWindow = 10`
+		// → expiration at relay 11. Push past that.
+		set_relay_now(20);
 		assert_eq!(TransactionStorage::account_authorization(who), None);
 	});
 }
@@ -90,7 +92,7 @@ fn can_store_matches_store_extrinsic() {
 		assert!(TransactionStorage::can_store(&who, MAX_DATA_SIZE));
 
 		// Expired authorization → can_store false.
-		run_to_block(100, || None);
+		set_relay_now(20);
 		assert!(!TransactionStorage::can_store(&who, 100));
 	});
 }

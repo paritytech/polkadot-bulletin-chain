@@ -22,6 +22,12 @@ use polkadot_sdk_frame::{
 	traits::{Get, OnRuntimeUpgrade, Zero},
 };
 
+/// Identifier prefix for every stepped migration in this pallet. The
+/// MBM scheduler keys on `(pallet_id, version_from, version_to)`, so all of
+/// our `SteppedMigration` impls must share this constant — only the version
+/// pair distinguishes one from the next.
+const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
 /// Runtime migration that seeds `AllowedAuthorizers` with the given accounts
 /// **only if the storage is currently empty**.
 ///
@@ -344,8 +350,8 @@ pub mod v1 {
 pub mod v2 {
 	use super::*;
 	use crate::{
-		pallet::{Authorizations, BlockTransactions, Pallet},
-		Authorization, AuthorizationExtent, TransactionInfo, TransactionKind,
+		pallet::{BlockTransactions, Pallet},
+		TransactionInfo, TransactionKind,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -358,40 +364,6 @@ pub mod v2 {
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
-
-	#[derive(Encode, Decode)]
-	pub(crate) struct V1AuthorizationExtent {
-		pub transactions: u32,
-		pub bytes: u64,
-	}
-
-	#[derive(Encode, Decode)]
-	pub(crate) struct V1Authorization<BlockNumber> {
-		pub extent: V1AuthorizationExtent,
-		pub expiration: BlockNumber,
-	}
-
-	impl<BlockNumber: PartialOrd + Copy> V1Authorization<BlockNumber> {
-		fn expired(&self, now: BlockNumber) -> bool {
-			now >= self.expiration
-		}
-	}
-
-	/// `Authorization` layout v1→v2 actually produces — frozen. The `From` impl
-	/// below maps it into the current `Authorization` struct; any future field
-	/// added to `Authorization` becomes a compile error here, forcing the author
-	/// to pick an explicit placeholder rather than silently writing the new shape
-	/// from this old migration.
-	pub(crate) struct V2Authorization<BlockNumber> {
-		pub extent: AuthorizationExtent,
-		pub expiration: BlockNumber,
-	}
-
-	impl<BlockNumber> From<V2Authorization<BlockNumber>> for Authorization<BlockNumber> {
-		fn from(v2: V2Authorization<BlockNumber>) -> Self {
-			Self { extent: v2.extent, expiration: v2.expiration }
-		}
-	}
 
 	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
 	/// field. Used here to decode existing entries during translation.
@@ -409,45 +381,15 @@ pub mod v2 {
 
 	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
 		fn on_runtime_upgrade() -> Weight {
-			let mut auth_migrated: u64 = 0;
-			let mut auth_dropped: u64 = 0;
-			let now = Pallet::<T>::now();
-			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
-				|_scope, old| {
-					if old.extent.bytes == 0 || old.expired(now) {
-						auth_dropped = auth_dropped.saturating_add(1);
-						return None;
-					}
-					auth_migrated = auth_migrated.saturating_add(1);
-					Some(
-						V2Authorization {
-							extent: AuthorizationExtent {
-								bytes: 0,
-								bytes_permanent: 0,
-								bytes_allowance: old.extent.bytes,
-								transactions: 0,
-								transactions_allowance: old.extent.transactions,
-							},
-							expiration: old.expiration,
-						}
-						.into(),
-					)
-				},
-			);
-			tracing::info!(
-				target: LOG_TARGET,
-				migrated = auth_migrated,
-				dropped = auth_dropped,
-				"v1->v2 AuthorizationExtent migration complete",
-			);
-
-			// `Transactions` is intentionally not rewritten here — `v2→v3` decodes v1
-			// entries via its `V2TransactionInfo` path (same SCALE shape) and converts
-			// them in bounded per-block steps. See the module-level doc comment.
-
-			// `BlockTransactions` is transient (cleared in `on_finalize`) so it's
-			// almost always empty between blocks, but translate defensively in case
-			// the upgrade lands mid-block.
+			// The historical body of this migration translated entries in the old
+			// single-window `Authorizations` map. The slot redesign (v3→v4) drops
+			// that storage entirely, so translating it here would be wasted work
+			// — we leave the entries in the old layout for v3→v4 to clear by
+			// raw prefix.
+			//
+			// `BlockTransactions` is transient (cleared every `on_finalize`),
+			// almost always empty between blocks, but we still translate
+			// defensively in case the upgrade lands mid-block.
 			let mut block_tx_present = 0u64;
 			let _ = BlockTransactions::<T>::translate::<
 				BoundedVec<V1TransactionInfo, T::MaxBlockTransactions>,
@@ -480,15 +422,13 @@ pub mod v2 {
 				"v1->v2 BlockTransactions migration complete",
 			);
 
-			let auth_touched = auth_migrated.saturating_add(auth_dropped);
-			T::DbWeight::get().reads_writes(
-				auth_touched.saturating_add(block_tx_present),
-				auth_touched.saturating_add(block_tx_present),
-			)
+			T::DbWeight::get().reads_writes(block_tx_present, block_tx_present)
 		}
 	}
 
-	/// Versioned migration v1→v2: rewrites `AuthorizationExtent` and `TransactionInfo`.
+	/// Versioned migration v1→v2: translates `BlockTransactions` to the v2
+	/// `TransactionInfo` layout. The (legacy) per-window `Authorizations` map is
+	/// cleared by v3→v4.
 	pub type MigrateV1ToV2<T> = VersionedMigration<
 		1,
 		2,
@@ -496,6 +436,252 @@ pub mod v2 {
 		Pallet<T>,
 		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
 	>;
+}
+
+/// Migration v3→v4: translate the legacy single-window `Authorizations` map
+/// into the slot-based [`crate::pallet::Authorizations`] map **in place** — v3
+/// and v4 share the `"Authorizations"` storage prefix, so [`MigrateV3ToV4`]
+/// rewrites each key from a `LegacyAuthorization` into an [`Authorization<T>`].
+///
+/// Stepped: each step processes one entry. Still-active legacy entries become
+/// a single fresh slot inheriting the allowances (used counters reset);
+/// expired or zero-allowance entries are removed. Storage version flips to
+/// `4` once the legacy iterator is exhausted.
+///
+/// The legacy `expiration` was a parachain block; the slot model uses relay
+/// blocks. The clocks aren't aligned, so every still-valid entry gets a fresh
+/// `T::DefaultAuthorizationWindow`-block window starting at `relay_now`.
+/// Pre-existing renewed bytes from the old window remain in
+/// `PermanentStorageUsed` and age out via `on_initialize`, so the per-account
+/// `bytes_permanent` reset does not double-count chain-wide footprint.
+pub mod v4 {
+	use super::*;
+	use crate::{
+		pallet::{Authorizations, Pallet},
+		Authorization, AuthorizationExtent, AuthorizationScopeFor, TimedAuthorization, WeightInfo,
+	};
+	use polkadot_sdk_frame::{
+		deps::{
+			frame_support::{
+				migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
+				storage::types::StorageMap,
+				traits::{ConstU32, StorageInstance},
+				weights::WeightMeter,
+				Blake2_128Concat, BoundedVec,
+			},
+			sp_runtime::traits::BlockNumberProvider,
+		},
+		prelude::{frame_system, BlockNumberFor, StorageVersion},
+	};
+
+	/// Legacy `Authorization` shape (v3): single-window per scope. Production
+	/// code only decodes existing entries; the benchmark and tests write it
+	/// via the [`LegacyAuthorizations`] storage alias to seed scenarios.
+	#[derive(Encode, Decode, MaxEncodedLen, scale_info::TypeInfo)]
+	pub struct LegacyAuthorization<BlockNumber> {
+		pub extent: AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	/// Hand-rolled prefix struct so the legacy alias decouples its Rust type
+	/// name (`LegacyAuthorizations`) from its on-chain prefix (`"Authorizations"`,
+	/// shared with the live `pallet::Authorizations` v4 storage). This is what
+	/// makes the v3→v4 rewrite in-place: the legacy alias and the new pallet
+	/// storage are two decoders for the same on-chain keys.
+	pub struct LegacyAuthorizationsInstance<T>(PhantomData<T>);
+	impl<T: Config> StorageInstance for LegacyAuthorizationsInstance<T> {
+		fn pallet_prefix() -> &'static str {
+			<Pallet<T> as polkadot_sdk_frame::deps::frame_support::traits::PalletInfoAccess>::name()
+		}
+		const STORAGE_PREFIX: &'static str = "Authorizations";
+	}
+
+	/// View over the v3 `"Authorizations"` prefix that decodes values as
+	/// `LegacyAuthorization`. Used by [`MigrateV3ToV4`] to read entries before
+	/// overwriting them with v4 [`Authorization<T>`] values at the same key.
+	pub type LegacyAuthorizations<T> = StorageMap<
+		LegacyAuthorizationsInstance<T>,
+		Blake2_128Concat,
+		AuthorizationScopeFor<T>,
+		LegacyAuthorization<BlockNumberFor<T>>,
+		polkadot_sdk_frame::deps::frame_support::pallet_prelude::OptionQuery,
+	>;
+
+	/// Stepped migration from storage version 3 to 4.
+	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
+
+	/// Upper bound on the migration cursor's hashed-key length.
+	/// `Blake2_128Concat` produces `16 + encoded_key` bytes; the encoded
+	/// `AuthorizationScope` (Account 32B / Preimage 32B plus 1B discriminator)
+	/// fits well inside this.
+	const CURSOR_MAX_LEN: u32 = 128;
+
+	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
+		type Cursor = BoundedVec<u8, ConstU32<CURSOR_MAX_LEN>>;
+		type Identifier = MigrationId<24>;
+
+		fn id() -> Self::Identifier {
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 3, version_to: 4 }
+		}
+
+		fn step(
+			cursor: Option<Self::Cursor>,
+			meter: &mut WeightMeter,
+		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::IterableStorageMap;
+
+			let relay_now = T::RelayChainBlockNumberProvider::current_block_number();
+			if relay_now == 0 {
+				// The genesis sentinel — only seen on misconfigured try-runtime
+				// snapshots. Live parachains fall back to
+				// `last_relay_block_number()` via `RelaychainDataProvider`. Fail
+				// loudly rather than write slot windows from `0`.
+				tracing::error!(
+					target: LOG_TARGET,
+					"v3->v4: relay block number unavailable; cannot run migration",
+				);
+				return Err(SteppedMigrationError::Failed);
+			}
+
+			let required = T::WeightInfo::migrate_v3_to_v4_step();
+			if meter.remaining().any_lt(required) {
+				return Err(SteppedMigrationError::InsufficientWeight { required });
+			}
+
+			let parachain_now = frame_system::Pallet::<T>::block_number();
+			let default_window = T::DefaultAuthorizationWindow::get();
+			let new_expiration = relay_now.saturating_add(default_window);
+
+			let mut prev_key: Option<Vec<u8>> = cursor.map(|c| c.into_inner());
+
+			loop {
+				if meter.try_consume(required).is_err() {
+					break;
+				}
+
+				// In-place rewrite: `translate_next` reads each entry under the
+				// v3 decoder (`LegacyAuthorization`) and writes v4 bytes
+				// (`Authorization<T>`) at the same key.
+				let next = Authorizations::<T>::translate_next::<
+					LegacyAuthorization<BlockNumberFor<T>>,
+					_,
+				>(prev_key.take(), |scope, legacy| {
+					// Drop already-expired entries (under the v3 parachain
+					// clock) or zero-allowance entries.
+					if legacy.expiration <= parachain_now || legacy.extent.bytes_allowance == 0 {
+						return None;
+					}
+					let slot = TimedAuthorization {
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							transactions: 0,
+							bytes_allowance: legacy.extent.bytes_allowance,
+							transactions_allowance: legacy.extent.transactions_allowance,
+						},
+						starts_at: relay_now,
+						expiration: new_expiration,
+					};
+					let mut slots =
+						BoundedVec::<TimedAuthorization, T::MaxAuthorizationSlots>::new();
+					slots
+						.try_push(slot)
+						.expect("MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed");
+					let auth = Authorization::<T> { slots };
+					// `inc_providers` lives on the System pallet so it does
+					// not touch the key being rewritten and is safe to call
+					// from inside the `translate_next` closure.
+					Pallet::<T>::authorization_added(&scope);
+					Some(auth)
+				});
+
+				match next {
+					Some(key) => prev_key = Some(key),
+					None => {
+						// Iteration exhausted. Pin to v4 explicitly;
+						// `in_code_storage_version` may be higher if later
+						// versions chain on top.
+						StorageVersion::new(4).put::<Pallet<T>>();
+						return Ok(None);
+					},
+				}
+			}
+
+			let cursor = prev_key
+				.map(BoundedVec::try_from)
+				.transpose()
+				.map_err(|_| SteppedMigrationError::Failed)?;
+			Ok(cursor)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let mut total: u32 = 0;
+			let mut zero_allowance: u32 = 0;
+			for (_, legacy) in LegacyAuthorizations::<T>::iter() {
+				total = total.saturating_add(1);
+				if legacy.extent.bytes_allowance == 0 {
+					zero_allowance = zero_allowance.saturating_add(1);
+				}
+			}
+			tracing::info!(
+				target: LOG_TARGET,
+				total,
+				zero_allowance,
+				"v3->v4 pre_upgrade: legacy entries",
+			);
+			Ok((total, zero_allowance).encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::prelude::GetStorageVersion;
+
+			let (total, zero_allowance) = <(u32, u32)>::decode(&mut &state[..])
+				.map_err(|_| "Failed to decode pre_upgrade state")?;
+
+			let mut new_count: u32 = 0;
+			for (_, auth) in Authorizations::<T>::iter() {
+				new_count = new_count.saturating_add(1);
+				polkadot_sdk_frame::prelude::ensure!(
+					!auth.slots.is_empty(),
+					"v3->v4 post_upgrade: Authorization has empty slots",
+				);
+				for slot in auth.slots.iter() {
+					polkadot_sdk_frame::prelude::ensure!(
+						slot.extent.bytes == 0 &&
+							slot.extent.bytes_permanent == 0 &&
+							slot.extent.transactions == 0,
+						"v3->v4 post_upgrade: translated slot has non-zero used counters",
+					);
+				}
+			}
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count <= total,
+				"v3->v4 post_upgrade: more v4 entries than legacy entries",
+			);
+			let drops = total.saturating_sub(new_count);
+			polkadot_sdk_frame::prelude::ensure!(
+				drops >= zero_allowance,
+				"v3->v4 post_upgrade: drops < known zero-allowance drops",
+			);
+			polkadot_sdk_frame::prelude::ensure!(
+				Pallet::<T>::on_chain_storage_version() >= StorageVersion::new(4),
+				"v3->v4 post_upgrade: storage version not bumped",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				total,
+				new_count,
+				drops,
+				zero_allowance,
+				"v3->v4 post_upgrade: ok",
+			);
+			Ok(())
+		}
+	}
 }
 
 /// Migration v2→v3: Adds `extrinsic_index` to `TransactionInfo`.
@@ -526,8 +712,6 @@ pub mod v3 {
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
 
-	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
-
 	/// `TransactionInfo` layout at v2 (no `extrinsic_index`). Used only for
 	/// decoding pre-migration entries; never written.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -548,7 +732,7 @@ pub mod v3 {
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 2, version_to: 3 }
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 2, version_to: 3 }
 		}
 
 		fn step(
@@ -576,11 +760,11 @@ pub mod v3 {
 				};
 
 				let Some(block_number) = iter.next() else {
-					// Write this migration's `version_to` explicitly so that when
-					// chained with v3→v4 the on-chain version progresses one step at
-					// a time and the next migration sees the correct starting version.
-					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(3)
-						.put::<Pallet<T>>();
+					// Pin to v3 explicitly. We can't use `in_code_storage_version`
+					// here: this MBM migrates to v3, but the in-code version may
+					// be higher (later versions chain on top). The follow-up
+					// migrations bump from there.
+					polkadot_sdk_frame::prelude::StorageVersion::new(3).put::<Pallet<T>>();
 					cursor = None;
 					break;
 				};
@@ -691,8 +875,8 @@ pub mod v3 {
 	}
 }
 
-/// V3 → V4 migration: re-encode each [`AutoRenewals`] entry from
-/// `{ account }` (v3) to `{ account, recurring: true, paid: false }` (v4).
+/// V4 → V5 migration: re-encode each [`AutoRenewals`] entry from
+/// `{ account }` (pre-paid-flag) to `{ account, recurring: true, paid: false }`.
 ///
 /// All existing entries were written by the old fee-paying `enable_auto_renew`,
 /// which:
@@ -704,9 +888,9 @@ pub mod v3 {
 ///
 /// The new one-shot path (`recurring: false`) and the new prepaid path
 /// (`paid: true`, set by both `renew` and the new `enable_auto_renew`) are only
-/// reachable through the v4 extrinsics, which can't have written any entries
+/// reachable through the v5 extrinsics, which can't have written any entries
 /// before this migration runs.
-pub mod v4 {
+pub mod v5 {
 	use super::*;
 	use crate::{
 		pallet::{AutoRenewals, Pallet},
@@ -723,29 +907,29 @@ pub mod v4 {
 
 	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
 
-	/// `AutoRenewalData` layout at v3 (no `recurring` field). Used only for
-	/// decoding pre-migration entries; never written.
+	/// `AutoRenewalData` layout pre-v5 (no `recurring` / `paid` fields). Used
+	/// only for decoding pre-migration entries; never written.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
-	pub(crate) struct V3AutoRenewalData<AccountId> {
+	pub(crate) struct PreV5AutoRenewalData<AccountId> {
 		pub account: AccountId,
 	}
 
-	/// Stepped migration from storage version 3 to 4.
-	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
+	/// Stepped migration from storage version 4 to 5.
+	pub struct MigrateV4ToV5<T: Config>(PhantomData<T>);
 
-	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
+	impl<T: Config> SteppedMigration for MigrateV4ToV5<T> {
 		type Cursor = ContentHash;
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 3, version_to: 4 }
+			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 4, version_to: 5 }
 		}
 
 		fn step(
 			mut cursor: Option<Self::Cursor>,
 			meter: &mut WeightMeter,
 		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			let required = T::WeightInfo::migrate_v3_to_v4_step();
+			let required = T::WeightInfo::migrate_v4_to_v5_step();
 			if meter.remaining().any_lt(required) {
 				return Err(SteppedMigrationError::InsufficientWeight { required });
 			}
@@ -762,7 +946,7 @@ pub mod v4 {
 				};
 
 				let Some(content_hash) = iter.next() else {
-					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(4)
+					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(5)
 						.put::<Pallet<T>>();
 					cursor = None;
 					break;
@@ -775,18 +959,18 @@ pub mod v4 {
 					continue;
 				};
 
-				// Idempotent: if it's already v4, skip.
+				// Idempotent: if it's already v5, skip.
 				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_ok() {
 					cursor = Some(content_hash);
 					continue;
 				}
 
-				let v3 = V3AutoRenewalData::<T::AccountId>::decode(&mut &raw[..])
+				let legacy = PreV5AutoRenewalData::<T::AccountId>::decode(&mut &raw[..])
 					.map_err(|_| SteppedMigrationError::Failed)?;
 
 				AutoRenewals::<T>::insert(
 					content_hash,
-					RenewalData { account: v3.account, recurring: true, paid: false },
+					RenewalData { account: legacy.account, recurring: true, paid: false },
 				);
 				cursor = Some(content_hash);
 			}
@@ -806,7 +990,7 @@ pub mod v4 {
 				previous_key = key;
 				count += 1;
 			}
-			tracing::info!(target: LOG_TARGET, count, "v3->v4 pre_upgrade: AutoRenewals entries");
+			tracing::info!(target: LOG_TARGET, count, "v4->v5 pre_upgrade: AutoRenewals entries");
 			Ok(count.encode())
 		}
 
@@ -827,29 +1011,29 @@ pub mod v4 {
 			{
 				previous_key = key.clone();
 				let raw = sp_io::storage::get(&key)
-					.ok_or("v3->v4 post_upgrade: missing AutoRenewals entry")?;
+					.ok_or("v4->v5 post_upgrade: missing AutoRenewals entry")?;
 				let decoded = RenewalData::<T::AccountId>::decode(&mut &raw[..])
-					.map_err(|_| "v3->v4 post_upgrade: remaining entry is not v4")?;
+					.map_err(|_| "v4->v5 post_upgrade: remaining entry is not v5")?;
 				polkadot_sdk_frame::prelude::ensure!(
 					decoded.recurring,
-					"v3->v4 post_upgrade: migrated entry must have recurring=true",
+					"v4->v5 post_upgrade: migrated entry must have recurring=true",
 				);
 				polkadot_sdk_frame::prelude::ensure!(
 					!decoded.paid,
-					"v3->v4 post_upgrade: migrated entry must have paid=false",
+					"v4->v5 post_upgrade: migrated entry must have paid=false",
 				);
 				new_count += 1;
 			}
 
 			polkadot_sdk_frame::prelude::ensure!(
 				new_count == old_count,
-				"v3->v4 post_upgrade: entry count changed",
+				"v4->v5 post_upgrade: entry count changed",
 			);
 			tracing::info!(
 				target: LOG_TARGET,
 				old_count,
 				new_count,
-				"v3->v4 post_upgrade: valid"
+				"v4->v5 post_upgrade: valid"
 			);
 			Ok(())
 		}

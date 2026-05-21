@@ -136,7 +136,7 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_account_authorization() -> Weight {
+	fn authorize_account_window() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
@@ -160,7 +160,7 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn refresh_preimage_authorization() -> Weight {
+	fn authorize_preimage_window() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
@@ -359,18 +359,31 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Placeholder for the v3→v4 stepped migration. One iteration: read one
+	/// legacy `Authorizations` entry, insert into `AuthorizationSlots`, remove
+	/// the legacy entry, bump the provider-ref (`Account` scope only). Will be
+	/// overwritten by `frame-omni-bencher`.
+	fn migrate_v3_to_v4_step() -> Weight {
+		Weight::from_parts(50_000_000, 5_500)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(3))
+	}
 	/// Storage: `TransactionStorage::AutoRenewals` (r:2 w:1)
 	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(81), added: 2556, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
-	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
-	fn migrate_v3_to_v4_step() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `394`
-		//  Estimated: `6102`
-		// Minimum execution time: 13_111_000 picoseconds.
+	fn migrate_v4_to_v5_step() -> Weight {
 		Weight::from_parts(14_101_000, 0)
 			.saturating_add(Weight::from_parts(0, 6102))
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	fn refresh_account_authorization() -> Weight {
+		Weight::from_parts(20_000_000, 2560)
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	fn refresh_preimage_authorization() -> Weight {
+		Weight::from_parts(20_000_000, 2560)
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }
