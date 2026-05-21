@@ -17,6 +17,7 @@
 
 //! Type definitions for the transaction storage pallet.
 
+pub use bulletin_transaction_storage_primitives::TransactionRef;
 use bulletin_transaction_storage_primitives::{
 	cids::{CidCodec, HashingAlgorithm},
 	ContentHash,
@@ -98,23 +99,6 @@ pub enum AuthorizationScope<AccountId> {
 
 pub(crate) type AuthorizationScopeFor<T> =
 	AuthorizationScope<<T as frame_system::Config>::AccountId>;
-
-/// Identifies a previously-stored entry in [`crate::Transactions`].
-#[derive(
-	Clone,
-	PartialEq,
-	Eq,
-	Debug,
-	Encode,
-	Decode,
-	codec::DecodeWithMemTracking,
-	scale_info::TypeInfo,
-	MaxEncodedLen,
-)]
-pub enum TransactionRef<BlockNumber> {
-	Position { block: BlockNumber, index: u32 },
-	ContentHash(ContentHash),
-}
 
 /// Describes the caller of a store/renew extrinsic after origin validation.
 #[derive(Clone, PartialEq, Eq, Debug)]
