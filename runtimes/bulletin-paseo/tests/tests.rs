@@ -2116,7 +2116,8 @@ fn non_sudo_cannot_add_authorizer() {
 		});
 }
 
-type TxPauseWhitelist = bulletin_pallets_common::TxPauseWhitelist<Runtime, TransactionStorage>;
+type TxPauseWhitelist =
+	bulletin_pallets_common::TxPauseWhitelist<Runtime, bulletin_paseo_runtime::PausableCalls>;
 
 const RENEW_CALLS: &[&[u8]] =
 	&[b"renew", b"force_renew", b"enable_auto_renew", b"disable_auto_renew"];

@@ -540,12 +540,38 @@ parameter_types! {
 	pub const TxPauseMaxNameLen: u32 = 256;
 }
 
+/// Calls pausable via `pallet_tx_pause`. Names derive from typed variants so a
+/// rename in the storage pallet is a compile error here.
+pub struct PausableCalls;
+impl frame_support::traits::Contains<pallet_tx_pause::RuntimeCallNameOf<Runtime>>
+	for PausableCalls
+{
+	fn contains(name: &pallet_tx_pause::RuntimeCallNameOf<Runtime>) -> bool {
+		use frame_support::traits::{GetCallName, PalletInfoAccess};
+		use pallet_bulletin_transaction_storage::{Call as TxStorageCall, TransactionRef};
+		if name.0.as_slice() != TransactionStorage::name().as_bytes() {
+			return false;
+		}
+		let entry: TransactionRef<BlockNumber> = TransactionRef::ContentHash([0u8; 32]);
+		let zero_hash = [0u8; 32];
+		let pausable = [
+			TxStorageCall::<Runtime>::renew { entry: entry.clone() }.get_call_name(),
+			TxStorageCall::<Runtime>::force_renew { entry }.get_call_name(),
+			TxStorageCall::<Runtime>::enable_auto_renew { content_hash: zero_hash }.get_call_name(),
+			TxStorageCall::<Runtime>::disable_auto_renew { content_hash: zero_hash }
+				.get_call_name(),
+		];
+		let call_name = name.1.as_slice();
+		pausable.iter().any(|n| n.as_bytes() == call_name)
+	}
+}
+
 impl pallet_tx_pause::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
 	type PauseOrigin = EnsureRoot<AccountId>;
 	type UnpauseOrigin = EnsureRoot<AccountId>;
-	type WhitelistedCalls = bulletin_pallets_common::TxPauseWhitelist<Runtime, TransactionStorage>;
+	type WhitelistedCalls = bulletin_pallets_common::TxPauseWhitelist<Runtime, PausableCalls>;
 	type MaxNameLen = TxPauseMaxNameLen;
 	type WeightInfo = pallet_tx_pause::weights::SubstrateWeight<Runtime>;
 }
