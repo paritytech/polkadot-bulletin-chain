@@ -359,7 +359,9 @@ fn authorized_storage_transactions_are_for_free() {
 
 			advance_block();
 
-			// `enable_auto_renew` should also be feeless and consume one tx unit instead.
+			// `enable_auto_renew` is feeless but pre-pays one cycle at registration
+			// — same hard-cap accounting as `force_renew`. The next cycle fires
+			// free thanks to `paid: true`; subsequent cycles charge per-cycle.
 			let extent_before = TransactionStorage::account_authorization_extent(who.clone());
 			let enable_call =
 				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::enable_auto_renew {
@@ -371,7 +373,10 @@ fn authorized_storage_transactions_are_for_free() {
 			let extent_after = TransactionStorage::account_authorization_extent(who.clone());
 			assert_eq!(extent_after.transactions, extent_before.transactions + 1);
 			assert_eq!(extent_after.bytes, extent_before.bytes);
-			assert_eq!(extent_after.bytes_permanent, extent_before.bytes_permanent);
+			assert_eq!(
+				extent_after.bytes_permanent,
+				extent_before.bytes_permanent + data.len() as u64,
+			);
 		});
 }
 
