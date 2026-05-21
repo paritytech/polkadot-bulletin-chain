@@ -77,6 +77,8 @@ fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
+mod runtime_api;
+
 /// Run `enable_auto_renew` through the same pipeline the runtime uses:
 /// `pre_dispatch_signed` (charges bytes + tx slot, matches what the extension's
 /// `prepare` step does at runtime) followed by `dispatch` with an
