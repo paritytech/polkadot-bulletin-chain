@@ -4,7 +4,7 @@
  * TypeScript equivalent of the Rust authorize-and-store example.
  * Demonstrates:
  * 1. Authorizing an account to store data (sudo via AsyncBulletinClient)
- * 2. Storing data on chain via AsyncBulletinClient.store().send()
+ * 2. Storing data on chain via AsyncBulletinClient.uploadFile().send()
  * 3. Verifying the returned CID
  *
  * Usage:
@@ -72,10 +72,10 @@ async function main() {
         console.log(`\nStep 2: Storing data: "${dataToStore}"`);
         console.log(`  Size: ${dataBytes.length} bytes`);
 
-        const result = await userClient.store(dataBytes).send();
+        const { cid } = await userClient.uploadFile(dataBytes).send();
 
         console.log('Data stored successfully!');
-        console.log(`  CID: ${result.cid.toString()}`);
+        console.log(`  CID: ${cid.toString()}`);
 
         console.log('\nTest passed!');
         resultCode = 0;

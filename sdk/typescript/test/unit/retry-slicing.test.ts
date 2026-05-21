@@ -23,11 +23,7 @@ async function makeClient() {
   }
   const apiStub = { tx: { TransactionStorage: {} } }
   // biome-ignore lint/suspicious/noExplicitAny: tests touch private method directly
-  return new AsyncBulletinClient(
-    apiStub as any,
-    signer as any,
-    async () => ({}) as never,
-  )
+  return new AsyncBulletinClient(apiStub as any, signer as any, undefined)
 }
 
 // Build a fake CID-like object (mockClient does Blake2b CIDs; we just need

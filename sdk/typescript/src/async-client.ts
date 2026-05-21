@@ -37,6 +37,7 @@ import {
 } from "./types.js"
 import {
   calculateCid,
+  getContentHash,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
@@ -155,21 +156,20 @@ export interface BulletinTypedApi {
 }
 
 /**
- * Function type for submitting raw transactions to the chain.
+ * Stream-watch submission interface, matching the signature of
+ * `PolkadotClient.submitAndWatch` from polkadot-api. Pass
+ * `papiClient.submitAndWatch` when constructing the client.
  *
- * Matches the signature of `PolkadotClient.submit` from polkadot-api.
- * Pass `papiClient.submit` directly when constructing the client.
+ * Required only for unsigned (`asUnsigned()`) uploads — signed uploads
+ * use the pipelined engine with its own wsUrls-based provider.
  */
-export type SubmitFn = (
-  transaction: Uint8Array,
-  at?: string,
-) => Promise<{
-  ok: boolean
-  block: { hash: string; number: number; index: number }
-  txHash: string
-  events: Array<{ type: string; value?: { type?: string; value?: unknown } }>
-  dispatchError?: { type: string; value: unknown }
-}>
+export type SubmitAndWatchFn = (transaction: Uint8Array) => {
+  subscribe(observer: {
+    next: (ev: TxStatusEvent) => void
+    error: (err: unknown) => void
+    complete?: () => void
+  }): { unsubscribe(): void }
+}
 
 /**
  * Transaction receipt from a successful submission
@@ -312,6 +312,7 @@ type UploadDispatch = (
   waitFor: WaitFor,
   onEvent: UploadCallback | undefined,
   checkAuth: boolean,
+  unsigned: boolean,
 ) => Promise<UploadResult>
 
 /** Dispatch callback for the high-level `uploadFile(data)` execution path. */
@@ -321,6 +322,7 @@ type UploadFileDispatch = (
   onEvent: UploadCallback | undefined,
   chunkerConfig: Partial<ChunkerConfig> | undefined,
   checkAuth: boolean,
+  unsigned: boolean,
 ) => Promise<UploadFileResult>
 
 /**
@@ -338,6 +340,7 @@ abstract class BaseUploadBuilder<TResult> {
   protected callback?: UploadCallback
   protected waitFor: WaitFor = "finalized"
   protected checkAuth = false
+  protected unsigned = false
 
   withCallback(callback: UploadCallback): this {
     this.callback = callback
@@ -351,6 +354,30 @@ abstract class BaseUploadBuilder<TResult> {
 
   ensureAuthorized(): this {
     this.checkAuth = true
+    return this
+  }
+
+  /**
+   * Submit as unsigned, preimage-authorized extrinsic(s). Requires each
+   * item's `blake2b256(data)` to be preimage-authorized on-chain
+   * beforehand (typically via `authorizePreimage()`).
+   *
+   * On `UploadBuilder`, all items are submitted in parallel — each is
+   * its own independent unsigned tx that lands when the pool accepts it.
+   * On `UploadFileBuilder`, only single-tx uploads are allowed (the
+   * chunking + DAG-PB manifest pipeline doesn't support unsigned); throws
+   * if `data` exceeds the chunking threshold.
+   *
+   * Progress events (ItemStarted/InBlock/Finalized/Failed) fire per
+   * item with `index` matching its position in the input.
+   *
+   * When combined with `ensureAuthorized()`, the pre-flight checks each
+   * item's `Authorizations<Preimage(blake2b256(data))>` entry instead of
+   * the signer's account authorization. Duplicate content hashes across
+   * items are deduped before the RPC queries.
+   */
+  asUnsigned(): this {
+    this.unsigned = true
     return this
   }
 
@@ -375,6 +402,7 @@ export class UploadBuilder extends BaseUploadBuilder<UploadResult> {
       this.waitFor,
       this.callback,
       this.checkAuth,
+      this.unsigned,
     )
   }
 }
@@ -421,6 +449,7 @@ export class UploadFileBuilder extends BaseUploadBuilder<UploadFileResult> {
       this.callback,
       this.chunkerConfig,
       this.checkAuth,
+      this.unsigned,
     )
   }
 }
@@ -541,7 +570,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * const api = client.getTypedApi(bulletinDescriptor);
  *
  * // Create SDK client
- * const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submit);
+ * const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submitAndWatch);
  *
  * // Store data
  * const result = await bulletinClient.store(data).send();
@@ -550,10 +579,19 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
 export class AsyncBulletinClient implements BulletinClientInterface {
   /** PAPI client for blockchain interaction */
   public api: BulletinTypedApi
-  /** Signer for transaction signing */
-  public signer: PolkadotSigner
-  /** Submit function for broadcasting raw transactions (from PolkadotClient.submit) */
-  public submit: SubmitFn
+  /**
+   * Signer for transaction signing. May be `undefined` when the client is
+   * constructed for unsigned-only use (`asUnsigned()`); any signed code
+   * path will throw if invoked.
+   */
+  public signer: PolkadotSigner | undefined
+  /**
+   * Stream-watch submission (`PolkadotClient.submitAndWatch`). Required
+   * for unsigned (`asUnsigned()`) uploads — signed uploads use the
+   * pipelined engine and don't need it, so it can be `undefined` on a
+   * signed-only client.
+   */
+  public submitAndWatch: SubmitAndWatchFn | undefined
   /** Client configuration */
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
@@ -575,8 +613,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * for your Bulletin Chain node.
    *
    * @param api - Configured PAPI TypedApi instance
-   * @param signer - Polkadot signer for transaction signing
-   * @param submit - Raw transaction submit function (pass `papiClient.submit`)
+   * @param signer - Polkadot signer for transaction signing, or `undefined`
+   *   for an unsigned-only client (`asUnsigned()` paths). Signed paths
+   *   throw `UNSUPPORTED_OPERATION` when invoked on a signer-less client.
+   * @param submitAndWatch - Stream-watch submission (pass
+   *   `papiClient.submitAndWatch`). Required for unsigned (`asUnsigned()`)
+   *   uploads. Pass `undefined` if you only use signed uploads — the
+   *   signed engine uses its own wsUrls-based provider.
    * @param config - Optional client configuration
    * @param onDestroy - Optional teardown callback. When provided, `destroy()`
    *   awaits it so callers (e.g. wrappers that own the underlying
@@ -584,14 +627,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   constructor(
     api: BulletinTypedApi,
-    signer: PolkadotSigner,
-    submit: SubmitFn,
+    signer: PolkadotSigner | undefined,
+    submitAndWatch: SubmitAndWatchFn | undefined,
     config?: Partial<ClientConfig>,
     onDestroy?: () => void | Promise<void>,
   ) {
     this.api = api
     this.signer = signer
-    this.submit = submit
+    this.submitAndWatch = submitAndWatch
     this.config = resolveClientConfig(config)
     this.onDestroy = onDestroy
     this.preparer = new BulletinPreparer({
@@ -632,7 +675,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
-    const address = ss58Address(this.signer.publicKey)
+    this.requireSigner("ensureAuthorized()")
+    const address = ss58Address(this.signer!.publicKey)
     const auth =
       await this.api.query.TransactionStorage.Authorizations.getValue({
         type: "Account",
@@ -660,6 +704,77 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           ErrorCode.INSUFFICIENT_AUTHORIZATION,
         )
       }
+    }
+  }
+
+  /**
+   * Opt-in pre-flight for the unsigned (`asUnsigned()`) path: verify that
+   * every item has a non-expired `Authorizations<Preimage(blake2b256(data))>`
+   * entry on chain. Preimage authorization is what the runtime checks for
+   * an unsigned `store` extrinsic — without it the tx is rejected by
+   * `AuthorizeCall`. Throws `INSUFFICIENT_AUTHORIZATION` for the first
+   * missing/expired item so the caller can authorize and retry.
+   */
+  private async ensurePreimagesAuthorized(items: UploadItem[]): Promise<void> {
+    const query = this.api.query
+    if (!query) {
+      throw new BulletinError(
+        "ensureAuthorized(): the typed API does not expose query support; cannot verify authorization",
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    const sysNumber = (
+      query as { System?: { Number?: { getValue(): Promise<number> } } }
+    ).System?.Number
+    const currentBlock = sysNumber ? await sysNumber.getValue() : undefined
+
+    // Compute every blake2b256 hash in parallel, dedupe identical items so
+    // we don't burn N RPCs when N items share content.
+    const hashHexes = await Promise.all(
+      items.map(async (item) =>
+        Binary.toHex(await getContentHash(item.data, HashAlgorithm.Blake2b256)),
+      ),
+    )
+    const uniqueHashes = Array.from(new Set(hashHexes))
+
+    await Promise.all(
+      uniqueHashes.map(async (hashHex) => {
+        const auth = await query.TransactionStorage.Authorizations.getValue({
+          type: "Preimage",
+          value: hashHex,
+        })
+        if (!auth) {
+          throw new BulletinError(
+            `No preimage authorization on chain for content hash ${hashHex}`,
+            ErrorCode.INSUFFICIENT_AUTHORIZATION,
+          )
+        }
+        if (
+          currentBlock !== undefined &&
+          typeof auth.expiration === "number" &&
+          auth.expiration <= currentBlock
+        ) {
+          throw new BulletinError(
+            `Preimage authorization for ${hashHex} expired at block ${auth.expiration} (current ${currentBlock})`,
+            ErrorCode.INSUFFICIENT_AUTHORIZATION,
+          )
+        }
+      }),
+    )
+  }
+
+  /**
+   * Assert a signer is wired before invoking a signed code path. Clients
+   * constructed for unsigned-only use (`asUnsigned()`) pass `undefined`
+   * for `signer`; calling a signed method on them raises here with a
+   * clear error rather than crashing in the depths of PAPI.
+   */
+  private requireSigner(operation: string): void {
+    if (!this.signer) {
+      throw new BulletinError(
+        `${operation} requires a signer, but this client was constructed without one`,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
     }
   }
 
@@ -708,6 +823,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     txIndex?: number
     events?: RuntimeEvent[]
   }> {
+    this.requireSigner("signAndSubmitWithProgress")
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
@@ -733,7 +849,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         })
       }
 
-      const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
+      const subscription = tx.signSubmitAndWatch(this.signer!).subscribe({
         next: (ev: TxStatusEvent) => {
           const result = mapPapiEventToProgress(
             ev,
@@ -866,7 +982,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   uploadFile(data: Uint8Array): UploadFileBuilder {
     return new UploadFileBuilder(
-      (d, wf, oe, cc, ca) => this.uploadFileImpl(d, wf, oe, cc, ca),
+      (d, wf, oe, cc, ca, un) => this.uploadFileImpl(d, wf, oe, cc, ca, un),
       data,
     )
   }
@@ -881,7 +997,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   upload(items: UploadItem[]): UploadBuilder {
     return new UploadBuilder(
-      (its, wf, oe, ca) => this.uploadItemsImpl(its, wf, oe, ca),
+      (its, wf, oe, ca, un) => this.uploadItemsImpl(its, wf, oe, ca, un),
       items,
     )
   }
@@ -892,18 +1008,26 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     onEvent: UploadCallback | undefined,
     chunkerConfig: Partial<ChunkerConfig> | undefined,
     checkAuth: boolean,
+    unsigned: boolean,
   ): Promise<UploadFileResult> {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
     const shouldChunk =
       !!chunkerConfig || data.length > this.config.chunkingThreshold
+    if (unsigned && shouldChunk) {
+      throw new BulletinError(
+        "asUnsigned() does not support chunked uploads (data exceeds chunkingThreshold or chunker config was provided)",
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
     if (!shouldChunk) {
       const { cids } = await this.uploadItemsImpl(
         [{ data }],
         waitFor,
         onEvent,
         checkAuth,
+        unsigned,
       )
       return { cid: cids[0]! }
     }
@@ -923,6 +1047,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       waitFor,
       onEvent,
       checkAuth,
+      false,
     )
     // For chunked uploads the manifest is the last item; without one, the
     // last chunk's CID is the best identifier we have.
@@ -934,6 +1059,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     waitFor: WaitFor,
     onEvent: UploadCallback | undefined,
     checkAuth: boolean,
+    unsigned: boolean,
   ): Promise<UploadResult> {
     if (items.length === 0) {
       throw new BulletinError(
@@ -941,6 +1067,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         ErrorCode.EMPTY_DATA,
       )
     }
+    if (unsigned) {
+      return this.uploadUnsignedMany(items, waitFor, onEvent, checkAuth)
+    }
+    this.requireSigner("upload()")
     if (checkAuth) await this.ensureAuthorizedOnChain()
 
     // Compute per-item CIDs once across all retry attempts.
@@ -967,7 +1097,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       const remaining = items.slice(alreadyFinalized)
       const remainingCids = allItemCids.slice(alreadyFinalized)
       try {
-        const result = await pipelineStore(this.api, this.signer, remaining, {
+        const result = await pipelineStore(this.api, this.signer!, remaining, {
           wsUrls: this.config.wsUrls,
           createProvider: (url) => getWsProvider(url),
           blockLimits: this.config.blockLimits,
@@ -998,6 +1128,145 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
     }
     return { cids: allCids }
+  }
+
+  /**
+   * Submit N unsigned (preimage-authorized) store extrinsics in parallel.
+   *
+   * Each item is independent: builds its own bareTx, calls PAPI's `submit`,
+   * and emits ItemStarted → ItemInBlock + ItemFinalized through the shared
+   * callback. The `index` on every event is the item's position in the
+   * input array, so callers can correlate events to items (or just key
+   * by `cid`).
+   *
+   * `ensureAuthorized()` is not meaningful for unsigned uploads (the
+   * account-allowance check needs a signer, and the chain's preimage
+   * authorization is per-content-hash anyway). We throw if combined.
+   */
+  private async uploadUnsignedMany(
+    items: UploadItem[],
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+    checkAuth: boolean,
+  ): Promise<UploadResult> {
+    for (const item of items) {
+      if (item.data.length === 0) {
+        throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
+      }
+    }
+    if (checkAuth) await this.ensurePreimagesAuthorized(items)
+
+    const total = items.length
+    // Submit all items concurrently — each unsigned tx is independent,
+    // can land in the same block (up to MaxBlockTransactions) or across
+    // a few blocks under pool pressure.
+    const cids = await Promise.all(
+      items.map((item, index) =>
+        this.submitUnsignedOne(item, index, total, waitFor, onEvent),
+      ),
+    )
+    return { cids }
+  }
+
+  /**
+   * Submit one unsigned store extrinsic via `submitAndWatch`. Emits
+   * ItemInBlock when the tx lands in a best block and ItemFinalized when
+   * it finalizes; the returned promise resolves at whichever event matches
+   * `waitFor`. Handles `invalid` / `dropped` node events as
+   * `TRANSACTION_FAILED` + ItemFailed.
+   */
+  private async submitUnsignedOne(
+    item: UploadItem,
+    index: number,
+    total: number,
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+  ): Promise<CID> {
+    if (!this.submitAndWatch) {
+      throw new BulletinError(
+        "asUnsigned() requires the client to be constructed with `submitAndWatch` (pass `papiClient.submitAndWatch`)",
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    const submitAndWatch = this.submitAndWatch
+
+    const cidCodec = item.codec ?? CidCodec.Raw
+    const hashAlgo = item.hashAlgo ?? HashAlgorithm.Blake2b256
+    const cid = await calculateCid(item.data, cidCodec, hashAlgo)
+
+    onEvent?.({ type: UploadStatus.ItemStarted, index, total, cid })
+
+    const tx = this.createStoreTx(item.data, cidCodec, hashAlgo)
+    const bareTx = await tx.getBareTx()
+
+    const emitFail = (error: unknown) => {
+      onEvent?.({
+        type: UploadStatus.ItemFailed,
+        index,
+        total,
+        cid,
+        error: error instanceof Error ? error : new Error(String(error)),
+      })
+    }
+
+    return new Promise<CID>((resolve, reject) => {
+      let inBlockEmitted = false
+      const wantInBlock = waitFor === "in_block"
+      let subscription: { unsubscribe(): void } | undefined
+      const subInstance = submitAndWatch(bareTx).subscribe({
+        next: (ev) => {
+          if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
+            if (!inBlockEmitted) {
+              inBlockEmitted = true
+              onEvent?.({
+                type: UploadStatus.ItemInBlock,
+                index,
+                total,
+                cid,
+                blockHash: ev.block.hash,
+                blockNumber: ev.block.number,
+              })
+              if (wantInBlock) {
+                subscription?.unsubscribe()
+                resolve(cid)
+              }
+            }
+          } else if (ev.type === "finalized" && ev.block) {
+            onEvent?.({
+              type: UploadStatus.ItemFinalized,
+              index,
+              total,
+              cid,
+              blockHash: ev.block.hash,
+              blockNumber: ev.block.number,
+            })
+            subscription?.unsubscribe()
+            resolve(cid)
+          } else if (ev.type === "invalid" || ev.type === "dropped") {
+            subscription?.unsubscribe()
+            const err = new BulletinError(
+              `Unsigned tx rejected by node: ${ev.type}`,
+              ErrorCode.TRANSACTION_FAILED,
+            )
+            emitFail(err)
+            reject(err)
+          }
+        },
+        error: (err) => {
+          const wrapped =
+            err instanceof BulletinError
+              ? err
+              : new BulletinError(
+                  `Failed to store unsigned: ${err instanceof Error ? err.message : String(err)}`,
+                  ErrorCode.TRANSACTION_FAILED,
+                  err,
+                )
+          emitFail(wrapped)
+          reject(wrapped)
+        },
+      })
+      subscription = subInstance
+    })
   }
 
   /**
@@ -1150,87 +1419,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         options,
       )
     })
-  }
-
-  /**
-   * Store preimage-authorized content as an unsigned (bare) transaction.
-   *
-   * Use this for content that has been pre-authorized via `authorizePreimage()`.
-   * The transaction is encoded as a bare (unsigned) extrinsic and submitted
-   * via the client's `submit` function (from `PolkadotClient.submit`).
-   *
-   * @param data - The preauthorized content to store
-   * @param options - Store options (codec, hashing algorithm, etc.)
-   *
-   * @example
-   * ```typescript
-   * import { blake2b256 } from '@polkadot-labs/hdkd-helpers';
-   *
-   * // First, authorize the content hash (requires sudo)
-   * const data = new TextEncoder().encode('Hello, Bulletin!');
-   * const hash = blake2b256(data);
-   * await sudoClient.authorizePreimage(hash, BigInt(data.length));
-   *
-   * // Anyone can now submit without fees
-   * const result = await client.store(data).sendUnsigned();
-   * ```
-   */
-  async storeWithPreimageAuth(
-    data: Uint8Array,
-    options?: StoreOptions,
-  ): Promise<StoreResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-
-    if (data.length > this.config.chunkingThreshold) {
-      throw new BulletinError(
-        "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
-        ErrorCode.UNSUPPORTED_OPERATION,
-      )
-    }
-
-    const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
-    const { cid } = await this.preparer.prepareStore(data, options)
-
-    try {
-      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
-      const bareTx = await tx.getBareTx()
-      const finalized = await this.submit(bareTx)
-
-      if (!finalized.ok) {
-        throw new BulletinError(
-          `Transaction dispatch failed: ${JSON.stringify(finalized.dispatchError)}`,
-          ErrorCode.TRANSACTION_FAILED,
-        )
-      }
-
-      const storedEvent = finalized.events.find(
-        (e) => e.type === "TransactionStorage" && e.value?.type === "Stored",
-      )
-
-      const extrinsicIndex =
-        storedEvent?.value?.value != null &&
-        typeof storedEvent.value.value === "object" &&
-        "index" in storedEvent.value.value
-          ? (storedEvent.value.value as { index?: number }).index
-          : undefined
-
-      return {
-        cid,
-        size: data.length,
-        blockNumber: finalized.block.number,
-        extrinsicIndex,
-        chunks: undefined,
-      }
-    } catch (error) {
-      if (error instanceof BulletinError) throw error
-      throw new BulletinError(
-        `Failed to store with preimage auth: ${error}`,
-        ErrorCode.TRANSACTION_FAILED,
-        error,
-      )
-    }
   }
 
   /**

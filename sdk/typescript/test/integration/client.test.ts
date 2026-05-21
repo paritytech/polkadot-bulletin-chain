@@ -57,7 +57,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
     // finalization regularly takes >60s under CI load, causing flaky
     // "Transaction timed out" failures on chunked store tests.
-    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+    client = new AsyncBulletinClient(api, signer, papiClient.submitAndWatch, {
       txTimeout: 120_000,
     })
 
@@ -471,14 +471,13 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       await client.authorizePreimage(contentHash, BigInt(data.length)).send()
 
       // Store with preimage auth (unsigned transaction)
-      const result = await client.storeWithPreimageAuth(data)
+      const { cids } = await client.upload([{ data }]).asUnsigned().send()
 
-      expect(result).toBeDefined()
-      expect(result.cid).toBeDefined()
-      expect(result.size).toBe(data.length)
+      expect(cids).toHaveLength(1)
+      expect(cids[0]).toBeDefined()
 
       console.log("Store with preimage auth test passed")
-      console.log("   CID:", result.cid.toString())
+      console.log("   CID:", cids[0]!.toString())
     })
   })
 

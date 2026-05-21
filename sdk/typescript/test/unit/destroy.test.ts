@@ -7,13 +7,10 @@ import { AsyncBulletinClient } from "../../src/async-client"
 // Minimal stand-ins; destroy() doesn't touch any of these.
 const dummyApi = {} as never
 const dummySigner = {} as never
-const dummySubmit = (async () => {
-  throw new Error("not used")
-}) as never
 
 describe("AsyncBulletinClient.destroy", () => {
   it("resolves to a no-op when no onDestroy is provided", async () => {
-    const client = new AsyncBulletinClient(dummyApi, dummySigner, dummySubmit)
+    const client = new AsyncBulletinClient(dummyApi, dummySigner, undefined)
     await expect(client.destroy()).resolves.toBeUndefined()
   })
 
@@ -24,7 +21,7 @@ describe("AsyncBulletinClient.destroy", () => {
     const client = new AsyncBulletinClient(
       dummyApi,
       dummySigner,
-      dummySubmit,
+      undefined,
       undefined,
       teardown,
     )

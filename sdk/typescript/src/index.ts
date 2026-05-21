@@ -53,7 +53,7 @@ export {
   type BulletinTypedApi,
   CallBuilder,
   type CallOptions,
-  type SubmitFn,
+  type SubmitAndWatchFn,
   type TransactionReceipt,
   UploadBuilder,
   UploadFileBuilder,

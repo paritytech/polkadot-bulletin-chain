@@ -2,11 +2,12 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, authorizePreimage, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.js';
+import { AsyncBulletinClient } from '../sdk/typescript/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
@@ -26,7 +27,7 @@ const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
  * @param {number|null} mhCode - Multihash code (null for default)
  * @param {object|null} client - Client for unsigned transactions
  */
-async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client) {
+async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client, wsUrl) {
     logSection(testName);
 
     // Data to store
@@ -60,8 +61,19 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
         );
     }
 
-    // Store data
-    const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
+    // Store via SDK. Unsigned uses `.asUnsigned()` (preimage-authorized);
+    // signed routes through the pipelined engine which needs `wsUrls`.
+    const dataBytes = new TextEncoder().encode(dataToStore);
+    const sdkClient = signer
+        ? new AsyncBulletinClient(bulletinAPI, signer, client.submitAndWatch, { wsUrls: [wsUrl] })
+        : new AsyncBulletinClient(bulletinAPI, undefined, client.submitAndWatch);
+    const item = { data: dataBytes };
+    if (cidCodec != null) item.codec = cidCodec;
+    if (mhCode != null) item.hashAlgo = mhCode;
+    let builder = sdkClient.upload([item]).withWaitFor("in_block");
+    if (signer == null) builder = builder.asUnsigned();
+    const { cids } = await builder.send();
+    const cid = cids[0];
     logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS
@@ -110,7 +122,8 @@ async function main() {
             null,       // no signer address
             null,       // default codec
             null,       // default hash
-            client
+            client,
+            NODE_WS,
         );
 
         // Test 2: Signed store with preimage auth and custom CID config (raw + SHA2-256)
@@ -123,7 +136,8 @@ async function main() {
             whoAddress,     // signer address for account auth
             0x55,           // raw
             0x12,           // sha2-256
-            client
+            client,
+            NODE_WS,
         );
 
         logTestResult(true, 'Authorize Preimage and Store Test');

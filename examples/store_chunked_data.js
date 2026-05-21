@@ -188,10 +188,10 @@ async function main() {
         );
 
         // Read the file, chunk it, store in Bulletin and return CIDs (using PAPI).
-        let { chunks} = await storeChunkedFile(bulletinAPI, whoSigner, filePath, CHUNK_SIZE);
+        let { chunks } = await storeChunkedFile(bulletinAPI, whoSigner, filePath, CHUNK_SIZE);
 
         // Store metadata file with all the CIDs to the Bulletin.
-        const { metadataCid} = await storeMetadata(bulletinAPI, whoSigner, chunks);
+        const { metadataCid } = await storeMetadata(bulletinAPI, whoSigner, chunks);
 
         ////////////////////////////////////////////////////////////////////////////////////
         // 1. example manually retrieve the picture (no IPFS DAG feature)

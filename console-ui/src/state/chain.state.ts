@@ -401,11 +401,12 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
  * const bulletinClient = createBulletinClient?.(signer);
  * ```
  */
-export function useCreateBulletinClient(): ((signer: PolkadotSigner) => AsyncBulletinClient) | undefined {
+export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => AsyncBulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
   if (!api || !client) return undefined;
-  return (signer: PolkadotSigner) => new AsyncBulletinClient(api, signer, client.submit);
+  return (signer?: PolkadotSigner) =>
+    new AsyncBulletinClient(api, signer, client.submitAndWatch);
 }
 
 // Direct access to subjects for non-React code

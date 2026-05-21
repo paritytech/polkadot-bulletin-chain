@@ -71,17 +71,11 @@ describe("ensureAuthorized() pre-flight", () => {
         publicKey: new Uint8Array(32),
         sign: async () => new Uint8Array(64),
       }
-      const submitFn = async () => ({
-        ok: true,
-        block: { hash: "0x02", number: 1, index: 0 },
-        txHash: "0x01",
-        events: [],
-      })
       // biome-ignore lint/suspicious/noExplicitAny: tests touch private method directly
       const client = new AsyncBulletinClient(
         apiStub as any,
         signer as any,
-        submitFn,
+        undefined,
       )
       // biome-ignore lint/suspicious/noExplicitAny: invoking private method by name
       await (client as any).ensureAuthorizedOnChain()
