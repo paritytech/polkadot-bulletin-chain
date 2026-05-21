@@ -692,13 +692,20 @@ pub mod v3 {
 }
 
 /// V3 → V4 migration: re-encode each [`AutoRenewals`] entry from
-/// `{ account }` (v3) to `{ account, recurring: true }` (v4).
+/// `{ account }` (v3) to `{ account, recurring: true, paid: false }` (v4).
 ///
-/// All existing entries were written by `enable_auto_renew`, which is the
-/// forever-renewal path — so they map to `recurring: true` to preserve their
-/// behaviour across the upgrade. The new one-shot path (`recurring: false`) is
-/// only reachable via the new `renew` extrinsic, which can't have written any
-/// entries before this migration runs.
+/// All existing entries were written by the old fee-paying `enable_auto_renew`,
+/// which:
+///
+/// - is the forever-renewal path, so the entries map to `recurring: true`;
+/// - did **not** pre-pay the next cycle against the owner's authorization, so they map to `paid:
+///   false` — `do_process_auto_renewals` will charge them per-cycle, preserving their on-chain
+///   behaviour across the upgrade.
+///
+/// The new one-shot path (`recurring: false`) and the new prepaid path
+/// (`paid: true`, set by both `renew` and the new `enable_auto_renew`) are only
+/// reachable through the v4 extrinsics, which can't have written any entries
+/// before this migration runs.
 pub mod v4 {
 	use super::*;
 	use crate::{
@@ -779,7 +786,7 @@ pub mod v4 {
 
 				AutoRenewals::<T>::insert(
 					content_hash,
-					RenewalData { account: v3.account, recurring: true },
+					RenewalData { account: v3.account, recurring: true, paid: false },
 				);
 				cursor = Some(content_hash);
 			}
@@ -826,6 +833,10 @@ pub mod v4 {
 				polkadot_sdk_frame::prelude::ensure!(
 					decoded.recurring,
 					"v3->v4 post_upgrade: migrated entry must have recurring=true",
+				);
+				polkadot_sdk_frame::prelude::ensure!(
+					!decoded.paid,
+					"v3->v4 post_upgrade: migrated entry must have paid=false",
 				);
 				new_count += 1;
 			}

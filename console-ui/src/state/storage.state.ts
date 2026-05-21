@@ -5,9 +5,21 @@ import { selectedAccount$ } from "./wallet.state";
 import { SS58String, Enum, Binary, type HexString } from "polkadot-api";
 
 export interface Authorization {
+  // Remaining quota; used by Upload precheck and similar flows.
   transactions: bigint;
   bytes: bigint;
   expiresAt?: number;
+  // Raw consumed values straight from the on-chain extent, for display.
+  used: {
+    transactions: bigint;
+    bytesEphemeral: bigint;
+    bytesPermanent: bigint;
+  };
+  // Raw caps from the extent, for display.
+  allowance: {
+    transactions: bigint;
+    bytes: bigint;
+  };
 }
 
 export interface PreimageAuthorization {
@@ -52,11 +64,36 @@ export function extentAllowanceTransactions(extent: any): bigint {
   return BigInt(allowance ?? extent?.transactions ?? 0);
 }
 
+function buildAuthorization(extent: any, expiration: number | null | undefined): Authorization {
+  return {
+    transactions: extentRemainingTransactions(extent),
+    bytes: extentRemainingBytes(extent),
+    expiresAt: expiration ?? undefined,
+    used: {
+      transactions: BigInt(extent?.transactions ?? 0),
+      bytesEphemeral: BigInt(extent?.bytes ?? 0n),
+      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+    },
+    allowance: {
+      transactions: extentAllowanceTransactions(extent),
+      bytes: extentAllowanceBytes(extent),
+    },
+  };
+}
+
+export type TransactionKind = "Store" | "Renew";
+
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
   contentHash: Uint8Array;
   size: number;
   blockChunks: number;
+}
+
+/** Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we read. */
+export interface RawTransactionInfo {
+  size: number;
+  kind: { type: TransactionKind };
 }
 
 // Account authorization state
@@ -81,11 +118,7 @@ export async function fetchAccountAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: extentRemainingTransactions(auth.extent),
-      bytes: extentRemainingBytes(auth.extent),
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     authorizationSubject.next(authorization);
     return authorization;
@@ -119,11 +152,7 @@ export async function checkPreimageAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: extentRemainingTransactions(auth.extent),
-      bytes: extentRemainingBytes(auth.extent),
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     preimageAuthSubject.next(authorization);
     return authorization;
