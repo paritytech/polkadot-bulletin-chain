@@ -2067,6 +2067,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-hop-promotion",
  "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-migrations",
@@ -2224,6 +2225,7 @@ dependencies = [
  "pallet-balances",
  "pallet-bulletin-hop-promotion",
  "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "pallet-collator-selection",
  "pallet-message-queue",
  "pallet-migrations",
@@ -8093,11 +8095,22 @@ dependencies = [
  "array-bytes 6.2.3",
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
  "sp-transaction-storage-proof",
  "tracing",
+]
+
+[[package]]
+name = "pallet-bulletin-transaction-storage-runtime-api"
+version = "0.1.0"
+dependencies = [
+ "bulletin-transaction-storage-primitives",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-api",
 ]
 
 [[package]]
