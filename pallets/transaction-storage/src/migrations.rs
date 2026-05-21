@@ -874,3 +874,168 @@ pub mod v3 {
 		}
 	}
 }
+
+/// V4 → V5 migration: re-encode each [`AutoRenewals`] entry from
+/// `{ account }` (pre-paid-flag) to `{ account, recurring: true, paid: false }`.
+///
+/// All existing entries were written by the old fee-paying `enable_auto_renew`,
+/// which:
+///
+/// - is the forever-renewal path, so the entries map to `recurring: true`;
+/// - did **not** pre-pay the next cycle against the owner's authorization, so they map to `paid:
+///   false` — `do_process_auto_renewals` will charge them per-cycle, preserving their on-chain
+///   behaviour across the upgrade.
+///
+/// The new one-shot path (`recurring: false`) and the new prepaid path
+/// (`paid: true`, set by both `renew` and the new `enable_auto_renew`) are only
+/// reachable through the v5 extrinsics, which can't have written any entries
+/// before this migration runs.
+pub mod v5 {
+	use super::*;
+	use crate::{
+		pallet::{AutoRenewals, Pallet},
+		RenewalData, WeightInfo,
+	};
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::{
+		frame_support::{
+			migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
+			weights::WeightMeter,
+		},
+		sp_io,
+	};
+
+	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
+	/// `AutoRenewalData` layout pre-v5 (no `recurring` / `paid` fields). Used
+	/// only for decoding pre-migration entries; never written.
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct PreV5AutoRenewalData<AccountId> {
+		pub account: AccountId,
+	}
+
+	/// Stepped migration from storage version 4 to 5.
+	pub struct MigrateV4ToV5<T: Config>(PhantomData<T>);
+
+	impl<T: Config> SteppedMigration for MigrateV4ToV5<T> {
+		type Cursor = ContentHash;
+		type Identifier = MigrationId<24>;
+
+		fn id() -> Self::Identifier {
+			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 4, version_to: 5 }
+		}
+
+		fn step(
+			mut cursor: Option<Self::Cursor>,
+			meter: &mut WeightMeter,
+		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			let required = T::WeightInfo::migrate_v4_to_v5_step();
+			if meter.remaining().any_lt(required) {
+				return Err(SteppedMigrationError::InsufficientWeight { required });
+			}
+
+			loop {
+				if meter.try_consume(required).is_err() {
+					break;
+				}
+
+				let mut iter = match cursor.as_ref() {
+					None => AutoRenewals::<T>::iter_keys(),
+					Some(last) =>
+						AutoRenewals::<T>::iter_keys_from(AutoRenewals::<T>::hashed_key_for(last)),
+				};
+
+				let Some(content_hash) = iter.next() else {
+					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(5)
+						.put::<Pallet<T>>();
+					cursor = None;
+					break;
+				};
+
+				let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
+
+				let Some(raw) = sp_io::storage::get(&raw_key) else {
+					cursor = Some(content_hash);
+					continue;
+				};
+
+				// Idempotent: if it's already v5, skip.
+				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_ok() {
+					cursor = Some(content_hash);
+					continue;
+				}
+
+				let legacy = PreV5AutoRenewalData::<T::AccountId>::decode(&mut &raw[..])
+					.map_err(|_| SteppedMigrationError::Failed)?;
+
+				AutoRenewals::<T>::insert(
+					content_hash,
+					RenewalData { account: legacy.account, recurring: true, paid: false },
+				);
+				cursor = Some(content_hash);
+			}
+
+			Ok(cursor)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+			let prefix = AutoRenewals::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(target: LOG_TARGET, count, "v4->v5 pre_upgrade: AutoRenewals entries");
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+
+			let prefix = AutoRenewals::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut new_count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key.clone();
+				let raw = sp_io::storage::get(&key)
+					.ok_or("v4->v5 post_upgrade: missing AutoRenewals entry")?;
+				let decoded = RenewalData::<T::AccountId>::decode(&mut &raw[..])
+					.map_err(|_| "v4->v5 post_upgrade: remaining entry is not v5")?;
+				polkadot_sdk_frame::prelude::ensure!(
+					decoded.recurring,
+					"v4->v5 post_upgrade: migrated entry must have recurring=true",
+				);
+				polkadot_sdk_frame::prelude::ensure!(
+					!decoded.paid,
+					"v4->v5 post_upgrade: migrated entry must have paid=false",
+				);
+				new_count += 1;
+			}
+
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count == old_count,
+				"v4->v5 post_upgrade: entry count changed",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				old_count,
+				new_count,
+				"v4->v5 post_upgrade: valid"
+			);
+			Ok(())
+		}
+	}
+}

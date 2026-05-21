@@ -301,7 +301,7 @@ fn consumption_picks_earliest_expiring_no_cross_slot_split() {
 
 		// Renew of 2000 bytes: slot A's `bytes_permanent + 2000 = 2000 > 1500`,
 		// so falls through to slot B.
-		let renew = Call::renew { block: 2, index: 0 };
+		let renew = Call::force_renew { entry: TransactionRef::Position { block: 2, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew));
 		let slots = slots_for(AuthorizationScope::Account(who));
 		let slot_a = slots.iter().find(|s| s.expiration == 200).unwrap();
@@ -447,7 +447,8 @@ fn bytes_permanent_does_not_borrow_across_slots() {
 
 		// The renew must NOT pick slot A (bytes_permanent at cap). It picks
 		// slot B and bumps that slot's `bytes_permanent`.
-		let renew_call = Call::renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		let slots = slots_for(AuthorizationScope::Account(who));
 		let slot_a = slots.iter().find(|s| s.expiration == 200).unwrap();
@@ -562,7 +563,8 @@ fn store_and_renew_axes_are_independent() {
 		);
 
 		// renew n bytes — bytes_permanent axis at cap; bytes unchanged.
-		let renew_call = Call::renew { block: 1, index: 0 };
+		let renew_call =
+			Call::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &renew_call));
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -612,7 +614,8 @@ fn store_and_renew_axes_are_independent() {
 		let block_txs = BlockTransactions::take();
 		Transactions::insert(2u64, &block_txs);
 
-		let small_renew = Call::renew { block: 2, index: 0 };
+		let small_renew =
+			Call::force_renew { entry: TransactionRef::Position { block: 2, index: 0 } };
 		assert_noop!(
 			TransactionStorage::pre_dispatch_signed(&who, &small_renew),
 			PERMANENT_ALLOWANCE_EXCEEDED,

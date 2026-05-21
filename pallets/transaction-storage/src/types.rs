@@ -17,6 +17,7 @@
 
 //! Type definitions for the transaction storage pallet.
 
+pub use bulletin_transaction_storage_primitives::TransactionRef;
 use bulletin_transaction_storage_primitives::{
 	cids::{CidCodec, HashingAlgorithm},
 	ContentHash,

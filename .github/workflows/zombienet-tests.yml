@@ -93,7 +93,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
@@ -115,7 +115,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
           path: /tmp/zombie-*/**/*.log
@@ -151,7 +151,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
@@ -175,7 +175,7 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
           path: /tmp/zombie-*/**/*.log

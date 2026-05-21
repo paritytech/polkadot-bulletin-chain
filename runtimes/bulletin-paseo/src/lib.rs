@@ -176,6 +176,7 @@ pub mod migrations {
 	pub type MbmMigrations = (
 		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 	);
 }
 
@@ -985,6 +986,25 @@ impl_runtime_apis! {
 
 		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
 			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
+	}
+
+	impl pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi<Block, AccountId, BlockNumber> for Runtime {
+		fn account_authorization(
+			account: AccountId,
+		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+		}
+
+		fn can_store(account: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+		}
+
+		fn can_renew(
+			account: AccountId,
+			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
+		) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
 		}
 	}
 

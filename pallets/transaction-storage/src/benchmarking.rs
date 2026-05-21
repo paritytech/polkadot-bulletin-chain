@@ -166,30 +166,44 @@ mod benchmarks {
 	}
 
 	#[benchmark]
-	fn renew() -> Result<(), BenchmarkError> {
+	fn force_renew() -> Result<(), BenchmarkError> {
+		// Worst-case: `ContentHash` variant pays one extra `TransactionByContentHash` read.
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
 		#[extrinsic_call]
-		_(RawOrigin::None, BlockNumberFor::<T>::zero(), 0);
+		_(RawOrigin::None, TransactionRef::ContentHash(content_hash));
 
 		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
 		Ok(())
 	}
 
 	#[benchmark]
-	fn renew_content_hash() -> Result<(), BenchmarkError> {
+	fn renew() -> Result<(), BenchmarkError> {
+		// Worst-case: `ContentHash` variant pays one extra `TransactionByContentHash` read.
+		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
-		#[extrinsic_call]
-		_(RawOrigin::None, content_hash);
+		// `renew` dispatch requires `Origin::Authorized` (set by `ValidateStorageCalls`
+		// at runtime); construct it directly here.
+		let origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
 
-		assert_last_event::<T>(Event::Renewed { index: 0, content_hash }.into());
+		#[extrinsic_call]
+		_(origin, TransactionRef::ContentHash(content_hash));
+
+		assert_last_event::<T>(
+			Event::RenewalEnabled { content_hash, who: caller, recurring: false }.into(),
+		);
 		Ok(())
 	}
 
@@ -446,8 +460,10 @@ mod benchmarks {
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
 		let ext = ValidateStorageCalls::<T>::default();
-		let call: RuntimeCallOf<T> =
-			Call::<T>::renew { block: BlockNumberFor::<T>::zero(), index: 0 }.into();
+		let call: RuntimeCallOf<T> = Call::<T>::force_renew {
+			entry: TransactionRef::Position { block: BlockNumberFor::<T>::zero(), index: 0 },
+		}
+		.into();
 		let info = DispatchInfo::default();
 		let len = 0_usize;
 
@@ -490,10 +506,19 @@ mod benchmarks {
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
 
-		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
+		let authorized_origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
 
-		assert_last_event::<T>(Event::AutoRenewalEnabled { content_hash, who: caller }.into());
+		#[extrinsic_call]
+		_(authorized_origin, content_hash);
+
+		assert_last_event::<T>(
+			Event::RenewalEnabled { content_hash, who: caller, recurring: true }.into(),
+		);
 		Ok(())
 	}
 
@@ -506,7 +531,8 @@ mod benchmarks {
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
 		bump_mock_relay_for_bench::<T>(1);
-		// Authorize, store, advance, then enable auto-renew
+		// Authorize, store, advance, then enable auto-renew via the rewritten authorized
+		// origin (the dispatch path expects `Origin::Authorized`).
 		TransactionStorage::<T>::authorize_account(
 			origin as T::RuntimeOrigin,
 			caller.clone(),
@@ -516,14 +542,26 @@ mod benchmarks {
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
-		TransactionStorage::<T>::enable_auto_renew(
-			RawOrigin::Signed(caller.clone()).into(),
-			content_hash,
-		)
-		.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
+		let authorized_origin: <T as frame_system::Config>::RuntimeOrigin =
+			crate::pallet::Origin::<T>::Authorized {
+				who: caller.clone(),
+				scope: AuthorizationScope::Account(caller.clone()),
+			}
+			.into();
+		TransactionStorage::<T>::enable_auto_renew(authorized_origin.clone(), content_hash)
+			.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
+		// `enable_auto_renew` leaves the entry with `paid: true`, which blocks
+		// signed `disable_auto_renew`. Flip to the post-first-cycle state so this
+		// benchmark measures the path real owners actually hit (a Root-disable
+		// would exercise a different branch with different weight).
+		AutoRenewals::<T>::mutate(content_hash, |entry| {
+			if let Some(data) = entry {
+				data.paid = false;
+			}
+		});
 
 		#[extrinsic_call]
-		_(RawOrigin::Signed(caller.clone()), content_hash);
+		_(authorized_origin, content_hash);
 
 		assert_last_event::<T>(Event::AutoRenewalDisabled { content_hash, who: caller }.into());
 		Ok(())
@@ -616,7 +654,9 @@ mod benchmarks {
 					block_chunks: 0,
 					kind: TransactionKind::Store,
 				};
-				let renewal_data = AutoRenewalData { account: caller };
+				// `paid: false` exercises the per-cycle `check_authorization` charge
+				// path, which is the heavier branch we want to measure.
+				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
 				pending
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
@@ -693,7 +733,7 @@ mod benchmarks {
 			// populated by the real `store()` call above).
 			AutoRenewals::<T>::insert(
 				template.content_hash,
-				AutoRenewalData { account: caller.clone() },
+				RenewalData { account: caller.clone(), recurring: true, paid: false },
 			);
 
 			// Distinct `content_hash` per entry so the on_initialize loop's
@@ -718,7 +758,7 @@ mod benchmarks {
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
 					AutoRenewals::<T>::insert(
 						unique_hash,
-						AutoRenewalData { account: caller.clone() },
+						RenewalData { account: caller.clone(), recurring: true, paid: false },
 					);
 				}
 				Ok(())
@@ -850,6 +890,37 @@ mod benchmarks {
 		let auth = crate::pallet::Authorizations::<T>::get(&scope).expect("auth exists");
 		assert_eq!(auth.slots.len(), 1);
 		assert_eq!(auth.slots[0].extent.bytes_allowance, 1024 * 1024);
+
+		Ok(())
+	}
+
+	/// Benchmarks one outer-loop iteration of the v4→v5 multi-block migration:
+	/// fetch one pre-v5 `AutoRenewals` entry, decode, re-encode as v5 with
+	/// `recurring: true, paid: false`, and re-insert.
+	#[benchmark]
+	fn migrate_v4_to_v5_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v5::{MigrateV4ToV5, PreV5AutoRenewalData};
+		use polkadot_sdk_frame::deps::{
+			frame_support::{migrations::SteppedMigration, weights::WeightMeter},
+			sp_runtime::traits::{BlakeTwo256, Hash},
+		};
+
+		let caller: T::AccountId = whitelisted_caller();
+		let content_hash: ContentHash = BlakeTwo256::hash(b"v4-to-v5-bench").into();
+		let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
+		sp_io::storage::set(&raw_key, &PreV5AutoRenewalData { account: caller.clone() }.encode());
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV4ToV5::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		let v5 = AutoRenewals::<T>::get(content_hash).expect("entry exists");
+		assert_eq!(v5.account, caller);
+		assert!(v5.recurring);
+		assert!(!v5.paid);
 
 		Ok(())
 	}
