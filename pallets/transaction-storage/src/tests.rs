@@ -2705,8 +2705,9 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 	});
 }
 
-/// `paid = true` cycle rejected by the per-block slot cap refunds the upfront
-/// `PermanentStorageUsed` and per-account `bytes_permanent` / `transactions`.
+/// `paid = true` cycle rejected by the per-block slot cap refunds chain-wide
+/// `PermanentStorageUsed`. Per-account `bytes_permanent` / `transactions` are
+/// intentionally left burned — see [`Pallet::refund_renewal_charge`].
 #[test]
 fn paid_cycle_refunds_on_block_slot_cap() {
 	new_test_ext().execute_with(|| {
@@ -2755,8 +2756,8 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 
 		assert_eq!(PermanentStorageUsed::get(), 0);
 		let auth = Authorizations::get(AuthorizationScope::Account(who)).expect("auth exists");
-		assert_eq!(auth.extent.bytes_permanent, permanent_before.saturating_sub(2000));
-		assert_eq!(auth.extent.transactions, transactions_before.saturating_sub(1));
+		assert_eq!(auth.extent.bytes_permanent, permanent_before);
+		assert_eq!(auth.extent.transactions, transactions_before);
 
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 	});

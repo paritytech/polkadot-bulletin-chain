@@ -1387,7 +1387,7 @@ pub mod pallet {
 						});
 					} else {
 						if charged {
-							Self::refund_renewal_charge(&scope, tx_info.size);
+							Self::refund_renewal_charge(tx_info.size);
 						}
 						AutoRenewals::<T>::remove(content_hash);
 						Self::deposit_event(Event::AutoRenewalFailed {
@@ -2052,18 +2052,16 @@ pub mod pallet {
 			result
 		}
 
-		/// Reverse a renew charge from [`Self::check_authorization`]. Saturating, so a
-		/// rolled-over authorization (counters already reset to zero) is a no-op.
-		fn refund_renewal_charge(scope: &AuthorizationScopeFor<T>, size: u32) {
+		/// Reverse the chain-wide [`PermanentStorageUsed`] bump from
+		/// [`Self::check_authorization`] when an auto-renewal cycle that was already
+		/// charged is rejected by the per-block slot cap. The per-account
+		/// `bytes_permanent` / `transactions` counters are intentionally left burned:
+		/// slot-cap rejection at inherent time is a chain-level pathological event
+		/// (the inherent runs before any user extrinsics, and `len(pending) <=
+		/// MaxBlockTransactions`), and reaching into the current `Authorizations`
+		/// entry would silently apply across auth roll-overs.
+		fn refund_renewal_charge(size: u32) {
 			let size_u64: u64 = size.into();
-			Authorizations::<T>::mutate(scope, |maybe_authorization| {
-				if let Some(authorization) = maybe_authorization {
-					authorization.extent.bytes_permanent =
-						authorization.extent.bytes_permanent.saturating_sub(size_u64);
-					authorization.extent.transactions =
-						authorization.extent.transactions.saturating_sub(1);
-				}
-			});
 			Self::update_permanent_storage_used(|used| used.saturating_sub(size_u64));
 		}
 
