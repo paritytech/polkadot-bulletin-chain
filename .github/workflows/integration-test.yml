@@ -102,6 +102,15 @@ jobs:
           cache-dependency-path: |
             examples/package.json
             console-ui/package-lock.json
+            sdk/typescript/package-lock.json
+
+      - name: Build TypeScript SDK
+        # Several examples import from `../sdk/typescript/dist/index.mjs` —
+        # ensure the SDK is built before any test step runs.
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm run build
 
       - name: Install subxt-cli
         run: |

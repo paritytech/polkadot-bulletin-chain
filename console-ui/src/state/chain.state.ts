@@ -3,6 +3,7 @@ import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
+import { useMemo } from "react";
 import { bind } from "@react-rxjs/core";
 import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot, web3_storage } from "@polkadot-api/descriptors";
 import {
@@ -404,9 +405,28 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
 export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => AsyncBulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
-  if (!api || !client) return undefined;
-  return (signer?: PolkadotSigner) =>
-    new AsyncBulletinClient(api, signer, client.submitAndWatch);
+  const network = useNetwork();
+  // Memoize so the per-instance pipelineBootstrap cache (metadata + offline
+  // API) survives renders. Without this every upload would re-bootstrap.
+  return useMemo(() => {
+    if (!api || !client) return undefined;
+    // pipelineStore (signed uploads) requires at least one wsUrl. Smoldot
+    // light-client setups have no ws endpoint to forward to — those clients
+    // can only do unsigned uploads (`asUnsigned()`) until the SDK grows a
+    // smoldot-native pipeline.
+    const wsUrls = network?.lightClient ? [] : network?.endpoints ?? [];
+    const cache = new WeakMap<object, AsyncBulletinClient>();
+    const NO_SIGNER = {} as object;
+    return (signer?: PolkadotSigner) => {
+      const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
+      let bulletin = cache.get(key);
+      if (!bulletin) {
+        bulletin = new AsyncBulletinClient(api, signer, client.submitAndWatch, { wsUrls });
+        cache.set(key, bulletin);
+      }
+      return bulletin;
+    };
+  }, [api, client, network]);
 }
 
 // Direct access to subjects for non-React code

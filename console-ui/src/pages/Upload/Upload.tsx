@@ -164,22 +164,26 @@ export function Upload() {
       const contentHash = await getContentHash(data, hashAlgorithm);
       const contentHashHex = bytesToHex(contentHash);
 
+      // Capture final block info + extrinsicIndex directly from the
+      // SDK's ItemFinalized event — no separate System.Events lookup
+      // needed since the pipeline surfaces them via `TransactionByContentHash`.
+      let finalBlockHash: string | undefined;
+      let finalBlockNumber: number | undefined;
+      let storedIndex: number | undefined;
+      const captureFinal = (ev: UploadEvent) => {
+        if (ev.type === UploadStatus.ItemFinalized) {
+          finalBlockHash = ev.blockHash;
+          finalBlockNumber = ev.blockNumber;
+          storedIndex = ev.extrinsicIndex;
+        }
+        handleUploadProgress(ev);
+      };
+
       if (hasPreimageAuth) {
-        // Unsigned submission via SDK's asUnsigned() builder. The client
-        // uses a placeholder signer because the SDK does not invoke any
-        // sign method on this code path.
+        // Unsigned (preimage-authorized). The SDK accepts no signer; the
+        // chain validates via the preimage authorization for the item's
+        // content hash.
         const bulletinClient = createBulletinClient!();
-
-        let finalBlockHash: string | undefined;
-        let finalBlockNumber: number | undefined;
-        const captureFinal = (ev: UploadEvent) => {
-          if (ev.type === UploadStatus.ItemFinalized) {
-            finalBlockHash = ev.blockHash;
-            finalBlockNumber = ev.blockNumber;
-          }
-          handleUploadProgress(ev);
-        };
-
         const { cids } = await bulletinClient
           .upload([{ data, codec: cidCodec, hashAlgo: hashAlgorithm }])
           .asUnsigned()
@@ -187,23 +191,7 @@ export function Upload() {
           .send();
         const cidStr = cids[0]?.toString() ?? "";
 
-        // Look up the pallet's Stored event index in the finalized block.
-        let storedIndex: number | undefined;
-        if (finalBlockHash) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const events = await (api.query.System.Events as any).getValue({ at: finalBlockHash });
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const stored = events?.find((rec: any) =>
-              rec.event?.type === "TransactionStorage" && rec.event?.value?.type === "Stored"
-            );
-            storedIndex = stored?.event?.value?.value?.index;
-          } catch (err) {
-            console.warn("Failed to look up Stored event index:", err);
-          }
-        }
-
-        const uploadResultData: UploadResult = {
+        setUploadResult({
           cid: cidStr,
           contentHash: contentHashHex,
           blockHash: finalBlockHash,
@@ -211,65 +199,23 @@ export function Upload() {
           index: storedIndex,
           size: data.length,
           unsigned: true,
-        };
-
-        setUploadResult(uploadResultData);
+        });
       } else {
-        // Signed submission via SDK
         const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
-
-        // Capture the final block info from the upload callback so we can
-        // look up the pallet's `Stored.index` (needed for the renew flow).
-        let finalBlockHash: string | undefined;
-        let finalBlockNumber: number | undefined;
-        const captureFinal = (ev: UploadEvent) => {
-          if (ev.type === UploadStatus.ItemFinalized) {
-            finalBlockHash = ev.blockHash;
-            finalBlockNumber = ev.blockNumber;
-          }
-          handleUploadProgress(ev);
-        };
-
         const { cids } = await bulletinClient
           .upload([{ data, codec: cidCodec, hashAlgo: hashAlgorithm }])
           .withCallback(captureFinal)
           .withWaitFor(WaitFor.Finalized)
           .send();
-
         const cidStr = cids[0]?.toString() ?? "";
 
-        // Look up the pallet's Stored event index for this account in the
-        // finalized block. Required for the renew flow that bookmarks
-        // `(blockNumber, storedIndex)`.
-        let storedIndex: number | undefined;
-        if (finalBlockHash) {
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const events = await (api.query.System.Events as any).getValue({ at: finalBlockHash });
-            const signerHex = bytesToHex(selectedAccount!.polkadotSigner.publicKey);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const stored = events?.find((rec: any) => {
-              const ev = rec.event;
-              if (ev?.type !== "TransactionStorage" || ev?.value?.type !== "Stored") return false;
-              const who = ev.value.value?.who;
-              const whoHex = typeof who === "string" ? who.toLowerCase() : bytesToHex(who);
-              return whoHex === signerHex.toLowerCase();
-            });
-            storedIndex = stored?.event?.value?.value?.index;
-          } catch (err) {
-            console.warn("Failed to look up Stored event index:", err);
-          }
-        }
-
-        const uploadResultData: UploadResult = {
+        setUploadResult({
           cid: cidStr,
           contentHash: contentHashHex,
           blockNumber: finalBlockNumber,
           index: storedIndex,
           size: data.length,
-        };
-
-        setUploadResult(uploadResultData);
+        });
 
         // Save to history for easy renewal later (only for signed transactions)
         if (finalBlockNumber !== undefined && storedIndex !== undefined) {

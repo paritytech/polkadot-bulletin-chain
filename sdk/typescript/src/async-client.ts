@@ -136,7 +136,10 @@ export interface BulletinTypedApi {
   query?: {
     TransactionStorage: {
       Authorizations: {
-        getValue(scope: { type: string; value: unknown }): Promise<
+        getValue(
+          scope: { type: string; value: unknown },
+          opts?: { at?: string },
+        ): Promise<
           | {
               extent: {
                 transactions: number
@@ -150,6 +153,21 @@ export interface BulletinTypedApi {
             }
           | undefined
         >
+      }
+      /**
+       * `H256 → (BlockNumber, ExtrinsicIndex)`. Populated by the pallet's
+       * `store` dispatchable at execution. Used by `pipelineStore` to
+       * reconcile per-item finalization without trusting nonce arithmetic.
+       *
+       * PAPI decodes `(BlockNumber, u32)` as a 2-tuple; runtime shape may
+       * vary by metadata version (some emit named fields), so callers
+       * should consume the value defensively.
+       */
+      TransactionByContentHash: {
+        getValue(
+          contentHash: string,
+          opts?: { at?: string },
+        ): Promise<unknown>
       }
     }
   }
@@ -543,13 +561,60 @@ function resolveStoreOptions(options?: StoreOptions): {
   }
 }
 
-/** Extract the transaction index from a Stored event in a list of runtime events */
-function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
+/**
+ * Reject uploads whose items have duplicate content hashes. The pipeline's
+ * `TransactionByContentHash`-based reconciler identifies items by their
+ * content hash; two items with the same hash would map to one TBCH entry,
+ * making per-item finalization undecidable. Catch this at submission time
+ * with a clear error rather than silently stalling.
+ *
+ * Returns the index of the first duplicate so the caller can act on it.
+ */
+function assertUniqueContentHashes(cids: CID[]): void {
+  const seen = new Map<string, number>()
+  for (let i = 0; i < cids.length; i++) {
+    const hex = Binary.toHex(cids[i]!.multihash.digest).toLowerCase()
+    const prior = seen.get(hex)
+    if (prior !== undefined) {
+      throw new BulletinError(
+        `upload(): item ${i} has the same content hash as item ${prior} — the SDK identifies items by content hash and can't distinguish duplicates. If you need to store the same data multiple times, submit them in separate upload() calls.`,
+        ErrorCode.INVALID_CONFIG,
+      )
+    }
+    seen.set(hex, i)
+  }
+}
+
+/**
+ * Extract the `Stored.index` for a specific content hash from a block's
+ * runtime events.
+ *
+ * `contentHashHex` is the blake2b-256 hash of the data, hex-encoded (with
+ * or without leading `0x`). If omitted, returns the first Stored event's
+ * index — useful when the caller already knows there's exactly one match.
+ */
+function extractStoredIndex(
+  events?: RuntimeEvent[],
+  contentHashHex?: string,
+): number | undefined {
   if (!events) return undefined
-  const storedEvent = events.find(
-    (e) => e.type === "TransactionStorage" && e.value?.type === "Stored",
-  )
-  return storedEvent?.value?.value?.index
+  const target = contentHashHex?.toLowerCase().replace(/^0x/, "")
+  for (const e of events) {
+    if (e.type !== "TransactionStorage" || e.value?.type !== "Stored") continue
+    if (target) {
+      const ch = (e.value?.value as { content_hash?: unknown } | undefined)
+        ?.content_hash
+      const chHex =
+        typeof ch === "string"
+          ? ch.toLowerCase().replace(/^0x/, "")
+          : ch instanceof Uint8Array
+            ? Binary.toHex(ch).replace(/^0x/, "")
+            : undefined
+      if (chHex !== target) continue
+    }
+    return (e.value?.value as { index?: number } | undefined)?.index
+  }
+  return undefined
 }
 
 /**
@@ -728,12 +793,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     ).System?.Number
     const currentBlock = sysNumber ? await sysNumber.getValue() : undefined
 
-    // Compute every blake2b256 hash in parallel, dedupe identical items so
-    // we don't burn N RPCs when N items share content.
+    // Compute each item's content hash under its chosen algo (default
+    // Blake2b-256), then dedupe identical (content_hash, algo) pairs so
+    // we don't burn N RPCs when N items share content. The pallet keys
+    // preimage authorizations by the user-chosen hash, so we must use the
+    // same algo here.
     const hashHexes = await Promise.all(
-      items.map(async (item) =>
-        Binary.toHex(await getContentHash(item.data, HashAlgorithm.Blake2b256)),
-      ),
+      items.map(async (item) => {
+        const algo = item.hashAlgo ?? HashAlgorithm.Blake2b256
+        return Binary.toHex(await getContentHash(item.data, algo))
+      }),
     )
     const uniqueHashes = Array.from(new Set(hashHexes))
 
@@ -1083,6 +1152,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         ),
       ),
     )
+    assertUniqueContentHashes(allItemCids)
     // Shared bootstrap cache (one per client instance, see field decl)
     // is reused across uploads AND across retry attempts within one upload.
     const bootstrap = this.pipelineBootstrap
@@ -1131,17 +1201,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Submit N unsigned (preimage-authorized) store extrinsics in parallel.
+   * Submit N unsigned (preimage-authorized) store extrinsics through the
+   * same pipelined engine as signed uploads. Broadcasts each item once
+   * via `author_submitExtrinsic` (no per-tx subscription) and reconciles
+   * via a single shared `chainHead_v1_follow` subscription with the
+   * TBCH-based reconciler. Eliminates the per-tx `submitAndWatch`
+   * subscription cap (~16–64) — N items scale to 1 subscription.
    *
-   * Each item is independent: builds its own bareTx, calls PAPI's `submit`,
-   * and emits ItemStarted → ItemInBlock + ItemFinalized through the shared
-   * callback. The `index` on every event is the item's position in the
-   * input array, so callers can correlate events to items (or just key
-   * by `cid`).
-   *
-   * `ensureAuthorized()` is not meaningful for unsigned uploads (the
-   * account-allowance check needs a signer, and the chain's preimage
-   * authorization is per-content-hash anyway). We throw if combined.
+   * Per-item events fire through the shared callback. The `index` is
+   * the item's position in the input array.
    */
   private async uploadUnsignedMany(
     items: UploadItem[],
@@ -1155,118 +1223,45 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
     }
     if (checkAuth) await this.ensurePreimagesAuthorized(items)
-
-    const total = items.length
-    // Submit all items concurrently — each unsigned tx is independent,
-    // can land in the same block (up to MaxBlockTransactions) or across
-    // a few blocks under pool pressure.
-    const cids = await Promise.all(
-      items.map((item, index) =>
-        this.submitUnsignedOne(item, index, total, waitFor, onEvent),
-      ),
-    )
-    return { cids }
-  }
-
-  /**
-   * Submit one unsigned store extrinsic via `submitAndWatch`. Emits
-   * ItemInBlock when the tx lands in a best block and ItemFinalized when
-   * it finalizes; the returned promise resolves at whichever event matches
-   * `waitFor`. Handles `invalid` / `dropped` node events as
-   * `TRANSACTION_FAILED` + ItemFailed.
-   */
-  private async submitUnsignedOne(
-    item: UploadItem,
-    index: number,
-    total: number,
-    waitFor: WaitFor,
-    onEvent: UploadCallback | undefined,
-  ): Promise<CID> {
-    if (!this.submitAndWatch) {
+    if (this.config.wsUrls.length === 0) {
       throw new BulletinError(
-        "asUnsigned() requires the client to be constructed with `submitAndWatch` (pass `papiClient.submitAndWatch`)",
+        "asUnsigned() multi-item upload requires the client to be constructed with `wsUrls` (chainHead-based reconciliation)",
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
-    const submitAndWatch = this.submitAndWatch
 
-    const cidCodec = item.codec ?? CidCodec.Raw
-    const hashAlgo = item.hashAlgo ?? HashAlgorithm.Blake2b256
-    const cid = await calculateCid(item.data, cidCodec, hashAlgo)
+    // Pre-compute CIDs (one per item) — pipelineStore consumes a
+    // resolved CIDs array via the precomputedCids hook.
+    const allItemCids: CID[] = await Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+    assertUniqueContentHashes(allItemCids)
 
-    onEvent?.({ type: UploadStatus.ItemStarted, index, total, cid })
-
-    const tx = this.createStoreTx(item.data, cidCodec, hashAlgo)
-    const bareTx = await tx.getBareTx()
-
-    const emitFail = (error: unknown) => {
-      onEvent?.({
-        type: UploadStatus.ItemFailed,
-        index,
-        total,
-        cid,
-        error: error instanceof Error ? error : new Error(String(error)),
+    try {
+      const result = await pipelineStore(this.api, undefined, items, {
+        wsUrls: this.config.wsUrls,
+        createProvider: (url) => getWsProvider(url),
+        blockLimits: this.config.blockLimits,
+        completeOn: waitFor === "in_block" ? "best" : "finalized",
+        bootstrap: this.pipelineBootstrap,
+        precomputedCids: allItemCids,
+        onEvent,
       })
+      return { cids: result.cids }
+    } catch (error) {
+      if (error instanceof BulletinError) throw error
+      throw new BulletinError(
+        `unsigned upload failed: ${error instanceof Error ? error.message : String(error)}`,
+        ErrorCode.TRANSACTION_FAILED,
+        error,
+      )
     }
-
-    return new Promise<CID>((resolve, reject) => {
-      let inBlockEmitted = false
-      const wantInBlock = waitFor === "in_block"
-      let subscription: { unsubscribe(): void } | undefined
-      const subInstance = submitAndWatch(bareTx).subscribe({
-        next: (ev) => {
-          if (ev.type === "txBestBlocksState" && ev.found && ev.block) {
-            if (!inBlockEmitted) {
-              inBlockEmitted = true
-              onEvent?.({
-                type: UploadStatus.ItemInBlock,
-                index,
-                total,
-                cid,
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-              })
-              if (wantInBlock) {
-                subscription?.unsubscribe()
-                resolve(cid)
-              }
-            }
-          } else if (ev.type === "finalized" && ev.block) {
-            onEvent?.({
-              type: UploadStatus.ItemFinalized,
-              index,
-              total,
-              cid,
-              blockHash: ev.block.hash,
-              blockNumber: ev.block.number,
-            })
-            subscription?.unsubscribe()
-            resolve(cid)
-          } else if (ev.type === "invalid" || ev.type === "dropped") {
-            subscription?.unsubscribe()
-            const err = new BulletinError(
-              `Unsigned tx rejected by node: ${ev.type}`,
-              ErrorCode.TRANSACTION_FAILED,
-            )
-            emitFail(err)
-            reject(err)
-          }
-        },
-        error: (err) => {
-          const wrapped =
-            err instanceof BulletinError
-              ? err
-              : new BulletinError(
-                  `Failed to store unsigned: ${err instanceof Error ? err.message : String(err)}`,
-                  ErrorCode.TRANSACTION_FAILED,
-                  err,
-                )
-          emitFail(wrapped)
-          reject(wrapped)
-        },
-      })
-      subscription = subInstance
-    })
   }
 
   /**

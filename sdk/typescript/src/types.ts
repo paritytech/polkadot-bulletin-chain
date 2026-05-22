@@ -224,6 +224,8 @@ export type UploadEvent =
       cid: CID
       blockHash: string
       blockNumber: number
+      /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
+      extrinsicIndex?: number
     }
   | {
       type: UploadStatus.ItemFinalized
@@ -232,6 +234,8 @@ export type UploadEvent =
       cid: CID
       blockHash: string
       blockNumber: number
+      /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
+      extrinsicIndex?: number
     }
   | {
       type: UploadStatus.ItemFailed
@@ -315,6 +319,7 @@ export enum ErrorCode {
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
   STORE_STALLED = "STORE_STALLED",
+  HIJACK_BUDGET_EXCEEDED = "HIJACK_BUDGET_EXCEEDED",
 }
 
 /** Error codes that are retryable */
@@ -351,6 +356,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "This operation is not supported in this context",
   [ErrorCode.STORE_STALLED]:
     "Store received no chainHead events from the RPC; the connection may be unhealthy. Retry on a fresh client",
+  [ErrorCode.HIJACK_BUDGET_EXCEEDED]:
+    "An item's nonce slot was repeatedly hijacked by other transactions from the same signer. Check for concurrent transactions on this account.",
 }
 
 /**
