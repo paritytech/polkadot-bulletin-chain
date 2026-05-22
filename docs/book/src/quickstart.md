@@ -47,7 +47,7 @@ npm install @parity/bulletin-sdk polkadot-api
 ### Step 2: Store Data
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { BulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
@@ -60,7 +60,7 @@ async function main() {
   const api = papiClient.getTypedApi(bulletin);
 
   // 2. Create SDK client with PAPI client, signer, and submit function
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+  const client = new BulletinClient(api, signer, papiClient.submit);
 
   // 3. Store data (requires authorization - use Faucet first!)
   const data = Binary.fromText("Hello, Bulletin Chain!");

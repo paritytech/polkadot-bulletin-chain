@@ -71,7 +71,7 @@ console.log("Transactions needed:", estimate.transactions);
 console.log("Bytes needed:", estimate.bytes);
 ```
 
-Or using `AsyncBulletinClient`:
+Or using `BulletinClient`:
 
 ```typescript
 const estimate = client.estimateAuthorization(fileSize);
@@ -199,7 +199,7 @@ if (auth?.expiration) {
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
+import { BulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
   // Setup
@@ -226,7 +226,7 @@ async function storeWithAuthCheck() {
   }
 
   // 3. Store via SDK
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+  const client = new BulletinClient(api, signer, papiClient.submit);
   const result = await client.store(data).send();
   console.log("Stored with CID:", result.cid.toString());
 }

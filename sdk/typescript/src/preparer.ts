@@ -17,6 +17,7 @@ import {
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
+  type ResolvedClientConfig,
   resolveClientConfig,
   type StoreOptions,
 } from "./types.js"
@@ -27,10 +28,10 @@ import { calculateCid, estimateAuthorization } from "./utils.js"
  *
  * Handles CID calculation, chunking, DAG-PB manifest creation, and
  * authorization estimation without any chain interaction.
- * Used internally by AsyncBulletinClient and MockBulletinClient.
+ * Used internally by BulletinClient and MockBulletinClient.
  */
 export class BulletinPreparer {
-  private config: Required<ClientConfig>
+  private config: ResolvedClientConfig
 
   constructor(config?: ClientConfig) {
     this.config = resolveClientConfig(config)

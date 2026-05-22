@@ -44,9 +44,9 @@
 
 export { CID } from "multiformats/cid"
 
-// async-client: core client, builders, and public interfaces
+// client: core client, builders, and public interfaces
 export {
-  AsyncBulletinClient,
+  BulletinClient,
   AuthCallBuilder,
   type AuthCallOptions,
   type BulletinClientInterface,
@@ -57,7 +57,7 @@ export {
   type TransactionReceipt,
   UploadBuilder,
   UploadFileBuilder,
-} from "./async-client.js"
+} from "./client.js"
 
 // chunker: data splitting and reassembly
 export {

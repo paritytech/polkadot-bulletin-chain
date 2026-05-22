@@ -28,7 +28,7 @@ import { getWsProvider } from 'polkadot-api/ws';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import {
-    AsyncBulletinClient,
+    BulletinClient,
     UploadStatus,
 } from '../sdk/typescript/dist/index.mjs';
 
@@ -119,10 +119,10 @@ async function main() {
             : '//SDKBigDataSigner';
         const user = newSigner(userSeed);
         console.log(`User account: ${user.address}`);
-        const authorizerClient = new AsyncBulletinClient(api, authorizerSigner);
+        const authorizerClient = new BulletinClient(api, authorizerSigner);
         // wsUrls opts the SDK into the pipelined submission engine — the
         // same code path used for both single-item and chunked uploads.
-        const userClient = new AsyncBulletinClient(api, user.signer, undefined, {
+        const userClient = new BulletinClient(api, user.signer, undefined, {
             wsUrls: [NODE_WS],
         });
 

@@ -118,7 +118,7 @@ Multi-language client SDKs for submitting data, managing authorizations, and gen
 
 Published as `@parity/bulletin-sdk` on npm. Browser and Node.js compatible (requires Node >= 22).
 
-- `AsyncBulletinClient` for end-to-end storage workflows
+- `BulletinClient` for end-to-end storage workflows
 - `FixedSizeChunker` and `UnixFsDagBuilder` for large file handling
 - Built on `polkadot-api` (PAPI)
 

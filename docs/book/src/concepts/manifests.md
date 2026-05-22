@@ -65,9 +65,9 @@ The root manifest contains links to all chunks with their sizes, allowing client
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { BulletinClient } from "@parity/bulletin-sdk";
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 const largeFile = new Uint8Array(10_000_000); // 10 MB
 
 // Automatically chunks and creates a DAG-PB manifest

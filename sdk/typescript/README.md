@@ -5,7 +5,7 @@ Off-chain client SDK for Polkadot Bulletin Chain with PAPI integration.
 ## Quick Start
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 
@@ -15,7 +15,7 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(/* chain descriptors */);
 
 // Create client
-const client = new AsyncBulletinClient(api, signer);
+const client = new BulletinClient(api, signer);
 
 // Store data using builder pattern
 const result = await client.store(data).send();

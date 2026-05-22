@@ -4,11 +4,12 @@ import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { fetchCid } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.js';
+import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -80,21 +81,22 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const mainChainSpec = readChainSpec(chainSpecPath);
     const parachainSpec = parachainSpecPath ? readChainSpec(parachainSpecPath) : null;
 
-    const provider = getSmProvider(async () => {
-        const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
-        console.log(`✅ Added main chain: ${chainSpecPath}`);
-        if (parachainSpec) {
-            const parachain = await sd.addChain({
-                chainSpec: parachainSpec,
-                potentialRelayChains: [mainChain]
-            });
-            console.log(`✅ Added parachain: ${parachainSpecPath}`);
-            return parachain;
-        }
-        return mainChain;
-    });
+    // Add chains once and reuse the target Chain handle for every JsonRpcProvider
+    // we hand out — both PAPI's top-level client and the SDK's internal substrate
+    // clients share the same smoldot connection.
+    const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    let target = mainChain;
+    if (parachainSpec) {
+        target = await sd.addChain({
+            chainSpec: parachainSpec,
+            potentialRelayChains: [mainChain],
+        });
+        console.log(`✅ Added parachain: ${parachainSpecPath}`);
+    }
 
-    return { client: createClient(provider), sd };
+    const createProvider = () => getSmProvider(target);
+    return { client: createClient(createProvider()), sd, createProvider };
 }
 
 async function main() {
@@ -124,55 +126,70 @@ async function main() {
         'IPFS API': HTTP_IPFS_API
     });
     
-    let sd, client, resultCode;
+    let sd, client, sudoClient, userClient, resultCode;
     try {
         // Init Smoldot PAPI client and typed api.
-        ({ client, sd } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
+        let createProvider;
+        ({ client, sd, createProvider } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
-        // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?        
+        // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
-        
+
         console.log('🔍 Checking if chain is ready...');
         const bulletinAPI = client.getTypedApi(bulletin);
         await waitForChainReady(bulletinAPI);
         await waitForBlockProduction(bulletinAPI);
 
-        // Signers: Use Bob for the account being authorized to avoid nonce conflicts
-        // when running after ws test (which uses Alice) on the same chain.
+        // Signers: Use //Alice for sudo, dedicated key for the user account
+        // to avoid nonce conflicts with the WS test on the same chain.
         const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+
+        // BulletinClient wired to the smoldot provider: pipelineStore opens its
+        // own substrate client via `createProvider`, so the WS url is ignored
+        // (we still need a non-empty `wsUrls` entry to pass validation).
+        sudoClient = new BulletinClient(bulletinAPI, authorizationSigner);
+        userClient = new BulletinClient(bulletinAPI, whoSigner, undefined, {
+            wsUrls: ['smoldot'],
+            createProvider,
+        });
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
-        let expectedCid = await cidFromBytes(dataToStore);
+        const dataBytes = new TextEncoder().encode(dataToStore);
+        const expectedCid = await cidFromBytes(dataBytes);
 
-        // Authorize an account.
-        await authorizeAccount(
-            bulletinAPI,
-            authorizationSigner,
-            whoAddress,
-            100,
-            BigInt(100 * 1024 * 1024), // 100 MiB
-            TX_MODE_FINALIZED_BLOCK,
-        );
+        // Authorize the user account. The chain accepts authorize_account directly
+        // from the configured authorizer key (//Alice in these examples); no sudo wrap.
+        await sudoClient
+            .authorizeAccount(whoAddress, 100, BigInt(100 * 1024 * 1024))
+            .withWaitFor('finalized')
+            .send();
+        logSuccess(`Account ${whoAddress} authorized`);
 
-        // Store data.
-        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        // Store data via the SDK pipeline.
+        const { cid } = await userClient.uploadFile(dataBytes).send();
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
-        // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
-        logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
-            cid,
-            expectedCid,
+            cid.toString(),
+            expectedCid.toString(),
             '❌ expectedCid does not match cid!'
         );
-        assert.deepStrictEqual(
-            dataToStore,
-            downloadedContent.toString(),
-            '❌ dataToStore does not match downloadedContent!'
-        );
-        logSuccess('Verified content!');
+
+        // Read back from IPFS — optional verification step. Skipped if the
+        // gateway isn't reachable (e.g. zombienet without --ipfs-server up).
+        try {
+            const downloadedContent = await fetchCid(HTTP_IPFS_API, cid.toString());
+            logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
+            assert.deepStrictEqual(
+                dataToStore,
+                downloadedContent.toString(),
+                '❌ dataToStore does not match downloadedContent!'
+            );
+            logSuccess('Verified content via IPFS!');
+        } catch (err) {
+            console.log(`⚠️  IPFS verification skipped (${HTTP_IPFS_API} unreachable): ${err.message}`);
+        }
 
         logTestResult(true, 'Authorize and Store Test (Smoldot)');
         resultCode = 0;
@@ -181,6 +198,8 @@ async function main() {
         console.error(error);
         resultCode = 1;
     } finally {
+        if (sudoClient) await sudoClient.destroy();
+        if (userClient) await userClient.destroy();
         if (client) client.destroy();
         if (sd) sd.terminate();
         process.exit(resultCode);

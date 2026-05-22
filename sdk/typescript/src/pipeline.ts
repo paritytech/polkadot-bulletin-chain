@@ -85,7 +85,7 @@ import {
   getOfflineApi,
   type PolkadotSigner,
 } from "polkadot-api"
-import type { BulletinTypedApi } from "./async-client.js"
+import type { BulletinTypedApi } from "./client.js"
 import {
   BulletinError,
   CidCodec,

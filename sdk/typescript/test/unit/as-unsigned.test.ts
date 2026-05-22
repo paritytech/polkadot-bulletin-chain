@@ -27,7 +27,7 @@ interface MockClientOpts {
 }
 
 async function makeClient(opts: MockClientOpts = {}) {
-  const { AsyncBulletinClient } = await import("../../src/async-client")
+  const { BulletinClient } = await import("../../src/client")
   const apiStub: Record<string, unknown> = {
     tx: {
       TransactionStorage: {
@@ -64,7 +64,7 @@ async function makeClient(opts: MockClientOpts = {}) {
   const config =
     opts.withWsUrls === false ? undefined : { wsUrls: ["ws://test"] }
   // biome-ignore lint/suspicious/noExplicitAny: tests touch private internals
-  return new AsyncBulletinClient(
+  return new BulletinClient(
     apiStub as any,
     signer as any,
     undefined,

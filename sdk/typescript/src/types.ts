@@ -439,6 +439,16 @@ export interface ClientConfig {
    * loop. Block watching uses the first URL; signed transactions are broadcast
    * to every URL. */
   wsUrls?: string[]
+  /**
+   * Optional provider factory override for {@link wsUrls}. Default builds a
+   * WebSocket provider via `polkadot-api/ws`. Pass a custom factory to use a
+   * non-WS transport — smoldot, in-process tunnel, etc. The factory is
+   * invoked once per URL (one monitor client + one submit client per URL).
+   * For light-client (smoldot) usage, pass a single placeholder in `wsUrls`
+   * and return the same shared smoldot provider for every call.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: PAPI's JsonRpcProvider type lives in @polkadot-api/json-rpc-provider; avoid a hard import dep here
+  createProvider?: (url: string) => any
   /** Per-chain block limits used by pipelineStore. Defaults to
    * {@link DEFAULT_BLOCK_LIMITS} (bulletin-westend / paseo values). */
   blockLimits?: BlockLimits
@@ -447,10 +457,19 @@ export interface ClientConfig {
 /**
  * Default client configuration values.
  *
- * Used by AsyncBulletinClient, MockBulletinClient, and BulletinPreparer
+ * Used by BulletinClient, MockBulletinClient, and BulletinPreparer
  * so that defaults are defined in one place.
  */
-export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
+/**
+ * Resolved client config — everything from `ClientConfig` is required
+ * except `createProvider`, which falls back to the default WebSocket
+ * provider in `client.ts` when omitted.
+ */
+export type ResolvedClientConfig = Required<
+  Omit<ClientConfig, "createProvider">
+> & Pick<ClientConfig, "createProvider">
+
+export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
   defaultChunkSize: 1024 * 1024, // 1 MiB
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
@@ -465,7 +484,7 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
 /** Merge caller-supplied config with defaults, ignoring undefined values. */
 export function resolveClientConfig(
   config?: Partial<ClientConfig>,
-): Required<ClientConfig> {
+): ResolvedClientConfig {
   if (!config) return { ...DEFAULT_CLIENT_CONFIG }
   const result = { ...DEFAULT_CLIENT_CONFIG }
   for (const key of Object.keys(config) as (keyof ClientConfig)[]) {

@@ -7,7 +7,7 @@ import { setupKeyringAndSigners, getContentHash, waitForBlockProduction, DEFAULT
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { AsyncBulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
@@ -65,8 +65,8 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
     // pipelined engine, so both require `wsUrls` in the SDK config.
     const dataBytes = new TextEncoder().encode(dataToStore);
     const sdkClient = signer
-        ? new AsyncBulletinClient(bulletinAPI, signer, undefined, { wsUrls: [wsUrl] })
-        : new AsyncBulletinClient(bulletinAPI, undefined, undefined, { wsUrls: [wsUrl] });
+        ? new BulletinClient(bulletinAPI, signer, undefined, { wsUrls: [wsUrl] })
+        : new BulletinClient(bulletinAPI, undefined, undefined, { wsUrls: [wsUrl] });
     const item = { data: dataBytes };
     if (cidCodec != null) item.codec = cidCodec;
     if (mhCode != null) item.hashAlgo = mhCode;

@@ -30,7 +30,7 @@ The `@parity/bulletin-sdk` package provides a modern, type-safe client for Node.
 ## Quick Example
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -40,7 +40,7 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // Create SDK client with PAPI client, signer, and submit function
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // Store any size file using builder pattern
 const data = new Uint8Array(50_000_000); // 50 MB

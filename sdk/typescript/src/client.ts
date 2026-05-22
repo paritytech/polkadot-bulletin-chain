@@ -20,6 +20,7 @@ import {
   type ChunkerConfig,
   CidCodec,
   type ClientConfig,
+  type ResolvedClientConfig,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
   HashAlgorithm,
@@ -298,7 +299,7 @@ function mapPapiEventToProgress(
 /**
  * Shared interface for Bulletin clients (real and mock).
  *
- * Both `AsyncBulletinClient` and `MockBulletinClient` implement this interface.
+ * Both `BulletinClient` and `MockBulletinClient` implement this interface.
  */
 export interface BulletinClientInterface {
   uploadFile(data: Uint8Array): UploadFileBuilder
@@ -625,7 +626,7 @@ function extractStoredIndex(
  * ```typescript
  * import { createClient } from 'polkadot-api';
  * import { getWsProvider } from 'polkadot-api/ws';
- * import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+ * import { BulletinClient } from '@parity/bulletin-sdk';
  *
  * // User sets up PAPI client
  * const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
@@ -633,13 +634,13 @@ function extractStoredIndex(
  * const api = client.getTypedApi(bulletinDescriptor);
  *
  * // Create SDK client
- * const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submitAndWatch);
+ * const bulletinClient = new BulletinClient(api, signer, papiClient.submitAndWatch);
  *
  * // Store data
  * const result = await bulletinClient.store(data).send();
  * ```
  */
-export class AsyncBulletinClient implements BulletinClientInterface {
+export class BulletinClient implements BulletinClientInterface {
   /** PAPI client for blockchain interaction */
   public api: BulletinTypedApi
   /**
@@ -656,7 +657,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   public submitAndWatch: SubmitAndWatchFn | undefined
   /** Client configuration */
-  public config: Required<ClientConfig>
+  public config: ResolvedClientConfig
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
   /** Optional teardown callback invoked by `destroy()` */
@@ -1173,7 +1174,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       try {
         await pipelineStore(this.api, this.signer!, remaining, {
           wsUrls: this.config.wsUrls,
-          createProvider: (url) => getWsProvider(url),
+          createProvider:
+            this.config.createProvider ?? ((url) => getWsProvider(url)),
           blockLimits: this.config.blockLimits,
           completeOn: waitFor === "in_block" ? "best" : "finalized",
           bootstrap,
@@ -1249,7 +1251,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     try {
       const result = await pipelineStore(this.api, undefined, items, {
         wsUrls: this.config.wsUrls,
-        createProvider: (url) => getWsProvider(url),
+        createProvider:
+          this.config.createProvider ?? ((url) => getWsProvider(url)),
         blockLimits: this.config.blockLimits,
         completeOn: waitFor === "in_block" ? "best" : "finalized",
         bootstrap: this.pipelineBootstrap,

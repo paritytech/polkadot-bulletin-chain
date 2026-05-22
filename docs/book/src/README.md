@@ -59,13 +59,13 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 
 ```typescript
 // TypeScript - Store data
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { BulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 
 const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
 const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 const result = await client.store(Binary.fromText("Hello, Bulletin!")).send();
 console.log("CID:", result.cid.toString());

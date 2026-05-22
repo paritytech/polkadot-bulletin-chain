@@ -12,7 +12,7 @@ import {
   DEFAULT_NETWORKS,
   type Network,
 } from "../config/networks";
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { BulletinClient } from "@parity/bulletin-sdk";
 
 export type StorageType = "bulletin" | "web3storage";
 
@@ -392,7 +392,7 @@ export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
 
 /**
- * Hook that returns a factory for creating AsyncBulletinClient instances.
+ * Hook that returns a factory for creating BulletinClient instances.
  * Returns undefined if not connected. Call with a signer to get a client.
  *
  * @example
@@ -402,7 +402,7 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
  * const bulletinClient = createBulletinClient?.(signer);
  * ```
  */
-export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => AsyncBulletinClient) | undefined {
+export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => BulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
   const network = useNetwork();
@@ -415,13 +415,13 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => AsyncBu
     // can only do unsigned uploads (`asUnsigned()`) until the SDK grows a
     // smoldot-native pipeline.
     const wsUrls = network?.lightClient ? [] : network?.endpoints ?? [];
-    const cache = new WeakMap<object, AsyncBulletinClient>();
+    const cache = new WeakMap<object, BulletinClient>();
     const NO_SIGNER = {} as object;
     return (signer?: PolkadotSigner) => {
       const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
       let bulletin = cache.get(key);
       if (!bulletin) {
-        bulletin = new AsyncBulletinClient(api, signer, client.submitAndWatch, { wsUrls });
+        bulletin = new BulletinClient(api, signer, client.submitAndWatch, { wsUrls });
         cache.set(key, bulletin);
       }
       return bulletin;

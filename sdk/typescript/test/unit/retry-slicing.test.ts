@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 /**
- * Tests for the retry layer in `AsyncBulletinClient.uploadItemsImpl`:
+ * Tests for the retry layer in `BulletinClient.uploadItemsImpl`:
  *   - on `BulletinError(STORE_STALLED, cause: { finalized: N })`, the retry
  *     re-invokes `pipelineStore` with `items.slice(N)`.
  *   - CIDs from all attempts are stitched into the final `cids: CID[]` in
@@ -14,16 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as pipelineModule from "../../src/pipeline"
 import { BulletinError, ErrorCode } from "../../src/types"
 
-// Cast helper for AsyncBulletinClient under test — we touch private impl.
+// Cast helper for BulletinClient under test — we touch private impl.
 async function makeClient() {
-  const { AsyncBulletinClient } = await import("../../src/async-client")
+  const { BulletinClient } = await import("../../src/client")
   const signer = {
     publicKey: new Uint8Array(32),
     sign: async () => new Uint8Array(64),
   }
   const apiStub = { tx: { TransactionStorage: {} } }
   // biome-ignore lint/suspicious/noExplicitAny: tests touch private method directly
-  return new AsyncBulletinClient(apiStub as any, signer as any, undefined)
+  return new BulletinClient(apiStub as any, signer as any, undefined)
 }
 
 // Build a fake CID-like object (mockClient does Blake2b CIDs; we just need

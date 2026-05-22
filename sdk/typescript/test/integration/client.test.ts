@@ -19,7 +19,7 @@ import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
-  AsyncBulletinClient,
+  BulletinClient,
   type BulletinTypedApi,
   CidCodec,
   HashAlgorithm,
@@ -30,8 +30,8 @@ const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
 const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 })
 
-describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
-  let client: AsyncBulletinClient
+describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
+  let client: BulletinClient
   let papiClient: PolkadotClient
   let aliceAddress: string
 
@@ -51,7 +51,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
     // 120s tx timeout for CI zombienet nodes — finalization can take >60s.
     // wsUrls opt the signed path into the pipelined submission engine.
-    client = new AsyncBulletinClient(api, signer, papiClient.submitAndWatch, {
+    client = new BulletinClient(api, signer, papiClient.submitAndWatch, {
       txTimeout: 120_000,
       wsUrls: [ENDPOINT],
     })
@@ -337,7 +337,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     it("two parallel uploads from the same signer both succeed", async () => {
       // Both clients share the SAME signer → fight over the same nonces.
       const makeRivalClient = () =>
-        new AsyncBulletinClient(
+        new BulletinClient(
           papiClient.getUnsafeApi() as unknown as BulletinTypedApi,
           // Re-create signer to avoid any per-instance caching collisions.
           (() => {

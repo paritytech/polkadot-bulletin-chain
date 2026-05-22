@@ -2,15 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 import { describe, expect, it, vi } from "vitest"
-import { AsyncBulletinClient } from "../../src/async-client"
+import { BulletinClient } from "../../src/client"
 
 // Minimal stand-ins; destroy() doesn't touch any of these.
 const dummyApi = {} as never
 const dummySigner = {} as never
 
-describe("AsyncBulletinClient.destroy", () => {
+describe("BulletinClient.destroy", () => {
   it("resolves to a no-op when no onDestroy is provided", async () => {
-    const client = new AsyncBulletinClient(dummyApi, dummySigner, undefined)
+    const client = new BulletinClient(dummyApi, dummySigner, undefined)
     await expect(client.destroy()).resolves.toBeUndefined()
   })
 
@@ -18,7 +18,7 @@ describe("AsyncBulletinClient.destroy", () => {
     const teardown = vi.fn(
       () => new Promise<void>((resolve) => setTimeout(resolve, 5)),
     )
-    const client = new AsyncBulletinClient(
+    const client = new BulletinClient(
       dummyApi,
       dummySigner,
       undefined,

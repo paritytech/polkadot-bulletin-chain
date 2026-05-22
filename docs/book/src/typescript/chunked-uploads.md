@@ -7,9 +7,9 @@ The Bulletin SDK automatically handles chunking for large files up to **64 MiB**
 For most use cases, simply use `store()` - it automatically chunks large files:
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // Load file of any size (up to 64 MiB)
 const data = new Uint8Array(50 * 1024 * 1024); // 50 MB
@@ -37,7 +37,7 @@ if (result.chunks) {
 You can configure the threshold and chunk size via the client constructor:
 
 ```typescript
-const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+const client = new BulletinClient(api, signer, papiClient.submit, {
     chunkingThreshold: 5 * 1024 * 1024,   // Chunk files > 5 MiB
     defaultChunkSize: 1024 * 1024,         // 1 MiB chunks (max: 2 MiB)
     createManifest: true,                  // Create DAG-PB manifest
@@ -49,9 +49,9 @@ const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
 Use `withChunkSize()` when you want explicit control over the chunk size:
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
 
@@ -232,9 +232,9 @@ try {
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, BulletinError } from '@parity/bulletin-sdk';
+import { BulletinClient, BulletinError } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // Large file (up to 64 MiB)
 const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB

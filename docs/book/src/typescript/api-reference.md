@@ -4,12 +4,12 @@ Complete reference for the `@parity/bulletin-sdk` TypeScript package.
 
 ## Classes
 
-### AsyncBulletinClient
+### BulletinClient
 
 The primary client for interacting with Bulletin Chain. Wraps a PAPI connection and provides high-level storage, authorization, and renewal operations.
 
 ```typescript
-class AsyncBulletinClient implements BulletinClientInterface {
+class BulletinClient implements BulletinClientInterface {
   api: BulletinTypedApi;
   signer: PolkadotSigner;
   submit: SubmitFn;
@@ -141,13 +141,13 @@ class BulletinPreparer {
 
 ### MockBulletinClient
 
-A mock client for testing without a blockchain connection. Implements the same interface as `AsyncBulletinClient`.
+A mock client for testing without a blockchain connection. Implements the same interface as `BulletinClient`.
 
 ```typescript
 class MockBulletinClient implements BulletinClientInterface {
   constructor(config?: Partial<MockClientConfig>);
 
-  // Same methods as AsyncBulletinClient, plus:
+  // Same methods as BulletinClient, plus:
   getOperations(): MockOperation[];
   clearOperations(): void;
 }

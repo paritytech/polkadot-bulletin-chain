@@ -45,7 +45,7 @@ describe("ensureAuthorized() pre-flight", () => {
     })
   })
 
-  describe("AsyncBulletinClient.ensureAuthorizedOnChain (via reflection)", () => {
+  describe("BulletinClient.ensureAuthorizedOnChain (via reflection)", () => {
     // Direct testing of the private method via `as any`. The method only
     // touches `this.api.query` and `this.signer.publicKey`; we can call it
     // in isolation without needing a real chainHead follow.
@@ -53,7 +53,7 @@ describe("ensureAuthorized() pre-flight", () => {
       query: unknown,
       systemNumber?: number,
     ): Promise<void> {
-      const { AsyncBulletinClient } = await import("../../src/async-client")
+      const { BulletinClient } = await import("../../src/client")
 
       const sysQuery =
         systemNumber !== undefined
@@ -72,7 +72,7 @@ describe("ensureAuthorized() pre-flight", () => {
         sign: async () => new Uint8Array(64),
       }
       // biome-ignore lint/suspicious/noExplicitAny: tests touch private method directly
-      const client = new AsyncBulletinClient(
+      const client = new BulletinClient(
         apiStub as any,
         signer as any,
         undefined,

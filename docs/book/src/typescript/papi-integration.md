@@ -22,7 +22,7 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 ```typescript
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
@@ -44,7 +44,7 @@ const signer = getPolkadotSigner(
 );
 
 // 4. Create SDK client with PAPI client, signer, and submit function
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // 5. Use the client
 const data = new TextEncoder().encode('Hello, Bulletin!');
@@ -62,7 +62,7 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { startFromWorker } from 'polkadot-api/smoldot/from-worker';
 import SmWorker from 'polkadot-api/smoldot/worker?worker';
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
 // 1. Start smoldot in a web worker
 const smoldot = startFromWorker(new SmWorker());
@@ -77,7 +77,7 @@ const papiClient = createClient(smProvider);
 
 // 4. Get typed API and create SDK client
 const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // Use normally - SDK doesn't know or care about the transport!
 const result = await client.store(data).send();
@@ -116,7 +116,7 @@ const bulletinChain = await smoldot.addChain({
 // Create client
 const papiClient = createClient(getSmProvider(bulletinChain));
 const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 ```
 
 ## Connection Reuse
@@ -126,7 +126,7 @@ The SDK accepts an existing PAPI client, so you can share one connection across 
 ```typescript
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/web';
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
 // Create ONE shared PAPI client for your whole app
 const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
@@ -134,7 +134,7 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // SDK uses the shared client
-const bulletinClient = new AsyncBulletinClient(api, signer, papiClient.submit);
+const bulletinClient = new BulletinClient(api, signer, papiClient.submit);
 
 // Your other code also uses the same client
 const blockNumber = await api.query.System.Number.getValue();
@@ -232,7 +232,7 @@ const extension = await connectInjectedExtension('polkadot-js');
 const accounts = extension.getAccounts();
 
 // Create client with first account
-const client = new AsyncBulletinClient(api, accounts[0].polkadotSigner, papiClient.submit);
+const client = new BulletinClient(api, accounts[0].polkadotSigner, papiClient.submit);
 ```
 
 ## Multiple Accounts
@@ -241,10 +241,10 @@ When you need to use different accounts (e.g., Alice for authorization, Bob for 
 
 ```typescript
 // Client for Alice (sudo account)
-const aliceClient = new AsyncBulletinClient(api, aliceSigner, papiClient.submit);
+const aliceClient = new BulletinClient(api, aliceSigner, papiClient.submit);
 
 // Client for Bob (regular user)
-const bobClient = new AsyncBulletinClient(api, bobSigner, papiClient.submit);
+const bobClient = new BulletinClient(api, bobSigner, papiClient.submit);
 
 // Alice authorizes Bob
 const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
@@ -295,7 +295,7 @@ if (prepared.manifest) {
 }
 ```
 
-> For most use cases, prefer `AsyncBulletinClient.store()` which handles chunking, submission, and progress tracking automatically.
+> For most use cases, prefer `BulletinClient.store()` which handles chunking, submission, and progress tracking automatically.
 
 ## Error Handling
 
@@ -323,7 +323,7 @@ try {
 Customize client behavior:
 
 ```typescript
-const client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+const client = new BulletinClient(api, signer, papiClient.submit, {
     defaultChunkSize: 1024 * 1024, // 1 MiB chunks
     createManifest: true, // Create DAG-PB manifest
     chunkingThreshold: 2 * 1024 * 1024, // Auto-chunk files > 2 MiB

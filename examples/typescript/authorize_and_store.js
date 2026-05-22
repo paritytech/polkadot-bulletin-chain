@@ -3,8 +3,8 @@
  *
  * TypeScript equivalent of the Rust authorize-and-store example.
  * Demonstrates:
- * 1. Authorizing an account to store data (sudo via AsyncBulletinClient)
- * 2. Storing data on chain via AsyncBulletinClient.uploadFile().send()
+ * 1. Authorizing an account to store data (sudo via BulletinClient)
+ * 2. Storing data on chain via BulletinClient.uploadFile().send()
  * 3. Verifying the returned CID
  *
  * Usage:
@@ -17,7 +17,7 @@ import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { bulletin } from '../.papi/descriptors/dist/index.js';
-import { AsyncBulletinClient } from '../../sdk/typescript/dist/index.mjs';
+import { BulletinClient } from '../../sdk/typescript/dist/index.mjs';
 
 // Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -55,20 +55,20 @@ async function main() {
 
         // Create SDK clients
         // sudoClient only authorizes; doesn't need wsUrls (no upload path).
-        const sudoClient = new AsyncBulletinClient(api, sudo.signer);
+        const sudoClient = new BulletinClient(api, sudo.signer);
         // userClient uploads — pipelineStore requires wsUrls for its
         // chainHead-based reconciler.
-        const userClient = new AsyncBulletinClient(api, user.signer, undefined, {
+        const userClient = new BulletinClient(api, user.signer, undefined, {
             wsUrls: [NODE_WS],
         });
 
-        // Step 1: Authorize the account to store data (requires sudo)
+        // Step 1: Authorize the account to store data
         console.log('\nStep 1: Authorizing account...');
         await sudoClient.authorizeAccount(
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        ).withSudo().withWaitFor('finalized').send();
+        ).withWaitFor('finalized').send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK

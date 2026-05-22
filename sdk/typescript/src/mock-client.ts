@@ -19,7 +19,7 @@ import {
   type TransactionReceipt,
   UploadBuilder,
   UploadFileBuilder,
-} from "./async-client.js"
+} from "./client.js"
 import {
   BulletinError,
   type ChunkerConfig,
@@ -27,6 +27,7 @@ import {
   type ClientConfig,
   ErrorCode,
   HashAlgorithm,
+  type ResolvedClientConfig,
   resolveClientConfig,
   type UploadCallback,
   type UploadFileResult,
@@ -108,7 +109,7 @@ function mockReceipt(): TransactionReceipt {
  */
 export class MockBulletinClient implements BulletinClientInterface {
   /** Client configuration */
-  public config: Required<ClientConfig> & {
+  public config: ResolvedClientConfig & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
     simulateInsufficientAuth: boolean

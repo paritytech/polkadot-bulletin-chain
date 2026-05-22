@@ -1,13 +1,13 @@
 # Basic Storage
 
-This guide shows how to store data using the `AsyncBulletinClient` with direct PAPI integration.
+This guide shows how to store data using the `BulletinClient` with direct PAPI integration.
 
 ## Quick Start
 
 The `store()` method with builder pattern automatically handles both small and large files:
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -17,7 +17,7 @@ const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
 // 2. Create client with PAPI client, signer, and submit function
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // 3. Store data using builder pattern (automatically chunks if > 2 MiB, max 64 MiB)
 const data = Binary.fromText('Hello, Bulletin Chain!');
@@ -51,9 +51,9 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 Create the SDK client with PAPI client, signer, and submit function:
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 ```
 
 ### 3. Prepare Data
@@ -154,7 +154,7 @@ See the [Error Handling](./error-handling.md) guide for the full error code refe
 ## Complete Example with Authorization
 
 ```typescript
-import { AsyncBulletinClient, BulletinError } from '@parity/bulletin-sdk';
+import { BulletinClient, BulletinError } from '@parity/bulletin-sdk';
 import { createClient, Binary } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
@@ -162,7 +162,7 @@ const wsProvider = getWsProvider('ws://localhost:9944');
 const papiClient = createClient(wsProvider);
 const api = papiClient.getTypedApi(bulletinDescriptor);
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient(api, signer, papiClient.submit);
 
 // Estimate what's needed
 const data = Binary.fromBytes(new Uint8Array(5_000_000)); // 5 MB

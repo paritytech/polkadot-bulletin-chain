@@ -55,7 +55,7 @@ bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 The SDK is split into layers:
 
 - **`BulletinClient`** - Prepares operations (chunking, CID calculation, manifests)
-- **`AsyncBulletinClient`** - ⚠️ Experimental, placeholder implementation
+- **`BulletinClient`** - ⚠️ Experimental, placeholder implementation
 - **`MockBulletinClient`** - Mock client for testing
 
 For production use, prepare operations with `BulletinClient` and submit via subxt directly.
