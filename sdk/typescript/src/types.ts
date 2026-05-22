@@ -467,7 +467,8 @@ export interface ClientConfig {
  */
 export type ResolvedClientConfig = Required<
   Omit<ClientConfig, "createProvider">
-> & Pick<ClientConfig, "createProvider">
+> &
+  Pick<ClientConfig, "createProvider">
 
 export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
   defaultChunkSize: 1024 * 1024, // 1 MiB

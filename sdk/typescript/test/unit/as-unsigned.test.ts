@@ -64,12 +64,7 @@ async function makeClient(opts: MockClientOpts = {}) {
   const config =
     opts.withWsUrls === false ? undefined : { wsUrls: ["ws://test"] }
   // biome-ignore lint/suspicious/noExplicitAny: tests touch private internals
-  return new BulletinClient(
-    apiStub as any,
-    signer as any,
-    undefined,
-    config,
-  )
+  return new BulletinClient(apiStub as any, signer as any, undefined, config)
 }
 
 describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {

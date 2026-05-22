@@ -43,12 +43,18 @@
  */
 
 export { CID } from "multiformats/cid"
-
+// chunker: data splitting and reassembly
+export {
+  FixedSizeChunker,
+  MAX_CHUNK_SIZE,
+  MAX_FILE_SIZE,
+  reassembleChunks,
+} from "./chunker.js"
 // client: core client, builders, and public interfaces
 export {
-  BulletinClient,
   AuthCallBuilder,
   type AuthCallOptions,
+  BulletinClient,
   type BulletinClientInterface,
   type BulletinTypedApi,
   CallBuilder,
@@ -58,14 +64,6 @@ export {
   UploadBuilder,
   UploadFileBuilder,
 } from "./client.js"
-
-// chunker: data splitting and reassembly
-export {
-  FixedSizeChunker,
-  MAX_CHUNK_SIZE,
-  MAX_FILE_SIZE,
-  reassembleChunks,
-} from "./chunker.js"
 
 // dag: DAG-PB manifest building
 export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
