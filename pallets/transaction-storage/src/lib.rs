@@ -554,9 +554,6 @@ pub mod pallet {
 			let info = Self::resolve_transaction_ref(&entry)?;
 			let content_hash = info.content_hash;
 
-			// Defensive duplicate-registration check. The extension's `check_signed`
-			// already rejects this case at pool ingress, before the hard-cap charge,
-			// so a second `renew` for the same hash never reaches here in practice.
 			ensure!(
 				!AutoRenewals::<T>::contains_key(content_hash),
 				Error::<T>::AutoRenewalAlreadyEnabled
@@ -1357,11 +1354,8 @@ pub mod pallet {
 					// `enable_auto_renew`). All other recurring cycles charge here.
 					let was_paid = renewal_data.paid;
 					let scope = AuthorizationScope::Account(renewal_data.account.clone());
-					let charged = if was_paid {
-						true
-					} else {
-						Self::check_authorization(&scope, tx_info.size, true, true).is_ok()
-					};
+					let charged = was_paid ||
+						Self::check_authorization(&scope, tx_info.size, true, true).is_ok();
 					let new_index = if charged {
 						Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
 					} else {
@@ -1392,10 +1386,6 @@ pub mod pallet {
 							account: renewal_data.account,
 						});
 					} else {
-						// `charged && new_index.is_none()` means the per-block
-						// `MaxBlockTransactions` cap rejected the push *after* the
-						// charge — refund so the chain-wide counter and per-account
-						// quota don't leak.
 						if charged {
 							Self::refund_renewal_charge(&scope, tx_info.size);
 						}
@@ -1916,7 +1906,7 @@ pub mod pallet {
 		}
 
 		/// Returns the [`TransactionInfo`] for the specified store/renew transaction.
-		fn transaction_info(
+		pub(crate) fn transaction_info(
 			block_number: BlockNumberFor<T>,
 			index: u32,
 		) -> Option<TransactionInfo> {
@@ -2062,12 +2052,8 @@ pub mod pallet {
 			result
 		}
 
-		/// Reverse a renew charge previously applied by [`Self::check_authorization`] with
-		/// `consume = true, is_renew = true`. Used by [`Self::do_process_auto_renewals`] when
-		/// a charged cycle fails to land in `BlockTransactions` (per-block `MaxBlockTransactions`
-		/// cap), so the bytes don't permanently leak from the chain-wide counter and per-account
-		/// quota. Saturating arithmetic — the authorization may have rolled over in the meantime,
-		/// in which case the counters were already reset to zero and the refund is a no-op.
+		/// Reverse a renew charge from [`Self::check_authorization`]. Saturating, so a
+		/// rolled-over authorization (counters already reset to zero) is a no-op.
 		fn refund_renewal_charge(scope: &AuthorizationScopeFor<T>, size: u32) {
 			let size_u64: u64 = size.into();
 			Authorizations::<T>::mutate(scope, |maybe_authorization| {
@@ -2259,12 +2245,10 @@ pub mod pallet {
 				},
 				Call::<T>::renew { entry } => {
 					// Pre-paid one-shot: charges the same as `force_renew`. Cycle delivers
-					// without re-charging (see `do_process_auto_renewals`).
+					// without re-charging (see `do_process_auto_renewals`). Reject
+					// duplicates before charging — mirrors `enable_auto_renew` below.
 					let info =
 						Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
-					// Reject duplicates here so the prepayment in `check_authorization` is
-					// only ever charged on a registration that will actually land — mirrors
-					// `enable_auto_renew`'s extension guard.
 					if AutoRenewals::<T>::contains_key(info.content_hash) {
 						return Err(AUTO_RENEWAL_ALREADY_ENABLED.into());
 					}
@@ -2574,12 +2558,10 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Verify the chain-wide permanent-storage accounting invariants:
-	/// - `PermanentStorageUsed == Σ Renew sizes in `Transactions` + Σ sizes of paid `AutoRenewals`.
-	///   `renew` / `enable_auto_renew` charge the counter at registration in `check_signed`, but
-	///   the matching `Renew` entry is only added to `Transactions` when the cycle fires at the
-	///   next retention boundary — so during the prepayment window the counter is reconciled
-	///   against the paid registrations.
-	/// - `PermanentStorageUsed <= MaxPermanentStorageSize` — the chain-wide hard cap is honored.
+	/// - `PermanentStorageUsed == Σ Renew sizes in Transactions + Σ paid AutoRenewals sizes` — the
+	///   paid term covers the prepayment window between `renew` / `enable_auto_renew` charging the
+	///   counter and `do_process_auto_renewals` writing the `Renew` entry.
+	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
 	) -> Result<(), sp_runtime::TryRuntimeError> {
@@ -2596,16 +2578,12 @@ impl<T: Config> Pallet<T> {
 				.filter(|(_, data)| data.paid)
 				.fold(0u64, |acc, (hash, _)| {
 					let size = TransactionByContentHash::<T>::get(hash)
-						.and_then(|(block, index)| {
-							Transactions::<T>::get(block)?.into_iter().nth(index as usize)
-						})
-						.map(|info| info.size as u64)
-						.unwrap_or(0);
+						.and_then(|(block, index)| Self::transaction_info(block, index))
+						.map_or(0, |info| info.size as u64);
 					acc.saturating_add(size)
 				});
-		let expected = renewed_sum.saturating_add(prepaid_sum);
 		ensure!(
-			expected == used,
+			renewed_sum.saturating_add(prepaid_sum) == used,
 			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 
