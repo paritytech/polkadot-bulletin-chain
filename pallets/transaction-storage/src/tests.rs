@@ -2710,6 +2710,81 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 	});
 }
 
+/// A `paid = true` registration that fails the per-block `MaxBlockTransactions` cap at
+/// cycle time refunds the upfront `PermanentStorageUsed` and per-account
+/// `bytes_permanent` / `transactions` charges. Without the refund the bytes would leak
+/// permanently — no `Renew` entry is ever created to age them out — and `try_state`
+/// would reject the desync.
+#[test]
+fn paid_cycle_refunds_on_block_slot_cap() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![7u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		// Registers as `paid = true` — `PermanentStorageUsed += 2000` and the
+		// authorization is charged 2000 bytes_permanent / 1 transaction.
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		let auth_after_register =
+			Authorizations::get(AuthorizationScope::Account(who)).expect("auth exists");
+		let permanent_before = auth_after_register.extent.bytes_permanent;
+		let transactions_before = auth_after_register.extent.transactions;
+
+		// Schedule the cycle: block-1 ages out at block 12, `on_initialize` queues
+		// the paid registration into `PendingAutoRenewals`.
+		init_block(12);
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+
+		// Fill `BlockTransactions` so the paid drain has no slot to land in.
+		let max_txns = <<Test as crate::Config>::MaxBlockTransactions as Get<u32>>::get();
+		BlockTransactions::mutate(|txns| {
+			for _ in 0..max_txns {
+				let _ = txns.try_push(TransactionInfo {
+					chunk_root: Default::default(),
+					size: 100,
+					content_hash: [0u8; 32],
+					hashing: crate::HashingAlgorithm::Blake2b256,
+					cid_codec: 0x55,
+					extrinsic_index: 0,
+					block_chunks: 0,
+					kind: crate::TransactionKind::Store,
+				});
+			}
+		});
+
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash,
+			account: who,
+		}));
+		assert!(AutoRenewals::get(content_hash).is_none());
+
+		// The prepayment was refunded on the block-slot-cap failure branch.
+		assert_eq!(PermanentStorageUsed::get(), 0, "chain-wide counter must be refunded");
+		let auth_after_cycle =
+			Authorizations::get(AuthorizationScope::Account(who)).expect("auth still exists");
+		assert_eq!(
+			auth_after_cycle.extent.bytes_permanent,
+			permanent_before.saturating_sub(2000),
+			"per-account bytes_permanent must be refunded"
+		);
+		assert_eq!(
+			auth_after_cycle.extent.transactions,
+			transactions_before.saturating_sub(1),
+			"per-account transactions must be refunded"
+		);
+
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
 /// `renew` registers a one-shot renewal — `AutoRenewals[hash]` is created with
 /// `recurring = false` and `RenewalEnabled { recurring: false }` fires.
 #[test]
@@ -2862,9 +2937,22 @@ fn renew_and_enable_auto_renew_conflict() {
 
 		// Schedule one-shot.
 		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
+		let permanent_used_before = PermanentStorageUsed::get();
 
-		// Second `renew` for the same hash: rejected at dispatch (registration exists).
-		// Bypass the pool (pre_dispatch_signed) to land in dispatch with `Origin::Authorized`.
+		// Second `renew` for the same hash: rejected at the extension (before any
+		// hard-cap charge), so the prepayment cannot be double-counted.
+		let dup_call = Call::renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &dup_call).map(|_| ()),
+			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+		);
+		assert_eq!(
+			PermanentStorageUsed::get(),
+			permanent_used_before,
+			"rejection at the extension must not move the chain-wide counter",
+		);
+
+		// Bypassing the extension still fails the defensive dispatch-level guard.
 		let origin: RuntimeOrigin =
 			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
 		assert_noop!(

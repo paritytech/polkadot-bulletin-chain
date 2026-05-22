@@ -554,6 +554,9 @@ pub mod pallet {
 			let info = Self::resolve_transaction_ref(&entry)?;
 			let content_hash = info.content_hash;
 
+			// Defensive duplicate-registration check. The extension's `check_signed`
+			// already rejects this case at pool ingress, before the hard-cap charge,
+			// so a second `renew` for the same hash never reaches here in practice.
 			ensure!(
 				!AutoRenewals::<T>::contains_key(content_hash),
 				Error::<T>::AutoRenewalAlreadyEnabled
@@ -1353,15 +1356,16 @@ pub mod pallet {
 					// (the one-shot `renew` path and the first cycle after
 					// `enable_auto_renew`). All other recurring cycles charge here.
 					let was_paid = renewal_data.paid;
-					let new_index = if was_paid {
+					let scope = AuthorizationScope::Account(renewal_data.account.clone());
+					let charged = if was_paid {
+						true
+					} else {
+						Self::check_authorization(&scope, tx_info.size, true, true).is_ok()
+					};
+					let new_index = if charged {
 						Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
 					} else {
-						let scope = AuthorizationScope::Account(renewal_data.account.clone());
-						if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
-							Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
-						} else {
-							None
-						}
+						None
 					};
 
 					if let Some(new_index) = new_index {
@@ -1388,6 +1392,13 @@ pub mod pallet {
 							account: renewal_data.account,
 						});
 					} else {
+						// `charged && new_index.is_none()` means the per-block
+						// `MaxBlockTransactions` cap rejected the push *after* the
+						// charge — refund so the chain-wide counter and per-account
+						// quota don't leak.
+						if charged {
+							Self::refund_renewal_charge(&scope, tx_info.size);
+						}
 						AutoRenewals::<T>::remove(content_hash);
 						Self::deposit_event(Event::AutoRenewalFailed {
 							content_hash,
@@ -2051,6 +2062,25 @@ pub mod pallet {
 			result
 		}
 
+		/// Reverse a renew charge previously applied by [`Self::check_authorization`] with
+		/// `consume = true, is_renew = true`. Used by [`Self::do_process_auto_renewals`] when
+		/// a charged cycle fails to land in `BlockTransactions` (per-block `MaxBlockTransactions`
+		/// cap), so the bytes don't permanently leak from the chain-wide counter and per-account
+		/// quota. Saturating arithmetic — the authorization may have rolled over in the meantime,
+		/// in which case the counters were already reset to zero and the refund is a no-op.
+		fn refund_renewal_charge(scope: &AuthorizationScopeFor<T>, size: u32) {
+			let size_u64: u64 = size.into();
+			Authorizations::<T>::mutate(scope, |maybe_authorization| {
+				if let Some(authorization) = maybe_authorization {
+					authorization.extent.bytes_permanent =
+						authorization.extent.bytes_permanent.saturating_sub(size_u64);
+					authorization.extent.transactions =
+						authorization.extent.transactions.saturating_sub(1);
+				}
+			});
+			Self::update_permanent_storage_used(|used| used.saturating_sub(size_u64));
+		}
+
 		/// Check that authorization with the given scope exists in storage, has expired, and
 		/// has no outstanding permanent storage. Mirrors the dispatch-time guard in
 		/// [`remove_expired_authorization`] so that `remove_expired_*` calls are rejected at
@@ -2232,6 +2262,12 @@ pub mod pallet {
 					// without re-charging (see `do_process_auto_renewals`).
 					let info =
 						Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
+					// Reject duplicates here so the prepayment in `check_authorization` is
+					// only ever charged on a registration that will actually land — mirrors
+					// `enable_auto_renew`'s extension guard.
+					if AutoRenewals::<T>::contains_key(info.content_hash) {
+						return Err(AUTO_RENEWAL_ALREADY_ENABLED.into());
+					}
 					Self::check_authorization(
 						&AuthorizationScope::Account(who.clone()),
 						info.size,

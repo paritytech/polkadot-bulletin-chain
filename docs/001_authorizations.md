@@ -213,7 +213,7 @@ When `PermanentStorageNearCap` fires governance can either:
 
 Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization` (called by the extension's `check_signed` for the manual flow and by `do_process_auto_renewals` for the auto flow); the unified renewal mechanics live in `do_renew_in_memory` (called by `do_renew` and by the auto-renewal drain loop).
 
-Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::AutoRenewalFailed` is emitted, and the data expires normally.
+Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::AutoRenewalFailed` is emitted, and the data expires normally. When the per-block slot cap rejects a cycle that had already been charged (either a `paid = true` prepayment or the per-cycle charge applied just above the failed push), `do_process_auto_renewals` refunds the chain-wide `PermanentStorageUsed` and the per-account `bytes_permanent` / `transactions` so the charge does not leak.
 
 The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
