@@ -95,7 +95,12 @@ import {
   type UploadItem,
   UploadStatus,
 } from "./types.js"
-import { calculateCid, hashAlgorithmCodecToEnum } from "./utils.js"
+import {
+  calculateCid,
+  hashAlgorithmCodecToEnum,
+  isNonDefaultCidConfig,
+  normalizeHex,
+} from "./utils.js"
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -324,9 +329,9 @@ interface OfflineTransactionStorage {
 /** Returns true when the item should be sent via the lighter `store` extrinsic. */
 /** @internal — exported for unit tests of the codec-dispatch decision. */
 export function isDefaultCidConfig(item: UploadItem): boolean {
-  return (
-    (item.codec ?? CidCodec.Raw) === CidCodec.Raw &&
-    (item.hashAlgo ?? HashAlgorithm.Blake2b256) === HashAlgorithm.Blake2b256
+  return !isNonDefaultCidConfig(
+    item.codec ?? CidCodec.Raw,
+    item.hashAlgo ?? HashAlgorithm.Blake2b256,
   )
 }
 
@@ -751,15 +756,12 @@ export async function pipelineStore(
                     // recovery carry a consistent block reference (the
                     // pre-disconnect lastBestBlock could be staler than
                     // newTip after a long gap).
-                    if (
-                      !lastBestBlock ||
-                      lastBestBlock.number < newTipNumber
-                    ) {
+                    if (!lastBestBlock || lastBestBlock.number < newTipNumber) {
                       lastBestBlock = { hash: lastHash, number: newTipNumber }
                     }
                     await reconcileAtBlock(api, state, lastHash)
-                    recordInclusionLatency(state, Date.now())
-                    recordFinalizationLatency(state, Date.now())
+                    recordLatency(state, Date.now(), "in_block")
+                    recordLatency(state, Date.now(), "finalized")
                     // Newly-confirmed items emit ItemInBlock + ItemFinalized
                     // so callers see the standard Started → InBlock →
                     // Finalized progression even when the in-block event
@@ -789,9 +791,7 @@ export async function pipelineStore(
                       Promise.resolve(0), // nonce — unused
                       Promise.resolve(""), // genesisHash — unused
                       Promise.resolve(new Uint8Array(0)), // metadataRaw — unused
-                      Promise.resolve(
-                        {} as { ss58Format?: number | string },
-                      ),
+                      Promise.resolve({} as { ss58Format?: number | string }),
                     ])
                   : await Promise.all([
                       readNonceAtBlock(monitorClient, signerHex, lastHash),
@@ -896,6 +896,23 @@ export async function pipelineStore(
               enqueue(async () => {
                 if (!initialized || done) return
 
+                // Early-out once every item is stored (or permanently
+                // failed). We're just waiting on `finalized` events — no
+                // need to fetch nonces or rerun the reconciler each best
+                // block until then.
+                if (counters.confirmed + failedItems.size >= totalItems) {
+                  if (
+                    completeOn === "best" &&
+                    counters.confirmed >= totalItems - failedItems.size
+                  ) {
+                    tracking.bestAtTargetStreak += 1
+                    if (tracking.bestAtTargetStreak >= 2) {
+                      finish() // [TERMINATE-OK] completeOn:"best" 2-block streak
+                    }
+                  }
+                  return
+                }
+
                 // Signed mode reads two nonces (poolNonce for dispatch
                 // dedup + chainNonce for hijack detection). Unsigned skips
                 // both — each unsigned tx is independent, no nonces.
@@ -906,15 +923,10 @@ export async function pipelineStore(
                       getBlockNumber(bestBlockHash),
                     ])
                   : await Promise.all([
-                      monitorClient.request<number>(
-                        "system_accountNextIndex",
-                        [signerSs58],
-                      ),
-                      readNonceAtBlock(
-                        monitorClient,
-                        signerHex,
-                        bestBlockHash,
-                      ),
+                      monitorClient.request<number>("system_accountNextIndex", [
+                        signerSs58,
+                      ]),
+                      readNonceAtBlock(monitorClient, signerHex, bestBlockHash),
                       getBlockNumber(bestBlockHash),
                     ])
                 lastBestBlock = { hash: bestBlockHash, number: bestBlockNumber }
@@ -924,7 +936,7 @@ export async function pipelineStore(
                 // `emitInBlockEvents` updates `counters.confirmed` and fires
                 // `ItemInBlock` with the correct `extrinsicIndex`.
                 await reconcileAtBlock(api, state, bestBlockHash)
-                recordInclusionLatency(state, Date.now())
+                recordLatency(state, Date.now(), "in_block")
                 emitInBlockEvents(state)
 
                 // Detect hijack: pending items whose nonce was used by the
@@ -1057,7 +1069,6 @@ export async function pipelineStore(
                   if (broadcastAtMs[i] === undefined)
                     broadcastAtMs[i] = broadcastNow
                   submissionAnchorBlock[i] = bestBlockNumber
-                  if (unsigned) broadcastedItems.add(i)
                 }
 
                 const {
@@ -1067,6 +1078,15 @@ export async function pipelineStore(
                   retryableLastCode: waveRetryableLastCode,
                 } = await broadcastWave(signed, submitClients, counters)
                 counters.waves++
+
+                // Mark items as broadcast only after a clean wave. If
+                // any submission was retryable (banned hash, pool full,
+                // future nonce, etc.), keep these items eligible for
+                // re-broadcast next wave so they don't sit waiting on
+                // the no-progress watchdog.
+                if (unsigned && waveRetryableCount === 0) {
+                  for (const i of waveIndexes) broadcastedItems.add(i)
+                }
 
                 if (waveTerminalCode !== undefined) {
                   // biome-ignore lint/suspicious/noConsole: terminal — show the user why
@@ -1136,7 +1156,7 @@ export async function pipelineStore(
                 // for any item whose TBCH entry exists at finalization. Then
                 // emit ItemFinalized (monotonic) with `extrinsicIndex`.
                 await reconcileAtBlock(api, state, lastHash)
-                recordFinalizationLatency(state, Date.now())
+                recordLatency(state, Date.now(), "finalized")
                 emitFinalizedEvents(state)
 
                 if (
@@ -1256,50 +1276,49 @@ async function reconcileAtBlock(
   state: WaveState,
   blockHash: string,
 ): Promise<void> {
-  const pending: number[] = []
+  // Re-check every signed/broadcast item — items whose `storedAt` was set
+  // at a previous best block may have been reorged out at this block.
+  // The reconciler is the only source of truth for storedAt; if TBCH no
+  // longer shows our entry, clear it so emitInBlockEvents can retract.
+  const considered: number[] = []
   for (let i = 0; i < state.totalItems; i++) {
-    if (
-      state.storedAt[i] === undefined &&
-      state.submissionAnchorBlock[i] !== undefined
-    ) {
-      pending.push(i)
-    }
+    if (state.submissionAnchorBlock[i] !== undefined) considered.push(i)
   }
-  if (pending.length === 0) return
-  const hashes = pending.map((i) => state.contentHashesHex[i] as string)
+  if (considered.length === 0) return
+  const hashes = considered.map((i) => state.contentHashesHex[i] as string)
   const tbch = await readStoredAtBlockBatch(api, hashes, blockHash)
-  for (let k = 0; k < pending.length; k++) {
-    const i = pending[k]!
+  for (let k = 0; k < considered.length; k++) {
+    const i = considered[k]!
     const entry = tbch.get(normalizeHex(hashes[k] as string))
-    if (!entry) continue
     const anchor = state.submissionAnchorBlock[i]!
-    if (entry.blockNumber >= anchor) {
+    if (entry && entry.blockNumber >= anchor) {
       state.storedAt[i] = entry
+    } else if (state.storedAt[i] !== undefined) {
+      // Was stored, no longer present at this block — reorg or
+      // out-of-retention removal. Caller handles re-emission via the
+      // `inBlockEmitted` flag.
+      state.storedAt[i] = undefined
     }
   }
 }
 
-/** Push inclusion-latency entries for items newly observed at best block. */
-function recordInclusionLatency(s: WaveState, observedAt: number): void {
+/**
+ * Push latency entries for items now confirmed but not yet emitted at the
+ * given lifecycle stage (best-block inclusion or finalization). Run before
+ * the matching `emit*Events` so the `!emitted` flag is still set.
+ */
+function recordLatency(
+  s: WaveState,
+  observedAt: number,
+  kind: "in_block" | "finalized",
+): void {
+  const emitted = kind === "in_block" ? s.inBlockEmitted : s.finalizedEmitted
+  const latencies =
+    kind === "in_block" ? s.inclusionLatenciesMs : s.finalizationLatenciesMs
   for (let i = 0; i < s.totalItems; i++) {
-    if (s.storedAt[i] !== undefined && !s.inBlockEmitted[i]) {
-      const broadcast = s.broadcastAtMs[i]
-      if (broadcast !== undefined) {
-        s.inclusionLatenciesMs.push(observedAt - broadcast)
-      }
-    }
-  }
-}
-
-/** Push finalization-latency entries for items newly observed at finality. */
-function recordFinalizationLatency(s: WaveState, observedAt: number): void {
-  for (let i = 0; i < s.totalItems; i++) {
-    if (s.storedAt[i] !== undefined && !s.finalizedEmitted[i]) {
-      const broadcast = s.broadcastAtMs[i]
-      if (broadcast !== undefined) {
-        s.finalizationLatenciesMs.push(observedAt - broadcast)
-      }
-    }
+    if (s.storedAt[i] === undefined || emitted[i]) continue
+    const broadcast = s.broadcastAtMs[i]
+    if (broadcast !== undefined) latencies.push(observedAt - broadcast)
   }
 }
 
@@ -1662,10 +1681,7 @@ async function readStoredAtBlockBatch(
   contentHashesHex: string[],
   blockHash: string,
 ): Promise<Map<string, { blockNumber: number; extrinsicIndex: number }>> {
-  const map = new Map<
-    string,
-    { blockNumber: number; extrinsicIndex: number }
-  >()
+  const map = new Map<string, { blockNumber: number; extrinsicIndex: number }>()
   if (contentHashesHex.length === 0) return map
   const results = await Promise.all(
     contentHashesHex.map((h) =>
@@ -1673,14 +1689,9 @@ async function readStoredAtBlockBatch(
     ),
   )
   for (const { h, stored } of results) {
-    if (stored) map.set(h.toLowerCase().replace(/^0x/, ""), stored)
+    if (stored) map.set(normalizeHex(h), stored)
   }
   return map
-}
-
-/** Normalize a hex string to lower-case without `0x` prefix for Map lookups. */
-function normalizeHex(h: string): string {
-  return h.toLowerCase().replace(/^0x/, "")
 }
 
 // ---------------------------------------------------------------------------

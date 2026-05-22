@@ -141,7 +141,10 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient()
     await expect(
-      client.upload([{ data: new Uint8Array(0) }]).asUnsigned().send(),
+      client
+        .upload([{ data: new Uint8Array(0) }])
+        .asUnsigned()
+        .send(),
     ).rejects.toMatchObject({ code: ErrorCode.EMPTY_DATA })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -150,7 +153,10 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient({ withWsUrls: false })
     await expect(
-      client.upload([{ data: new Uint8Array([1]) }]).asUnsigned().send(),
+      client
+        .upload([{ data: new Uint8Array([1]) }])
+        .asUnsigned()
+        .send(),
     ).rejects.toMatchObject({ code: ErrorCode.UNSUPPORTED_OPERATION })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -236,15 +242,15 @@ describe("ensureAuthorized() + asUnsigned()", () => {
     const queried: unknown[] = []
     const client = await makeClient({
       withQuery: {
-        auth: { extent: { transactions: 1, bytes: 1024n }, expiration: 1_000_000 },
+        auth: {
+          extent: { transactions: 1, bytes: 1024n },
+          expiration: 1_000_000,
+        },
         onQuery: (s) => queried.push(s),
       },
     })
     await client
-      .upload([
-        { data: new Uint8Array([1]) },
-        { data: new Uint8Array([2]) },
-      ])
+      .upload([{ data: new Uint8Array([1]) }, { data: new Uint8Array([2]) }])
       .ensureAuthorized()
       .asUnsigned()
       .send()
@@ -286,7 +292,6 @@ describe("ensureAuthorized() + asUnsigned()", () => {
     })
     expect(spy).not.toHaveBeenCalled()
   })
-
 })
 
 describe("Duplicate content guard", () => {
@@ -297,9 +302,7 @@ describe("Duplicate content guard", () => {
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
     await expect(
-      client
-        .upload([{ data: sameData }, { data: sameData }])
-        .send(),
+      client.upload([{ data: sameData }, { data: sameData }]).send(),
     ).rejects.toMatchObject({ code: ErrorCode.INVALID_CONFIG })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -323,8 +326,7 @@ describe("Duplicate content guard", () => {
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       .mockImplementation(async (_api, _signer, items: any) => ({
         cids: items.map(
-          (_: unknown, i: number) =>
-            ({ toString: () => `cid:${i}` }) as never,
+          (_: unknown, i: number) => ({ toString: () => `cid:${i}` }) as never,
         ),
       }))
     const { CidCodec, HashAlgorithm } = await import("../../src/types")
@@ -332,8 +334,16 @@ describe("Duplicate content guard", () => {
     const sameData = new Uint8Array([1, 2, 3])
     const { cids } = await client
       .upload([
-        { data: sameData, codec: CidCodec.Raw, hashAlgo: HashAlgorithm.Blake2b256 },
-        { data: sameData, codec: CidCodec.Raw, hashAlgo: HashAlgorithm.Sha2_256 },
+        {
+          data: sameData,
+          codec: CidCodec.Raw,
+          hashAlgo: HashAlgorithm.Blake2b256,
+        },
+        {
+          data: sameData,
+          codec: CidCodec.Raw,
+          hashAlgo: HashAlgorithm.Sha2_256,
+        },
       ])
       .send()
     expect(cids).toHaveLength(2)

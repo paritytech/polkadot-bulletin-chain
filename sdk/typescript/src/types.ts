@@ -455,7 +455,10 @@ export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
-  wsUrls: [], // empty ⇒ legacy serial-loop chunked store
+  // Must be populated by the caller (e.g. `[NODE_WS_URL]`) before
+  // invoking any upload — `pipelineStore` requires at least one wsUrl
+  // for its chainHead-based reconciler.
+  wsUrls: [],
   blockLimits: DEFAULT_BLOCK_LIMITS,
 }
 

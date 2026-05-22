@@ -181,6 +181,15 @@ export function isNonDefaultCidConfig(
   return cidCodec !== CidCodec.Raw || hashAlgorithm !== HashAlgorithm.Blake2b256
 }
 
+/**
+ * Canonicalize a hex string: lowercase + strip leading `0x`. Used as the
+ * comparison/key form for content-hash lookups when the input source
+ * varies (PAPI returns 0x-prefixed; some user inputs don't).
+ */
+export function normalizeHex(h: string): string {
+  return h.toLowerCase().replace(/^0x/, "")
+}
+
 export function validateChunkSize(size: number): void {
   if (size <= 0) {
     throw new BulletinError(

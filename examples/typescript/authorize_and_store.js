@@ -54,8 +54,13 @@ async function main() {
         console.log(`User account: ${user.address}`);
 
         // Create SDK clients
+        // sudoClient only authorizes; doesn't need wsUrls (no upload path).
         const sudoClient = new AsyncBulletinClient(api, sudo.signer);
-        const userClient = new AsyncBulletinClient(api, user.signer);
+        // userClient uploads — pipelineStore requires wsUrls for its
+        // chainHead-based reconciler.
+        const userClient = new AsyncBulletinClient(api, user.signer, undefined, {
+            wsUrls: [NODE_WS],
+        });
 
         // Step 1: Authorize the account to store data (requires sudo)
         console.log('\nStep 1: Authorizing account...');

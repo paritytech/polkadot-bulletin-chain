@@ -40,6 +40,7 @@ import {
   getContentHash,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
+  normalizeHex,
   type ScaleHashingAlgorithm,
 } from "./utils.js"
 
@@ -164,10 +165,7 @@ export interface BulletinTypedApi {
        * should consume the value defensively.
        */
       TransactionByContentHash: {
-        getValue(
-          contentHash: string,
-          opts?: { at?: string },
-        ): Promise<unknown>
+        getValue(contentHash: string, opts?: { at?: string }): Promise<unknown>
       }
     }
   }
@@ -573,7 +571,7 @@ function resolveStoreOptions(options?: StoreOptions): {
 function assertUniqueContentHashes(cids: CID[]): void {
   const seen = new Map<string, number>()
   for (let i = 0; i < cids.length; i++) {
-    const hex = Binary.toHex(cids[i]!.multihash.digest).toLowerCase()
+    const hex = normalizeHex(Binary.toHex(cids[i]!.multihash.digest))
     const prior = seen.get(hex)
     if (prior !== undefined) {
       throw new BulletinError(
@@ -598,7 +596,7 @@ function extractStoredIndex(
   contentHashHex?: string,
 ): number | undefined {
   if (!events) return undefined
-  const target = contentHashHex?.toLowerCase().replace(/^0x/, "")
+  const target = contentHashHex ? normalizeHex(contentHashHex) : undefined
   for (const e of events) {
     if (e.type !== "TransactionStorage" || e.value?.type !== "Stored") continue
     if (target) {
@@ -606,9 +604,9 @@ function extractStoredIndex(
         ?.content_hash
       const chHex =
         typeof ch === "string"
-          ? ch.toLowerCase().replace(/^0x/, "")
+          ? normalizeHex(ch)
           : ch instanceof Uint8Array
-            ? Binary.toHex(ch).replace(/^0x/, "")
+            ? normalizeHex(Binary.toHex(ch))
             : undefined
       if (chHex !== target) continue
     }
@@ -780,7 +778,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * `AuthorizeCall`. Throws `INSUFFICIENT_AUTHORIZATION` for the first
    * missing/expired item so the caller can authorize and retry.
    */
-  private async ensurePreimagesAuthorized(items: UploadItem[]): Promise<void> {
+  private async ensurePreimagesAuthorized(
+    items: UploadItem[],
+    cids?: CID[],
+  ): Promise<void> {
     const query = this.api.query
     if (!query) {
       throw new BulletinError(
@@ -793,17 +794,17 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     ).System?.Number
     const currentBlock = sysNumber ? await sysNumber.getValue() : undefined
 
-    // Compute each item's content hash under its chosen algo (default
-    // Blake2b-256), then dedupe identical (content_hash, algo) pairs so
-    // we don't burn N RPCs when N items share content. The pallet keys
-    // preimage authorizations by the user-chosen hash, so we must use the
-    // same algo here.
-    const hashHexes = await Promise.all(
-      items.map(async (item) => {
-        const algo = item.hashAlgo ?? HashAlgorithm.Blake2b256
-        return Binary.toHex(await getContentHash(item.data, algo))
-      }),
-    )
+    // The pallet keys preimage authorizations by the user's chosen hash
+    // algo's digest, which is exactly the CID's `multihash.digest`. Reuse
+    // pre-computed CIDs when the caller has them; otherwise hash now.
+    const hashHexes = cids
+      ? cids.map((cid) => Binary.toHex(cid.multihash.digest))
+      : await Promise.all(
+          items.map(async (item) => {
+            const algo = item.hashAlgo ?? HashAlgorithm.Blake2b256
+            return Binary.toHex(await getContentHash(item.data, algo))
+          }),
+        )
     const uniqueHashes = Array.from(new Set(hashHexes))
 
     await Promise.all(
@@ -1158,16 +1159,19 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     const bootstrap = this.pipelineBootstrap
 
     // Retry on transient stalls; resume from finalized count so items that
-    // already landed are not re-submitted.
+    // already landed are not re-submitted. CIDs are deterministic from
+    // input — `pipelineStore` always returns them computed from the same
+    // (data, codec, hashAlgo) we supplied via `precomputedCids`, so we
+    // can return `allItemCids` directly instead of stitching across
+    // retry attempts (which would lose pre-stall finalized slots).
     const maxRetries = 3
     let attempt = 0
     let alreadyFinalized = 0
-    const allCids: CID[] = new Array(items.length)
     while (true) {
       const remaining = items.slice(alreadyFinalized)
       const remainingCids = allItemCids.slice(alreadyFinalized)
       try {
-        const result = await pipelineStore(this.api, this.signer!, remaining, {
+        await pipelineStore(this.api, this.signer!, remaining, {
           wsUrls: this.config.wsUrls,
           createProvider: (url) => getWsProvider(url),
           blockLimits: this.config.blockLimits,
@@ -1178,9 +1182,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             ? (ev) => onEvent({ ...ev, index: alreadyFinalized + ev.index })
             : undefined,
         })
-        for (let i = 0; i < result.cids.length; i++) {
-          allCids[alreadyFinalized + i] = result.cids[i]!
-        }
         break
       } catch (error) {
         if (isStallError(error) && attempt < maxRetries) {
@@ -1197,7 +1198,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         )
       }
     }
-    return { cids: allCids }
+    return { cids: allItemCids }
   }
 
   /**
@@ -1222,7 +1223,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
       }
     }
-    if (checkAuth) await this.ensurePreimagesAuthorized(items)
     if (this.config.wsUrls.length === 0) {
       throw new BulletinError(
         "asUnsigned() multi-item upload requires the client to be constructed with `wsUrls` (chainHead-based reconciliation)",
@@ -1231,7 +1231,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     // Pre-compute CIDs (one per item) — pipelineStore consumes a
-    // resolved CIDs array via the precomputedCids hook.
+    // resolved CIDs array via the precomputedCids hook. Doing this BEFORE
+    // ensurePreimagesAuthorized lets that helper reuse the multihash
+    // digests as content hashes (avoids re-hashing the data).
     const allItemCids: CID[] = await Promise.all(
       items.map((item) =>
         calculateCid(
@@ -1242,6 +1244,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ),
     )
     assertUniqueContentHashes(allItemCids)
+    if (checkAuth) await this.ensurePreimagesAuthorized(items, allItemCids)
 
     try {
       const result = await pipelineStore(this.api, undefined, items, {
