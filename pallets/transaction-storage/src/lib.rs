@@ -273,6 +273,10 @@ pub mod pallet {
 		/// `AllowedAuthorizers` budget cannot cover the requested
 		/// `transactions` / `bytes` (or `max_size`).
 		InsufficientAuthorizerBudget,
+		/// `add_authorizer` rejected: the `authorization_period` override is either
+		/// zero or `>= DefaultAuthorizationWindow`. The override exists to *shorten*
+		/// this authorizer's window; pass `None` to use the default length.
+		InvalidAuthorizationPeriodOverride,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(5);
@@ -692,7 +696,9 @@ pub mod pallet {
 		/// If a slot with the default window already exists for this hash, the
 		/// new `max_size` is **added** to its `bytes_allowance` (additive).
 		/// Otherwise a new slot is pushed; preimage slots carry
-		/// `transactions_allowance = 1`. To target a specific window use
+		/// `transactions_allowance = 2` so the canonical store-then-renew flow
+		/// fits (the slot's tx-counter axis is gated hard on consume and each
+		/// of store/renew bumps it). To target a specific window use
 		/// [`Self::authorize_preimage_window`].
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
@@ -960,6 +966,12 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
 			ensure!(!budget.is_expired(Self::now()), Error::<T>::InvalidValidUntil);
+			if let Some(period) = budget.authorization_period {
+				ensure!(
+					period > 0 && period < T::DefaultAuthorizationWindow::get(),
+					Error::<T>::InvalidAuthorizationPeriodOverride,
+				);
+			}
 			AllowedAuthorizers::<T>::insert(&who, budget);
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
@@ -1175,7 +1187,8 @@ pub mod pallet {
 		/// tuples.
 		pub account_authorizations: Vec<(T::AccountId, u32, u64)>,
 		/// Initial preimage authorizations as (content_hash, max_size) tuples. Each preimage
-		/// gets `transactions_allowance = 1`.
+		/// gets `transactions_allowance = 2` to match the runtime-authorized flow
+		/// (store-then-renew).
 		pub preimage_authorizations: Vec<(ContentHash, u64)>,
 	}
 
@@ -1218,7 +1231,7 @@ pub mod pallet {
 			for (content_hash, max_size) in &self.preimage_authorizations {
 				Pallet::<T>::add_slot(
 					AuthorizationScope::Preimage(*content_hash),
-					1,
+					2,
 					*max_size,
 					starts_at,
 					expiration,
@@ -1230,6 +1243,9 @@ pub mod pallet {
 					account,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: *transactions, bytes: *bytes }),
+						// Genesis authorizers use the default window; root can re-add
+						// them later to set a custom `authorization_period` if needed.
+						authorization_period: None,
 						// Genesis authorizers never expire; root can re-add them later to set
 						// a `valid_until` if needed.
 						valid_until: None,
@@ -1666,24 +1682,50 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Resolve `(starts_at, expiration)` for an authorize call: when
-		/// `expiration` is `None` the caller wants the default window
-		/// (`relay_now + DefaultAuthorizationWindow`); otherwise the explicit
-		/// window is validated via [`Self::ensure_valid_window`].
+		/// Resolve `(starts_at, expiration)` for an authorize call.
+		///
+		/// `expiration = None` selects the default window — `relay_now +
+		/// authorizer_period`, where `authorizer_period` is the authorizer's
+		/// [`AuthorizerBudget::authorization_period`] override (if set) or
+		/// [`Config::DefaultAuthorizationWindow`].
+		///
+		/// `expiration = Some(_)` is the explicit `_window` form: validated via
+		/// [`Self::ensure_valid_window`], **and** capped to `authorizer_period`
+		/// when the override is set — the requested span
+		/// `expiration - effective_starts_at` must not exceed it. This is the
+		/// policy-enforcement half of the override: an authorizer with a
+		/// shorter period cannot issue a longer window via `_window`.
 		fn resolve_window(
 			relay_now: u32,
 			starts_at: Option<u32>,
 			expiration: Option<u32>,
+			override_period: Option<u32>,
 		) -> Result<(u32, u32), Error<T>> {
 			match expiration {
-				None =>
-					Ok((relay_now, relay_now.saturating_add(T::DefaultAuthorizationWindow::get()))),
+				None => {
+					let period = override_period.unwrap_or_else(T::DefaultAuthorizationWindow::get);
+					Ok((relay_now, relay_now.saturating_add(period)))
+				},
 				Some(expiration) => {
 					let effective_starts_at = starts_at.unwrap_or(relay_now);
 					Self::ensure_valid_window(relay_now, effective_starts_at, expiration)?;
+					if let Some(period) = override_period {
+						let span = expiration.saturating_sub(effective_starts_at);
+						ensure!(span <= period, Error::<T>::InvalidWindow);
+					}
 					Ok((effective_starts_at, expiration))
 				},
 			}
+		}
+
+		/// Returns the `authorization_period` override registered for the
+		/// signer of `origin`, if any. Root / XCM / non-signed origins have no
+		/// entry in [`AllowedAuthorizers`] and return `None`. Callers must
+		/// invoke this *before* `T::Authorizer::ensure_origin` consumes the
+		/// origin.
+		fn authorization_period_override_for(origin: &OriginFor<T>) -> Option<u32> {
+			let signer = frame_system::ensure_signed(origin.clone()).ok()?;
+			AllowedAuthorizers::<T>::get(&signer)?.authorization_period
 		}
 
 		/// Shared body for [`Self::authorize_account`] and
@@ -1697,17 +1739,21 @@ pub mod pallet {
 			starts_at: Option<u32>,
 			expiration: Option<u32>,
 		) -> DispatchResult {
-			// Capture the signer (if any) before `ensure_origin` consumes the origin —
-			// we use it post-check to charge their `AllowedAuthorizers` budget. Root /
-			// XCM origins have no signer and no budget to consume.
+			// Capture the signer (if any) and read their `authorization_period`
+			// override before `ensure_origin` consumes the origin. Root / XCM
+			// origins have no signer, no budget, no override.
 			let signer = frame_system::ensure_signed(origin.clone()).ok();
+			let override_period = Self::authorization_period_override_for(&origin);
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) =
+				Self::resolve_window(relay_now, starts_at, expiration, override_period)?;
+			// Charge budget only after window + size validation succeed, so a
+			// malformed call doesn't dock the authorizer.
 			if let Some(signer) = signer {
 				Self::consume_authorizer_budget(&signer, transactions, bytes)?;
 			}
-			let relay_now = Self::ensure_relay_now()?;
-			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
 			Self::add_slot(
 				AuthorizationScope::Account(who.clone()),
 				transactions,
@@ -1740,13 +1786,15 @@ pub mod pallet {
 			expiration: Option<u32>,
 		) -> DispatchResult {
 			let signer = frame_system::ensure_signed(origin.clone()).ok();
+			let override_period = Self::authorization_period_override_for(&origin);
 			T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
+			let relay_now = Self::ensure_relay_now()?;
+			let (starts_at, expiration) =
+				Self::resolve_window(relay_now, starts_at, expiration, override_period)?;
 			if let Some(signer) = signer {
 				Self::consume_authorizer_budget(&signer, 1, max_size)?;
 			}
-			let relay_now = Self::ensure_relay_now()?;
-			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
 			Self::add_slot(
 				AuthorizationScope::Preimage(content_hash),
 				2,

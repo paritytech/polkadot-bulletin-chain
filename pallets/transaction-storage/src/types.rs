@@ -283,6 +283,14 @@ impl CheckContext {
 pub struct AuthorizerBudget<BlockNumber> {
 	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
 	pub quota: Option<Quota>,
+	/// Optional per-authorizer override of the authorization window length, in
+	/// **relay** blocks. `None` ⇒ use [`Config::DefaultAuthorizationWindow`].
+	/// `Some(p)` caps every grant from this authorizer to a window of at most
+	/// `p` relay-blocks — for both the default `authorize_*` and explicit
+	/// `authorize_*_window` forms. Validated at `add_authorizer` time:
+	/// `0 < p < DefaultAuthorizationWindow`; the override exists to *shorten*
+	/// this authorizer's grants, not extend them.
+	pub authorization_period: Option<u32>,
 	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
 	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
 	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
@@ -370,6 +378,7 @@ where
 					&new,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
+						authorization_period: None,
 						valid_until: None,
 					},
 				);

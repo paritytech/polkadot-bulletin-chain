@@ -68,7 +68,11 @@ type Transactions = super::Transactions<Test>;
 type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
-	AuthorizerBudget { quota: Some(Quota { transactions, bytes }), valid_until: None }
+	AuthorizerBudget {
+		quota: Some(Quota { transactions, bytes }),
+		authorization_period: None,
+		valid_until: None,
+	}
 }
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -3615,6 +3619,128 @@ fn add_authorizer_valid_until() {
 			);
 		}
 		assert!(!AllowedAuthorizers::<Test>::contains_key(99u64));
+	});
+}
+
+#[test]
+fn add_authorizer_authorization_period_override() {
+	new_test_ext().execute_with(|| {
+		// Mock `DefaultAuthorizationWindow` is 10. The override must be strictly
+		// shorter and strictly positive: 0 < p < 10.
+		let ok = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 1024) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), 42u64, ok));
+		assert_eq!(AllowedAuthorizers::<Test>::get(42u64).unwrap().authorization_period, Some(5),);
+
+		// Reject 0, == DefaultAuthorizationWindow, and > DefaultAuthorizationWindow.
+		for p in [0u32, 10, 11] {
+			let bad = AuthorizerBudget { authorization_period: Some(p), ..test_budget(100, 1024) };
+			assert_noop!(
+				TransactionStorage::add_authorizer(RuntimeOrigin::root(), 99u64, bad),
+				Error::InvalidAuthorizationPeriodOverride,
+			);
+		}
+		assert!(!AllowedAuthorizers::<Test>::contains_key(99u64));
+	});
+}
+
+#[test]
+fn authorization_period_override_applied_at_dispatch() {
+	new_test_ext().execute_with(|| {
+		set_relay_now(100);
+		let authorizer = 10u64;
+		let budget = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 10_000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), authorizer, budget));
+
+		// Default-form `authorize_account` from this authorizer uses the override:
+		// the resulting slot's expiration is `relay_now + 5`, not `relay_now + 10`.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			1u64,
+			3,
+			1000,
+		));
+		let auth = Authorizations::get(AuthorizationScope::Account(1u64)).unwrap();
+		assert_eq!(auth.slots.len(), 1);
+		assert_eq!(auth.slots[0].starts_at, 100);
+		assert_eq!(auth.slots[0].expiration, 105);
+
+		// Root has no override; default-form grant uses `DefaultAuthorizationWindow`.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), 2u64, 3, 1000,));
+		let auth = Authorizations::get(AuthorizationScope::Account(2u64)).unwrap();
+		assert_eq!(auth.slots[0].expiration, 110);
+	});
+}
+
+#[test]
+fn authorization_period_override_caps_window_form() {
+	new_test_ext().execute_with(|| {
+		set_relay_now(100);
+		let authorizer = 10u64;
+		let budget = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 10_000) };
+		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), authorizer, budget));
+
+		// `_window` requesting a 5-block span is allowed (exactly the cap).
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::signed(authorizer),
+			1u64,
+			1,
+			100,
+			Some(100),
+			105,
+		));
+
+		// Requesting a 6-block span is rejected — the override is the ceiling.
+		assert_noop!(
+			TransactionStorage::authorize_account_window(
+				RuntimeOrigin::signed(authorizer),
+				2u64,
+				1,
+				100,
+				Some(100),
+				106,
+			),
+			Error::InvalidWindow,
+		);
+		assert!(!Authorizations::contains_key(AuthorizationScope::Account(2u64)));
+
+		// Root (no override) can still go up to `MaxStartsAtFuture` and any
+		// `expiration > effective_starts_at`.
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::root(),
+			3u64,
+			1,
+			100,
+			Some(100),
+			150,
+		));
+	});
+}
+
+#[test]
+fn budget_not_consumed_on_invalid_window() {
+	new_test_ext().execute_with(|| {
+		set_relay_now(100);
+		let authorizer = 10u64;
+		let starting = test_budget(100, 10_000);
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			authorizer,
+			starting.clone(),
+		));
+
+		// `expiration <= relay_now` ⇒ `InvalidWindow`. Budget must be unchanged.
+		assert_noop!(
+			TransactionStorage::authorize_account_window(
+				RuntimeOrigin::signed(authorizer),
+				1u64,
+				3,
+				1000,
+				None,
+				100,
+			),
+			Error::InvalidWindow,
+		);
+		assert_eq!(AllowedAuthorizers::<Test>::get(authorizer).unwrap().quota, starting.quota);
 	});
 }
 

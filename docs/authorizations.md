@@ -125,7 +125,7 @@ Then `add_slot` inserts or merges:
 
 Preimage slots carry `transactions_allowance = 2`. The slot model gates the transaction-count axis on consume, and the canonical preimage flow is store-then-renew — a single-tx budget would block the renew.
 
-**`refresh_account_authorization` no longer exists as an extrinsic.** Re-extending an account's authorization is now "call `authorize_account` again": if the same default window is still active, the caps merge additively (consumed counters preserved); if it has expired, the lazy prune drops the old slot and a fresh one is pushed.
+**`refresh_account_authorization` / `refresh_preimage_authorization`** extend the **latest-expiring active slot's** `expiration` to `relay_now + DefaultAuthorizationWindow`. Per-slot counters (`bytes`, `transactions`, `bytes_permanent`) and caps are left untouched; a no-op when the slot already expires later. Fails with `Error::AuthorizationNotFound` when the lazy prune leaves no active slot. Use this to bump an existing slot forward without spending caller budget on a fresh grant; to add capacity, call `authorize_account` (additive merge if the window matches) or `authorize_account_window` (new slot).
 
 **Events.** `AccountAuthorized` and `PreimageAuthorized` now carry the resolved `starts_at` and `expiration`, so off-chain consumers can index slots without re-deriving from the call.
 

@@ -133,6 +133,7 @@ pub(crate) fn bump_mock_relay_for_bench<T: Config>(n: u32) {
 fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 	AuthorizerBudget {
 		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
+		authorization_period: None,
 		valid_until: None,
 	}
 }
@@ -388,6 +389,7 @@ mod benchmarks {
 			&who,
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 0, bytes: 0 }),
+				authorization_period: None,
 				valid_until: None,
 			},
 		);
