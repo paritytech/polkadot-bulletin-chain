@@ -26,7 +26,7 @@ Accept over-allowance `store` calls at a lower priority instead. In-budget users
 
 `renew` re-anchors an existing stored item: when the original entry's `RetentionPeriod` is about to elapse, a `renew` lands a fresh `Transactions[block]` entry pointing at the same content, and the *renewed* entry's own `RetentionPeriod` clock starts from that block. Repeat indefinitely and a single piece of content can stay on chain forever.
 
-Without bounds, at sustained-peak block usage one window of fresh `store` data alone is ~1.73 TiB, and re-renewals stack on top. ⇒ motivates a **hard limit** on renewed storage (per slot and chain-wide).
+Without bounds, at sustained-peak block usage one window of fresh `store` data alone is ~1.73 TiB, and renewals stack on top. ⇒ motivates a **hard limit** on renewed storage (per slot and chain-wide).
 
 ## Storage types
 
@@ -46,9 +46,13 @@ Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`.
 
 ## Authorization model: slots
 
-Per-scope state is `AuthorizationSlots`, a map from `AuthorizationScope::{Account, Preimage}` to a `BoundedVec<TimedAuthorization, MaxAuthorizationSlots>`. Each slot is independent:
+Per-scope state is `Authorizations`, a map from `AuthorizationScope::{Account, Preimage}` to an `Authorization<T>` whose only field is `slots: BoundedVec<TimedAuthorization, MaxAuthorizationSlots>`. Each slot is independent:
 
 ```rust
+struct Authorization<T: Config> {
+    slots: BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
+}
+
 struct TimedAuthorization {
     extent: AuthorizationExtent,
     starts_at: u32,   // inclusive relay block
@@ -245,7 +249,7 @@ PoP grants Bob two slots side-by-side, both with `bytes_allowance = 10 MiB`:
 - Slot A: `authorize_account_window(Bob, transactions=3, bytes=10 MiB, starts_at=None, expiration=R0 + 14 days)` — folds into the default window via additive merge if `authorize_account` was called first.
 - Slot B: `authorize_account_window(Bob, transactions=3, bytes=10 MiB, starts_at=None, expiration=R0 + 28 days)` — distinct `expiration`, so it pushes a new slot.
 
-After both calls, `AuthorizationSlots[Bob]` is `[slot_A, slot_B]` (sorted by `expiration` asc). At `relay_now = R0`, both are active.
+After both calls, `Authorizations[Bob].slots` is `[slot_A, slot_B]` (sorted by `expiration` asc). At `relay_now = R0`, both are active.
 
 | Action | Picked slot | `slot_A` | `slot_B` |
 |---|---|---|---|
