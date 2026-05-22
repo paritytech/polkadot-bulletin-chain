@@ -1606,6 +1606,54 @@ fn try_state_passes_after_renew() {
 	});
 }
 
+/// `renew` / `enable_auto_renew` charge `PermanentStorageUsed` up front but the
+/// matching `Renew` entry only lands at the next retention boundary; `try_state`
+/// must reconcile the counter against paid registrations in the meantime.
+#[test]
+fn try_state_passes_during_paid_auto_renewal_prepayment_window() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
+
+		run_to_block(4, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+/// As above, for `enable_auto_renew`.
+#[test]
+fn try_state_passes_during_enable_auto_renew_prepayment_window() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
+
+		run_to_block(4, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
 /// `PermanentStorageUsed` desync from `Σ size of renewed Transactions entries` is caught.
 #[test]
 fn try_state_detects_permanent_used_mismatch_with_transactions() {
@@ -1615,7 +1663,7 @@ fn try_state_detects_permanent_used_mismatch_with_transactions() {
 		PermanentStorageUsed::put(2000);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ size of renewed Transactions entries"
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
 		);
 	});
 }
@@ -2657,6 +2705,64 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 	});
 }
 
+/// `paid = true` cycle rejected by the per-block slot cap refunds chain-wide
+/// `PermanentStorageUsed`. Per-account `bytes_permanent` / `transactions` are
+/// intentionally left burned — see the inline rationale in `do_process_auto_renewals`.
+#[test]
+fn paid_cycle_refunds_on_block_slot_cap() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![7u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		let auth = Authorizations::get(AuthorizationScope::Account(who)).expect("auth exists");
+		let permanent_before = auth.extent.bytes_permanent;
+		let transactions_before = auth.extent.transactions;
+
+		init_block(12);
+		assert_eq!(PendingAutoRenewals::get().len(), 1);
+
+		// Fill `BlockTransactions` so the paid drain has no slot to land in.
+		let max_txns = <<Test as crate::Config>::MaxBlockTransactions as Get<u32>>::get();
+		BlockTransactions::mutate(|txns| {
+			for _ in 0..max_txns {
+				let _ = txns.try_push(TransactionInfo {
+					chunk_root: Default::default(),
+					size: 100,
+					content_hash: [0u8; 32],
+					hashing: crate::HashingAlgorithm::Blake2b256,
+					cid_codec: 0x55,
+					extrinsic_index: 0,
+					block_chunks: 0,
+					kind: crate::TransactionKind::Store,
+				});
+			}
+		});
+
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::AutoRenewalFailed {
+			content_hash,
+			account: who,
+		}));
+		assert!(AutoRenewals::get(content_hash).is_none());
+
+		assert_eq!(PermanentStorageUsed::get(), 0);
+		let auth = Authorizations::get(AuthorizationScope::Account(who)).expect("auth exists");
+		assert_eq!(auth.extent.bytes_permanent, permanent_before);
+		assert_eq!(auth.extent.transactions, transactions_before);
+
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
 /// `renew` registers a one-shot renewal — `AutoRenewals[hash]` is created with
 /// `recurring = false` and `RenewalEnabled { recurring: false }` fires.
 #[test]
@@ -2807,11 +2913,18 @@ fn renew_and_enable_auto_renew_conflict() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		// Schedule one-shot.
 		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
+		let permanent_used_before = PermanentStorageUsed::get();
 
-		// Second `renew` for the same hash: rejected at dispatch (registration exists).
-		// Bypass the pool (pre_dispatch_signed) to land in dispatch with `Origin::Authorized`.
+		// Duplicate `renew` is rejected at the extension before any charge.
+		let dup_call = Call::renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		assert_eq!(
+			TransactionStorage::validate_signed(&who, &dup_call).map(|_| ()),
+			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+		);
+		assert_eq!(PermanentStorageUsed::get(), permanent_used_before);
+
+		// Defensive dispatch-level guard still rejects if the extension is bypassed.
 		let origin: RuntimeOrigin =
 			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
 		assert_noop!(
@@ -2819,7 +2932,6 @@ fn renew_and_enable_auto_renew_conflict() {
 			Error::AutoRenewalAlreadyEnabled,
 		);
 
-		// `enable_auto_renew` for the same hash: also rejected (at the extension).
 		let call = Call::enable_auto_renew { content_hash };
 		assert_eq!(
 			TransactionStorage::validate_signed(&who, &call).map(|_| ()),
