@@ -1773,6 +1773,8 @@ pub mod pallet {
 				bytes_allowance: auth.extent.bytes_allowance,
 				bytes_used: auth.extent.bytes,
 				bytes_permanent_used: auth.extent.bytes_permanent,
+				transactions_allowance: auth.extent.transactions_allowance,
+				transactions_used: auth.extent.transactions,
 			})
 		}
 
