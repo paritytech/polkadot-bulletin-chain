@@ -1606,6 +1606,59 @@ fn try_state_passes_after_renew() {
 	});
 }
 
+/// The deferred `renew` (and `enable_auto_renew`) charges `PermanentStorageUsed`
+/// up front in `check_signed`, but the matching `Renew` entry is only added to
+/// `Transactions` at the next retention boundary by `do_process_auto_renewals`.
+/// During that prepayment window the counter must be reconciled against the
+/// paid-but-not-yet-renewed registrations sitting in `AutoRenewals`.
+#[test]
+fn try_state_passes_during_paid_auto_renewal_prepayment_window() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		// Deferred one-shot renew: charged now, the actual `Renew` entry is created
+		// later at the next retention boundary.
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
+
+		// Flush `on_finalize` so we're at end-of-block, where `try_state` runs.
+		run_to_block(4, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
+/// Same as above, for the recurring `enable_auto_renew` registration path.
+#[test]
+fn try_state_passes_during_enable_auto_renew_prepayment_window() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(PermanentStorageUsed::get(), 2000);
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
+
+		run_to_block(4, || None);
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+	});
+}
+
 /// `PermanentStorageUsed` desync from `Σ size of renewed Transactions entries` is caught.
 #[test]
 fn try_state_detects_permanent_used_mismatch_with_transactions() {
@@ -1615,7 +1668,7 @@ fn try_state_detects_permanent_used_mismatch_with_transactions() {
 		PermanentStorageUsed::put(2000);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ size of renewed Transactions entries"
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
 		);
 	});
 }

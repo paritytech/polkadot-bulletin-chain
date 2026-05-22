@@ -2538,9 +2538,11 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Verify the chain-wide permanent-storage accounting invariants:
-	/// - `PermanentStorageUsed == Σ Transactions[block][i].size where kind == Renew` — the counter
-	///   is exactly the sum of currently-on-chain renewed bytes; if these ever desync, the
-	///   chain-wide hard cap would over- or under-subscribe.
+	/// - `PermanentStorageUsed == Σ Renew sizes in `Transactions` + Σ sizes of paid `AutoRenewals`.
+	///   `renew` / `enable_auto_renew` charge the counter at registration in `check_signed`, but
+	///   the matching `Renew` entry is only added to `Transactions` when the cycle fires at the
+	///   next retention boundary — so during the prepayment window the counter is reconciled
+	///   against the paid registrations.
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize` — the chain-wide hard cap is honored.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
@@ -2553,9 +2555,22 @@ impl<T: Config> Pallet<T> {
 				.filter(|t| matches!(t.kind, TransactionKind::Renew))
 				.fold(acc, |inner, t| inner.saturating_add(t.size as u64))
 		});
+		let prepaid_sum: u64 =
+			AutoRenewals::<T>::iter()
+				.filter(|(_, data)| data.paid)
+				.fold(0u64, |acc, (hash, _)| {
+					let size = TransactionByContentHash::<T>::get(hash)
+						.and_then(|(block, index)| {
+							Transactions::<T>::get(block)?.into_iter().nth(index as usize)
+						})
+						.map(|info| info.size as u64)
+						.unwrap_or(0);
+					acc.saturating_add(size)
+				});
+		let expected = renewed_sum.saturating_add(prepaid_sum);
 		ensure!(
-			renewed_sum == used,
-			"PermanentStorageUsed != Σ size of renewed Transactions entries",
+			expected == used,
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 
 		ensure!(
