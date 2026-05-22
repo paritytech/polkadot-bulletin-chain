@@ -24,6 +24,12 @@ pub struct AccountAuthorization<BlockNumber> {
 	/// Bytes already consumed by `renew` calls (counts against the same
 	/// `bytes_allowance` cap).
 	pub bytes_permanent_used: u64,
+	/// Total transaction cap granted by the authorizer. Used together with
+	/// `transactions_used` to predict whether a `store` will receive the
+	/// priority boost.
+	pub transactions_allowance: u32,
+	/// Transactions already consumed by `store` and `renew` calls.
+	pub transactions_used: u32,
 }
 
 sp_api::decl_runtime_apis! {
