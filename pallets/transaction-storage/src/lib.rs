@@ -1302,8 +1302,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`], renewing each entry whose owner has sufficient
-		/// authorization. Returns the count drained.
+		/// Drain [`PendingAutoRenewals`] and return the count drained.
 		///
 		/// Batches the [`BlockTransactions`] read/write across all `n` renewals by threading
 		/// an in-memory accumulator through repeated [`Self::do_renew_in_memory`] calls.
@@ -1348,64 +1347,72 @@ pub mod pallet {
 					return n_actual;
 				},
 			};
-			let mut transactions = <BlockTransactions<T>>::get();
-
-			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
-				// `paid = true` means the cycle was already charged at registration
-				// (the one-shot `renew` path and the first cycle after
-				// `enable_auto_renew`). All other recurring cycles charge here.
-				let was_paid = renewal_data.paid;
-				let new_index = if was_paid {
-					Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
-				} else {
+			<BlockTransactions<T>>::mutate(|transactions| {
+				for (content_hash, tx_info, renewal_data) in pending.into_iter() {
+					// `paid = true` means the cycle was already charged at registration
+					// (the one-shot `renew` path and the first cycle after
+					// `enable_auto_renew`). All other recurring cycles charge here.
+					let was_paid = renewal_data.paid;
 					let scope = AuthorizationScope::Account(renewal_data.account.clone());
-					if Self::check_authorization(&scope, tx_info.size, true, true).is_ok() {
-						Self::do_renew_in_memory(&mut transactions, &tx_info, extrinsic_index)
+					let charged = was_paid ||
+						Self::check_authorization(&scope, tx_info.size, true, true).is_ok();
+					let new_index = if charged {
+						Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
 					} else {
 						None
-					}
-				};
+					};
 
-				if let Some(new_index) = new_index {
-					if !renewal_data.recurring {
-						// One-shot: registration is consumed.
+					if let Some(new_index) = new_index {
+						if !renewal_data.recurring {
+							// One-shot: registration is consumed.
+							AutoRenewals::<T>::remove(content_hash);
+						} else if was_paid {
+							// Recurring: consume the prepayment so subsequent cycles
+							// charge per-cycle, and unblock `disable_auto_renew` for the
+							// owner now that the prepaid renewal has been delivered.
+							// `mutate` (not `insert`) so a Root `disable_auto_renew`
+							// executed earlier in the same block — between the
+							// `on_initialize` queue and this inherent — is not silently
+							// re-armed by a fresh insert.
+							AutoRenewals::<T>::mutate(content_hash, |entry| {
+								if let Some(data) = entry {
+									data.paid = false;
+								}
+							});
+						}
+						Self::deposit_event(Event::DataAutoRenewed {
+							index: new_index,
+							content_hash,
+							account: renewal_data.account,
+						});
+					} else {
+						if charged {
+							// Reverse the chain-wide `PermanentStorageUsed` bump that
+							// `check_authorization` applied for this cycle. The per-account
+							// `bytes_permanent` / `transactions` increments are intentionally
+							// left burned: slot-cap rejection at inherent time is a chain-level
+							// pathological event (the inherent runs before any user extrinsics,
+							// and `len(pending) <= MaxBlockTransactions`), and reaching into the
+							// current `Authorizations` entry to refund would silently apply
+							// across auth roll-overs.
+							let size_u64: u64 = tx_info.size.into();
+							Self::update_permanent_storage_used(|used| {
+								used.saturating_sub(size_u64)
+							});
+						}
 						AutoRenewals::<T>::remove(content_hash);
-					} else if was_paid {
-						// Recurring: consume the prepayment so subsequent cycles
-						// charge per-cycle, and unblock `disable_auto_renew` for the
-						// owner now that the prepaid renewal has been delivered.
-						// `mutate` (not `insert`) so a Root `disable_auto_renew`
-						// executed earlier in the same block — between the
-						// `on_initialize` queue and this inherent — is not silently
-						// re-armed by a fresh insert.
-						AutoRenewals::<T>::mutate(content_hash, |entry| {
-							if let Some(data) = entry {
-								data.paid = false;
-							}
+						Self::deposit_event(Event::AutoRenewalFailed {
+							content_hash,
+							account: renewal_data.account,
 						});
 					}
-					Self::deposit_event(Event::DataAutoRenewed {
-						index: new_index,
-						content_hash,
-						account: renewal_data.account,
-					});
-				} else {
-					AutoRenewals::<T>::remove(content_hash);
-					Self::deposit_event(Event::AutoRenewalFailed {
-						content_hash,
-						account: renewal_data.account,
-					});
 				}
-			}
-
-			<BlockTransactions<T>>::put(transactions);
+			});
 			n_actual
 		}
 
-		/// Centralized renewal mechanics: stamp the entry as `kind = Renew`, push it onto
-		/// the in-memory `BlockTransactions` accumulator, call `transaction_index::renew`,
-		/// and update [`TransactionByContentHash`]. Returns `None` at the per-block
-		/// `MaxBlockTransactions` cap.
+		/// Push a `kind = Renew` entry onto the in-memory accumulator and update
+		/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
 		///
 		/// Called by:
 		/// - [`Self::do_renew`] for the single-renewal manual flow (`force_renew`).
@@ -1421,7 +1428,8 @@ pub mod pallet {
 			info: &TransactionInfo,
 			extrinsic_index: u32,
 		) -> Option<u32> {
-			let block_chunks = TransactionInfo::total_chunks(transactions) + num_chunks(info.size);
+			let block_chunks =
+				TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(info.size));
 			let new_index = transactions.len() as u32;
 			let new_info = TransactionInfo {
 				chunk_root: info.chunk_root,
@@ -1559,11 +1567,10 @@ pub mod pallet {
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			let mut transactions = <BlockTransactions<T>>::get();
-			let new_index = Self::do_renew_in_memory(&mut transactions, &info, extrinsic_index)
-				.ok_or(Error::<T>::TooManyTransactions)?;
-			<BlockTransactions<T>>::put(transactions);
-			Ok(new_index)
+			<BlockTransactions<T>>::try_mutate(|transactions| {
+				Self::do_renew_in_memory(transactions, &info, extrinsic_index)
+					.ok_or(Error::<T>::TooManyTransactions)
+			})
 		}
 
 		/// Append a new entry to [`BlockTransactions`] (with the cumulative `block_chunks`)
@@ -1579,22 +1586,24 @@ pub mod pallet {
 			extrinsic_index: u32,
 			kind: TransactionKind,
 		) -> Result<u32, Error<T>> {
-			let mut transactions = <BlockTransactions<T>>::get();
-			let block_chunks = TransactionInfo::total_chunks(&transactions) + num_chunks(size);
-			let new_index = transactions.len() as u32;
-			transactions
-				.try_push(TransactionInfo {
-					chunk_root,
-					size,
-					content_hash,
-					hashing,
-					cid_codec,
-					extrinsic_index,
-					block_chunks,
-					kind,
-				})
-				.map_err(|_| Error::<T>::TooManyTransactions)?;
-			<BlockTransactions<T>>::put(transactions);
+			let new_index = <BlockTransactions<T>>::try_mutate(|transactions| {
+				let block_chunks =
+					TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(size));
+				let new_index = transactions.len() as u32;
+				transactions
+					.try_push(TransactionInfo {
+						chunk_root,
+						size,
+						content_hash,
+						hashing,
+						cid_codec,
+						extrinsic_index,
+						block_chunks,
+						kind,
+					})
+					.map_err(|_| Error::<T>::TooManyTransactions)?;
+				Ok::<_, Error<T>>(new_index)
+			})?;
 			TransactionByContentHash::<T>::insert(content_hash, (Self::now(), new_index));
 			Ok(new_index)
 		}
@@ -1912,7 +1921,7 @@ pub mod pallet {
 		}
 
 		/// Returns the [`TransactionInfo`] for the specified store/renew transaction.
-		fn transaction_info(
+		pub(crate) fn transaction_info(
 			block_number: BlockNumberFor<T>,
 			index: u32,
 		) -> Option<TransactionInfo> {
@@ -2236,9 +2245,13 @@ pub mod pallet {
 				},
 				Call::<T>::renew { entry } => {
 					// Pre-paid one-shot: charges the same as `force_renew`. Cycle delivers
-					// without re-charging (see `do_process_auto_renewals`).
+					// without re-charging (see `do_process_auto_renewals`). Reject
+					// duplicates before charging — mirrors `enable_auto_renew` below.
 					let info =
 						Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
+					if AutoRenewals::<T>::contains_key(info.content_hash) {
+						return Err(AUTO_RENEWAL_ALREADY_ENABLED.into());
+					}
 					Self::check_authorization(
 						&AuthorizationScope::Account(who.clone()),
 						info.size,
@@ -2545,10 +2558,10 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// Verify the chain-wide permanent-storage accounting invariants:
-	/// - `PermanentStorageUsed == Σ Transactions[block][i].size where kind == Renew` — the counter
-	///   is exactly the sum of currently-on-chain renewed bytes; if these ever desync, the
-	///   chain-wide hard cap would over- or under-subscribe.
-	/// - `PermanentStorageUsed <= MaxPermanentStorageSize` — the chain-wide hard cap is honored.
+	/// - `PermanentStorageUsed == Σ Renew sizes in Transactions + Σ paid AutoRenewals sizes` — the
+	///   paid term covers the prepayment window between `renew` / `enable_auto_renew` charging the
+	///   counter and `do_process_auto_renewals` writing the `Renew` entry.
+	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
 	) -> Result<(), sp_runtime::TryRuntimeError> {
@@ -2560,9 +2573,18 @@ impl<T: Config> Pallet<T> {
 				.filter(|t| matches!(t.kind, TransactionKind::Renew))
 				.fold(acc, |inner, t| inner.saturating_add(t.size as u64))
 		});
+		let prepaid_sum: u64 =
+			AutoRenewals::<T>::iter()
+				.filter(|(_, data)| data.paid)
+				.fold(0u64, |acc, (hash, _)| {
+					let size = TransactionByContentHash::<T>::get(hash)
+						.and_then(|(block, index)| Self::transaction_info(block, index))
+						.map_or(0, |info| info.size as u64);
+					acc.saturating_add(size)
+				});
 		ensure!(
-			renewed_sum == used,
-			"PermanentStorageUsed != Σ size of renewed Transactions entries",
+			renewed_sum.saturating_add(prepaid_sum) == used,
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 
 		ensure!(
