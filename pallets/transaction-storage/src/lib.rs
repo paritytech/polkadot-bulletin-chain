@@ -45,6 +45,7 @@ use bulletin_transaction_storage_primitives::{
 };
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::fmt::Debug;
+use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
@@ -1755,6 +1756,73 @@ pub mod pallet {
 		/// Returns the (unused and unexpired) authorization extent for the given account.
 		pub fn account_authorization_extent(who: T::AccountId) -> AuthorizationExtent {
 			Self::authorization_extent(AuthorizationScope::Account(who))
+		}
+
+		/// Active-authorization summary for `who`, shaped for the
+		/// [`BulletinTransactionStorageApi`] runtime API. Returns `None` if the
+		/// account has no authorization or its authorization has expired.
+		///
+		/// [`BulletinTransactionStorageApi`]:
+		/// pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi
+		pub fn account_authorization(
+			who: T::AccountId,
+		) -> Option<AccountAuthorization<BlockNumberFor<T>>> {
+			let auth = Authorizations::<T>::get(AuthorizationScope::Account(who))?;
+			(!auth.expired(Self::now())).then_some(AccountAuthorization {
+				expires_at: auth.expiration,
+				bytes_allowance: auth.extent.bytes_allowance,
+				bytes_used: auth.extent.bytes,
+				bytes_permanent_used: auth.extent.bytes_permanent,
+			})
+		}
+
+		/// Returns `true` iff a `store(data)` call where `data.len() == data_len`
+		/// would currently pass transaction validation for `who`.
+		///
+		/// Mirrors the preconditions enforced by [`Self::store`] +
+		/// [`Self::check_authorization`] (`is_renew = false`):
+		///
+		/// - `data_len` is within `[1, MaxTransactionSize]`
+		/// - `who` has an unexpired authorization entry
+		///
+		/// `store` saturates against `bytes` / `transactions` and uses the priority
+		/// boost (soft limit), so no per-account or chain-wide hard cap applies here.
+		pub fn can_store(who: &T::AccountId, data_len: u32) -> bool {
+			if !Self::data_size_ok(data_len as usize) {
+				return false;
+			}
+			Self::account_has_active_authorization(who)
+		}
+
+		/// Returns `true` iff a `renew(entry)` call would currently pass transaction
+		/// validation for `who`.
+		///
+		/// Mirrors the preconditions enforced by [`Self::renew`] +
+		/// [`Self::check_authorization`] (`is_renew = true`):
+		///
+		/// - `entry` resolves to currently-stored data
+		/// - the stored data's size is within `[1, MaxTransactionSize]`
+		/// - `who` has an unexpired authorization entry
+		/// - per-account hard cap: `bytes_permanent + size <= bytes_allowance`
+		/// - chain-wide hard cap: `PermanentStorageUsed + size <= MaxPermanentStorageSize`
+		pub fn can_renew(who: &T::AccountId, entry: &TransactionRef<BlockNumberFor<T>>) -> bool {
+			let Ok(info) = Self::resolve_transaction_ref(entry) else { return false };
+			if !Self::data_size_ok(info.size as usize) {
+				return false;
+			}
+			let Some(auth) = Authorizations::<T>::get(AuthorizationScope::Account(who.clone()))
+			else {
+				return false;
+			};
+			if auth.expired(Self::now()) {
+				return false;
+			}
+			let size: u64 = info.size.into();
+			if !auth.extent.has_permanent_capacity(size) {
+				return false;
+			}
+			PermanentStorageUsed::<T>::get().saturating_add(size) <=
+				T::MaxPermanentStorageSize::get()
 		}
 
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,
