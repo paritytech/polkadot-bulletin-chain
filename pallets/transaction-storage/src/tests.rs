@@ -2707,7 +2707,7 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 
 /// `paid = true` cycle rejected by the per-block slot cap refunds chain-wide
 /// `PermanentStorageUsed`. Per-account `bytes_permanent` / `transactions` are
-/// intentionally left burned — see [`Pallet::refund_renewal_charge`].
+/// intentionally left burned — see the inline rationale in `do_process_auto_renewals`.
 #[test]
 fn paid_cycle_refunds_on_block_slot_cap() {
 	new_test_ext().execute_with(|| {

@@ -1387,7 +1387,18 @@ pub mod pallet {
 						});
 					} else {
 						if charged {
-							Self::refund_renewal_charge(tx_info.size);
+							// Reverse the chain-wide `PermanentStorageUsed` bump that
+							// `check_authorization` applied for this cycle. The per-account
+							// `bytes_permanent` / `transactions` increments are intentionally
+							// left burned: slot-cap rejection at inherent time is a chain-level
+							// pathological event (the inherent runs before any user extrinsics,
+							// and `len(pending) <= MaxBlockTransactions`), and reaching into the
+							// current `Authorizations` entry to refund would silently apply
+							// across auth roll-overs.
+							let size_u64: u64 = tx_info.size.into();
+							Self::update_permanent_storage_used(|used| {
+								used.saturating_sub(size_u64)
+							});
 						}
 						AutoRenewals::<T>::remove(content_hash);
 						Self::deposit_event(Event::AutoRenewalFailed {
@@ -1417,7 +1428,8 @@ pub mod pallet {
 			info: &TransactionInfo,
 			extrinsic_index: u32,
 		) -> Option<u32> {
-			let block_chunks = TransactionInfo::total_chunks(transactions) + num_chunks(info.size);
+			let block_chunks =
+				TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(info.size));
 			let new_index = transactions.len() as u32;
 			let new_info = TransactionInfo {
 				chunk_root: info.chunk_root,
@@ -1575,7 +1587,8 @@ pub mod pallet {
 			kind: TransactionKind,
 		) -> Result<u32, Error<T>> {
 			let new_index = <BlockTransactions<T>>::try_mutate(|transactions| {
-				let block_chunks = TransactionInfo::total_chunks(transactions) + num_chunks(size);
+				let block_chunks =
+					TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(size));
 				let new_index = transactions.len() as u32;
 				transactions
 					.try_push(TransactionInfo {
@@ -2050,19 +2063,6 @@ pub mod pallet {
 			}
 
 			result
-		}
-
-		/// Reverse the chain-wide [`PermanentStorageUsed`] bump from
-		/// [`Self::check_authorization`] when an auto-renewal cycle that was already
-		/// charged is rejected by the per-block slot cap. The per-account
-		/// `bytes_permanent` / `transactions` counters are intentionally left burned:
-		/// slot-cap rejection at inherent time is a chain-level pathological event
-		/// (the inherent runs before any user extrinsics, and `len(pending) <=
-		/// MaxBlockTransactions`), and reaching into the current `Authorizations`
-		/// entry would silently apply across auth roll-overs.
-		fn refund_renewal_charge(size: u32) {
-			let size_u64: u64 = size.into();
-			Self::update_permanent_storage_used(|used| used.saturating_sub(size_u64));
 		}
 
 		/// Check that authorization with the given scope exists in storage, has expired, and
