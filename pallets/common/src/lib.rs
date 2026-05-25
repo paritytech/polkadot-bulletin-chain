@@ -408,6 +408,29 @@ pub fn proxy_inner_calls<T: pallet_proxy::Config>(
 	}
 }
 
+/// `WhitelistedCalls` impl that inverts a runtime-supplied "pausable" set.
+pub struct TxPauseWhitelist<T, Pausable>(core::marker::PhantomData<(T, Pausable)>);
+
+impl<T, Pausable> frame_support::traits::Contains<pallet_tx_pause::RuntimeCallNameOf<T>>
+	for TxPauseWhitelist<T, Pausable>
+where
+	T: pallet_tx_pause::Config,
+	Pausable: frame_support::traits::Contains<pallet_tx_pause::RuntimeCallNameOf<T>>,
+{
+	fn contains(name: &pallet_tx_pause::RuntimeCallNameOf<T>) -> bool {
+		// Benches need every call pausable to exercise `pause`/`unpause`.
+		#[cfg(feature = "runtime-benchmarks")]
+		{
+			let _ = name;
+			false
+		}
+		#[cfg(not(feature = "runtime-benchmarks"))]
+		{
+			!Pausable::contains(name)
+		}
+	}
+}
+
 /// Extract inner calls from a sudo call variant.
 pub fn sudo_inner_calls<T: pallet_sudo::Config>(
 	call: &pallet_sudo::Call<T>,
