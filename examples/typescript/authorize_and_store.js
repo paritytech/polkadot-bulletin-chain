@@ -22,9 +22,9 @@ import { AsyncBulletinClient } from '../../sdk/typescript/dist/index.mjs';
 // Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 
-// Create a PAPI-compatible signer from a dev seed (e.g. "//Alice")
+// Create a PAPI-compatible signer from a dev seed (e.g. "//Eve")
 function createSignerFromSeed(seed) {
     const keyring = new Keyring({ type: 'sr25519' });
     const account = keyring.addFromUri(seed);

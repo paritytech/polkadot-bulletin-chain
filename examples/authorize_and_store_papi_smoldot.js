@@ -139,7 +139,7 @@ async function main() {
 
         // Signers: Use Bob for the account being authorized to avoid nonce conflicts
         // when running after ws test (which uses Alice) on the same chain.
-        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Eve', '//Papismoldosigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
