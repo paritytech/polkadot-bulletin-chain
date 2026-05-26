@@ -1767,9 +1767,7 @@ export class BulletinClient implements BulletinClientInterface {
       const uniqueHashIndexes = dedupInput
         ? Array.from(firstSeen.values())
         : items.map((_, i) => i)
-      const uniqueHashes = uniqueHashIndexes.map(
-        (i) => hashesHex[i] as string,
-      )
+      const uniqueHashes = uniqueHashIndexes.map((i) => hashesHex[i] as string)
       const entries = await Promise.all(
         uniqueHashes.map((h) => readStoredAt(this.api, h)),
       )

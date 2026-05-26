@@ -12,6 +12,7 @@
  */
 
 import type { CID } from "multiformats/cid"
+import { Binary } from "polkadot-api"
 import {
   AuthCallBuilder,
   type AuthorizeAccountEntry,
@@ -40,7 +41,6 @@ import {
   type WaitFor,
 } from "./types.js"
 import { calculateCid } from "./utils.js"
-import { Binary } from "polkadot-api"
 
 /**
  * Configuration for the mock Bulletin client

@@ -430,7 +430,8 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           const data = new Uint8Array(ITEM_SIZE)
           const seed = randomBytes(8)
           for (let i = 0; i < ITEM_SIZE; i++) {
-            data[i] = (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+            data[i] =
+              (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
           }
           return { data }
         }),
@@ -543,7 +544,8 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           const data = new Uint8Array(ITEM_SIZE)
           const seed = randomBytes(8)
           for (let i = 0; i < ITEM_SIZE; i++) {
-            data[i] = (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+            data[i] =
+              (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
           }
           return { data }
         }),

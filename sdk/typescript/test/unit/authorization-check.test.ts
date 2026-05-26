@@ -27,6 +27,7 @@ vi.mock("polkadot-api", async (importOriginal) => {
     })),
   }
 })
+
 import { MockBulletinClient } from "../../src/mock-client"
 import { BulletinError, ErrorCode } from "../../src/types"
 

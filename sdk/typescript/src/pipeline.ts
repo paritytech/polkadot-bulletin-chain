@@ -1007,7 +1007,11 @@ export async function pipelineStore(
                 // expectedFinalNonce really does mean every nonce we
                 // assigned has been committed to some tx.
                 if (!unsigned && chainNonce >= expectedFinalNonce) {
-                  const missing: Array<{ i: number; nonce: number; attempts: number }> = []
+                  const missing: Array<{
+                    i: number
+                    nonce: number
+                    attempts: number
+                  }> = []
                   const stored: number[] = []
                   const givenUp: Array<{ i: number; nonce: number }> = []
                   for (let i = 0; i < totalItems; i++) {
@@ -1043,8 +1047,13 @@ export async function pipelineStore(
                     // biome-ignore lint/suspicious/noConsole: verification visibility
                     console.warn(
                       `[pipelineStore] verify @chain=${chainNonce}/exp=${expectedFinalNonce}: stored=${stored.length}, missing=${missing.length} [${missing
-                        .map((m) => `i${m.i}@n${m.nonce}(att${m.attempts}->${m.attempts + 1})`)
-                        .join(",")}], giveup=${givenUp.length}${givenUp.length ? ` [${givenUp.map((g) => `i${g.i}@n${g.nonce}`).join(",")}]` : ""}`,
+                        .map(
+                          (m) =>
+                            `i${m.i}@n${m.nonce}(att${m.attempts}->${m.attempts + 1})`,
+                        )
+                        .join(
+                          ",",
+                        )}], giveup=${givenUp.length}${givenUp.length ? ` [${givenUp.map((g) => `i${g.i}@n${g.nonce}`).join(",")}]` : ""}`,
                     )
                     const inQueue = new Set(sendQueue)
                     for (const m of missing) {
