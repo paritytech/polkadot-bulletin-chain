@@ -38,6 +38,14 @@ const SENTRY_PHASE_WIDGET_BASE =
   "https://paritytech.sentry.io/dashboard/1669817/widget/8/?project=4511093597405264&project=4511298552135760&sort=-avg%28span.duration%29&statsPeriod=24h";
 const TELEMETRY_POLKADOT = "https://telemetry.polkadot.io/";
 
+function telemetryLink(genesisHash: string): string {
+  return `https://telemetry.polkadot.io/#list/${genesisHash}`;
+}
+
+const TELEMETRY_PASEO_NEXT_V2 = telemetryLink(
+  "0x2761c95259d59e55ae3daf756c1413b46e45a5a2987299f8ef8e5d8e4776cbc4",
+);
+
 function sentrySpanLink(spanOp: string): string {
   return `${SENTRY_PHASE_WIDGET_BASE}&query=${encodeURIComponent(`span.op:${spanOp}`)}`;
 }
@@ -110,7 +118,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
-      telemetry: TELEMETRY_POLKADOT,
+      telemetry: TELEMETRY_PASEO_NEXT_V2,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
     },
   },
