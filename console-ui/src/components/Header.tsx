@@ -255,6 +255,24 @@ function HelpMenu() {
           icon: LineChart,
           description: "Product-side write latency and failures",
         },
+        monitoring.sentryStorageSpan && {
+          label: "Sentry: deploy.storage",
+          href: monitoring.sentryStorageSpan,
+          icon: LineChart,
+          description: "Per-deploy total Bulletin write time",
+        },
+        monitoring.sentryChunkUploadSpan && {
+          label: "Sentry: deploy.chunk-upload",
+          href: monitoring.sentryChunkUploadSpan,
+          icon: LineChart,
+          description: "Per-chunk submit-to-finalized latency",
+        },
+        monitoring.sentryChainProbeSpan && {
+          label: "Sentry: deploy.chain-probe",
+          href: monitoring.sentryChainProbeSpan,
+          icon: LineChart,
+          description: "Cache-check RPC reads against the chain",
+        },
         monitoring.telemetry && {
           label: "Substrate Telemetry",
           href: monitoring.telemetry,

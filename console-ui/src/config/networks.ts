@@ -3,6 +3,12 @@ export interface MonitoringLinks {
   grafana?: string;
   /** Sentry dashboard for product-side telemetry on this chain. */
   sentry?: string;
+  /** Sentry drill-down: deploy.storage phase (per-deploy Bulletin write). */
+  sentryStorageSpan?: string;
+  /** Sentry drill-down: deploy.chunk-upload phase (per-chunk write latency). */
+  sentryChunkUploadSpan?: string;
+  /** Sentry drill-down: deploy.chain-probe phase (cache-check RPC reads). */
+  sentryChainProbeSpan?: string;
   /** Substrate telemetry view. */
   telemetry?: string;
   /** PolkadotJS Apps deep-link. */
@@ -28,7 +34,17 @@ const GRAFANA_COMMON_QS =
   "orgId=1&from=now-6h&to=now&timezone=utc&var-data_source=PC96415006F908B67";
 const SENTRY_BULLETIN_DEPLOY_HEALTH =
   "https://paritytech.sentry.io/dashboard/1669817/?project=4511093597405264&project=4511298552135760&statsPeriod=24h";
+const SENTRY_PHASE_WIDGET_BASE =
+  "https://paritytech.sentry.io/dashboard/1669817/widget/8/?project=4511093597405264&project=4511298552135760&sort=-avg%28span.duration%29&statsPeriod=24h";
 const TELEMETRY_POLKADOT = "https://telemetry.polkadot.io/";
+
+function sentrySpanLink(spanOp: string): string {
+  return `${SENTRY_PHASE_WIDGET_BASE}&query=${encodeURIComponent(`span.op:${spanOp}`)}`;
+}
+
+const SENTRY_STORAGE_SPAN = sentrySpanLink("deploy.storage");
+const SENTRY_CHUNK_UPLOAD_SPAN = sentrySpanLink("deploy.chunk-upload");
+const SENTRY_CHAIN_PROBE_SPAN = sentrySpanLink("deploy.chain-probe");
 
 function grafanaLink(chain: string, node?: string): string {
   const params = [`var-chain=${chain}`, GRAFANA_COMMON_QS];
@@ -58,6 +74,9 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     monitoring: {
       grafana: grafanaLink("bulletin-westend"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
+      sentryStorageSpan: SENTRY_STORAGE_SPAN,
+      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
+      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://westend-bulletin-rpc.polkadot.io"),
     },
@@ -70,6 +89,9 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     monitoring: {
       grafana: grafanaLink("bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
+      sentryStorageSpan: SENTRY_STORAGE_SPAN,
+      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
+      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-rpc.polkadot.io"),
     },
@@ -85,6 +107,9 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
         "paseo-bulletin-next-collator-node-0",
       ),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
+      sentryStorageSpan: SENTRY_STORAGE_SPAN,
+      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
+      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
     },
@@ -106,6 +131,9 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
+      sentryStorageSpan: SENTRY_STORAGE_SPAN,
+      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
+      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://bulletin-rpc.polkadot.io"),
     },
