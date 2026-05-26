@@ -111,6 +111,33 @@ jobs:
             echo "subxt-cli already installed"
           fi
 
+      # Resolve the Fellows commit sha and key the WASM cache on it so subsequent
+      # runs skip the multi-minute out-of-tree build.
+      - name: Resolve external runtime ref
+        if: ${{ matrix.runtime.external_runtime != null }}
+        id: external-runtime
+        run: |
+          REPO='${{ matrix.runtime.external_runtime.repo }}'
+          REF='${{ matrix.runtime.external_runtime.ref }}'
+          SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+          if [ -z "$SHA" ]; then
+            echo "Failed to resolve $REF in $REPO"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Cache external runtime build
+        if: ${{ matrix.runtime.external_runtime != null }}
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: target/external-runtimes/${{ matrix.runtime.name }}
+          key: external-runtime-${{ matrix.runtime.name }}-${{ steps.external-runtime.outputs.sha }}
+
+      - name: Build external runtime
+        if: ${{ matrix.runtime.external_runtime != null }}
+        working-directory: examples
+        run: just build-external-runtime ${{ matrix.runtime.name }} > /dev/null
+
       - name: Start services
         working-directory: examples
         env:
