@@ -139,7 +139,7 @@ export function Ops() {
             Operations &amp; Diagnostics
           </h1>
           <p className="text-sm text-muted-foreground">
-            External dashboards, logs, and runbooks for the selected network.
+            External dashboards and telemetry for the selected network.
           </p>
         </div>
         {network && <Badge variant="secondary">{network.name}</Badge>}
