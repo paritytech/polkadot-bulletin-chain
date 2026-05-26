@@ -26,7 +26,7 @@
       "instances": [
         { "name": "main",       "uris": ["wss://paseo-bulletin-rpc.polkadot.io"] },
         { "name": "next-v2",    "uris": ["wss://paseo-bulletin-next-rpc.polkadot.io"] },
-        { "name": "previewnet", "uris": ["wss://previewnet-bulletin-rpc.polkadot.io"] }
+        { "name": "previewnet", "uris": ["wss://previewnet.substrate.dev/bulletin"] }
       ]
     },
     "benchmarks_templates": {
