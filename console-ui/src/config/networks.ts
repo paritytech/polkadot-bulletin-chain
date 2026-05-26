@@ -27,7 +27,7 @@ const GRAFANA_OPERATION_HEALTH =
 const GRAFANA_COMMON_QS =
   "orgId=1&from=now-6h&to=now&timezone=utc&var-data_source=PC96415006F908B67";
 const SENTRY_BULLETIN_DEPLOY_HEALTH =
-  "https://parityteh.sentry.io/dashboard/1669817/";
+  "https://paritytech.sentry.io/dashboard/1669817/?project=4511093597405264&project=4511298552135760&statsPeriod=24h";
 const TELEMETRY_POLKADOT = "https://telemetry.polkadot.io/";
 
 function grafanaLink(chain: string, node?: string): string {
