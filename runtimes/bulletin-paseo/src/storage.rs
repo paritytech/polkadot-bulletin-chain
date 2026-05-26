@@ -17,7 +17,7 @@
 //! Storage-specific configurations.
 
 use super::{
-	xcm_config::IsSiblingParachain, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
+	xcm_config::IsAllowedParachain, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 };
 use alloc::vec::Vec;
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
@@ -104,8 +104,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		EitherOfDiverse<
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
-			// Any sibling parachain can handle authorizations.
-			EnsureXcm<IsSiblingParachain>,
+			// Sibling parachains listed in `AllowedParachainIds` can handle authorizations.
+			EnsureXcm<IsAllowedParachain>,
 		>,
 		// Accounts registered in `AllowedAuthorizers` storage (managed via
 		// `add_authorizer` / `remove_authorizer`).
