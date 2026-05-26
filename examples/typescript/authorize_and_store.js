@@ -57,13 +57,19 @@ async function main() {
         const sudoClient = new AsyncBulletinClient(api, sudo.signer);
         const userClient = new AsyncBulletinClient(api, user.signer);
 
-        // Step 1: Authorize the account to store data (requires sudo)
-        console.log('\nStep 1: Authorizing account...');
-        await sudoClient.authorizeAccount(
+        // Step 1: Authorize the account to store data.
+        // Sudo-less runtimes (bulletin-polkadot) accept signed `authorize_account`
+        // directly via EnsureAllowedAuthorizers when the signer is seeded in
+        // `AllowedAuthorizers` at genesis.
+        const hasSudo = !!api.tx.Sudo?.sudo;
+        console.log(`\nStep 1: Authorizing account... (sudo=${hasSudo})`);
+        const authBuilder = sudoClient.authorizeAccount(
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        ).withSudo().withWaitFor('finalized').send();
+        );
+        if (hasSudo) authBuilder.withSudo();
+        await authBuilder.withWaitFor('finalized').send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK
