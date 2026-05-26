@@ -24,9 +24,17 @@ export interface Network {
 
 const GRAFANA_OPERATION_HEALTH =
   "https://grafana.teleport.parity.io/d/cfdekwvxzxerkb/operation-health";
+const GRAFANA_COMMON_QS =
+  "orgId=1&from=now-6h&to=now&timezone=utc&var-data_source=PC96415006F908B67";
 const SENTRY_BULLETIN_DEPLOY_HEALTH =
   "https://parityteh.sentry.io/dashboard/1669817/";
 const TELEMETRY_POLKADOT = "https://telemetry.polkadot.io/";
+
+function grafanaLink(chain: string, node?: string): string {
+  const params = [`var-chain=${chain}`, GRAFANA_COMMON_QS];
+  if (node) params.push(`var-node=${node}`);
+  return `${GRAFANA_OPERATION_HEALTH}?${params.join("&")}`;
+}
 
 function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
@@ -48,7 +56,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
     lightClient: false,
     monitoring: {
-      grafana: `${GRAFANA_OPERATION_HEALTH}?var-chain=bulletin-westend`,
+      grafana: grafanaLink("bulletin-westend"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://westend-bulletin-rpc.polkadot.io"),
@@ -60,7 +68,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
     lightClient: false,
     monitoring: {
-      grafana: `${GRAFANA_OPERATION_HEALTH}?var-chain=bulletin-paseo`,
+      grafana: grafanaLink("bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-rpc.polkadot.io"),
@@ -72,7 +80,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
     lightClient: false,
     monitoring: {
-      grafana: `${GRAFANA_OPERATION_HEALTH}?var-chain=bulletin-paseo`,
+      grafana: grafanaLink(
+        "next-bulletin-paseo",
+        "paseo-bulletin-next-collator-node-0",
+      ),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
@@ -93,7 +104,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://bulletin-rpc.polkadot.io"],
     lightClient: false,
     monitoring: {
-      grafana: `${GRAFANA_OPERATION_HEALTH}?var-chain=bulletin-polkadot`,
+      grafana: grafanaLink("bulletin-polkadot"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://bulletin-rpc.polkadot.io"),
