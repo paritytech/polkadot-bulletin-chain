@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Globe, LineChart, BarChart3 } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
 const GithubIcon = ({ className }: { className?: string }) => (
@@ -245,6 +245,9 @@ function HelpMenu() {
     }
   }, [open]);
 
+  const { network } = useChainState();
+  const monitoring = network?.monitoring;
+
   const helpLinks = [
     {
       label: "User Manual",
@@ -262,6 +265,47 @@ function HelpMenu() {
     },
   ];
 
+  const monitoringLinks = monitoring
+    ? [
+        monitoring.grafana && {
+          label: "Grafana (Operation Health)",
+          href: monitoring.grafana,
+          icon: Activity,
+          description: "Block production, finality, peers",
+        },
+        monitoring.sentry && {
+          label: "Sentry (Bulletin Deploy Health)",
+          href: monitoring.sentry,
+          icon: LineChart,
+          description: "Product-side write latency and failures",
+        },
+        monitoring.telemetry && {
+          label: "Substrate Telemetry",
+          href: monitoring.telemetry,
+          icon: Globe,
+          description: "Node liveness and version",
+        },
+        monitoring.polkadotJs && {
+          label: "PolkadotJS Apps",
+          href: monitoring.polkadotJs,
+          icon: ExternalLink,
+          description: "Inspect chain state and events",
+        },
+        monitoring.explorer && {
+          label: "Block Explorer",
+          href: monitoring.explorer,
+          icon: BarChart3,
+          description: "Browse blocks and extrinsics",
+        },
+        monitoring.runbook && {
+          label: "Runbook",
+          href: monitoring.runbook,
+          icon: BookOpen,
+          description: "Operational playbook",
+        },
+      ].filter((x): x is Exclude<typeof x, false | undefined | ""> => Boolean(x))
+    : [];
+
   return (
     <div className="relative" ref={menuRef}>
       <Button
@@ -274,7 +318,7 @@ function HelpMenu() {
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-2 shadow-lg z-50">
+        <div className="absolute right-0 top-full mt-2 w-80 rounded-md border bg-popover p-2 shadow-lg z-50">
             <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
               Help & Resources
             </div>
@@ -299,6 +343,34 @@ function HelpMenu() {
                 </div>
               </a>
             ))}
+            {monitoringLinks.length > 0 && (
+              <>
+                <div className="text-xs font-medium text-muted-foreground px-2 py-1.5 mt-2 border-t pt-3">
+                  Monitoring &amp; Diagnostics
+                </div>
+                {monitoringLinks.map((link) => (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-3 rounded-sm px-2 py-2 hover:bg-accent transition-colors"
+                    onClick={() => setOpen(false)}
+                  >
+                    <link.icon className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1 text-sm font-medium">
+                        {link.label}
+                        <ExternalLink className="h-3 w-3" />
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {link.description}
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </>
+            )}
           </div>
       )}
     </div>
