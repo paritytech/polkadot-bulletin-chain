@@ -35,6 +35,7 @@ const navItems = [
   { path: "/upload", label: "Upload", icon: Upload, web3storage: false, requiresAuth: true },
   { path: "/download", label: "Download", icon: Download, web3storage: false, requiresAuth: false },
   { path: "/renew", label: "Renew", icon: RefreshCw, web3storage: false, requiresAuth: true },
+  { path: "/ops", label: "Ops", icon: Activity, web3storage: true, requiresAuth: false },
 ] as const;
 
 function ConnectionStatus() {
