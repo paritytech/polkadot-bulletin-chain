@@ -18,7 +18,7 @@
 
 use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
-	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
+	paseo_constants::fee::WeightToFee,
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
@@ -913,7 +913,9 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 
 #[test]
 fn people_chain_can_authorize_storage_with_transact() {
-	// Prepare call.
+	// People chain (parachain 1502) should be able to authorize storage via XCM Transact.
+	let people_location = Location::new(1, [Parachain(1502)]);
+
 	let account = Sr25519Keyring::Ferdie;
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
@@ -935,7 +937,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 		.build()
 		.execute_with(|| {
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
-				(PeopleLocation::get(), OriginKind::Xcm),
+				(people_location, OriginKind::Xcm),
 				authorize_call,
 				None
 			)

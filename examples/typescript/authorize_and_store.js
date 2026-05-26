@@ -48,22 +48,23 @@ async function main() {
         papiClient = createClient(getWsProvider(NODE_WS));
         const api = papiClient.getTypedApi(bulletin);
 
-        // Create signers: sudo (Alice) and a regular user account
-        const sudo = createSignerFromSeed(SEED);
+        // Create signers: authorizer (default seed, must be in `AllowedAuthorizers`)
+        // and a regular user account.
+        const authorizer = createSignerFromSeed(SEED);
         const user = createSignerFromSeed('//SDKSigner');
         console.log(`User account: ${user.address}`);
 
         // Create SDK clients
-        const sudoClient = new AsyncBulletinClient(api, sudo.signer);
+        const authorizerClient = new AsyncBulletinClient(api, authorizer.signer);
         const userClient = new AsyncBulletinClient(api, user.signer);
 
-        // Step 1: Authorize the account to store data (requires sudo)
+        // Step 1: Authorize the user account to store data.
         console.log('\nStep 1: Authorizing account...');
-        await sudoClient.authorizeAccount(
+        await authorizerClient.authorizeAccount(
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        ).withSudo().withWaitFor('finalized').send();
+        ).withWaitFor('finalized').send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK
