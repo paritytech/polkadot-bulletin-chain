@@ -48,28 +48,26 @@ async function main() {
         papiClient = createClient(getWsProvider(NODE_WS));
         const api = papiClient.getTypedApi(bulletin);
 
-        // Create signers: sudo (Alice) and a regular user account
-        const sudo = createSignerFromSeed(SEED);
+        // Create signers: an authorizer (Alice) and a regular user account
+        const authorizer = createSignerFromSeed(SEED);
         const user = createSignerFromSeed('//SDKSigner');
         console.log(`User account: ${user.address}`);
 
         // Create SDK clients
-        const sudoClient = new AsyncBulletinClient(api, sudo.signer);
+        const authorizerClient = new AsyncBulletinClient(api, authorizer.signer);
         const userClient = new AsyncBulletinClient(api, user.signer);
 
-        // Step 1: Authorize the account to store data.
-        // Sudo-less runtimes (bulletin-polkadot) accept signed `authorize_account`
-        // directly via EnsureAllowedAuthorizers when the signer is seeded in
-        // `AllowedAuthorizers` at genesis.
-        const hasSudo = !!api.tx.Sudo?.sudo;
-        console.log(`\nStep 1: Authorizing account... (sudo=${hasSudo})`);
-        const authBuilder = sudoClient.authorizeAccount(
+        // Step 1: Authorize the user account to store data.
+        // The authorizer's signed call goes through EnsureAllowedAuthorizers when
+        // seeded in `AllowedAuthorizers` at genesis (bulletin-polkadot), or through
+        // EnsureSignedBy<TestAccounts> on testnet runtimes (bulletin-westend/paseo).
+        // No sudo wrap — production parachains have no Sudo pallet.
+        console.log('\nStep 1: Authorizing account...');
+        await authorizerClient.authorizeAccount(
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        );
-        if (hasSudo) authBuilder.withSudo();
-        await authBuilder.withWaitFor('finalized').send();
+        ).withWaitFor('finalized').send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK
