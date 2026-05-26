@@ -159,7 +159,34 @@ pub mod migrations {
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		AddAuthorizer,
 	);
+
+	/// Adds [`FAUCET_AUTHORIZER`] as an unlimited authorizer.
+	pub struct AddAuthorizer;
+
+	// 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
+	const FAUCET_AUTHORIZER: AccountId = AccountId::new([
+		0xb6, 0x45, 0x5b, 0xc5, 0x38, 0x36, 0x5d, 0x32, 0xd3, 0x29, 0x67, 0xb6, 0xf2, 0x1a, 0x0c,
+		0x9b, 0x07, 0x15, 0x65, 0xe8, 0x78, 0xfe, 0x98, 0x5f, 0x88, 0xd1, 0x54, 0x3c, 0xb1, 0x99,
+		0x1a, 0x7d,
+	]);
+
+	impl frame_support::traits::OnRuntimeUpgrade for AddAuthorizer {
+		fn on_runtime_upgrade() -> Weight {
+			use pallet_bulletin_transaction_storage::{AllowedAuthorizers, AuthorizerBudget};
+			let db = <Runtime as frame_system::Config>::DbWeight::get();
+			let weight = db.reads(1);
+			if AllowedAuthorizers::<Runtime>::contains_key(&FAUCET_AUTHORIZER) {
+				return weight;
+			}
+			AllowedAuthorizers::<Runtime>::insert(
+				&FAUCET_AUTHORIZER,
+				AuthorizerBudget { quota: None, authorization_period: None, valid_until: None },
+			);
+			weight.saturating_add(db.writes(1))
+		}
+	}
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
