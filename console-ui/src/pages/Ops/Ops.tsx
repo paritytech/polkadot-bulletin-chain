@@ -48,9 +48,9 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
 
-  const writePath: LinkSpec[] = [];
+  const deployTelemetry: LinkSpec[] = [];
   if (monitoring.sentry) {
-    writePath.push({
+    deployTelemetry.push({
       label: "Sentry — Bulletin Deploy Health",
       href: monitoring.sentry,
       icon: LineChart,
@@ -58,7 +58,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
   if (monitoring.sentryStorageSpan) {
-    writePath.push({
+    deployTelemetry.push({
       label: "deploy.storage span",
       href: monitoring.sentryStorageSpan,
       icon: LineChart,
@@ -66,7 +66,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
   if (monitoring.sentryChunkUploadSpan) {
-    writePath.push({
+    deployTelemetry.push({
       label: "deploy.chunk-upload span",
       href: monitoring.sentryChunkUploadSpan,
       icon: LineChart,
@@ -74,7 +74,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
   if (monitoring.sentryChainProbeSpan) {
-    writePath.push({
+    deployTelemetry.push({
       label: "deploy.chain-probe span",
       href: monitoring.sentryChainProbeSpan,
       icon: LineChart,
@@ -94,7 +94,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
 
   return [
     { title: "Chain Health", items: chainHealth },
-    { title: "Write Path (Sentry)", items: writePath },
+    { title: "Deploy Telemetry (Sentry)", items: deployTelemetry },
     { title: "Docs", items: docs },
   ].filter((g) => g.items.length > 0);
 }
