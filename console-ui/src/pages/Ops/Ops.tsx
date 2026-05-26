@@ -48,37 +48,41 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
 
-  const deployTelemetry: LinkSpec[] = [];
+  // Writes, ordered by relevance: per-chunk SLI source first, then per-deploy
+  // parent, then the full dashboard for context.
+  const writes: LinkSpec[] = [];
+  if (monitoring.sentryChunkUploadSpan) {
+    writes.push({
+      label: "deploy.chunk-upload span",
+      href: monitoring.sentryChunkUploadSpan,
+      icon: LineChart,
+      description: "Per-chunk submit-to-finalized latency. Primary write SLI source.",
+    });
+  }
+  if (monitoring.sentryStorageSpan) {
+    writes.push({
+      label: "deploy.storage span",
+      href: monitoring.sentryStorageSpan,
+      icon: LineChart,
+      description: "Per-deploy Bulletin storage phase (wraps all chunks).",
+    });
+  }
   if (monitoring.sentry) {
-    deployTelemetry.push({
+    writes.push({
       label: "Sentry — Bulletin Deploy Health",
       href: monitoring.sentry,
       icon: LineChart,
       description: "Full deploy dashboard.",
     });
   }
-  if (monitoring.sentryStorageSpan) {
-    deployTelemetry.push({
-      label: "deploy.storage span",
-      href: monitoring.sentryStorageSpan,
-      icon: LineChart,
-      description: "Per-deploy total write time.",
-    });
-  }
-  if (monitoring.sentryChunkUploadSpan) {
-    deployTelemetry.push({
-      label: "deploy.chunk-upload span",
-      href: monitoring.sentryChunkUploadSpan,
-      icon: LineChart,
-      description: "Per-chunk submit-to-finalized latency.",
-    });
-  }
+
+  const reads: LinkSpec[] = [];
   if (monitoring.sentryChainProbeSpan) {
-    deployTelemetry.push({
+    reads.push({
       label: "deploy.chain-probe span",
       href: monitoring.sentryChainProbeSpan,
       icon: LineChart,
-      description: "Cache-check RPC reads.",
+      description: "Cache-check RPC reads against the chain.",
     });
   }
 
@@ -94,7 +98,8 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
 
   return [
     { title: "Chain Health", items: chainHealth },
-    { title: "Deploy Telemetry (Sentry)", items: deployTelemetry },
+    { title: "Writes (Sentry)", items: writes },
+    { title: "Reads (Sentry)", items: reads },
     { title: "Docs", items: docs },
   ].filter((g) => g.items.length > 0);
 }
