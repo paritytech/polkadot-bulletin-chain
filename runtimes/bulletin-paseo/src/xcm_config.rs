@@ -116,8 +116,8 @@ pub type AssetTransactors = FungibleTransactor;
 /// ready for dispatching a transaction with XCM's `Transact`. There is an `OriginKind` that can
 /// bias the kind of local `Origin` it will become.
 pub type XcmOriginToTransactDispatchOrigin = (
-	// Governance location can gain root.
-	LocationAsSuperuser<Equals<GovernanceLocation>, RuntimeOrigin>,
+	// Governance locations can gain root.
+	LocationAsSuperuser<IsGovernance, RuntimeOrigin>,
 	// Sovereign account converter; this attempts to derive an `AccountId` from the origin location
 	// using `LocationToAccountId` and then turn that into the usual `Signed` origin. Useful for
 	// foreign chains who want to have a local sovereign account on this chain that they control.
@@ -155,6 +155,10 @@ parameter_types! {
 	/// XCM. Storage-backed so governance (root) can update via
 	/// `system.set_storage` without a runtime upgrade.
 	pub storage AllowedParachainIds: Vec<u32> = vec![1502, 5140];
+	/// Sibling parachain IDs treated as governance origins. Storage-backed so
+	/// governance (root) can update via `system.set_storage` without a runtime
+	/// upgrade.
+	pub storage GovernanceParachainIds: Vec<u32> = vec![ASSET_HUB_ID, 1500];
 }
 
 /// Filter matching sibling parachain origins listed in [`AllowedParachainIds`].
@@ -163,6 +167,31 @@ impl Contains<Location> for IsAllowedParachain {
 	fn contains(location: &Location) -> bool {
 		match location.unpack() {
 			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
+			_ => false,
+		}
+	}
+}
+
+/// Filter matching sibling parachain origins listed in [`GovernanceParachainIds`].
+pub struct IsGovernance;
+impl Contains<Location> for IsGovernance {
+	fn contains(location: &Location) -> bool {
+		match location.unpack() {
+			(1, [Parachain(id)]) => GovernanceParachainIds::get().contains(id),
+			_ => false,
+		}
+	}
+}
+
+/// Multi-paraId equivalent of `IsVoiceOfBody<GovernanceLocation, B>`: matches
+/// `Voice` of body `B` from any sibling parachain in [`GovernanceParachainIds`].
+pub struct IsGovernanceVoiceOfBody<B>(core::marker::PhantomData<B>);
+impl<B: frame_support::traits::Get<BodyId>> Contains<Location> for IsGovernanceVoiceOfBody<B> {
+	fn contains(location: &Location) -> bool {
+		match location.unpack() {
+			(1, [Parachain(id), Plurality { id: body_id, part: BodyPart::Voice }])
+				if *body_id == B::get() =>
+				GovernanceParachainIds::get().contains(id),
 			_ => false,
 		}
 	}
@@ -193,7 +222,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 			AllowExplicitUnpaidExecutionFrom<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
-				Equals<GovernanceLocation>,
+				IsGovernance,
 				// Allow any sibling parachain for unpaid execution, since there
 				// are multiple People testnet chains.
 				IsSiblingParachain,
