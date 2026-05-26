@@ -20,6 +20,7 @@ use super::{
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
 use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+use alloc::{vec, vec::Vec};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -146,6 +147,24 @@ pub struct IsSiblingParachain;
 impl Contains<Location> for IsSiblingParachain {
 	fn contains(location: &Location) -> bool {
 		matches!(location.unpack(), (1, [Parachain(_)]))
+	}
+}
+
+parameter_types! {
+	/// Sibling parachain IDs authorized to dispatch storage authorizations via
+	/// XCM. Storage-backed so governance (root) can update via
+	/// `system.set_storage` without a runtime upgrade.
+	pub storage AllowedParachainIds: Vec<u32> = vec![1502, 5140];
+}
+
+/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`].
+pub struct IsAllowedParachain;
+impl Contains<Location> for IsAllowedParachain {
+	fn contains(location: &Location) -> bool {
+		match location.unpack() {
+			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
+			_ => false,
+		}
 	}
 }
 
