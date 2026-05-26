@@ -275,10 +275,10 @@ function HelpMenu() {
           description: "Cache-check RPC reads against the chain",
         },
         monitoring.telemetry && {
-          label: "Substrate Telemetry",
+          label: "Operator Set",
           href: monitoring.telemetry,
           icon: Globe,
-          description: "Node liveness and version",
+          description: "Live list of every node running this chain",
         },
         monitoring.polkadotJs && {
           label: "PolkadotJS Apps",

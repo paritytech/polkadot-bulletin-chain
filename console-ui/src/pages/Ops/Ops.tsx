@@ -25,10 +25,10 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
   }
   if (monitoring.telemetry) {
     chainHealth.push({
-      label: "Substrate Telemetry",
+      label: "Operator Set",
       href: monitoring.telemetry,
       icon: Globe,
-      description: "Node liveness, version, sync.",
+      description: "Live list of every node running this chain (version, block height, peers).",
     });
   }
   if (monitoring.polkadotJs) {
