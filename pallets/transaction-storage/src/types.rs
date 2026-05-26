@@ -289,10 +289,9 @@ pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 /// - `signer`: the account whose [`AllowedAuthorizers`] budget will be charged.
 /// - `period_override`: per-authorizer `authorization_period` to use instead of
 ///   [`Config::AuthorizationPeriod`].
-/// - `valid_until`: the authorizer's expiry block, exposed for inspection by
-///   downstream logic. The pallet does **not** use this to cap the granted
-///   authorization — authorizations are independent of their grantor's
-///   remaining validity.
+/// - `valid_until`: the authorizer's expiry block, exposed for inspection by downstream logic. The
+///   pallet does **not** use this to cap the granted authorization — authorizations are independent
+///   of their grantor's remaining validity.
 ///
 /// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
 /// non-account authorizer (Root / XCM / signed-by list) — no budget to charge

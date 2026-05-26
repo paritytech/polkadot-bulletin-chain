@@ -96,7 +96,11 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
-		EnsureAnonymousAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
+		EnsureAnonymousAuthorizer<
+			EnsureRoot<Self::AccountId>,
+			Self::AccountId,
+			BlockNumberFor<Self>,
+		>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;

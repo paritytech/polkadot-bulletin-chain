@@ -633,12 +633,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let signer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(
-				AuthorizationScope::Account(who.clone()),
-				transactions,
-				bytes,
-				signer,
-			)?;
+			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, signer)?;
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -671,12 +666,7 @@ pub mod pallet {
 			let signer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			// Preimage scope is single-use, so the per-grant tx budget is `1`.
-			Self::authorize(
-				AuthorizationScope::Preimage(content_hash),
-				1,
-				max_size,
-				signer,
-			)?;
+			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, signer)?;
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -990,10 +980,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let budget =
 				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
-			ensure!(
-				Self::authorizer_removable(&budget),
-				Error::<T>::AuthorizerBudgetNotExhausted,
-			);
+			ensure!(Self::authorizer_removable(&budget), Error::<T>::AuthorizerBudgetNotExhausted,);
 			AllowedAuthorizers::<T>::remove(&who);
 			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
 			Ok(())
