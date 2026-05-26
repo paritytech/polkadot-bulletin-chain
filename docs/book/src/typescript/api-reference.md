@@ -31,7 +31,8 @@ class BulletinClient implements BulletinClientInterface {
 | `store(data)` | `StoreBuilder` | Start a store operation with builder pattern |
 | `storeWithOptions(data, options?, callback?, chunkerConfig?)` | `Promise<StoreResult>` | Store with explicit options (no builder) |
 | `storeWithPreimageAuth(data, options?)` | `Promise<StoreResult>` | Store using preimage-based authorization |
-| `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize an account for storage |
+| `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize a single account for storage |
+| `authorizeAccount(entries)` | `AuthCallBuilder` | Atomically authorize many accounts via `Utility.batch_all`; `entries: Array<{ who, transactions, bytes }>` |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
 | `renew(block, index)` | `CallBuilder` | Renew storage at a given block/index |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
@@ -103,10 +104,25 @@ class AuthCallBuilder {
 **Example:**
 
 ```typescript
-// Authorize with sudo
-await client.authorizeAccount(address, 10, BigInt(1024 * 1024))
-  .withSudo()
-  .send();
+// Authorize a single account
+await client.authorizeAccount(address, 10, BigInt(1024 * 1024)).send();
+
+// Atomic multi-account grant (Utility.batch_all — all-or-nothing)
+await client.authorizeAccount([
+  { who: aliceAddr, transactions: 100, bytes: 100n * 1024n * 1024n },
+  { who: bobAddr,   transactions: 50,  bytes: 50n  * 1024n * 1024n },
+  { who: carolAddr, transactions: 25,  bytes: 25n  * 1024n * 1024n },
+]).send();
+
+// Use a dedicated signer for authorization extrinsics, separate from
+// the upload signer (useful when an Authorizer account grants quota
+// to many user accounts).
+const client = new BulletinClient(api, uploadSigner, submitAndWatch, {
+  providers: () => [getWsProvider(NODE_WS)],
+  authorizerSigner: authorizerSigner,
+});
+// Now authorizeAccount / authorizePreimage / refresh*Authorization
+// are signed by authorizerSigner; uploads still use uploadSigner.
 ```
 
 ---
@@ -330,6 +346,23 @@ interface ClientConfig {
   createManifest?: boolean;            // default: true
   chunkingThreshold?: number;          // default: 2 MiB
   txTimeout?: number;                  // default: 420_000 (per tx, in ms)
+  /** Factory returning JsonRpcProvider instances for the pipelined upload
+   *  engine. Called once per pipelineStore invocation (and each outer
+   *  retry) so dead WS connections get replaced with fresh ones.
+   *  `providers()[0]` drives chainHead; every provider receives broadcast
+   *  txs. REQUIRED for any signed/unsigned upload.
+   *  - ws-RPC:  `() => [getWsProvider(url)]`
+   *  - smoldot: `() => [getSmProvider(chainHandle)]` */
+  providers?: () => JsonRpcProvider[];
+  blockLimits?: BlockLimits;           // chain-specific block weight/length caps
+  /**
+   * Signer for authorization-class extrinsics (`authorizeAccount`,
+   * `authorizePreimage`, `refreshAccountAuthorization`,
+   * `refreshPreimageAuthorization`). REQUIRED to call any of those
+   * methods — the client throws `UNSUPPORTED_OPERATION` otherwise.
+   * Deliberately separate from the upload signer.
+   */
+  authorizerSigner?: PolkadotSigner;
 }
 ```
 

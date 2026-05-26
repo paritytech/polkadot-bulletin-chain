@@ -14,6 +14,7 @@
 import type { CID } from "multiformats/cid"
 import {
   AuthCallBuilder,
+  type AuthorizeAccountEntry,
   type BulletinClientInterface,
   CallBuilder,
   type TransactionReceipt,
@@ -30,6 +31,8 @@ import {
   type ResolvedClientConfig,
   resolveClientConfig,
   type UploadCallback,
+  type UploadEstimate,
+  type UploadEstimateItem,
   type UploadFileResult,
   type UploadItem,
   type UploadResult,
@@ -37,6 +40,7 @@ import {
   type WaitFor,
 } from "./types.js"
 import { calculateCid } from "./utils.js"
+import { Binary } from "polkadot-api"
 
 /**
  * Configuration for the mock Bulletin client
@@ -158,6 +162,7 @@ export class MockBulletinClient implements BulletinClientInterface {
   upload(items: UploadItem[]): UploadBuilder {
     return new UploadBuilder(
       (its, _wf, oe, ca) => this.uploadItemsImpl(its, oe, ca),
+      (its) => this.estimateUpload(its),
       items,
     )
   }
@@ -247,15 +252,27 @@ export class MockBulletinClient implements BulletinClientInterface {
     who: string,
     transactions: number,
     bytes: bigint,
+  ): AuthCallBuilder
+  authorizeAccount(entries: AuthorizeAccountEntry[]): AuthCallBuilder
+  authorizeAccount(
+    whoOrEntries: string | AuthorizeAccountEntry[],
+    transactions?: number,
+    bytes?: bigint,
   ): AuthCallBuilder {
     return new AuthCallBuilder(async () => {
       this.throwIfAuthFailure()
-      this.operations.push({
-        type: "authorize_account",
-        who,
-        transactions,
-        bytes,
-      })
+      const entries: AuthorizeAccountEntry[] =
+        typeof whoOrEntries === "string"
+          ? [{ who: whoOrEntries, transactions: transactions!, bytes: bytes! }]
+          : whoOrEntries
+      for (const e of entries) {
+        this.operations.push({
+          type: "authorize_account",
+          who: e.who,
+          transactions: e.transactions,
+          bytes: e.bytes,
+        })
+      }
       return mockReceipt()
     })
   }
@@ -327,6 +344,59 @@ export class MockBulletinClient implements BulletinClientInterface {
         Math.ceil(dataSize / this.config.defaultChunkSize) +
         (this.config.createManifest ? 1 : 0),
       bytes: dataSize,
+    }
+  }
+
+  /**
+   * Mock implementation of estimateUpload. Doesn't query a chain (no
+   * chain in the mock), so `skipExisting` only ever surfaces input
+   * duplicates. Mirrors the real client's shape so consumers can use the
+   * same code path under both.
+   */
+  async estimateUpload(items: UploadItem[]): Promise<UploadEstimate> {
+    const itemCids = await Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+    const hashesHex = itemCids.map((cid) => Binary.toHex(cid.multihash.digest))
+    const seen = new Map<string, number>()
+    const duplicateIndices: number[] = []
+    for (let i = 0; i < items.length; i++) {
+      const h = hashesHex[i] as string
+      if (seen.has(h)) duplicateIndices.push(i)
+      else seen.set(h, i)
+    }
+    const dupSet = new Set(duplicateIndices)
+    const toUpload: number[] = []
+    let bytes = 0n
+    const itemsOut: UploadEstimateItem[] = new Array(items.length)
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] as UploadItem
+      const dup = dupSet.has(i)
+      itemsOut[i] = {
+        index: i,
+        cid: itemCids[i] as CID,
+        bytes: item.data.length,
+        ...(dup ? { skipReason: "duplicate_input" as const } : {}),
+      }
+      if (!dup) {
+        toUpload.push(i)
+        bytes += BigInt(item.data.length)
+      }
+    }
+    return {
+      total: items.length,
+      items: itemsOut,
+      transactions: toUpload.length,
+      bytes,
+      duplicateIndices,
+      alreadyStored: [],
+      toUpload,
     }
   }
 }

@@ -1,7 +1,6 @@
 import assert from "assert";
 import * as smoldot from 'smoldot';
 import { readFileSync } from 'fs';
-import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { fetchCid } from './api.js';
@@ -96,7 +95,7 @@ async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     }
 
     const createProvider = () => getSmProvider(target);
-    return { client: createClient(createProvider()), sd, createProvider };
+    return { sd, createProvider };
 }
 
 async function main() {
@@ -126,48 +125,47 @@ async function main() {
         'IPFS API': HTTP_IPFS_API
     });
     
-    let sd, client, sudoClient, userClient, resultCode;
+    let sd, client, resultCode;
     try {
-        // Init Smoldot PAPI client and typed api.
+        // Init smoldot + get the provider factory (one provider instance
+        // per call → fresh JsonRpcProvider over the same chain handle).
         let createProvider;
-        ({ client, sd, createProvider } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
+        ({ sd, createProvider } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
         console.log(`⏭️ Waiting ${SYNC_WAIT_SEC} seconds for smoldot to sync...`);
         // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
 
-        console.log('🔍 Checking if chain is ready...');
-        const bulletinAPI = client.getTypedApi(bulletin);
-        await waitForChainReady(bulletinAPI);
-        await waitForBlockProduction(bulletinAPI);
-
-        // Signers: Use //Alice for sudo, dedicated key for the user account
-        // to avoid nonce conflicts with the WS test on the same chain.
+        // Signers: //Alice (Authorizer) + dedicated upload key.
         const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
 
-        // BulletinClient wired to the smoldot provider: pipelineStore opens its
-        // own substrate client via `createProvider`, so the WS url is ignored
-        // (we still need a non-empty `wsUrls` entry to pass validation).
-        sudoClient = new BulletinClient(bulletinAPI, authorizationSigner);
-        userClient = new BulletinClient(bulletinAPI, whoSigner, undefined, {
-            wsUrls: ['smoldot'],
-            createProvider,
+        // Self-contained client over smoldot. `providers()` returns a
+        // fresh JsonRpcProvider per pipelineStore invocation; smoldot
+        // manages the underlying chain connection.
+        client = new BulletinClient({
+            descriptor: bulletin,
+            providers: () => [createProvider()],
+            uploadSigner: whoSigner,
+            authorizerSigner: authorizationSigner,
         });
+
+        console.log('🔍 Checking if chain is ready...');
+        await waitForChainReady(client.api);
+        await waitForBlockProduction(client.api);
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
         const dataBytes = new TextEncoder().encode(dataToStore);
         const expectedCid = await cidFromBytes(dataBytes);
 
-        // Authorize the user account. The chain accepts authorize_account directly
-        // from the configured authorizer key (//Alice in these examples); no sudo wrap.
-        await sudoClient
+        // Authorize the user account via the configured authorizerSigner.
+        await client
             .authorizeAccount(whoAddress, 100, BigInt(100 * 1024 * 1024))
             .withWaitFor('finalized')
             .send();
         logSuccess(`Account ${whoAddress} authorized`);
 
         // Store data via the SDK pipeline.
-        const { cid } = await userClient.uploadFile(dataBytes).send();
+        const { cid } = await client.uploadFile(dataBytes).send();
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
         assert.deepStrictEqual(
@@ -198,9 +196,7 @@ async function main() {
         console.error(error);
         resultCode = 1;
     } finally {
-        if (sudoClient) await sudoClient.destroy();
-        if (userClient) await userClient.destroy();
-        if (client) client.destroy();
+        if (client) await client.destroy();
         if (sd) sd.terminate();
         process.exit(resultCode);
     }

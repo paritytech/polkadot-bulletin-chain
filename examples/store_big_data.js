@@ -95,7 +95,7 @@ async function main() {
     logHeader('STORE BIG DATA TEST (SDK)');
     logConnection(NODE_WS, SEED, IPFS_GATEWAY_URL);
 
-    let papiClient, resultCode;
+    let client, resultCode;
     try {
         // 1) Generate the input file
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulletinimggen-'));
@@ -106,30 +106,27 @@ async function main() {
         const fileBytes = fs.readFileSync(filePath);
         console.log(`📁 Generated ${filePath}, size ${formatBytes(fileBytes.length)}`);
 
-        // 2) PAPI + SDK clients
-        papiClient = createClient(getWsProvider(NODE_WS));
-        const api = papiClient.getTypedApi(bulletin);
-
+        // 2) SDK client (owns its PAPI lifecycle).
         // SEED is the Authorizer-origin account (e.g. //Alice on local
-        // zombienet and Paseo Bulletin). It calls `authorize_account` directly,
-        // no Sudo wrapping needed.
+        // zombienet and Paseo Bulletin). It calls `authorize_account`
+        // directly, no Sudo wrapping needed.
         const { authorizationSigner: authorizerSigner } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
         const userSeed = signerDiscriminator
             ? `//SDKBigDataSigner${signerDiscriminator}`
             : '//SDKBigDataSigner';
         const user = newSigner(userSeed);
         console.log(`User account: ${user.address}`);
-        const authorizerClient = new BulletinClient(api, authorizerSigner);
-        // wsUrls opts the SDK into the pipelined submission engine — the
-        // same code path used for both single-item and chunked uploads.
-        const userClient = new BulletinClient(api, user.signer, undefined, {
-            wsUrls: [NODE_WS],
+        client = new BulletinClient({
+            descriptor: bulletin,
+            providers: () => [getWsProvider(NODE_WS)],
+            uploadSigner: user.signer,
+            authorizerSigner,
         });
 
         // 3) Authorize the user account
         if (!SKIP_AUTHORIZE) {
             logStep('1️⃣', 'Authorizing user account...');
-            await authorizerClient
+            await client
                 .authorizeAccount(user.address, 100, BigInt(100 * 1024 * 1024)) // 100 MiB
                 .withWaitFor('finalized')
                 .send();
@@ -147,7 +144,7 @@ async function main() {
         let lastItemTotal = 0;
         const start = Date.now();
 
-        const { cid: rootCid } = await userClient
+        const { cid: rootCid } = await client
             .uploadFile(new Uint8Array(fileBytes))
             .ensureAuthorized()  // fail fast if the account has no/expired auth
             .withCallback((ev) => {
@@ -217,7 +214,7 @@ async function main() {
         console.error(error);
         resultCode = 1;
     } finally {
-        if (papiClient) papiClient.destroy();
+        if (client) await client.destroy();
         process.exit(resultCode);
     }
 }

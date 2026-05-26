@@ -5,14 +5,15 @@
  * Async client with full transaction submission support
  */
 
+import type { JsonRpcProvider } from "@polkadot-api/json-rpc-provider"
 import { ss58Address } from "@polkadot-labs/hdkd-helpers"
 import type { CID } from "multiformats/cid"
-import { Binary, type PolkadotSigner } from "polkadot-api"
-import { getWsProvider } from "polkadot-api/ws"
+import { Binary, createClient, type PolkadotSigner } from "polkadot-api"
 import {
   isStallError,
   type PipelineBootstrap,
   pipelineStore,
+  readStoredAt,
 } from "./pipeline.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
@@ -30,6 +31,9 @@ import {
   type StoreResult,
   TxStatus,
   type UploadCallback,
+  type UploadEstimate,
+  type UploadEstimateItem,
+  type UploadEstimateOptions,
   type UploadFileResult,
   type UploadItem,
   type UploadResult,
@@ -133,6 +137,11 @@ export interface BulletinTypedApi {
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
     }
+    /** Utility pallet — used by `authorizeAccount(entries[])` for atomic
+     * multi-account grants via `batch_all`. */
+    Utility: {
+      batch_all(args: { calls: unknown[] }): PapiTransaction
+    }
   }
   /** Optional query interface for on-chain storage reads (e.g., authorization checks) */
   query?: {
@@ -178,7 +187,7 @@ export interface BulletinTypedApi {
  * `papiClient.submitAndWatch` when constructing the client.
  *
  * Required only for unsigned (`asUnsigned()`) uploads — signed uploads
- * use the pipelined engine with its own wsUrls-based provider.
+ * use the pipelined engine with its own providers factory.
  */
 export type SubmitAndWatchFn = (transaction: Uint8Array) => {
   subscribe(observer: {
@@ -301,6 +310,14 @@ function mapPapiEventToProgress(
  *
  * Both `BulletinClient` and `MockBulletinClient` implement this interface.
  */
+/** Single authorization-grant entry, used for the batched form of
+ * {@link BulletinClientInterface.authorizeAccount}. */
+export interface AuthorizeAccountEntry {
+  who: string
+  transactions: number
+  bytes: bigint
+}
+
 export interface BulletinClientInterface {
   uploadFile(data: Uint8Array): UploadFileBuilder
   upload(items: UploadItem[]): UploadBuilder
@@ -309,6 +326,7 @@ export interface BulletinClientInterface {
     transactions: number,
     bytes: bigint,
   ): AuthCallBuilder
+  authorizeAccount(entries: AuthorizeAccountEntry[]): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
   renew(block: number, index: number): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
@@ -319,6 +337,10 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
+  estimateUpload(
+    items: UploadItem[],
+    options?: UploadEstimateOptions,
+  ): Promise<UploadEstimate>
   /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
   destroy(): Promise<void>
 }
@@ -330,7 +352,16 @@ type UploadDispatch = (
   onEvent: UploadCallback | undefined,
   checkAuth: boolean,
   unsigned: boolean,
+  skipExisting: boolean,
 ) => Promise<UploadResult>
+
+/** Estimate dispatcher: `UploadBuilder.estimate()` forwards builder
+ * state (currently just `skipExisting`) to this and returns the chain-
+ * accurate `transactions` / `bytes` plan for the configured upload. */
+type UploadEstimateDispatch = (
+  items: UploadItem[],
+  skipExisting: boolean,
+) => Promise<UploadEstimate>
 
 /** Dispatch callback for the high-level `uploadFile(data)` execution path. */
 type UploadFileDispatch = (
@@ -358,6 +389,7 @@ abstract class BaseUploadBuilder<TResult> {
   protected waitFor: WaitFor = "finalized"
   protected checkAuth = false
   protected unsigned = false
+  protected skipExisting = false
 
   withCallback(callback: UploadCallback): this {
     this.callback = callback
@@ -371,6 +403,21 @@ abstract class BaseUploadBuilder<TResult> {
 
   ensureAuthorized(): this {
     this.checkAuth = true
+    return this
+  }
+
+  /**
+   * Skip items whose content_hash is already in the chain's
+   * `TransactionByContentHash` at upload time. Adds one RPC per unique
+   * content but avoids paying for an authorization slot on data the chain
+   * already has. Items dropped this way still appear in the resolved CIDs
+   * (positional) but never produce a `store` extrinsic.
+   *
+   * Pairs with {@link BulletinClient.estimateUpload}({ skipExisting: true })
+   * so callers can preview the exact `transactions` / `bytes` cost.
+   */
+  withSkipExisting(): this {
+    this.skipExisting = true
     return this
   }
 
@@ -408,9 +455,21 @@ abstract class BaseUploadBuilder<TResult> {
 export class UploadBuilder extends BaseUploadBuilder<UploadResult> {
   constructor(
     private dispatch: UploadDispatch,
+    private estimateDispatch: UploadEstimateDispatch,
     private items: UploadItem[],
   ) {
     super()
+  }
+
+  /**
+   * Compute the dispatch plan for THIS builder's items + configuration
+   * without submitting. The returned estimate reflects `withSkipExisting`
+   * (if set) so the `transactions` / `bytes` here match exactly what a
+   * subsequent `.send()` would charge to the signer's authorization.
+   * Equivalent to `client.estimateUpload(items, { skipExisting })`.
+   */
+  async estimate(): Promise<UploadEstimate> {
+    return this.estimateDispatch(this.items, this.skipExisting)
   }
 
   async send(): Promise<UploadResult> {
@@ -420,6 +479,7 @@ export class UploadBuilder extends BaseUploadBuilder<UploadResult> {
       this.callback,
       this.checkAuth,
       this.unsigned,
+      this.skipExisting,
     )
   }
 }
@@ -640,28 +700,44 @@ function extractStoredIndex(
  * const result = await bulletinClient.store(data).send();
  * ```
  */
+/**
+ * Options for constructing a {@link BulletinClient}.
+ *
+ * The SDK builds and owns the internal `PolkadotClient` from
+ * `providers()[0]`, derives the typed API via `getTypedApi(descriptor)`,
+ * and exposes both as `client.api` / `client.submitAndWatch`.
+ * `client.destroy()` tears it all down.
+ */
+export interface BulletinClientOptions extends Partial<ClientConfig> {
+  /**
+   * PAPI chain descriptor (generated by `papi add`). Optional — when
+   * omitted the SDK falls back to `PolkadotClient.getUnsafeApi()` which
+   * still works at runtime but loses compile-time chain types. Pass
+   * your generated descriptor for full TypeScript safety.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: descriptor is generated per-chain — opaque to the SDK
+  descriptor?: any
+  /**
+   * Upload signer. Optional — pass `undefined` for unsigned-only mode.
+   * Signed paths throw `UNSUPPORTED_OPERATION` on a signer-less client.
+   */
+  uploadSigner?: PolkadotSigner
+}
+
 export class BulletinClient implements BulletinClientInterface {
-  /** PAPI client for blockchain interaction */
+  /** Typed PAPI API for direct queries (also used by the SDK internally). */
   public api: BulletinTypedApi
-  /**
-   * Signer for transaction signing. May be `undefined` when the client is
-   * constructed for unsigned-only use (`asUnsigned()`); any signed code
-   * path will throw if invoked.
-   */
+  /** Stream-watch submission, exposed for advanced callers. */
+  public submitAndWatch: SubmitAndWatchFn
+  /** Upload signer (undefined → unsigned-only mode). */
   public signer: PolkadotSigner | undefined
-  /**
-   * Stream-watch submission (`PolkadotClient.submitAndWatch`). Required
-   * for unsigned (`asUnsigned()`) uploads — signed uploads use the
-   * pipelined engine and don't need it, so it can be `undefined` on a
-   * signed-only client.
-   */
-  public submitAndWatch: SubmitAndWatchFn | undefined
   /** Client configuration */
   public config: ResolvedClientConfig
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
-  /** Optional teardown callback invoked by `destroy()` */
-  private onDestroy?: () => void | Promise<void>
+  /** Internal PAPI client owned by the SDK — torn down on `destroy()`. */
+  // biome-ignore lint/suspicious/noExplicitAny: PolkadotClient type omitted to avoid hard PAPI version coupling here
+  private papiClient: any
   /**
    * Mutable pipeline bootstrap cache shared across every upload from this
    * client. Populated on the first successful `pipelineStore` call (metadata
@@ -671,36 +747,45 @@ export class BulletinClient implements BulletinClientInterface {
   private pipelineBootstrap: PipelineBootstrap = {}
 
   /**
-   * Create a new async client with PAPI client and signer
+   * Construct a client.
    *
-   * The PAPI client must be configured with the correct chain metadata
-   * for your Bulletin Chain node.
-   *
-   * @param api - Configured PAPI TypedApi instance
-   * @param signer - Polkadot signer for transaction signing, or `undefined`
-   *   for an unsigned-only client (`asUnsigned()` paths). Signed paths
-   *   throw `UNSUPPORTED_OPERATION` when invoked on a signer-less client.
-   * @param submitAndWatch - Stream-watch submission (pass
-   *   `papiClient.submitAndWatch`). Required for unsigned (`asUnsigned()`)
-   *   uploads. Pass `undefined` if you only use signed uploads — the
-   *   signed engine uses its own wsUrls-based provider.
-   * @param config - Optional client configuration
-   * @param onDestroy - Optional teardown callback. When provided, `destroy()`
-   *   awaits it so callers (e.g. wrappers that own the underlying
-   *   `PolkadotClient`) can route cleanup through this client.
+   * The SDK creates and owns an internal PAPI client from
+   * `options.providers()[0]` and a typed API from `options.descriptor`.
+   * Both stay accessible via `client.api` / `client.submitAndWatch` for
+   * callers who need to run their own queries. `client.destroy()` tears
+   * them down.
    */
-  constructor(
-    api: BulletinTypedApi,
-    signer: PolkadotSigner | undefined,
-    submitAndWatch: SubmitAndWatchFn | undefined,
-    config?: Partial<ClientConfig>,
-    onDestroy?: () => void | Promise<void>,
-  ) {
-    this.api = api
-    this.signer = signer
-    this.submitAndWatch = submitAndWatch
-    this.config = resolveClientConfig(config)
-    this.onDestroy = onDestroy
+  constructor(options: BulletinClientOptions) {
+    if (!options.providers) {
+      throw new BulletinError(
+        "BulletinClient: `providers` factory is required",
+        ErrorCode.INVALID_CONFIG,
+      )
+    }
+    const initialProviders = options.providers()
+    if (!initialProviders.length) {
+      throw new BulletinError(
+        "BulletinClient: `providers()` must return at least one JsonRpcProvider",
+        ErrorCode.INVALID_CONFIG,
+      )
+    }
+    this.papiClient = createClient(initialProviders[0])
+    this.api = (options.descriptor
+      ? this.papiClient.getTypedApi(options.descriptor)
+      : this.papiClient.getUnsafeApi()) as unknown as BulletinTypedApi
+    this.submitAndWatch = this.papiClient
+      .submitAndWatch as unknown as SubmitAndWatchFn
+    this.signer = options.uploadSigner
+    this.config = resolveClientConfig({
+      providers: options.providers,
+      authorizerSigner: options.authorizerSigner,
+      txTimeout: options.txTimeout,
+      blockLimits: options.blockLimits,
+      defaultChunkSize: options.defaultChunkSize,
+      chunkingThreshold: options.chunkingThreshold,
+      createManifest: options.createManifest,
+      submissionStrategy: options.submissionStrategy,
+    })
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
@@ -709,16 +794,18 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Release resources held on behalf of this client.
-   *
-   * Invokes the optional `onDestroy` callback supplied at construction time.
-   * Without one, this is a no-op — the SDK itself holds no long-lived
-   * resources, so callers that own the underlying `PolkadotClient` (or other
-   * connection) can either tear it down themselves or pass `onDestroy` to
-   * route teardown through here.
+   * Release the SDK's internal PAPI client (closes its WS connection and
+   * clears subscriptions). Idempotent after the first call.
    */
   async destroy(): Promise<void> {
-    await this.onDestroy?.()
+    if (this.papiClient) {
+      try {
+        this.papiClient.destroy()
+      } catch {
+        /* ignore double-destroy */
+      }
+      this.papiClient = undefined
+    }
   }
 
   /**
@@ -850,6 +937,36 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * Authorization-class methods (`authorizeAccount`, `authorizePreimage`,
+   * `refreshAccountAuthorization`, `refreshPreimageAuthorization`) must
+   * be signed by an explicit Authorizer key, not by the client's
+   * primary upload signer. This guards against accidental use of the
+   * upload account for permission grants.
+   */
+  private requireAuthorizerSigner(operation: string): PolkadotSigner {
+    const s = this.config.authorizerSigner
+    if (!s) {
+      throw new BulletinError(
+        `${operation} requires \`authorizerSigner\` to be set in ClientConfig`,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    return s
+  }
+
+  /** Resolve the provider factory, throwing a clear error if unset. */
+  private requireProviders(operation: string): () => JsonRpcProvider[] {
+    const p = this.config.providers
+    if (!p) {
+      throw new BulletinError(
+        `${operation} requires \`providers\` to be set in ClientConfig`,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    return p
+  }
+
+  /**
    * Create a store transaction.
    *
    * The chain defaults to Raw (0x55) codec + Blake2b-256 hashing, so the plain
@@ -887,6 +1004,7 @@ export class BulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
+    signerOverride?: PolkadotSigner,
   ): Promise<{
     blockHash: string
     txHash: string
@@ -894,7 +1012,13 @@ export class BulletinClient implements BulletinClientInterface {
     txIndex?: number
     events?: RuntimeEvent[]
   }> {
-    this.requireSigner("signAndSubmitWithProgress")
+    const useSigner = signerOverride ?? this.signer
+    if (!useSigner) {
+      throw new BulletinError(
+        "signAndSubmitWithProgress requires a signer",
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
@@ -920,7 +1044,7 @@ export class BulletinClient implements BulletinClientInterface {
         })
       }
 
-      const subscription = tx.signSubmitAndWatch(this.signer!).subscribe({
+      const subscription = tx.signSubmitAndWatch(useSigner).subscribe({
         next: (ev: TxStatusEvent) => {
           const result = mapPapiEventToProgress(
             ev,
@@ -1011,6 +1135,7 @@ export class BulletinClient implements BulletinClientInterface {
     errorMessage: string,
     errorCode: ErrorCode,
     options?: CallOptions,
+    signerOverride?: PolkadotSigner,
   ): Promise<TransactionReceipt> {
     try {
       const waitFor = options?.waitFor ?? "in_block"
@@ -1018,6 +1143,8 @@ export class BulletinClient implements BulletinClientInterface {
         tx,
         options?.onProgress,
         waitFor,
+        undefined,
+        signerOverride,
       )
 
       return {
@@ -1068,7 +1195,9 @@ export class BulletinClient implements BulletinClientInterface {
    */
   upload(items: UploadItem[]): UploadBuilder {
     return new UploadBuilder(
-      (its, wf, oe, ca, un) => this.uploadItemsImpl(its, wf, oe, ca, un),
+      (its, wf, oe, ca, un, sk) =>
+        this.uploadItemsImpl(its, wf, oe, ca, un, sk),
+      (its, sk) => this.estimateUpload(its, { skipExisting: sk }),
       items,
     )
   }
@@ -1099,6 +1228,7 @@ export class BulletinClient implements BulletinClientInterface {
         onEvent,
         checkAuth,
         unsigned,
+        false,
       )
       return { cid: cids[0]! }
     }
@@ -1119,6 +1249,7 @@ export class BulletinClient implements BulletinClientInterface {
       onEvent,
       checkAuth,
       false,
+      false,
     )
     // For chunked uploads the manifest is the last item; without one, the
     // last chunk's CID is the best identifier we have.
@@ -1131,6 +1262,7 @@ export class BulletinClient implements BulletinClientInterface {
     onEvent: UploadCallback | undefined,
     checkAuth: boolean,
     unsigned: boolean,
+    skipExisting: boolean,
   ): Promise<UploadResult> {
     if (items.length === 0) {
       throw new BulletinError(
@@ -1155,39 +1287,120 @@ export class BulletinClient implements BulletinClientInterface {
       ),
     )
     assertUniqueContentHashes(allItemCids)
+
+    // Optional pre-flight: query TBCH for each item's content_hash and
+    // skip items already on chain. The CIDs we return still match input
+    // order (skipped items keep their CID); only the on-chain submission
+    // is reduced. ItemFinalized events fire for skipped items so callers
+    // see a complete event stream.
+    const allContentHashesHexUp = allItemCids.map((cid) =>
+      Binary.toHex(cid.multihash.digest),
+    )
+    const preSkipped = new Set<number>()
+    if (skipExisting) {
+      const entries = await Promise.all(
+        allContentHashesHexUp.map((h) => readStoredAt(this.api, h)),
+      )
+      for (let i = 0; i < items.length; i++) {
+        const entry = entries[i]
+        if (!entry) continue
+        preSkipped.add(i)
+        onEvent?.({
+          type: UploadStatus.ItemFinalized,
+          index: i,
+          total: items.length,
+          cid: allItemCids[i] as CID,
+          blockHash: "",
+          blockNumber: entry.blockNumber,
+          extrinsicIndex: entry.extrinsicIndex,
+        })
+      }
+    }
     // Shared bootstrap cache (one per client instance, see field decl)
     // is reused across uploads AND across retry attempts within one upload.
     const bootstrap = this.pipelineBootstrap
 
-    // Retry on transient stalls; resume from finalized count so items that
-    // already landed are not re-submitted. CIDs are deterministic from
-    // input — `pipelineStore` always returns them computed from the same
-    // (data, codec, hashAlgo) we supplied via `precomputedCids`, so we
-    // can return `allItemCids` directly instead of stitching across
-    // retry attempts (which would lose pre-stall finalized slots).
+    // Retry on transient stalls; resume by filtering out items that
+    // already landed (tracked by original index, not by count — items can
+    // land non-contiguously under hijack/race conditions). CIDs are
+    // deterministic from input so we return `allItemCids` directly.
+    //
+    // Exactly-once broadcast guarantee within a single uploadItems
+    // session: before every retry attempt, query TBCH for each
+    // not-yet-finalized item. If on-chain (regardless of who put it
+    // there during *this session*), treat as finalized and skip
+    // re-broadcast. Without this, an item that landed in a best block
+    // before STORE_STALLED fired would not appear in
+    // `error.cause.finalizedIndices` (only finalized items do), and the
+    // retry would resubmit + double-pay.
     const maxRetries = 3
     let attempt = 0
-    let alreadyFinalized = 0
+    // Items pre-skipped via `skipExisting` are pre-populated here so the
+    // retry loop's slicing and the early-return short-circuit treat them
+    // exactly like items that finalized during an earlier attempt.
+    const finalizedOriginal = new Set<number>(preSkipped)
+    const allContentHashesHex = allContentHashesHexUp
     while (true) {
-      const remaining = items.slice(alreadyFinalized)
-      const remainingCids = allItemCids.slice(alreadyFinalized)
+      // Pre-retry TBCH dedup: items already on chain are skipped.
+      if (attempt > 0) {
+        const pendingIndexes: number[] = []
+        const pendingHashes: string[] = []
+        for (let i = 0; i < items.length; i++) {
+          if (finalizedOriginal.has(i)) continue
+          pendingIndexes.push(i)
+          pendingHashes.push(allContentHashesHex[i] as string)
+        }
+        if (pendingIndexes.length > 0) {
+          const entries = await Promise.all(
+            pendingHashes.map((h) => readStoredAt(this.api, h)),
+          )
+          for (let k = 0; k < pendingIndexes.length; k++) {
+            const entry = entries[k]
+            if (!entry) continue
+            const i = pendingIndexes[k] as number
+            finalizedOriginal.add(i)
+            onEvent?.({
+              type: UploadStatus.ItemFinalized,
+              index: i,
+              total: items.length,
+              cid: allItemCids[i] as CID,
+              blockHash: "",
+              blockNumber: entry.blockNumber,
+              extrinsicIndex: entry.extrinsicIndex,
+            })
+          }
+        }
+      }
+      const remaining: UploadItem[] = []
+      const remainingCids: CID[] = []
+      const newToOriginal: number[] = []
+      for (let i = 0; i < items.length; i++) {
+        if (finalizedOriginal.has(i)) continue
+        newToOriginal.push(i)
+        remaining.push(items[i] as UploadItem)
+        remainingCids.push(allItemCids[i] as CID)
+      }
+      if (remaining.length === 0) break
       try {
         await pipelineStore(this.api, this.signer!, remaining, {
-          wsUrls: this.config.wsUrls,
-          createProvider:
-            this.config.createProvider ?? ((url) => getWsProvider(url)),
+          providers: this.requireProviders("upload()"),
           blockLimits: this.config.blockLimits,
           completeOn: waitFor === "in_block" ? "best" : "finalized",
           bootstrap,
           precomputedCids: remainingCids,
+          submissionStrategy: this.config.submissionStrategy,
           onEvent: onEvent
-            ? (ev) => onEvent({ ...ev, index: alreadyFinalized + ev.index })
+            ? (ev) =>
+                onEvent({ ...ev, index: newToOriginal[ev.index] as number })
             : undefined,
         })
         break
       } catch (error) {
         if (isStallError(error) && attempt < maxRetries) {
-          alreadyFinalized += error.cause.finalized
+          for (const newIdx of error.cause.finalizedIndices) {
+            const originalIdx = newToOriginal[newIdx]
+            if (originalIdx !== undefined) finalizedOriginal.add(originalIdx)
+          }
           attempt += 1
           await new Promise((r) => setTimeout(r, 1_000 * 2 ** (attempt - 1)))
           continue
@@ -1225,12 +1438,7 @@ export class BulletinClient implements BulletinClientInterface {
         throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
       }
     }
-    if (this.config.wsUrls.length === 0) {
-      throw new BulletinError(
-        "asUnsigned() multi-item upload requires the client to be constructed with `wsUrls` (chainHead-based reconciliation)",
-        ErrorCode.UNSUPPORTED_OPERATION,
-      )
-    }
+    const providers = this.requireProviders("asUnsigned() multi-item upload")
 
     // Pre-compute CIDs (one per item) — pipelineStore consumes a
     // resolved CIDs array via the precomputedCids hook. Doing this BEFORE
@@ -1250,13 +1458,12 @@ export class BulletinClient implements BulletinClientInterface {
 
     try {
       const result = await pipelineStore(this.api, undefined, items, {
-        wsUrls: this.config.wsUrls,
-        createProvider:
-          this.config.createProvider ?? ((url) => getWsProvider(url)),
+        providers,
         blockLimits: this.config.blockLimits,
         completeOn: waitFor === "in_block" ? "best" : "finalized",
         bootstrap: this.pipelineBootstrap,
         precomputedCids: allItemCids,
+        submissionStrategy: this.config.submissionStrategy,
         onEvent,
       })
       return { cids: result.cids }
@@ -1277,24 +1484,85 @@ export class BulletinClient implements BulletinClientInterface {
    * @param transactions - Number of transactions to authorize
    * @param bytes - Maximum bytes to authorize
    */
+  /**
+   * Authorize one or many accounts to store data. With a single
+   * `(who, transactions, bytes)` triple it dispatches a single
+   * `TransactionStorage.authorize_account`. With an array of entries it
+   * wraps them in `Utility.batch_all` — atomic: either every
+   * authorization is applied or none of them are.
+   *
+   * Signed by `config.authorizerSigner` if set, otherwise by the
+   * client's primary upload signer.
+   */
   authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
+  ): AuthCallBuilder
+  authorizeAccount(entries: AuthorizeAccountEntry[]): AuthCallBuilder
+  authorizeAccount(
+    whoOrEntries: string | AuthorizeAccountEntry[],
+    transactions?: number,
+    bytes?: bigint,
   ): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
-      const authTx = this.api.tx.TransactionStorage.authorize_account({
-        who,
+      const signer = this.requireAuthorizerSigner("authorizeAccount()")
+      const authTx = this.buildAuthorizeAccountTx(
+        whoOrEntries,
         transactions,
         bytes,
-      })
+      )
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to authorize account",
         ErrorCode.AUTHORIZATION_FAILED,
         options,
+        signer,
       )
     })
+  }
+
+  private buildAuthorizeAccountTx(
+    whoOrEntries: string | AuthorizeAccountEntry[],
+    transactions: number | undefined,
+    bytes: bigint | undefined,
+  ): PapiTransaction {
+    if (typeof whoOrEntries === "string") {
+      if (transactions === undefined || bytes === undefined) {
+        throw new BulletinError(
+          "authorizeAccount(who, transactions, bytes) requires all 3 args",
+          ErrorCode.INVALID_CONFIG,
+        )
+      }
+      return this.api.tx.TransactionStorage.authorize_account({
+        who: whoOrEntries,
+        transactions,
+        bytes,
+      })
+    }
+    if (whoOrEntries.length === 0) {
+      throw new BulletinError(
+        "authorizeAccount(entries) requires at least one entry",
+        ErrorCode.INVALID_CONFIG,
+      )
+    }
+    if (whoOrEntries.length === 1) {
+      const e = whoOrEntries[0] as AuthorizeAccountEntry
+      return this.api.tx.TransactionStorage.authorize_account({
+        who: e.who,
+        transactions: e.transactions,
+        bytes: e.bytes,
+      })
+    }
+    const calls = whoOrEntries.map(
+      (e) =>
+        this.api.tx.TransactionStorage.authorize_account({
+          who: e.who,
+          transactions: e.transactions,
+          bytes: e.bytes,
+        }).decodedCall,
+    )
+    return this.api.tx.Utility.batch_all({ calls })
   }
 
   /**
@@ -1305,6 +1573,7 @@ export class BulletinClient implements BulletinClientInterface {
    */
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
+      const signer = this.requireAuthorizerSigner("authorizePreimage()")
       const authTx = this.api.tx.TransactionStorage.authorize_preimage({
         content_hash: Binary.toHex(contentHash),
         max_size: maxSize,
@@ -1314,6 +1583,7 @@ export class BulletinClient implements BulletinClientInterface {
         "Failed to authorize preimage",
         ErrorCode.AUTHORIZATION_FAILED,
         options,
+        signer,
       )
     })
   }
@@ -1345,6 +1615,9 @@ export class BulletinClient implements BulletinClientInterface {
    */
   refreshAccountAuthorization(who: string): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
+      const signer = this.requireAuthorizerSigner(
+        "refreshAccountAuthorization()",
+      )
       const authTx =
         this.api.tx.TransactionStorage.refresh_account_authorization({ who })
       return this.submitTx(
@@ -1352,6 +1625,7 @@ export class BulletinClient implements BulletinClientInterface {
         "Failed to refresh account authorization",
         ErrorCode.AUTHORIZATION_FAILED,
         options,
+        signer,
       )
     })
   }
@@ -1365,6 +1639,9 @@ export class BulletinClient implements BulletinClientInterface {
    */
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
+      const signer = this.requireAuthorizerSigner(
+        "refreshPreimageAuthorization()",
+      )
       const authTx =
         this.api.tx.TransactionStorage.refresh_preimage_authorization({
           content_hash: Binary.toHex(contentHash),
@@ -1374,6 +1651,7 @@ export class BulletinClient implements BulletinClientInterface {
         "Failed to refresh preimage authorization",
         ErrorCode.AUTHORIZATION_FAILED,
         options,
+        signer,
       )
     })
   }
@@ -1430,5 +1708,114 @@ export class BulletinClient implements BulletinClientInterface {
     bytes: number
   } {
     return this.preparer.estimateAuthorization(dataSize)
+  }
+
+  /**
+   * Compute the dispatch plan and resource cost for a batch of upload
+   * items WITHOUT actually submitting anything. Returns:
+   *
+   * - per-item CID + skip-reason
+   * - aggregate `transactions` / `bytes` the chain will charge to the
+   *   account's authorization (after the requested deduplication)
+   *
+   * By default duplicates within the input are collapsed (the chain
+   * dedupes by content_hash anyway, so charging twice is wasteful). Pass
+   * `skipExisting: true` to also query the chain's
+   * `TransactionByContentHash` and exclude items already on chain (one
+   * RPC per unique content; pair with `.withSkipExisting()` on the
+   * upload builder to make the upload behavior match).
+   *
+   * Use this to size `authorizeAccount` before paying, or to preview the
+   * cost of an upload in a UI.
+   */
+  async estimateUpload(
+    items: UploadItem[],
+    options: UploadEstimateOptions = {},
+  ): Promise<UploadEstimate> {
+    const dedupInput = options.dedupInput ?? true
+    const skipExisting = options.skipExisting ?? false
+
+    const itemCids = await Promise.all(
+      items.map((item) =>
+        calculateCid(
+          item.data,
+          item.codec ?? CidCodec.Raw,
+          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+        ),
+      ),
+    )
+    const hashesHex = itemCids.map((cid) => Binary.toHex(cid.multihash.digest))
+
+    // First-seen wins; later occurrences land in `duplicateIndices`.
+    const duplicateIndices: number[] = []
+    const firstSeen = new Map<string, number>()
+    if (dedupInput) {
+      for (let i = 0; i < items.length; i++) {
+        const h = hashesHex[i] as string
+        if (firstSeen.has(h)) {
+          duplicateIndices.push(i)
+        } else {
+          firstSeen.set(h, i)
+        }
+      }
+    }
+
+    // Optional chain dedup: TBCH lookup for each first-seen content_hash.
+    const alreadyStored: number[] = []
+    if (skipExisting) {
+      // De-dup hashes before querying to avoid redundant RPCs for input dups.
+      const uniqueHashIndexes = dedupInput
+        ? Array.from(firstSeen.values())
+        : items.map((_, i) => i)
+      const uniqueHashes = uniqueHashIndexes.map(
+        (i) => hashesHex[i] as string,
+      )
+      const entries = await Promise.all(
+        uniqueHashes.map((h) => readStoredAt(this.api, h)),
+      )
+      const onChainHashes = new Set<string>()
+      for (let k = 0; k < uniqueHashes.length; k++) {
+        if (entries[k]) onChainHashes.add(uniqueHashes[k] as string)
+      }
+      // Mark every input index whose content is on chain — including
+      // duplicates: if a duplicate's content_hash is on chain, the
+      // duplicate also wouldn't be submitted under skipExisting.
+      for (let i = 0; i < items.length; i++) {
+        if (onChainHashes.has(hashesHex[i] as string)) alreadyStored.push(i)
+      }
+    }
+
+    const skippedSet = new Set<number>([...duplicateIndices, ...alreadyStored])
+    const toUpload: number[] = []
+    const itemsOut: UploadEstimateItem[] = new Array(items.length)
+    let bytes = 0n
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i] as UploadItem
+      const dupOf = dedupInput && duplicateIndices.includes(i)
+      const onChain = alreadyStored.includes(i)
+      let skipReason: UploadEstimateItem["skipReason"]
+      if (dupOf) skipReason = "duplicate_input"
+      else if (onChain) skipReason = "already_on_chain"
+      itemsOut[i] = {
+        index: i,
+        cid: itemCids[i] as CID,
+        bytes: item.data.length,
+        ...(skipReason ? { skipReason } : {}),
+      }
+      if (!skippedSet.has(i)) {
+        toUpload.push(i)
+        bytes += BigInt(item.data.length)
+      }
+    }
+
+    return {
+      total: items.length,
+      items: itemsOut,
+      transactions: toUpload.length,
+      bytes,
+      duplicateIndices,
+      alreadyStored,
+      toUpload,
+    }
   }
 }

@@ -390,6 +390,7 @@ export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
+export const [useStorageType] = bind(storageTypeSubject);
 
 /**
  * Hook that returns a factory for creating BulletinClient instances.
@@ -406,27 +407,39 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
   const api = useApi();
   const client = useClient();
   const network = useNetwork();
+  const storageType = useStorageType();
   // Memoize so the per-instance pipelineBootstrap cache (metadata + offline
   // API) survives renders. Without this every upload would re-bootstrap.
   return useMemo(() => {
     if (!api || !client) return undefined;
-    // pipelineStore (signed uploads) requires at least one wsUrl. Smoldot
-    // light-client setups have no ws endpoint to forward to — those clients
-    // can only do unsigned uploads (`asUnsigned()`) until the SDK grows a
-    // smoldot-native pipeline.
-    const wsUrls = network?.lightClient ? [] : network?.endpoints ?? [];
+    // pipelineStore (signed uploads) needs JsonRpcProvider instances.
+    // Light-client setups have no ws endpoint — for those, upload paths
+    // can't be used until the SDK exposes a smoldot-native provider here.
+    const endpoints = network?.lightClient ? [] : network?.endpoints ?? [];
+    const providers =
+      endpoints.length > 0
+        ? () => endpoints.map((url) => getWsProvider(url))
+        : undefined;
+    // The SDK creates its own internal PAPI client; pick the same
+    // descriptor the rest of the app uses for this network.
+    const descriptor =
+      DESCRIPTORS[storageType]?.[network?.id ?? ""] ?? bulletin_westend;
     const cache = new WeakMap<object, BulletinClient>();
     const NO_SIGNER = {} as object;
     return (signer?: PolkadotSigner) => {
       const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
       let bulletin = cache.get(key);
-      if (!bulletin) {
-        bulletin = new BulletinClient(api, signer, client.submitAndWatch, { wsUrls });
+      if (!bulletin && providers) {
+        bulletin = new BulletinClient({
+          descriptor,
+          providers,
+          uploadSigner: signer,
+        });
         cache.set(key, bulletin);
       }
-      return bulletin;
+      return bulletin as BulletinClient;
     };
-  }, [api, client, network]);
+  }, [api, client, network, storageType]);
 }
 
 // Direct access to subjects for non-React code

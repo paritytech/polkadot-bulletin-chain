@@ -14,6 +14,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import * as pipelineModule from "../../src/pipeline"
 import { ErrorCode } from "../../src/types"
 
+// Per-test apiStub is set by the helper below; createClient is mocked at
+// file scope (vi.mock hoists). Each test's helper reassigns `currentApi`.
+// biome-ignore lint/suspicious/noExplicitAny: dynamic apiStub
+let currentApi: any = {}
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => currentApi,
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: () => {},
+    })),
+  }
+})
+
 interface MockClientOpts {
   withSigner?: boolean
   withWsUrls?: boolean
@@ -61,10 +77,19 @@ async function makeClient(opts: MockClientOpts = {}) {
     opts.withSigner === false
       ? undefined
       : { publicKey: new Uint8Array(32), sign: async () => new Uint8Array(64) }
-  const config =
-    opts.withWsUrls === false ? undefined : { wsUrls: ["ws://test"] }
-  // biome-ignore lint/suspicious/noExplicitAny: tests touch private internals
-  return new BulletinClient(apiStub as any, signer as any, undefined, config)
+  // The file-scope vi.mock returns `currentApi` from getTypedApi; set it
+  // to this test's stub.
+  currentApi = apiStub
+  return new BulletinClient({
+    descriptor: {},
+    providers:
+      opts.withWsUrls === false
+        ? undefined
+        : // biome-ignore lint/suspicious/noExplicitAny: provider stub
+          () => [{} as any],
+    // biome-ignore lint/suspicious/noExplicitAny: signer stub
+    uploadSigner: signer as any,
+  } as unknown as ConstructorParameters<typeof BulletinClient>[0])
 }
 
 describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
@@ -144,16 +169,12 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it("rejects asUnsigned() without wsUrls", async () => {
-    const spy = vi.spyOn(pipelineModule, "pipelineStore")
-    const client = await makeClient({ withWsUrls: false })
-    await expect(
-      client
-        .upload([{ data: new Uint8Array([1]) }])
-        .asUnsigned()
-        .send(),
-    ).rejects.toMatchObject({ code: ErrorCode.UNSUPPORTED_OPERATION })
-    expect(spy).not.toHaveBeenCalled()
+  it("constructor rejects when `providers` is missing", async () => {
+    // The self-contained constructor requires `providers` upfront; this
+    // replaces the previous "rejects asUnsigned() without wsUrls" test.
+    await expect(makeClient({ withWsUrls: false })).rejects.toMatchObject({
+      code: ErrorCode.INVALID_CONFIG,
+    })
   })
 
   it("works on a signer-less client (asUnsigned doesn't need a signer)", async () => {

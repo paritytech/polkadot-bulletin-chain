@@ -11,16 +11,15 @@
  * end-to-end against the new pipeline-based submission engine.
  */
 
+import { randomBytes } from "node:crypto"
 import { blake2b } from "@noble/hashes/blake2.js"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
 import { DEV_MINI_SECRET, ss58Address } from "@polkadot-labs/hdkd-helpers"
-import { createClient, type PolkadotClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   BulletinClient,
-  type BulletinTypedApi,
   CidCodec,
   HashAlgorithm,
   UploadStatus,
@@ -32,14 +31,9 @@ const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 })
 
 describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
   let client: BulletinClient
-  let papiClient: PolkadotClient
   let aliceAddress: string
 
   beforeAll(async () => {
-    const wsProvider = getWsProvider(ENDPOINT)
-    papiClient = createClient(wsProvider)
-    const api = papiClient.getUnsafeApi() as unknown as BulletinTypedApi
-
     const derive = sr25519CreateDerive(DEV_MINI_SECRET)
     const aliceKeyPair = derive("//Alice")
     const signer = getPolkadotSigner(
@@ -49,11 +43,15 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
-    // 120s tx timeout for CI zombienet nodes — finalization can take >60s.
-    // wsUrls opt the signed path into the pipelined submission engine.
-    client = new BulletinClient(api, signer, papiClient.submitAndWatch, {
+    // Self-contained client: SDK owns the PAPI client lifecycle.
+    // No `descriptor` here → SDK uses getUnsafeApi() (works at runtime,
+    // loses compile-time chain types). Alice is both uploader and
+    // authorizer in these tests.
+    client = new BulletinClient({
+      providers: () => [getWsProvider(ENDPOINT)],
+      uploadSigner: signer,
+      authorizerSigner: signer,
       txTimeout: 120_000,
-      wsUrls: [ENDPOINT],
     })
 
     // Authorize Alice's account so signed uploads succeed.
@@ -68,7 +66,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
   })
 
   afterAll(async () => {
-    if (papiClient) papiClient.destroy()
+    if (client) await client.destroy()
   })
 
   describe("upload() — signed via pipeline", () => {
@@ -336,18 +334,17 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
   describe("Hijack recovery", { timeout: 180_000 }, () => {
     it("two parallel uploads from the same signer both succeed", async () => {
       // Both clients share the SAME signer → fight over the same nonces.
-      const makeRivalClient = () =>
-        new BulletinClient(
-          papiClient.getUnsafeApi() as unknown as BulletinTypedApi,
-          // Re-create signer to avoid any per-instance caching collisions.
-          (() => {
-            const derive = sr25519CreateDerive(DEV_MINI_SECRET)
-            const kp = derive("//Alice")
-            return getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
-          })(),
-          papiClient.submitAndWatch,
-          { txTimeout: 120_000, wsUrls: [ENDPOINT] },
-        )
+      const makeRivalClient = () => {
+        const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+        const kp = derive("//Alice")
+        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        return new BulletinClient({
+          providers: () => [getWsProvider(ENDPOINT)],
+          uploadSigner: rivalSigner,
+          authorizerSigner: rivalSigner,
+          txTimeout: 120_000,
+        })
+      }
       const clientA = makeRivalClient()
       const clientB = makeRivalClient()
 
@@ -370,6 +367,243 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(resB.cids).toHaveLength(1)
       // Distinct content → distinct CIDs.
       expect(resA.cids[0]!.toString()).not.toBe(resB.cids[0]!.toString())
+    })
+  })
+
+  /**
+   * Exactly-once accounting under concurrent same-account uploads. Each
+   * successful `store` extrinsic in the runtime increments the caller's
+   * `Authorizations.extent.transactions` by 1 and `extent.bytes` by
+   * `data.len()` (see pallets/transaction-storage `do_store`). If the SDK
+   * ever double-broadcasts a chunk (e.g. on watchdog reconnect or
+   * STORE_STALLED retry) the chain would either reject as `Duplicate`
+   * OR (if the prior copy was pruned) accept it again and double-count.
+   * Either way the delta would drift from the expected sum — this test
+   * locks the invariant.
+   */
+  describe("Exactly-once accounting under parallel same-account upload", {
+    timeout: 480_000,
+  }, () => {
+    it("3 parallel uploads → Authorizations.extent advances by exact sum", async () => {
+      const SESSIONS = 3
+      // 17 items per session is intentionally above the chain's ~9
+      // items-per-block cap so the test exercises the contention path
+      // across multiple blocks (waves, hijack/dedup, retries).
+      const ITEMS_PER = 17
+      const ITEM_SIZE = 1024 * 1024 // 1 MiB
+
+      // Top up Alice's authorization with enough headroom for the
+      // expected work (3 × 17 = 51 transactions, 51 MiB). authorizeAccount
+      // is additive within the unexpired window, so this stacks on top
+      // of whatever was authorized in earlier tests / beforeAll.
+      await client
+        .authorizeAccount(
+          aliceAddress,
+          SESSIONS * ITEMS_PER + 10, // 51 txs + a small safety margin
+          BigInt((SESSIONS * ITEMS_PER + 10) * ITEM_SIZE),
+        )
+        .withWaitFor("finalized")
+        .send()
+
+      // Snapshot BEFORE — current usage at the latest finalized state.
+      const before =
+        await client.api.query.TransactionStorage.Authorizations.getValue({
+          type: "Account",
+          value: aliceAddress,
+        })
+      expect(before).toBeDefined()
+      const beforeTx = before!.extent.transactions
+      const beforeBytes = before!.extent.bytes
+
+      // Build SESSIONS × ITEMS_PER unique 1-MiB chunks. Content MUST be
+      // distinct cross-session, cross-item, and cross-run — the chain
+      // dedupes by content_hash (TBCH overwrites) and Authorizations.extent
+      // increments per execution, so the accounting check breaks if any
+      // pair of items collide.
+      //
+      // We mix an 8-byte crypto-random seed PER ITEM into every byte of
+      // the payload (collision probability 2^-64). Earlier XOR-shuffle
+      // generators looked random but collapsed many (sIdx, iIdx) pairs to
+      // identical content because only byte 0 of the 32-bit tag was used.
+      const sessionItems = Array.from({ length: SESSIONS }, () =>
+        Array.from({ length: ITEMS_PER }, () => {
+          const data = new Uint8Array(ITEM_SIZE)
+          const seed = randomBytes(8)
+          for (let i = 0; i < ITEM_SIZE; i++) {
+            data[i] = (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+          }
+          return { data }
+        }),
+      )
+
+      // 3 separate clients sharing the same signer — emulates 3
+      // independent scripts on //Alice racing for the same nonces.
+      const rivals = Array.from({ length: SESSIONS }, () => {
+        const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+        const kp = derive("//Alice")
+        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        return new BulletinClient({
+          providers: () => [getWsProvider(ENDPOINT)],
+          uploadSigner: rivalSigner,
+          txTimeout: 180_000,
+        })
+      })
+
+      try {
+        // Fire all 3 uploads in parallel; each waits for finalization.
+        const results = await Promise.all(
+          rivals.map((c, idx) =>
+            c
+              .upload(sessionItems[idx] as { data: Uint8Array }[])
+              .withWaitFor("finalized")
+              .send(),
+          ),
+        )
+        for (const r of results) {
+          expect(r.cids).toHaveLength(ITEMS_PER)
+        }
+
+        // Snapshot AFTER — same query path so any "finalized lag"
+        // applies symmetrically to both snapshots.
+        const after =
+          await client.api.query.TransactionStorage.Authorizations.getValue({
+            type: "Account",
+            value: aliceAddress,
+          })
+        expect(after).toBeDefined()
+        const afterTx = after!.extent.transactions
+        const afterBytes = after!.extent.bytes
+
+        // Expected deltas come from estimateUpload over the full batch:
+        // any content_hash collisions across sessions would naturally
+        // reduce the per-tx expectation, matching what the chain sees.
+        // With crypto-random per-item seeds these will equal SESSIONS *
+        // ITEMS_PER but the estimate keeps the assertion self-consistent.
+        const allItems = sessionItems.flat()
+        const estimate = await client.estimateUpload(allItems)
+        expect(afterTx - beforeTx).toBe(estimate.transactions)
+        expect(afterBytes - beforeBytes).toBe(estimate.bytes)
+      } finally {
+        await Promise.all(rivals.map((c) => c.destroy()))
+      }
+    })
+
+    it("3 parallel uploads from 3 DIFFERENT accounts → each Authorizations.extent advances by exact per-account sum", async () => {
+      const SESSIONS = 3
+      // 17 items per session, same as same-account variant, so the
+      // per-account work matches and we can compare wall-clock easily.
+      const ITEMS_PER = 17
+      const ITEM_SIZE = 1024 * 1024 // 1 MiB
+
+      // Per-test derivation paths — chosen to be distinct from any
+      // other test's signer so we don't collide with shared state.
+      const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+      const paths = ["//ParallelA", "//ParallelB", "//ParallelC"]
+      const accounts = paths.map((path) => {
+        const kp = derive(path)
+        return {
+          address: ss58Address(kp.publicKey, 42),
+          signer: getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign),
+        }
+      })
+
+      // Authorize all 3 target accounts in a single atomic batched call
+      // (Utility.batch_all under the hood). One round-trip instead of
+      // three serial ones, and the batch is all-or-nothing.
+      await client
+        .authorizeAccount(
+          accounts.map((acc) => ({
+            who: acc.address,
+            transactions: ITEMS_PER + 5,
+            bytes: BigInt((ITEMS_PER + 5) * ITEM_SIZE),
+          })),
+        )
+        .withWaitFor("finalized")
+        .send()
+
+      // Snapshot per-account BEFORE.
+      const before = await Promise.all(
+        accounts.map((acc) =>
+          client.api.query.TransactionStorage.Authorizations.getValue({
+            type: "Account",
+            value: acc.address,
+          }),
+        ),
+      )
+      for (const auth of before) expect(auth).toBeDefined()
+      const beforeTx = before.map((a) => a!.extent.transactions)
+      const beforeBytes = before.map((a) => a!.extent.bytes)
+
+      // Unique 1-MiB chunks. Cross-session uniqueness still required —
+      // even though signers differ, the chain's `TransactionByContentHash`
+      // is keyed by content_hash regardless of signer. Per-item
+      // crypto-random seed (see same-account variant above for rationale).
+      const sessionItems = Array.from({ length: SESSIONS }, () =>
+        Array.from({ length: ITEMS_PER }, () => {
+          const data = new Uint8Array(ITEM_SIZE)
+          const seed = randomBytes(8)
+          for (let i = 0; i < ITEM_SIZE; i++) {
+            data[i] = (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+          }
+          return { data }
+        }),
+      )
+
+      // 3 clients, each with its OWN signer — no nonce sharing.
+      const clients = accounts.map(
+        (acc) =>
+          new BulletinClient({
+            providers: () => [getWsProvider(ENDPOINT)],
+            uploadSigner: acc.signer,
+            txTimeout: 120_000,
+          }),
+      )
+
+      try {
+        const results = await Promise.all(
+          clients.map((c, idx) =>
+            c
+              .upload(sessionItems[idx] as { data: Uint8Array }[])
+              .withWaitFor("finalized")
+              .send(),
+          ),
+        )
+        for (const r of results) {
+          expect(r.cids).toHaveLength(ITEMS_PER)
+        }
+
+        // Snapshot per-account AFTER.
+        const after = await Promise.all(
+          accounts.map((acc) =>
+            client.api.query.TransactionStorage.Authorizations.getValue({
+              type: "Account",
+              value: acc.address,
+            }),
+          ),
+        )
+        for (const auth of after) expect(auth).toBeDefined()
+
+        // Per-account exact-match delta. Each account did exactly
+        // estimate.transactions successful stores (which equals ITEMS_PER
+        // when there are no input duplicates within a session). Using
+        // estimateUpload here keeps the assertion robust if the test
+        // data generator ever emits collisions again.
+        for (let i = 0; i < SESSIONS; i++) {
+          const sessionEstimate = await client.estimateUpload(
+            sessionItems[i] as { data: Uint8Array }[],
+          )
+          const txDelta = after[i]!.extent.transactions - beforeTx[i]!
+          const bytesDelta = after[i]!.extent.bytes - beforeBytes[i]!
+          expect(txDelta, `account ${i} tx delta`).toBe(
+            sessionEstimate.transactions,
+          )
+          expect(bytesDelta, `account ${i} bytes delta`).toBe(
+            sessionEstimate.bytes,
+          )
+        }
+      } finally {
+        await Promise.all(clients.map((c) => c.destroy()))
+      }
     })
   })
 })

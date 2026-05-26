@@ -61,12 +61,14 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
         );
     }
 
-    // Both signed AND unsigned paths now route through the chainHead-based
-    // pipelined engine, so both require `wsUrls` in the SDK config.
+    // Both signed AND unsigned paths route through the chainHead-based
+    // pipelined engine, so both require `providers` in the SDK options.
     const dataBytes = new TextEncoder().encode(dataToStore);
-    const sdkClient = signer
-        ? new BulletinClient(bulletinAPI, signer, undefined, { wsUrls: [wsUrl] })
-        : new BulletinClient(bulletinAPI, undefined, undefined, { wsUrls: [wsUrl] });
+    const sdkClient = new BulletinClient({
+        descriptor: bulletin,
+        providers: () => [getWsProvider(wsUrl)],
+        uploadSigner: signer ?? undefined,
+    });
     const item = { data: dataBytes };
     if (cidCodec != null) item.codec = cidCodec;
     if (mhCode != null) item.hashAlgo = mhCode;

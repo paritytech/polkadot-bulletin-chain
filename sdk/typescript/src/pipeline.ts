@@ -87,6 +87,11 @@ import {
 } from "polkadot-api"
 import type { BulletinTypedApi } from "./client.js"
 import {
+  createNonceTrackingStrategy,
+  type SubmissionStrategy,
+  type SubmissionStrategyKind,
+} from "./submission-strategy.js"
+import {
   BulletinError,
   CidCodec,
   ErrorCode,
@@ -113,14 +118,13 @@ export type { BlockLimits } from "./types.js"
 /** Configuration for {@link pipelineStore}. */
 export interface PipelineConfig {
   /**
-   * RPC WebSocket URLs.
-   *
-   * Block watching uses the first URL. Every signed transaction is
-   * broadcast to **all** URLs so that every node's pool receives the batch.
+   * Provider factory. Called once per `pipelineStore()` invocation so each
+   * outer retry gets fresh transport (dead WS connections from a failed
+   * attempt are replaced). The first provider in the returned array drives
+   * the chainHead monitor; every provider is used as a broadcast target
+   * (pass multiple for ws-RPC redundancy).
    */
-  wsUrls: string[]
-  /** Factory that creates a {@link JsonRpcProvider} from a URL. */
-  createProvider: (url: string) => JsonRpcProvider
+  providers: () => JsonRpcProvider[]
   /** Block capacity limits for batch computation. */
   blockLimits: BlockLimits
   /** Lifecycle events (item-level). */
@@ -150,6 +154,8 @@ export interface PipelineConfig {
    * resolved.
    */
   precomputedCids?: CID[] | Promise<CID[]>
+  /** Wire-level submission strategy. Defaults to `"nonce-tracking"`. */
+  submissionStrategy?: SubmissionStrategyKind
 }
 
 /** Mutable bootstrap cache, populated by `pipelineStore` on first call. */
@@ -224,12 +230,15 @@ export interface PipelineResult extends PipelineStats {
 }
 
 /**
- * `cause` payload on a `BulletinError(STORE_STALLED)`: how many items the
- * chain had finalized when the store gave up. Callers can resume from the
- * chain's current state instead of re-submitting everything.
+ * `cause` payload on a `BulletinError(STORE_STALLED)`: which items the
+ * chain had already accepted when the store gave up. Callers must use
+ * `finalizedIndices` (not the count) to decide what to resume — items can
+ * land out of order under hijack/race conditions, so the set is not always
+ * `[0..finalized)`.
  */
 export interface StallCause {
   readonly finalized: number
+  readonly finalizedIndices: ReadonlySet<number>
 }
 
 export function isStallError(
@@ -238,63 +247,19 @@ export function isStallError(
   return (
     err instanceof BulletinError &&
     err.code === ErrorCode.STORE_STALLED &&
-    typeof (err.cause as StallCause | undefined)?.finalized === "number"
+    (err.cause as StallCause | undefined)?.finalizedIndices instanceof Set
   )
 }
 
-function stallError(finalized: number, reason: string): BulletinError {
+function stallError(
+  finalizedIndices: ReadonlySet<number>,
+  reason: string,
+): BulletinError {
   return new BulletinError(
-    `store stalled: ${reason}; finalized=${finalized}`,
+    `store stalled: ${reason}; finalized=${finalizedIndices.size}`,
     ErrorCode.STORE_STALLED,
-    { finalized } satisfies StallCause,
+    { finalized: finalizedIndices.size, finalizedIndices } satisfies StallCause,
   )
-}
-
-/**
- * Substrate transaction-pool RPC error codes. Stable across substrate
- * versions; see `client/rpc-api/src/author/error.rs`.
- */
-enum AuthorRpcError {
-  InvalidTransaction = 1010,
-  UnknownValidity = 1011,
-  TemporarilyBanned = 1012,
-  AlreadyImported = 1013,
-  TooLowPriority = 1014,
-  CycleDetected = 1015,
-  ImmediatelyDropped = 1016,
-  InvalidTransactionV2 = 1017,
-  UnauthorizedTransaction = 1018,
-  UnknownCustomValidity = 1019,
-  UnknownBuiltinValidity = 1020,
-  FutureTransaction = 1021,
-}
-
-type RpcErrorClass = "terminal" | "retryable" | "already_imported" | "unknown"
-
-function classifyAuthorRpcError(code: number | undefined): RpcErrorClass {
-  switch (code) {
-    // Bad sig / payment / unauthorized / cycle — no amount of retrying helps.
-    case AuthorRpcError.InvalidTransaction:
-    case AuthorRpcError.UnknownValidity:
-    case AuthorRpcError.CycleDetected:
-    case AuthorRpcError.InvalidTransactionV2:
-    case AuthorRpcError.UnauthorizedTransaction:
-    case AuthorRpcError.UnknownCustomValidity:
-    case AuthorRpcError.UnknownBuiltinValidity:
-      return "terminal"
-    // Pool capacity / hash bans / future nonce — block production will drain
-    // the pool and clear bans; keep going.
-    case AuthorRpcError.TemporarilyBanned:
-    case AuthorRpcError.TooLowPriority:
-    case AuthorRpcError.ImmediatelyDropped:
-    case AuthorRpcError.FutureTransaction:
-      return "retryable"
-    // The tx is sitting in the pool from a prior wave — count as success.
-    case AuthorRpcError.AlreadyImported:
-      return "already_imported"
-    default:
-      return "unknown"
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -366,10 +331,13 @@ export async function pipelineStore(
   // content hash.
   const unsigned = signer === undefined
 
-  const { wsUrls, createProvider, blockLimits, onEvent } = config
+  const { providers: providersFactory, blockLimits, onEvent } = config
   const completeOn = config.completeOn ?? "finalized"
-  if (wsUrls.length === 0) {
-    throw new Error("pipelineStore: at least one wsUrl is required")
+  const providers = providersFactory()
+  if (providers.length === 0) {
+    throw new Error(
+      "pipelineStore: providers() must return at least one provider",
+    )
   }
 
   // Kick off CID computation immediately so it runs in parallel with the
@@ -514,15 +482,11 @@ export async function pipelineStore(
   // Connections
   // ---------------------------------------------------------------------------
 
-  // Monitor: one client for block-following + nonce queries
-  const monitorClient = createSubstrateClient(
-    createProvider(wsUrls[0] as string),
-  )
+  // Monitor: providers[0] drives chainHead/nonce queries.
+  const monitorClient = createSubstrateClient(providers[0] as JsonRpcProvider)
 
-  // Submission: one client per RPC URL (broadcast to all)
-  const submitClients = wsUrls.map((url) =>
-    createSubstrateClient(createProvider(url)),
-  )
+  // Submission: one substrate client per provider (broadcast to all).
+  const submitClients = providers.map((p) => createSubstrateClient(p))
 
   const startTime = Date.now()
   let startNonce = 0
@@ -531,33 +495,65 @@ export async function pipelineStore(
   let done = false
   let offlineStorage: OfflineTransactionStorage | undefined
 
-  // Per-item assigned nonce. Initialized to `startNonce + i` for each item;
-  // can change when an item's nonce gets hijacked and the retry queue
-  // re-assigns a fresh nonce.
+  // Per-item assigned nonce. Undefined while an item sits in `sendQueue`;
+  // set when the consumer assigns a nonce and broadcasts; cleared on
+  // hijack or retryable-broadcast (item is then re-enqueued).
   const itemNonce: Array<number | undefined> = new Array(totalItems).fill(
     undefined,
   )
-  // Retry budget per item — incremented each time we re-sign with a fresh
-  // nonce. Caps at MAX_RETRY_ATTEMPTS; beyond that we emit ItemFailed.
+  // Retry budget per item — incremented each time we re-enqueue after a
+  // hijack or retryable broadcast error. Caps at MAX_RETRY_ATTEMPTS;
+  // beyond that we emit ItemFailed.
   const retryAttempts: number[] = new Array(totalItems).fill(0)
-  // Highest nonce ever assigned to any item. Retries pull `nextFreeNonce++`
-  // to avoid colliding with already-broadcast nonces.
+  // Monotonic nonce counter. Each broadcast assigns the next N consecutive
+  // nonces starting here, then advances. Hijacked nonces are "wasted" —
+  // never reused, the counter only moves forward.
   let nextFreeNonce = 0
   // Items whose retry budget was exhausted — these get `ItemFailed` once
   // and are excluded from subsequent waves.
   const failedItems = new Set<number>()
-  const MAX_RETRY_ATTEMPTS = 3
+  const MAX_RETRY_ATTEMPTS = 10
 
-  // Watchdog: a healthy WS+follow delivers a chainHead event every block
-  // (~6 s). If we go too long without one, the underlying WS is most likely
-  // dead and our chainHead restart can't recover (it would re-issue against
-  // the same dead client). Bail out with a clear error so callers can retry
-  // with a fresh client rather than silently looping forever.
+  // FIFO queue of item indices awaiting broadcast. Populated at init with
+  // every item; consumer (bestBlockChanged) drains while pool depth is
+  // below target. Hijack detection and retryable broadcast errors
+  // re-enqueue at the FRONT (priority over fresh items).
+  const sendQueue: number[] = []
+
+  // Submission strategy: today only nonce-tracking is implemented. The
+  // `SubmissionStrategyKind` union and `config.submissionStrategy` field
+  // exist so future strategies can be added without rewriting the pipeline
+  // (see `docs/watch-strategy-design.md` for the watch strategy we
+  // prototyped and removed).
+  const _strategyKind: SubmissionStrategyKind =
+    config.submissionStrategy ?? "nonce-tracking"
+  const strategy: SubmissionStrategy = createNonceTrackingStrategy({
+    submitClients,
+  })
+
+  // Watchdog #1: any chainHead event (`initialized`/`newBlock`/
+  // `bestBlockChanged`/`finalized`/`stop`) keeps this fresh. Detects
+  // total WS-stream silence — unrecoverable from our side and signals
+  // the outer retry to open a new client.
   const STALL_TIMEOUT_MS = 18_000
   let lastChainEventAt = Date.now()
   let stallTimer: ReturnType<typeof setInterval> | undefined
   const touchChainEvent = (): void => {
     lastChainEventAt = Date.now()
+  }
+
+  // Watchdog #2: only refreshed when our `bestBlockChanged` or `finalized`
+  // handler actually completes (post-reconcile, post-emit, post-drain).
+  // Defends against the case where the chainHead WS keeps sending
+  // `newBlock` heartbeats — touching watchdog #1 — but `bestBlockChanged`
+  // / `finalized` stop reaching our handler (PAPI subscription drift,
+  // pin-limit stalls). Bigger threshold than #1 (~5 block times) because
+  // it's expected to be quieter under contention.
+  const PROGRESS_TIMEOUT_MS = 30_000
+  let lastProgressAt = Date.now()
+  let progressTimer: ReturnType<typeof setInterval> | undefined
+  const touchProgress = (): void => {
+    lastProgressAt = Date.now()
   }
 
   // Substrate transaction-pool error codes from `author_submitExtrinsic`.
@@ -591,6 +587,11 @@ export async function pipelineStore(
   let lastDeferredCode: number | undefined
   let lastDeferredCount = 0
 
+  // Per-block status snapshot, logged only when state changed vs previous
+  // event. Surfaces quiet windows where items are waiting in pool (no
+  // wave/hijack/deferred log) so the script doesn't look stuck.
+  let lastStatusSig = ""
+
   // Mutable scalars consumed by the per-block helpers (see WaveState).
   const tracking = {
     inclusionRecordedTo: 0,
@@ -617,6 +618,7 @@ export async function pipelineStore(
     inBlockEmitted,
     finalizedEmitted,
     emit,
+    strategy,
   }
 
   return new Promise<PipelineResult>((resolve, reject) => {
@@ -656,6 +658,11 @@ export async function pipelineStore(
       } catch {
         /* ignore */
       }
+      try {
+        strategy.teardown()
+      } catch {
+        /* ignore */
+      }
       for (const c of submitClients) {
         try {
           c.destroy()
@@ -667,13 +674,28 @@ export async function pipelineStore(
         clearInterval(stallTimer)
         stallTimer = undefined
       }
+      if (progressTimer !== undefined) {
+        clearInterval(progressTimer)
+        progressTimer = undefined
+      }
     }
 
     function failWithStall(reason: string): void {
       if (done) return
       done = true
       teardown()
-      reject(stallError(counters.finalized, reason))
+      // Only items that have been emitted as completed at the requested
+      // level (best-block for completeOn="best", finalized otherwise) are
+      // safe to skip on resume. `storedAt` alone is insufficient — a best-
+      // block observation can be reorged out before finalization, and
+      // re-submitting after that is desirable.
+      const completedFlags =
+        completeOn === "best" ? inBlockEmitted : finalizedEmitted
+      const finalizedIndices = new Set<number>()
+      for (let i = 0; i < completedFlags.length; i++) {
+        if (completedFlags[i]) finalizedIndices.add(i)
+      }
+      reject(stallError(finalizedIndices, reason))
     }
 
     function finish(): void {
@@ -816,13 +838,12 @@ export async function pipelineStore(
                 const [nonce, genesisHash, metadataRaw, properties] = reads
                 if (!unsigned) {
                   startNonce = nonce
+                  // Consumer assigns nonces sequentially from nextFreeNonce
+                  // as it drains the queue. expectedFinalNonce tracks the
+                  // upper bound — initially startNonce + items.length, then
+                  // grows as hijack-recovery consumes additional nonces.
+                  nextFreeNonce = startNonce
                   expectedFinalNonce = startNonce + items.length
-                  // Each item gets its sequential nonce; nextFreeNonce
-                  // points at the first unused slot, used for hijack retries.
-                  for (let i = 0; i < totalItems; i++) {
-                    itemNonce[i] = startNonce + i
-                  }
-                  nextFreeNonce = startNonce + totalItems
                   // `system_properties.ss58Format` is sometimes returned as a
                   // string; coerce. If missing, fall back to 42 (generic Substrate).
                   const ss58Format =
@@ -867,8 +888,29 @@ export async function pipelineStore(
                   Binary.toHex(cid.multihash.digest),
                 )
                 state.contentHashesHex = contentHashesHex
+                // Diagnostic: log the first 12 hex chars of every content
+                // hash so cross-session collisions (which would cause the
+                // reconciler to read the SAME TBCH entry for two different
+                // items) can be detected in test logs.
+                // biome-ignore lint/suspicious/noConsole: content-hash diagnostic
+                console.log(
+                  `[pipelineStore] content_hashes (startNonce=${startNonce}): ${contentHashesHex.map((h, i) => `i${i}=${h.slice(0, 12)}`).join(" ")}`,
+                )
                 for (let i = 0; i < totalItems; i++) {
                   emit(UploadStatus.ItemStarted, i)
+                  sendQueue.push(i)
+                }
+
+                // Bootstrap `lastFinalizedBlock` from chainHead's initial
+                // finalized hash BEFORE flipping `initialized = true`. The
+                // mortal-era anchor reads from `lastFinalizedBlock`, so the
+                // first wave needs it set or we'd fall back to best block —
+                // which can reorg out and invalidate every tx we sign with
+                // it (BadProof at block-time validation, blocks then build
+                // empty against a queued pool).
+                if (!unsigned) {
+                  const finNumber = await getBlockNumber(lastHash)
+                  lastFinalizedBlock = { hash: lastHash, number: finNumber }
                 }
 
                 initialized = true
@@ -939,83 +981,87 @@ export async function pipelineStore(
                 recordLatency(state, Date.now(), "in_block")
                 emitInBlockEvents(state)
 
-                // Detect hijack: pending items whose nonce was used by the
-                // chain (chainNonce > itemNonce) but whose content_hash
-                // isn't in TBCH → someone else's tx took our nonce slot.
-                // Uses on-chain `chainNonce` only — `poolNonce` would
-                // false-positive on our own in-pool txs. Skip entirely in
-                // unsigned mode (no nonces to track).
-                if (!unsigned) {
+                // Deferred verification model.
+                //
+                // Instead of reactive per-block hijack detection (which
+                // mis-fires on transient reorgs and bounces around with
+                // Deferred verification: wait until the chain has
+                // executed at least as many of our account's nonces as
+                // we assigned (`chainNonce >= expectedFinalNonce`). At
+                // that point every in-flight item's outcome is
+                // committed — either its content is in TBCH (success)
+                // or another tx won the slot (hijack / era-invalidated
+                // / pool-dropped — all recover the same way: clear the
+                // nonce, re-enqueue, next wave assigns a fresh nonce
+                // above the current pool tail).
+                //
+                // We compare `chainNonce` (the actual on-chain account
+                // nonce read at the best block), NOT
+                // `accountNextIndex` (pool-aware). accountNextIndex
+                // adds pool-pending count to chainNonce — using it
+                // would fire the trigger while our own txs are still
+                // queued in the pool, causing every item to be falsely
+                // flagged as missing and re-issued at higher nonces
+                // (double submission). chainNonce only advances when a
+                // tx actually executes, so seeing chainNonce reach
+                // expectedFinalNonce really does mean every nonce we
+                // assigned has been committed to some tx.
+                if (!unsigned && chainNonce >= expectedFinalNonce) {
+                  const missing: Array<{ i: number; nonce: number; attempts: number }> = []
+                  const stored: number[] = []
+                  const givenUp: Array<{ i: number; nonce: number }> = []
                   for (let i = 0; i < totalItems; i++) {
-                    if (storedAt[i] !== undefined) continue
                     if (failedItems.has(i)) continue
+                    if (storedAt[i] !== undefined) {
+                      stored.push(i)
+                      continue
+                    }
                     const nonce = itemNonce[i]
-                    if (nonce === undefined) continue
-                    if (chainNonce <= nonce) continue
-                    // Hijacked at nonce `nonce`.
+                    if (nonce === undefined) continue // queued, not yet submitted
                     const attempts = retryAttempts[i] ?? 0
                     if (attempts >= MAX_RETRY_ATTEMPTS) {
-                      // biome-ignore lint/suspicious/noConsole: visibility for permanent failure
-                      console.warn(
-                        `[pipelineStore] item ${i}: hijacked ${MAX_RETRY_ATTEMPTS} times (nonce ${nonce}); giving up`,
-                      )
+                      givenUp.push({ i, nonce })
                       failedItems.add(i)
+                      strategy.onItemSettled(i)
                       onEvent?.({
                         type: UploadStatus.ItemFailed,
                         index: i,
                         total: totalItems,
                         cid: cids[i] as CID,
                         error: new BulletinError(
-                          `item ${i}: nonce slot repeatedly hijacked by another transaction from the same signer (${MAX_RETRY_ATTEMPTS} attempts)`,
+                          `item ${i}: failed to land after ${MAX_RETRY_ATTEMPTS} attempts`,
                           ErrorCode.HIJACK_BUDGET_EXCEEDED,
                         ),
                       })
                       continue
                     }
-                    // Pick the next free nonce. Use max(local counter,
-                    // poolNonce) so concurrent same-account uploaders pick
-                    // non-overlapping slots — the pool's view of "next
-                    // available" already accounts for OTHER processes'
-                    // pending txs, which our local counter doesn't see.
-                    const fresh = Math.max(nextFreeNonce, poolNonce)
-                    nextFreeNonce = fresh + 1
-                    // biome-ignore lint/suspicious/noConsole: ops visibility for transient hijacks
-                    console.warn(
-                      `[pipelineStore] item ${i}: nonce ${nonce} hijacked at chain=${chainNonce}; retry attempt ${attempts + 1}/${MAX_RETRY_ATTEMPTS} with nonce ${fresh}`,
-                    )
-                    itemNonce[i] = fresh
+                    missing.push({ i, nonce, attempts })
                     retryAttempts[i] = attempts + 1
+                    itemNonce[i] = undefined
                   }
-                  // Rolling expected-final-nonce keeps the "all-done" check
-                  // aware of fresh nonces consumed by retries.
-                  expectedFinalNonce = nextFreeNonce
+                  if (missing.length > 0 || givenUp.length > 0) {
+                    // biome-ignore lint/suspicious/noConsole: verification visibility
+                    console.warn(
+                      `[pipelineStore] verify @chain=${chainNonce}/exp=${expectedFinalNonce}: stored=${stored.length}, missing=${missing.length} [${missing
+                        .map((m) => `i${m.i}@n${m.nonce}(att${m.attempts}->${m.attempts + 1})`)
+                        .join(",")}], giveup=${givenUp.length}${givenUp.length ? ` [${givenUp.map((g) => `i${g.i}@n${g.nonce}`).join(",")}]` : ""}`,
+                    )
+                    const inQueue = new Set(sendQueue)
+                    for (const m of missing) {
+                      if (!inQueue.has(m.i)) sendQueue.unshift(m.i)
+                    }
+                  }
                 }
 
-                // Two pending sets:
-                //   pendingForFinal — anything not yet stored and not
-                //     failed; drives the "are we done" check.
-                //   pendingForBroadcast — subset of pendingForFinal whose
-                //     itemNonce is NOT already in the pool. Items in pool
-                //     skipped to avoid spamming with new-era variants.
-                //     Hijack-reassigned items have itemNonce ≥ poolNonce.
-                const pendingForFinal: number[] = []
-                const pendingForBroadcast: number[] = []
+                // Completion check: nothing left to broadcast and nothing
+                // in flight that isn't yet stored.
+                let pendingForFinalCount = 0
                 for (let i = 0; i < totalItems; i++) {
                   if (storedAt[i] !== undefined) continue
                   if (failedItems.has(i)) continue
-                  pendingForFinal.push(i)
-                  // Dispatch dedup: signed uses nonce-vs-pool check;
-                  // unsigned tracks per-item broadcast state locally
-                  // (no nonces). Either way: skip if already in pool.
-                  if (unsigned) {
-                    if (broadcastedItems.has(i)) continue
-                  } else {
-                    const nonce = itemNonce[i]
-                    if (nonce !== undefined && nonce < poolNonce) continue
-                  }
-                  pendingForBroadcast.push(i)
+                  pendingForFinalCount++
                 }
-                if (pendingForFinal.length === 0) {
+                if (pendingForFinalCount === 0) {
                   // Everyone stored or failed. The `finalized` handler
                   // will issue the termination call.
                   tracking.bestAtTargetStreak += 1
@@ -1038,18 +1084,65 @@ export async function pipelineStore(
                   return
                 }
 
-                if (pendingForBroadcast.length === 0) return
+                // Consumer: drain `sendQueue` up to a block-buffer's worth.
+                // selectWaveBatch internally caps at WAVE_BUFFER_BLOCKS
+                // blocks of weight/length/count, so steady-state we keep
+                // ~that many items in pool ahead of the block author.
+                if (sendQueue.length === 0) return
                 const waveIndexes = selectWaveBatch(
                   items,
-                  pendingForBroadcast,
+                  sendQueue,
                   blockLimits,
                 )
                 if (waveIndexes.length === 0) return
+                // Pop the consumed prefix from the queue.
+                sendQueue.splice(0, waveIndexes.length)
+
+                // Assign consecutive nonces from the running counter to
+                // any item that doesn't already have one. Items kept on
+                // the queue by a retryable broadcast error (1014/1016)
+                // arrive here with `itemNonce[i]` already set — they
+                // get re-broadcast at the SAME nonce so we don't leave
+                // a gap in the account's nonce sequence (same-account
+                // txs are processed in nonce order).
+                if (!unsigned) {
+                  let next = Math.max(nextFreeNonce, poolNonce)
+                  for (let k = 0; k < waveIndexes.length; k++) {
+                    const i = waveIndexes[k] as number
+                    if (itemNonce[i] === undefined) {
+                      itemNonce[i] = next
+                      next++
+                    }
+                  }
+                  nextFreeNonce = next
+                  expectedFinalNonce = next
+                }
 
                 // Re-sign every wave: reusing prior bytes is unsafe (stale
                 // era → BadProof, banned-hash on pool eviction). The wave
                 // also picks up any items whose itemNonce was bumped above
                 // for hijack recovery.
+                //
+                // Anchor the mortal era at the last *finalized* block, not
+                // best. The era's signed payload includes the hash of the
+                // anchor block; if that anchor reorgs out, block-time
+                // validation reads a different hash at that height in the
+                // canonical chain and rejects the tx with BadProof. Pool
+                // then evicts and the next block builder repeats the same
+                // failure, producing empty blocks against a queued pool.
+                // Finalized blocks never reorg out, so the signature is
+                // valid on any branch the chain takes. The 64-block era
+                // period easily absorbs the ~6-block finality lag.
+                //
+                // `lastFinalizedBlock` is bootstrapped during initialized
+                // (before this wave can fire) and refreshed on every
+                // `finalized` chainHead event. Unsigned waves pass
+                // `bestBlock` as a no-op — signBatch ignores anchor when
+                // signer is undefined.
+                const eraAnchor =
+                  !unsigned && lastFinalizedBlock
+                    ? lastFinalizedBlock
+                    : { number: bestBlockNumber, hash: bestBlockHash }
                 const signed = await signBatch({
                   storage: offlineStorage!,
                   api,
@@ -1057,7 +1150,7 @@ export async function pipelineStore(
                   items,
                   indexes: waveIndexes,
                   itemNonce,
-                  anchor: { number: bestBlockNumber, hash: bestBlockHash },
+                  anchor: eraAnchor,
                 })
 
                 // Record first-broadcast timestamp + wave-specific anchor
@@ -1076,28 +1169,129 @@ export async function pipelineStore(
                   terminalMsg: waveTerminalMsg,
                   retryableCount: waveRetryableCount,
                   retryableLastCode: waveRetryableLastCode,
-                } = await broadcastWave(signed, submitClients, counters)
+                  itemResults,
+                } = await strategy.broadcastWave({
+                  signed,
+                  waveIndexes,
+                  counters,
+                })
                 counters.waves++
 
-                // Mark items as broadcast only after a clean wave. If
-                // any submission was retryable (banned hash, pool full,
-                // future nonce, etc.), keep these items eligible for
-                // re-broadcast next wave so they don't sit waiting on
-                // the no-progress watchdog.
-                if (unsigned && waveRetryableCount === 0) {
-                  for (const i of waveIndexes) broadcastedItems.add(i)
+                // Capture wave's nonce range BEFORE possible re-enqueue
+                // (which may clear itemNonce for fresh-nonce retries).
+                const firstNonce =
+                  !unsigned && waveIndexes.length > 0
+                    ? itemNonce[waveIndexes[0] as number]
+                    : undefined
+                const lastNonce =
+                  !unsigned && waveIndexes.length > 0
+                    ? itemNonce[waveIndexes[waveIndexes.length - 1] as number]
+                    : undefined
+
+                // Per-item disposition of every wave entry. Two reject
+                // classes are handled here:
+                //
+                //   retryable (1014/1016, FutureTransaction, TooLowPriority):
+                //     Pool was full or our priority lost. Re-broadcast at
+                //     the SAME nonce next wave — re-assigning a higher
+                //     nonce would create a gap in the account's nonce
+                //     sequence and same-account txs are processed in
+                //     nonce order. Doesn't burn the retry budget (pool
+                //     pressure isn't a hijack).
+                //
+                //   terminal (1010 InvalidTransaction etc.):
+                //     The slot is unusable — most commonly a concurrent
+                //     same-account uploader grabbed the nonce, but could
+                //     also be a stale era or bad proof. Clear nonce, get
+                //     a fresh one next drain, increment retry budget.
+                //     We do NOT bail the wave (only individual items are
+                //     affected); the outer retry layer still catches
+                //     budget exhaustion via failedItems.
+                const reRejected: number[] = []
+                if (!unsigned) {
+                  for (let k = 0; k < waveIndexes.length; k++) {
+                    const i = waveIndexes[k] as number
+                    const result = itemResults[k]
+                    if (result?.accepted) continue
+                    // Was this terminal or retryable?
+                    const code = result?.retryableCode
+                    if (code === undefined) {
+                      // No retryable code recorded means every client
+                      // returned terminal. Treat as per-item terminal —
+                      // refresh the nonce so we don't loop on the same
+                      // poisoned slot.
+                      const attempts = retryAttempts[i] ?? 0
+                      if (attempts >= MAX_RETRY_ATTEMPTS) {
+                        // biome-ignore lint/suspicious/noConsole: visibility for permanent failure
+                        console.warn(
+                          `[pipelineStore] item ${i}: terminal RPC error ${MAX_RETRY_ATTEMPTS} times (nonce ${itemNonce[i]}); giving up`,
+                        )
+                        failedItems.add(i)
+                        strategy.onItemSettled(i)
+                        onEvent?.({
+                          type: UploadStatus.ItemFailed,
+                          index: i,
+                          total: totalItems,
+                          cid: cids[i] as CID,
+                          error: new BulletinError(
+                            `item ${i}: terminal RPC error after ${MAX_RETRY_ATTEMPTS} attempts`,
+                            ErrorCode.TRANSACTION_FAILED,
+                          ),
+                        })
+                        continue
+                      }
+                      itemNonce[i] = undefined
+                      retryAttempts[i] = attempts + 1
+                      reRejected.push(i)
+                    } else {
+                      // Retryable: keep nonce, just re-broadcast next wave.
+                      reRejected.push(i)
+                    }
+                  }
+                } else {
+                  // Unsigned: same intent, but no nonces. Just re-enqueue
+                  // anything not accepted by the pool.
+                  for (let k = 0; k < waveIndexes.length; k++) {
+                    const i = waveIndexes[k] as number
+                    if (itemResults[k]?.accepted) {
+                      broadcastedItems.add(i)
+                    } else {
+                      reRejected.push(i)
+                    }
+                  }
+                }
+                if (reRejected.length > 0) sendQueue.unshift(...reRejected)
+
+                // Visibility for the producer/consumer queue: one line per
+                // wave showing how many items were broadcast, the nonce
+                // range used, what's left in the queue, and the per-item
+                // index→nonce mapping for cross-correlation with the
+                // verification log.
+                if (!unsigned && waveIndexes.length > 0) {
+                  const mapping = waveIndexes
+                    .map(
+                      (i) =>
+                        `i${i}@n${itemNonce[i]}${
+                          retryAttempts[i] ? `(r${retryAttempts[i]})` : ""
+                        }`,
+                    )
+                    .join(",")
+                  // biome-ignore lint/suspicious/noConsole: queue-drain visibility
+                  console.log(
+                    `[pipelineStore] wave #${counters.waves}: broadcast ${waveIndexes.length} items (nonces ${firstNonce}..${lastNonce}) [${mapping}]; queue=${sendQueue.length} expFinal=${expectedFinalNonce}`,
+                  )
                 }
 
+                // Wave-level terminal is now only logged for diagnostics —
+                // per-item handling above already re-enqueued or failed
+                // the affected items. No more whole-wave abort on a single
+                // 1010 (which under concurrent same-account uploads is
+                // routine).
                 if (waveTerminalCode !== undefined) {
-                  // biome-ignore lint/suspicious/noConsole: terminal — show the user why
+                  // biome-ignore lint/suspicious/noConsole: diagnostic for terminal codes seen in wave
                   console.warn(
-                    `[pipelineStore] wave #${counters.waves}: terminal RPC error (code=${waveTerminalCode}, msg=${waveTerminalMsg?.slice(0, 120)})`,
+                    `[pipelineStore] wave #${counters.waves}: terminal RPC code observed (code=${waveTerminalCode}, msg=${waveTerminalMsg?.slice(0, 120)}); affected items re-enqueued with fresh nonces`,
                   )
-                  // [TERMINATE-STALL] terminal RPC code seen in broadcastWave
-                  failWithStall(
-                    `terminal RPC error (code=${waveTerminalCode}): ${waveTerminalMsg}`,
-                  )
-                  return
                 }
                 if (waveRetryableCount > 0) {
                   // Diagnostic: only warn when the wave's signature changes
@@ -1121,6 +1315,37 @@ export async function pipelineStore(
                   lastDeferredCode = undefined
                   lastDeferredCount = 0
                 }
+
+                // Quiet-window visibility: emit a status snapshot when the
+                // pipeline is between actions (nothing to broadcast, items
+                // pending in pool). Skipped while the signature is the
+                // same as the previous event so a steady-state wait
+                // produces ONE line, not one per block.
+                if (!unsigned) {
+                  let inflightCount = 0
+                  let storedCount = 0
+                  for (let i = 0; i < totalItems; i++) {
+                    if (storedAt[i] !== undefined) {
+                      storedCount++
+                    } else if (
+                      itemNonce[i] !== undefined &&
+                      !failedItems.has(i)
+                    ) {
+                      inflightCount++
+                    }
+                  }
+                  const sig = `q=${sendQueue.length},pool=${inflightCount},stored=${storedCount},failed=${failedItems.size},chain=${chainNonce},next=${nextFreeNonce}`
+                  if (
+                    sig !== lastStatusSig &&
+                    (sendQueue.length > 0 || inflightCount > 0)
+                  ) {
+                    // biome-ignore lint/suspicious/noConsole: quiet-window visibility
+                    console.log(`[pipelineStore] #${bestBlockNumber} ${sig}`)
+                    lastStatusSig = sig
+                  }
+                }
+                // Progress watchdog: handler completed successfully.
+                touchProgress()
               })
               break
             }
@@ -1139,17 +1364,10 @@ export async function pipelineStore(
 
                 if (!initialized || done) return
 
-                // Unsigned mode skips finNonce — completion is purely
-                // TBCH-driven (all items have storedAt set).
-                const [finNonce, finBlockNumber] = unsigned
-                  ? await Promise.all([
-                      Promise.resolve(0),
-                      getBlockNumber(lastHash),
-                    ])
-                  : await Promise.all([
-                      readNonceAtBlock(monitorClient, signerHex, lastHash),
-                      getBlockNumber(lastHash),
-                    ])
+                // Queue model: completion is purely TBCH-driven (storedAt
+                // set for every item), so we no longer need the account
+                // nonce at the finalized block.
+                const finBlockNumber = await getBlockNumber(lastHash)
                 lastFinalizedBlock = { hash: lastHash, number: finBlockNumber }
 
                 // Reconcile at the finalized block — populates `storedAt[i]`
@@ -1159,12 +1377,33 @@ export async function pipelineStore(
                 recordLatency(state, Date.now(), "finalized")
                 emitFinalizedEvents(state)
 
-                if (
-                  counters.finalized >= items.length ||
-                  (!unsigned && finNonce >= expectedFinalNonce)
-                ) {
-                  finish() // [TERMINATE-OK] all items finalized OR nonce reached target
+                // Completion: every input item is either stored or
+                // permanently failed (hijack budget exceeded). The
+                // queue model guarantees items are re-enqueued on every
+                // pool rejection / hijack, so `storedAt` is the
+                // authoritative signal — no nonce-based fallback
+                // needed (it would over-trigger when items sit in
+                // `sendQueue` between broadcasts).
+                if (counters.finalized + failedItems.size >= items.length) {
+                  // Pre-finish summary: per-item state classification so
+                  // we can audit the chain accounting after the test.
+                  // biome-ignore lint/suspicious/noConsole: completion summary
+                  const stored: number[] = []
+                  const failed: number[] = []
+                  const orphan: number[] = []
+                  for (let i = 0; i < totalItems; i++) {
+                    if (failedItems.has(i)) failed.push(i)
+                    else if (storedAt[i] !== undefined) stored.push(i)
+                    else orphan.push(i)
+                  }
+                  // biome-ignore lint/suspicious/noConsole: completion summary
+                  console.log(
+                    `[pipelineStore] finish @finalized=${finBlockNumber}: stored=${stored.length} [${stored.map((i) => `i${i}@blk${storedAt[i]?.blockNumber}`).join(",")}], failed=${failed.length}${failed.length ? ` [${failed.join(",")}]` : ""}${orphan.length ? `, ORPHAN=${orphan.length} [${orphan.join(",")}]` : ""}`,
+                  )
+                  finish() // [TERMINATE-OK] all items finalized or failed
                 }
+                // Progress watchdog: handler completed successfully.
+                touchProgress()
               })
               break
             }
@@ -1197,6 +1436,20 @@ export async function pipelineStore(
     // Don't pin the Node event loop on the watchdog alone; the chainHead
     // subscription keeps the loop alive while the pipeline is active.
     stallTimer.unref?.()
+
+    progressTimer = setInterval(() => {
+      if (done) return
+      if (Date.now() - lastProgressAt > PROGRESS_TIMEOUT_MS) {
+        // [TERMINATE-STALL] no bestBlock/finalized handler progress.
+        // Outer retry will reopen a fresh client and TBCH-dedup any
+        // items that landed but never got finalized through this
+        // subscription.
+        failWithStall(
+          `no bestBlock/finalized progress for ${PROGRESS_TIMEOUT_MS} ms`,
+        )
+      }
+    }, 6_000)
+    progressTimer.unref?.()
   })
 }
 
@@ -1257,6 +1510,8 @@ interface WaveState {
   inBlockEmitted: boolean[]
   finalizedEmitted: boolean[]
   emit: (status: UploadStatus, i: number) => void
+  /** Submission strategy — notified when an item is settled at finality. */
+  strategy: SubmissionStrategy
 }
 
 /**
@@ -1292,11 +1547,22 @@ async function reconcileAtBlock(
     const entry = tbch.get(normalizeHex(hashes[k] as string))
     const anchor = state.submissionAnchorBlock[i]!
     if (entry && entry.blockNumber >= anchor) {
+      // Log only first-time set, to keep logs tractable
+      if (state.storedAt[i] === undefined) {
+        // biome-ignore lint/suspicious/noConsole: stored-set diagnostic
+        console.log(
+          `[reconcile] item ${i}: storedAt SET blk=${entry.blockNumber} idx=${entry.extrinsicIndex} (anchor=${anchor}, hash=${hashes[k]?.slice(0, 12)}, queried=${blockHash.slice(0, 10)})`,
+        )
+      }
       state.storedAt[i] = entry
     } else if (state.storedAt[i] !== undefined) {
       // Was stored, no longer present at this block — reorg or
       // out-of-retention removal. Caller handles re-emission via the
       // `inBlockEmitted` flag.
+      // biome-ignore lint/suspicious/noConsole: reorg-out visibility
+      console.warn(
+        `[reconcile] item ${i}: storedAt cleared at block ${blockHash.slice(0, 10)} (previous=blk${state.storedAt[i]?.blockNumber}, anchor=${anchor}, tbch=${entry?.blockNumber ?? "missing"})`,
+      )
       state.storedAt[i] = undefined
     }
   }
@@ -1363,6 +1629,7 @@ function emitFinalizedEvents(s: WaveState): void {
       if (!s.finalizedEmitted[i]) {
         s.emit(UploadStatus.ItemFinalized, i)
         s.finalizedEmitted[i] = true
+        s.strategy.onItemSettled(i)
       }
     }
   }
@@ -1395,63 +1662,6 @@ function runNoProgressWatchdog(
 // ---------------------------------------------------------------------------
 // Batch signing
 // ---------------------------------------------------------------------------
-
-interface WaveResult {
-  terminalCode?: number
-  terminalMsg?: string
-  retryableCount: number
-  retryableLastCode?: number
-}
-
-/**
- * Broadcast every signed tx to every RPC, classifying each rejection by
- * code. Returns the wave summary the caller uses to drive bail/diagnostic
- * decisions. Mutates `counters.txsBroadcast` / `counters.broadcastErrors`.
- */
-async function broadcastWave(
-  signed: string[],
-  submitClients: SubstrateClient[],
-  counters: { txsBroadcast: number; broadcastErrors: number },
-): Promise<WaveResult> {
-  let terminalCode: number | undefined
-  let terminalMsg: string | undefined
-  let retryableCount = 0
-  let retryableLastCode: number | undefined
-  const promises: Promise<void>[] = []
-  for (const hex of signed) {
-    for (const client of submitClients) {
-      promises.push(
-        client
-          .request("author_submitExtrinsic", [hex])
-          .then(() => {
-            counters.txsBroadcast++
-          })
-          .catch((err: unknown) => {
-            const e = err as { code?: number; message?: string }
-            switch (classifyAuthorRpcError(e?.code)) {
-              case "already_imported":
-                counters.txsBroadcast++
-                return
-              case "terminal":
-                counters.broadcastErrors++
-                if (terminalCode === undefined) {
-                  terminalCode = e.code
-                  terminalMsg = e.message
-                }
-                return
-              default:
-                // retryable + unknown both fall here.
-                counters.broadcastErrors++
-                retryableCount++
-                retryableLastCode = e?.code
-            }
-          }),
-      )
-    }
-  }
-  await Promise.allSettled(promises)
-  return { terminalCode, terminalMsg, retryableCount, retryableLastCode }
-}
 
 interface SignBatchArgs {
   /**
@@ -1571,17 +1781,33 @@ function computeBatchEnd(
 }
 
 /**
- * Select the prefix of `pendingIndexes` that fits in one block. Same
- * weight / length / count limits as `computeBatchEnd`, but accepts a
- * non-contiguous index list — required once hijack-recovery can leave
- * gaps in the pending set (e.g., item 5 still pending while items 6–10
- * already finalized).
+ * How many blocks of pool buffer to maintain per wave. Broadcasting one
+ * block's worth per bestBlock event leaves the pool empty whenever the
+ * block author runs slightly before us — full blocks degrade to 2–3
+ * tx/block. Multiplying by N keeps ~N blocks queued in the pool so the
+ * author always has items to grab. Also matters under hijack recovery:
+ * when chain advances by K blocks at once and K items are reassigned,
+ * all of them get rebroadcast in a single wave instead of trickled out
+ * one block at a time.
+ */
+const WAVE_BUFFER_BLOCKS = 3
+
+/**
+ * Select the prefix of `pendingIndexes` that fits in `bufferBlocks`
+ * blocks. Same weight / length / count limits as `computeBatchEnd`, but
+ * accepts a non-contiguous index list — required once hijack-recovery
+ * can leave gaps in the pending set (e.g., item 5 still pending while
+ * items 6–10 already finalized).
  */
 function selectWaveBatch(
   items: UploadItem[],
   pendingIndexes: number[],
   limits: BlockLimits,
+  bufferBlocks: number = WAVE_BUFFER_BLOCKS,
 ): number[] {
+  const maxWeight = limits.maxNormalWeight * BigInt(bufferBlocks)
+  const maxLength = limits.normalBlockLength * bufferBlocks
+  const maxTxs = limits.maxBlockTransactions * bufferBlocks
   const selected: number[] = []
   let accWeight = 0n
   let accLength = 0
@@ -1590,9 +1816,9 @@ function selectWaveBatch(
     const txWeight =
       limits.storeWeightBase + limits.storeWeightPerByte * BigInt(size)
     const txLength = size + limits.extrinsicOverhead
-    if (accWeight + txWeight > limits.maxNormalWeight) break
-    if (accLength + txLength > limits.normalBlockLength) break
-    if (selected.length >= limits.maxBlockTransactions) break
+    if (accWeight + txWeight > maxWeight) break
+    if (accLength + txLength > maxLength) break
+    if (selected.length >= maxTxs) break
     accWeight += txWeight
     accLength += txLength
     selected.push(idx)
@@ -1642,12 +1868,29 @@ async function readStoredAtBlock(
   contentHashHex: string,
   blockHash: string,
 ): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
+  return readStoredAt(api, contentHashHex, blockHash)
+}
+
+/**
+ * Same as `readStoredAtBlock` but optionally without a block hash — when
+ * the caller doesn't have one (e.g. client-side dedup before the first
+ * pipelineStore call), PAPI's `getValue` queries against the latest
+ * known block.
+ */
+export async function readStoredAt(
+  api: BulletinTypedApi,
+  contentHashHex: string,
+  blockHash?: string,
+): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
   if (!api.query) return undefined
-  const raw =
-    await api.query.TransactionStorage.TransactionByContentHash.getValue(
-      contentHashHex,
-      { at: blockHash },
-    )
+  const raw = blockHash
+    ? await api.query.TransactionStorage.TransactionByContentHash.getValue(
+        contentHashHex,
+        { at: blockHash },
+      )
+    : await api.query.TransactionStorage.TransactionByContentHash.getValue(
+        contentHashHex,
+      )
   if (raw == null) return undefined
   if (Array.isArray(raw)) {
     return { blockNumber: Number(raw[0]), extrinsicIndex: Number(raw[1]) }

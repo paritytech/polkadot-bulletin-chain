@@ -10,7 +10,23 @@
  */
 
 import { Binary } from "polkadot-api"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+
+// File-scope mock: createClient(provider).getTypedApi(descriptor) returns
+// `currentApi`, which each test sets via the helper below.
+// biome-ignore lint/suspicious/noExplicitAny: dynamic apiStub
+let currentApi: any = {}
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => currentApi,
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: () => {},
+    })),
+  }
+})
 import { MockBulletinClient } from "../../src/mock-client"
 import { BulletinError, ErrorCode } from "../../src/types"
 
@@ -71,12 +87,15 @@ describe("ensureAuthorized() pre-flight", () => {
         publicKey: new Uint8Array(32),
         sign: async () => new Uint8Array(64),
       }
-      // biome-ignore lint/suspicious/noExplicitAny: tests touch private method directly
-      const client = new BulletinClient(
-        apiStub as any,
-        signer as any,
-        undefined,
-      )
+      // File-scope vi.mock returns this stub from getTypedApi.
+      currentApi = apiStub
+      const client = new BulletinClient({
+        descriptor: {},
+        // biome-ignore lint/suspicious/noExplicitAny: provider stub
+        providers: () => [{} as any],
+        // biome-ignore lint/suspicious/noExplicitAny: signer stub
+        uploadSigner: signer as any,
+      })
       // biome-ignore lint/suspicious/noExplicitAny: invoking private method by name
       await (client as any).ensureAuthorizedOnChain()
     }

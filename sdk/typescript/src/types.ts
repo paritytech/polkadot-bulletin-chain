@@ -6,6 +6,7 @@
  */
 
 import type { CID } from "multiformats/cid"
+import type { PolkadotSigner } from "polkadot-api"
 
 /**
  * CID codec types supported by Bulletin Chain.
@@ -184,6 +185,59 @@ export interface UploadItem {
 /** Final result returned by `upload()`. `cids[i]` matches `items[i]`. */
 export interface UploadResult {
   cids: CID[]
+}
+
+/**
+ * Per-item entry in {@link UploadEstimate.items}. `skipReason` is set when
+ * the item won't be submitted (either it duplicates an earlier item in the
+ * input, or it's already on chain and the caller opted into `skipExisting`).
+ */
+export interface UploadEstimateItem {
+  index: number
+  cid: CID
+  bytes: number
+  skipReason?: "duplicate_input" | "already_on_chain"
+}
+
+/**
+ * Result of {@link BulletinClient.estimateUpload}: a per-item dispatch plan
+ * plus the aggregated `transactions` / `bytes` the chain will charge to the
+ * caller's authorization. Use it to size `authorizeAccount` capacity or to
+ * preview an upload in a UI before paying.
+ */
+export interface UploadEstimate {
+  /** Items in the input (= items.length). */
+  total: number
+  /** Per-item disposition, parallel to the input array. */
+  items: UploadEstimateItem[]
+  /** Number of `store` extrinsics that would be submitted (= `toUpload.length`). */
+  transactions: number
+  /** Total bytes consumed by the submitted txs (sum of toUpload items' sizes). */
+  bytes: bigint
+  /** Indices duplicating an earlier item by content_hash. Always populated. */
+  duplicateIndices: number[]
+  /** Indices already in the chain's TBCH at estimate time. Populated only if
+   * `skipExisting=true`. */
+  alreadyStored: number[]
+  /** Indices that would be submitted. */
+  toUpload: number[]
+}
+
+/** Options for {@link BulletinClient.estimateUpload}. */
+export interface UploadEstimateOptions {
+  /**
+   * Query the chain's `TransactionByContentHash` for each unique
+   * content_hash and exclude items already present. Requires one RPC per
+   * unique content. Default: `false`.
+   */
+  skipExisting?: boolean
+  /**
+   * Collapse repeated content_hashes within the input to a single upload
+   * (first occurrence wins; subsequent indices land in `duplicateIndices`).
+   * Default: `true` — the chain dedupes by content_hash anyway, so charging
+   * the caller for the duplicates is wasteful.
+   */
+  dedupInput?: boolean
 }
 
 /**
@@ -434,24 +488,43 @@ export interface ClientConfig {
    * PAPI handles reconnects and mortality, so this should rarely fire.
    * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks). */
   txTimeout?: number
-  /** RPC WebSocket URLs. When non-empty, chunked stores use the pipelineStore
-   * engine for parallel submission (~10x faster) instead of the legacy serial
-   * loop. Block watching uses the first URL; signed transactions are broadcast
-   * to every URL. */
-  wsUrls?: string[]
   /**
-   * Optional provider factory override for {@link wsUrls}. Default builds a
-   * WebSocket provider via `polkadot-api/ws`. Pass a custom factory to use a
-   * non-WS transport — smoldot, in-process tunnel, etc. The factory is
-   * invoked once per URL (one monitor client + one submit client per URL).
-   * For light-client (smoldot) usage, pass a single placeholder in `wsUrls`
-   * and return the same shared smoldot provider for every call.
+   * Factory that returns the JsonRpcProvider instances the SDK should use
+   * for the upload pipeline. Called once per `pipelineStore()` invocation
+   * — including each outer retry — so dead WS connections from a failed
+   * attempt get replaced with fresh ones. `providers[0]` is used for the
+   * chainHead monitor; every provider is used as a broadcast target
+   * (pass multiple for ws-RPC redundancy across endpoints).
+   *
+   * - ws-RPC, single node: `() => [getWsProvider(url)]`
+   * - ws-RPC, multi-node:  `() => urls.map(getWsProvider)`
+   * - smoldot light client: `() => [getSmProvider(chainHandle)]`
+   * - custom transport:    `() => [myJsonRpcProvider]`
+   *
+   * REQUIRED for any signed/unsigned upload — the upload paths throw
+   * UNSUPPORTED_OPERATION when this isn't set.
    */
   // biome-ignore lint/suspicious/noExplicitAny: PAPI's JsonRpcProvider type lives in @polkadot-api/json-rpc-provider; avoid a hard import dep here
-  createProvider?: (url: string) => any
+  providers?: () => any[]
   /** Per-chain block limits used by pipelineStore. Defaults to
    * {@link DEFAULT_BLOCK_LIMITS} (bulletin-westend / paseo values). */
   blockLimits?: BlockLimits
+  /**
+   * Signer for authorization-class extrinsics (`authorizeAccount`,
+   * `authorizePreimage`, `refreshAccountAuthorization`,
+   * `refreshPreimageAuthorization`). REQUIRED to call any of those
+   * methods — the client will throw `UNSUPPORTED_OPERATION` otherwise.
+   * Deliberately separate from the upload signer so an Authorizer key
+   * is never used by accident for uploads (and vice-versa).
+   */
+  authorizerSigner?: PolkadotSigner
+  /**
+   * Wire-level submission strategy. Today only `"nonce-tracking"` is
+   * implemented; the field exists so additional strategies can be added
+   * without changing this shape. See `docs/watch-strategy-design.md` for
+   * a watch-based design that was prototyped and removed.
+   */
+  submissionStrategy?: "nonce-tracking"
 }
 
 /**
@@ -466,20 +539,19 @@ export interface ClientConfig {
  * provider in `client.ts` when omitted.
  */
 export type ResolvedClientConfig = Required<
-  Omit<ClientConfig, "createProvider">
+  Omit<ClientConfig, "providers" | "authorizerSigner">
 > &
-  Pick<ClientConfig, "createProvider">
+  Pick<ClientConfig, "providers" | "authorizerSigner">
 
 export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
   defaultChunkSize: 1024 * 1024, // 1 MiB
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
-  // Must be populated by the caller (e.g. `[NODE_WS_URL]`) before
-  // invoking any upload — `pipelineStore` requires at least one wsUrl
-  // for its chainHead-based reconciler.
-  wsUrls: [],
   blockLimits: DEFAULT_BLOCK_LIMITS,
+  submissionStrategy: "nonce-tracking",
+  // `providers` (factory) and `authorizerSigner` are intentionally
+  // not defaulted — see ResolvedClientConfig.
 }
 
 /** Merge caller-supplied config with defaults, ignoring undefined values. */

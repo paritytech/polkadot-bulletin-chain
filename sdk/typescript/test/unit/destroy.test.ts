@@ -4,30 +4,42 @@
 import { describe, expect, it, vi } from "vitest"
 import { BulletinClient } from "../../src/client"
 
-// Minimal stand-ins; destroy() doesn't touch any of these.
-const dummyApi = {} as never
-const dummySigner = {} as never
+// File-scope mock — captures the destroy() spy so each test can assert
+// on it.
+const destroySpy = vi.fn()
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => ({}),
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: destroySpy,
+    })),
+  }
+})
 
 describe("BulletinClient.destroy", () => {
-  it("resolves to a no-op when no onDestroy is provided", async () => {
-    const client = new BulletinClient(dummyApi, dummySigner, undefined)
-    await expect(client.destroy()).resolves.toBeUndefined()
+  it("tears down the internal PolkadotClient", async () => {
+    destroySpy.mockClear()
+    const client = new BulletinClient({
+      descriptor: {},
+      // biome-ignore lint/suspicious/noExplicitAny: provider stub
+      providers: () => [{} as any],
+    })
+    await client.destroy()
+    expect(destroySpy).toHaveBeenCalledTimes(1)
   })
 
-  it("invokes onDestroy and awaits async teardown", async () => {
-    const teardown = vi.fn(
-      () => new Promise<void>((resolve) => setTimeout(resolve, 5)),
-    )
-    const client = new BulletinClient(
-      dummyApi,
-      dummySigner,
-      undefined,
-      undefined,
-      teardown,
-    )
-
+  it("is idempotent — second destroy() is a no-op", async () => {
+    destroySpy.mockClear()
+    const client = new BulletinClient({
+      descriptor: {},
+      // biome-ignore lint/suspicious/noExplicitAny: provider stub
+      providers: () => [{} as any],
+    })
     await client.destroy()
-
-    expect(teardown).toHaveBeenCalledTimes(1)
+    await client.destroy()
+    expect(destroySpy).toHaveBeenCalledTimes(1)
   })
 })
