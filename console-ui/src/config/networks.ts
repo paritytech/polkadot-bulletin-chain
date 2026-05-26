@@ -34,8 +34,6 @@ const GRAFANA_COMMON_QS =
   "orgId=1&from=now-6h&to=now&timezone=utc&var-data_source=PC96415006F908B67";
 const SENTRY_BULLETIN_DEPLOY_HEALTH =
   "https://paritytech.sentry.io/dashboard/1669817/?project=4511093597405264&project=4511298552135760&statsPeriod=24h";
-const SENTRY_PHASE_WIDGET_BASE =
-  "https://paritytech.sentry.io/dashboard/1669817/widget/8/?project=4511093597405264&project=4511298552135760&sort=-avg%28span.duration%29&statsPeriod=24h";
 const TELEMETRY_POLKADOT = "https://telemetry.polkadot.io/";
 
 function telemetryLink(genesisHash: string): string {
@@ -46,8 +44,34 @@ const TELEMETRY_PASEO_NEXT_V2 = telemetryLink(
   "0x2761c95259d59e55ae3daf756c1413b46e45a5a2987299f8ef8e5d8e4776cbc4",
 );
 
+/**
+ * Sentry Explore Traces deep-link, filtered to one Bulletin deploy.* span. Same
+ * shape Sentry generates when you click a row in the Phase Breakdown widget.
+ */
 function sentrySpanLink(spanOp: string): string {
-  return `${SENTRY_PHASE_WIDGET_BASE}&query=${encodeURIComponent(`span.op:${spanOp}`)}`;
+  const query = encodeURIComponent(
+    `span.op:deploy.* !span.op:deploy !deploy.tag:e2e-* span.op:${spanOp}`,
+  );
+  const visualize = encodeURIComponent(
+    JSON.stringify({
+      chartType: 1,
+      yAxes: [
+        "avg(span.duration)",
+        "p90(span.duration)",
+        "p95(span.duration)",
+        "count()",
+      ],
+    }),
+  );
+  return (
+    "https://paritytech.sentry.io/explore/traces/" +
+    "?field=span.op&field=span.duration" +
+    "&groupBy=span.op&interval=15m&mode=samples" +
+    "&project=4511093597405264&project=4511298552135760" +
+    `&query=${query}` +
+    "&sort=-span.duration&statsPeriod=24h" +
+    `&visualize=${visualize}`
+  );
 }
 
 const SENTRY_STORAGE_SPAN = sentrySpanLink("deploy.storage");
