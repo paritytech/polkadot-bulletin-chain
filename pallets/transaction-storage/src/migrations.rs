@@ -25,8 +25,11 @@ use polkadot_sdk_frame::{
 /// Runtime migration that seeds `AllowedAuthorizers` with the given accounts
 /// **only if the storage is currently empty**.
 ///
-/// Idempotent: safe to run multiple times. Skips if any authorizers already
-/// exist (e.g., set via genesis on a fresh chain, or by a previous run).
+/// Intended as a one-shot seed: run it on the first deployment that introduces
+/// `AllowedAuthorizers`. The "empty" check makes back-to-back invocations a
+/// no-op, but it is *not* a true idempotency guarantee — if `remove_authorizer`
+/// / `remove_exhausted_authorizer` later drain the set, a subsequent run would
+/// re-seed. Wrap in a `VersionedMigration` so it executes at most once.
 pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>(
 	PhantomData<(T, Accounts, Budget)>,
 );

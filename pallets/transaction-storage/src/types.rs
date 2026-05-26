@@ -282,6 +282,31 @@ impl<BlockNumber: PartialOrd + Copy> AuthorizerBudget<BlockNumber> {
 
 pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 
+/// Per-dispatch context returned by [`Config::Authorizer`] when the dispatcher is
+/// an [`AllowedAuthorizers`] entry. Carries everything `authorize_*` needs from
+/// the authorizer:
+///
+/// - `signer`: the account whose [`AllowedAuthorizers`] budget will be charged.
+/// - `period_override`: per-authorizer `authorization_period` to use instead of
+///   [`Config::AuthorizationPeriod`].
+/// - `valid_until`: the authorizer's expiry block, exposed for inspection by
+///   downstream logic. The pallet does **not** use this to cap the granted
+///   authorization — authorizations are independent of their grantor's
+///   remaining validity.
+///
+/// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
+/// non-account authorizer (Root / XCM / signed-by list) — no budget to charge
+/// and no overrides.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizationOrigin<AccountId, BlockNumber> {
+	pub signer: AccountId,
+	pub period_override: Option<BlockNumber>,
+	pub valid_until: Option<BlockNumber>,
+}
+
+pub(crate) type AuthorizationOriginFor<T> =
+	AuthorizationOrigin<<T as frame_system::Config>::AccountId, BlockNumberFor<T>>;
+
 /// `EnsureOrigin` adapter that accepts a `Signed(account)` origin iff the signing
 /// account is registered in [`AllowedAuthorizers`]. Used to plug the runtime-mutable
 /// authorizer list into the pallet's `Authorizer` chain.
@@ -292,12 +317,16 @@ where
 	T::RuntimeOrigin: From<frame_system::RawOrigin<T::AccountId>>
 		+ Into<Result<frame_system::RawOrigin<T::AccountId>, T::RuntimeOrigin>>,
 {
-	type Success = T::AccountId;
+	type Success = Option<AuthorizationOriginFor<T>>;
 
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
-				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(who),
+				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(Some(AuthorizationOrigin {
+					signer: who,
+					period_override: b.authorization_period,
+					valid_until: b.valid_until,
+				})),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
 			},
 			other => Err(T::RuntimeOrigin::from(other)),
@@ -322,5 +351,30 @@ where
 			},
 		};
 		Ok(frame_system::RawOrigin::Signed(who).into())
+	}
+}
+
+/// `EnsureOrigin` adapter that wraps an inner origin and projects its `Success` to
+/// `None: Option<AuthorizationOrigin<AccountId, BlockNumber>>`. Used to align
+/// non-account-bearing authorizers (Root, XCM, signed-by lists) with the
+/// `Option<AuthorizationOrigin<_, _>>` `Success` produced by
+/// [`EnsureAllowedAuthorizers`] when composing the [`Config::Authorizer`] chain
+/// via [`EitherOf`](polkadot_sdk_frame::deps::frame_support::traits::EitherOf).
+pub struct EnsureAnonymousAuthorizer<E, AccountId, BlockNumber>(
+	core::marker::PhantomData<(E, AccountId, BlockNumber)>,
+);
+
+impl<O, AccountId, BlockNumber, E: EnsureOrigin<O>> EnsureOrigin<O>
+	for EnsureAnonymousAuthorizer<E, AccountId, BlockNumber>
+{
+	type Success = Option<AuthorizationOrigin<AccountId, BlockNumber>>;
+
+	fn try_origin(o: O) -> Result<Self::Success, O> {
+		E::try_origin(o).map(|_| None)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<O, ()> {
+		E::try_successful_origin()
 	}
 }

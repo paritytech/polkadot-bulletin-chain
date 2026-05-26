@@ -29,9 +29,10 @@ use super::{
 		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
-	AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo, TransactionKind,
-	TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND,
+	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
+	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
+	TransactionKind, TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED,
+	AUTHORIZER_NOT_FOUND,
 	BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
@@ -1991,10 +1992,16 @@ fn ensure_allowed_authorizers_origin_rules() {
 	new_test_ext().execute_with(|| {
 		let registered = 7u64;
 		AllowedAuthorizers::<Test>::insert(registered, test_budget(100, 1024));
-		// Signed by a registered account → accepted, returns the account.
+		// Signed by a registered account → accepted, returns the full
+		// `AuthorizationOrigin` carrying the signer, period override, and
+		// `valid_until` (both `None` for `test_budget`).
 		assert_eq!(
 			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
-			Some(registered),
+			Some(Some(AuthorizationOrigin {
+				signer: registered,
+				period_override: None,
+				valid_until: None,
+			})),
 		);
 		// Signed by an unregistered account, Root, and None all rejected.
 		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(99)).is_err());
