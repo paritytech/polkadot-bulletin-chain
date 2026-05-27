@@ -142,14 +142,6 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
-/// Filter that matches any sibling parachain origin.
-pub struct IsSiblingParachain;
-impl Contains<Location> for IsSiblingParachain {
-	fn contains(location: &Location) -> bool {
-		matches!(location.unpack(), (1, [Parachain(_)]))
-	}
-}
-
 parameter_types! {
 	/// Sibling parachain IDs authorized to dispatch storage authorizations via
 	/// XCM. Storage-backed so governance (root) can update via
@@ -161,9 +153,10 @@ parameter_types! {
 	pub storage GovernanceParachainIds: Vec<u32> = vec![ASSET_HUB_ID, 1500];
 }
 
-/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`].
-pub struct IsAllowedParachain;
-impl Contains<Location> for IsAllowedParachain {
+/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`]
+/// — the parachains allowed to dispatch storage authorizations via XCM.
+pub struct IsAuthorizerParachain;
+impl Contains<Location> for IsAuthorizerParachain {
 	fn contains(location: &Location) -> bool {
 		match location.unpack() {
 			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
@@ -223,7 +216,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				IsGovernanceLocation,
-				IsAllowedParachain,
+				IsAuthorizerParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,

@@ -17,7 +17,7 @@
 //! Storage-specific configurations.
 
 use super::{
-	xcm_config::IsAllowedParachain, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
+	xcm_config::IsAuthorizerParachain, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 };
 use alloc::vec::Vec;
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
