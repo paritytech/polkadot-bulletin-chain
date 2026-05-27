@@ -33,22 +33,5 @@
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
     }
-  },
-  {
-    "name": "bulletin-previewnet",
-    "package": "bulletin-paseo-runtime",
-    "path": "runtimes/bulletin-paseo",
-    "uris": [
-      "wss://previewnet.substrate.dev/bulletin"
-    ],
-    "integration_tests": false,
-    "try_runtime": {
-        "spec_name_check": "--disable-spec-name-check",
-        "extra_flags": "--blocktime 24000 --disable-spec-version-check"
-    },
-    "benchmarks_templates": {
-      "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
-      "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
-    }
   }
 ]
