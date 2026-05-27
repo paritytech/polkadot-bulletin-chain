@@ -223,9 +223,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
 				IsGovernance,
-				// Allow any sibling parachain for unpaid execution, since there
-				// are multiple People testnet chains.
-				IsSiblingParachain,
+				IsAllowedParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
