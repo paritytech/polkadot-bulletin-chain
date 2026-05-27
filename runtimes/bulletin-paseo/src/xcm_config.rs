@@ -211,7 +211,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 			// allow it.
 			AllowTopLevelPaidExecutionFrom<Everything>,
 			// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
-			// and AssetHub get free execution.
+			// governance parachains, and authorizer parachains get free execution.
 			AllowExplicitUnpaidExecutionFrom<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,

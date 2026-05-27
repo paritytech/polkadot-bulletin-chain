@@ -47,10 +47,9 @@ use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
 const ALICE: [u8; 32] = [1u8; 32];
 
-/// Governance location used in tests: AssetHub, a configured `GovernanceParachainIds` member.
+/// Governance location used in tests: paraId 1500, a configured `GovernanceParachainIds` member.
 fn governance_location() -> Location {
-	use bulletin_paseo_runtime::paseo_constants::system_parachain::ASSET_HUB_ID;
-	Location::new(1, [Parachain(ASSET_HUB_ID)])
+	Location::new(1, [Parachain(1500)])
 }
 
 /// Advance to the next block for testing transaction storage.
@@ -795,11 +794,15 @@ fn governance_authorize_upgrade_works() {
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(12334)))),
 		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
 	);
-	// ok - AssetHub
-	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
-		Runtime,
-		RuntimeOrigin,
-	>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))));
+	// no - AssetHub: not in the governance/authorizer allowlists, so the Barrier
+	// rejects its unpaid execution before the Transact origin check is even reached.
+	assert_err!(
+		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
+			Runtime,
+			RuntimeOrigin,
+		>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))),
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
+	);
 	// no - Collectives: a bare Collectives parachain origin is not in the
 	// governance/authorizer allowlists, so the Barrier rejects it.
 	assert_err!(
@@ -821,7 +824,8 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 2, error: XcmError::BadOrigin })
 	);
 
-	// no - relaychain (relay chain does not have superuser access, only AssetHub does)
+	// no - relaychain (relay chain does not have superuser access, only `GovernanceParachainIds`
+	// members do)
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
@@ -830,7 +834,7 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
 	);
 
-	// ok - governance location (which is AssetHub)
+	// ok - governance location (paraId 1500)
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,
