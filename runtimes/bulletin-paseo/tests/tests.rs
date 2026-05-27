@@ -18,11 +18,9 @@
 
 use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
-	paseo_constants::{fee::WeightToFee, locations::PeopleLocation},
-	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
-	UncheckedExtrinsic,
+	paseo_constants::fee::WeightToFee, xcm_config::LocationToAccountId, AllPalletsWithoutSystem,
+	Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent, RuntimeGenesisConfig,
+	RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
 };
 use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use frame_support::{
@@ -48,6 +46,11 @@ use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
 const ALICE: [u8; 32] = [1u8; 32];
+
+/// Governance location used in tests: paraId 1500, a configured `GovernanceParachainIds` member.
+fn governance_location() -> Location {
+	Location::new(1, [Parachain(1500)])
+}
 
 /// Advance to the next block for testing transaction storage.
 fn advance_block() {
@@ -782,27 +785,32 @@ fn xcm_payment_api_works() {
 fn governance_authorize_upgrade_works() {
 	use bulletin_paseo_runtime::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 
-	// no - random para (passes barrier since any sibling parachain gets unpaid execution,
-	// but fails at Transact with BadOrigin since it's not a governance origin)
+	// no - random para: not in the governance/authorizer allowlists, so the Barrier
+	// rejects its unpaid execution before the Transact origin check is even reached.
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(12334)))),
-		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
 	);
-	// ok - AssetHub
-	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
-		Runtime,
-		RuntimeOrigin,
-	>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))));
-	// no - Collectives (passes barrier but not a governance origin)
+	// no - AssetHub: not in the governance/authorizer allowlists, so the Barrier
+	// rejects its unpaid execution before the Transact origin check is even reached.
+	assert_err!(
+		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
+			Runtime,
+			RuntimeOrigin,
+		>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))),
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
+	);
+	// no - Collectives: a bare Collectives parachain origin is not in the
+	// governance/authorizer allowlists, so the Barrier rejects it.
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(COLLECTIVES_ID)))),
-		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
 	);
 	// no - Collectives Voice of Fellows plurality
 	assert_err!(
@@ -816,7 +824,8 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 2, error: XcmError::BadOrigin })
 	);
 
-	// no - relaychain (relay chain does not have superuser access, only AssetHub does)
+	// no - relaychain (relay chain does not have superuser access, only `GovernanceParachainIds`
+	// members do)
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
@@ -825,11 +834,11 @@ fn governance_authorize_upgrade_works() {
 		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
 	);
 
-	// ok - governance location (which is AssetHub)
+	// ok - governance location (paraId 1500)
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,
-	>(GovernanceOrigin::Location(GovernanceLocation::get())));
+	>(GovernanceOrigin::Location(governance_location())));
 }
 
 #[test]
@@ -913,7 +922,9 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 
 #[test]
 fn people_chain_can_authorize_storage_with_transact() {
-	// Prepare call.
+	// People chain (parachain 1502) should be able to authorize storage via XCM Transact.
+	let people_location = Location::new(1, [Parachain(1502)]);
+
 	let account = Sr25519Keyring::Ferdie;
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
@@ -935,7 +946,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 		.build()
 		.execute_with(|| {
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
-				(PeopleLocation::get(), OriginKind::Xcm),
+				(people_location, OriginKind::Xcm),
 				authorize_call,
 				None
 			)
@@ -1777,9 +1788,9 @@ fn xcm_transact_store_is_blocked() {
 			});
 
 			// Build an XCM message: UnpaidExecution + Transact(Superuser, store).
-			// GovernanceLocation (relay chain) has LocationAsSuperuser in the
-			// OriginConverter, so origin conversion would succeed — but SafeCallFilter
-			// must block the call before that matters.
+			// The governance location has LocationAsSuperuser in the OriginConverter,
+			// so origin conversion would succeed — but SafeCallFilter must block the
+			// call before that matters.
 			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
 				.unpaid_execution(Unlimited, None)
 				.transact(OriginKind::Superuser, None, store_call.encode())
@@ -1789,7 +1800,7 @@ fn xcm_transact_store_is_blocked() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			// SafeCallFilter returns false for store → XcmError::NoPermission
@@ -1847,7 +1858,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			assert!(
@@ -1907,7 +1918,7 @@ fn xcm_transact_authorize_account_works() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			assert!(
