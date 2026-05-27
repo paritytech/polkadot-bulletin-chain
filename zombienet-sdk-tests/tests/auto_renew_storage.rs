@@ -101,6 +101,7 @@ const RENEWAL_CYCLES_TO_OBSERVE: u32 = 3;
 fn get_para_node_args() -> Vec<String> {
 	vec![
 		"--ipfs-server".into(),
+		"--authoring=slot-based".into(),
 		NODE_LOG_CONFIG.into(),
 		// Arguments after "--" are passed to the embedded relay chain client.
 		"--".into(),
@@ -201,6 +202,7 @@ fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 	);
 	vec![
 		"--ipfs-server".into(),
+		"--authoring=slot-based".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
 		format!("-l{}", log_targets),
 		"--".into(),

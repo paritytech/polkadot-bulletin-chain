@@ -73,8 +73,7 @@ use sp_version::NativeVersion;
 use sp_version::RuntimeVersion;
 use testnet_parachains_constants::westend::{currency::*, fee::WeightToFee, time::*};
 
-/// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
-/// Elastic scaling produces multiple parachain blocks per slot.
+/// Aura slot duration: 24 seconds (4 relay chain slots per collator rotation).
 const SLOT_DURATION: u64 = 24_000;
 
 mod elastic_scaling;
