@@ -150,7 +150,7 @@ parameter_types! {
 	/// Sibling parachain IDs treated as governance origins. Storage-backed so
 	/// governance (root) can update via `system.set_storage` without a runtime
 	/// upgrade.
-	pub storage GovernanceParachainIds: Vec<u32> = vec![ASSET_HUB_ID, 1500];
+	pub storage GovernanceParachainIds: Vec<u32> = vec![1500];
 }
 
 /// Filter matching sibling parachain origins listed in [`AllowedParachainIds`]
