@@ -1,0 +1,39 @@
+[package]
+name = "pallet-bulletin-utility"
+version = "0.1.0"
+authors = ["Parity Technologies <admin@parity.io>"]
+edition.workspace = true
+license = "Apache-2.0"
+homepage.workspace = true
+repository.workspace = true
+description = "Utility wrapper that makes batches feeless when every inner call is feeless"
+readme = "README.md"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { workspace = true }
+scale-info = { features = ["derive"], workspace = true }
+pallet-utility = { workspace = true }
+
+polkadot-sdk-frame = { workspace = true, default-features = false, features = [
+	"runtime",
+] }
+
+[features]
+default = ["std"]
+runtime-benchmarks = [
+	"pallet-utility/runtime-benchmarks",
+	"polkadot-sdk-frame/runtime-benchmarks",
+]
+std = [
+	"codec/std",
+	"pallet-utility/std",
+	"polkadot-sdk-frame/std",
+	"scale-info/std",
+]
+try-runtime = [
+	"pallet-utility/try-runtime",
+	"polkadot-sdk-frame/try-runtime",
+]

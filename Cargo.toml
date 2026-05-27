@@ -42,6 +42,7 @@ bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
 pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "pallets/transaction-storage/runtime-api", default-features = false }
+pallet-bulletin-utility = { version = "0.1.0", path = "pallets/bulletin-utility", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "48.0.0", default-features = false }
@@ -122,6 +123,7 @@ substrate-wasm-builder = { version = "33.0.0" }
 [workspace]
 resolver = "2"
 members = [
+	"pallets/bulletin-utility",
 	"pallets/common",
 	"pallets/hop-promotion",
 	"pallets/transaction-storage",
