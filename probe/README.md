@@ -1,25 +1,15 @@
 # bulletin-probe
 
-Atomic synthetic probe for Bulletin Chain. Submits a single, fixed-size
-`TransactionStorage.store` extrinsic on a fixed cadence and emits Sentry spans
-matching `bulletin-deploy`'s schema, tagged with `deploy.probe`.
+Minimal synthetic write+read probe for Bulletin Chain. On each iteration:
 
-This is the **SLI source** for the write-path SLO. Sentry's existing aggregations
-(p90 / p95 / count by `span.op`) work without any extra dashboards — just filter
-on `deploy.probe:slo-*` to isolate probe samples from real users.
+1. Submits a single-chunk `TransactionStorage.store` extrinsic with random bytes
+   and waits for finality. Emits `probe.bulletin.store`.
+2. Computes the Blake2b-256 content hash of the payload and queries
+   `TransactionStorage.TransactionByContentHash` on chain to verify it is
+   indexed. Emits `probe.bulletin.read`.
 
-## How it differs from real-user spans
-
-| Property                 | Real-user `deploy.chunk-upload` | Probe `deploy.chunk-upload` |
-| ------------------------ | ------------------------------- | --------------------------- |
-| Chunks per run           | 1 to thousands (parallel)       | exactly 1                   |
-| Payload size             | varies                          | fixed (default 64 KB)       |
-| Sibling contention       | yes                             | none                        |
-| Cadence                  | when users deploy               | fixed (default 5 min)       |
-| Tag `deploy.probe`       | unset                           | `slo-<network>`             |
-
-The probe is what you write an SLO against. The real-user widget remains useful
-as a workload-sensitivity view.
+Designed as the SLI source for write-path and read-path SLOs. Atomic by
+construction: 1 chunk, fixed bytes, sequential, fresh WS client per iteration.
 
 ## Setup
 
@@ -27,49 +17,76 @@ as a workload-sensitivity view.
 cd probe
 npm install
 npm run papi:generate        # writes .papi/descriptors against paseo-next-v2
-cp .env.example .env         # then fill in SENTRY_DSN and PROBE_MNEMONIC
+cp .env.example .env         # fill in SENTRY_DSN and PROBE_MNEMONIC
 npm start
 ```
 
 `PROBE_MNEMONIC` must correspond to an account that's been authorised on the
-target network (`authorize_account` with at least a few hundred bytes of
-allowance, enough for one extrinsic per probe interval).
+target network. Generous allowance recommended so the probe runs for months
+without refill governance.
 
 ## Env vars
 
-| Name                     | Required | Default              | Notes                                     |
-| ------------------------ | -------- | -------------------- | ----------------------------------------- |
-| `SENTRY_DSN`             | yes      | —                    | Use the same project as `bulletin-deploy` |
-| `PROBE_NETWORK`          | no       | `paseo-next-v2`      | Key from `src/networks.ts`                |
-| `PROBE_MNEMONIC`         | no       | dev phrase (`//Alice`-equivalent root) | Required for non-local networks |
-| `PROBE_INTERVAL_SEC`     | no       | `300`                | Sequential, never overlapping             |
-| `PROBE_PAYLOAD_BYTES`    | no       | `65536`              | Must stay under the single-chunk limit    |
-| `PROBE_TX_TIMEOUT_SEC`   | no       | `180`                | Hard deadline per probe                   |
+| Name                       | Required | Default          | Notes                                  |
+| -------------------------- | -------- | ---------------- | -------------------------------------- |
+| `SENTRY_DSN`               | yes      | —                | Probe Sentry project DSN               |
+| `PROBE_NETWORK`            | no       | `paseo-next-v2`  | Key from `src/networks.ts`             |
+| `PROBE_MNEMONIC`           | no       | dev phrase       | Required on non-local networks         |
+| `PROBE_INTERVAL_SEC`       | no       | `300`            | Sequential, never overlapping          |
+| `PROBE_PAYLOAD_BYTES`      | no       | `65536`          | Must stay under single-chunk limit     |
+| `PROBE_TX_TIMEOUT_SEC`     | no       | `180`            | Per-probe write deadline               |
+| `PROBE_READ_TIMEOUT_SEC`   | no       | `10`             | Per-probe read deadline                |
 
-## Sentry SLO
+## Span schema
 
-Define the SLO in Sentry once, against this query:
-
-```
-span.op:deploy.chunk-upload deploy.probe:slo-*
-```
-
-- **Good event**: `span.status:ok AND span.duration < 2min`
-- **Target**: 99% over 30 days
-- **Burn-rate alerts**: Sentry defaults (fast + slow) are fine
-
-To compare real-user vs probe in the existing Phase Breakdown widget, clone it
-twice with these filters:
+Both spans share these attributes:
 
 ```
-# user-experienced (real deploys, contended)
-span.op:deploy.chunk-upload !deploy.probe:slo-*
-
-# isolated (probe baseline, atomic)
-span.op:deploy.chunk-upload deploy.probe:slo-* deploy.chunks.total:1
+probe.network         e.g. paseo-next-v2
+probe.tool_version    bulletin-probe@0.1.0
 ```
 
-## Cron deploy (GitHub Actions)
+Write span (`probe.bulletin.store`) adds:
+
+```
+probe.payload_bytes   65536
+probe.chunks          1
+probe.tx_timeout      "true" when the deadline fires
+probe.tx_dropped      "true" when the chain reports a dropped tx
+```
+
+Read span (`probe.bulletin.read`) adds:
+
+```
+probe.read_miss       "true" when TransactionByContentHash returned null
+probe.read_timeout    "true" when the deadline fires
+```
+
+Seeded `"false"` so Sentry ratio queries (`count_if(probe.tx_timeout:true) / count()`)
+work without `has:` gymnastics.
+
+## Sentry SLOs
+
+Define one SLO per signal. Latency targets are placeholders, dial after a few
+days of real data.
+
+**Write latency**
+
+```
+span.op:probe.bulletin.store probe.network:paseo-next-v2
+good event: span.status:ok AND span.duration < 120000
+target: 99% / 30d
+```
+
+**Read latency**
+
+```
+span.op:probe.bulletin.read probe.network:paseo-next-v2
+good event: span.status:ok AND span.duration < 2000
+target: 99.5% / 30d
+```
+
+## GitHub Actions cron
 
 ```yaml
 name: bulletin-probe
@@ -95,21 +112,12 @@ jobs:
           PROBE_INTERVAL_SEC: "60"
 ```
 
-In this mode `PROBE_INTERVAL_SEC` is shorter than the cron cadence because the
-workflow is killed after one run by `timeout-minutes`. Each scheduled invocation
-fires once and exits.
-
-For long-running deployment (one process, multiple iterations) drop the
-`timeout-minutes` cap and host as a systemd unit or container with
-`PROBE_INTERVAL_SEC=300`.
+Each scheduled invocation fires once and exits (`timeout-minutes: 4`). For a
+long-running deployment drop the timeout and run as a systemd unit or container
+with `PROBE_INTERVAL_SEC=300`.
 
 ## Guardrails
 
-The probe is designed to be **atomic** and **non-contending**. Two invariants
-worth keeping if you change the code:
-
-1. `deploy.chunks.total` must always be `1`. If the payload ever needs chunking,
-   fail loudly. Multi-chunk probes pollute the isolated SLI population.
-2. Probe iterations are strictly sequential. Don't replace the `for (;;)` loop
-   with `setInterval` — overlapping probes would contend with their own RPC
-   submissions and corrupt the baseline.
+1. `probe.chunks` must always be `1`. Multi-chunk probes pollute the SLI.
+2. Iterations are strictly sequential. Don't swap the `while (!shuttingDown)`
+   loop for `setInterval`; overlapping probes would contend on RPC.

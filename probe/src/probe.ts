@@ -1,5 +1,10 @@
 import * as Sentry from "@sentry/node";
-import { createClient, type PolkadotSigner } from "polkadot-api";
+import {
+  Binary,
+  createClient,
+  type PolkadotSigner,
+  type TypedApi,
+} from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { getPolkadotSigner } from "polkadot-api/signer";
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd";
@@ -8,7 +13,10 @@ import {
   entropyToMiniSecret,
   mnemonicToEntropy,
 } from "@polkadot-labs/hdkd-helpers";
+import { blake2b } from "@noble/hashes/blake2.js";
 import { bulletin } from "@polkadot-api/descriptors";
+
+type BulletinApi = TypedApi<typeof bulletin>;
 import { randomBytes } from "node:crypto";
 import { resolveNetwork, type Network } from "./networks.js";
 import { closeSentry, initSentry } from "./sentry.js";
@@ -21,6 +29,7 @@ const MNEMONIC      = process.env.PROBE_MNEMONIC ?? DEV_PHRASE;
 const PAYLOAD_BYTES = int("PROBE_PAYLOAD_BYTES", 64 * 1024);
 const INTERVAL_SEC  = int("PROBE_INTERVAL_SEC", 300);
 const TX_TIMEOUT_MS = int("PROBE_TX_TIMEOUT_SEC", 180) * 1000;
+const RD_TIMEOUT_MS = int("PROBE_READ_TIMEOUT_SEC", 10) * 1000;
 
 initSentry({ dsn: DSN, release: RELEASE, environment: NETWORK.id });
 
@@ -40,65 +49,82 @@ function installShutdownHandlers(): void {
 }
 
 async function probeOnce(net: Network): Promise<void> {
-  const payload  = new Uint8Array(randomBytes(PAYLOAD_BYTES));
-  const carMb    = (payload.length / 1_000_000).toFixed(2);
-  const probeTag = `slo-${net.id}`;
-
-  await Sentry.startSpan(
-    {
-      name: "probe deploy",
-      op:   "deploy",
-      attributes: {
-        "deploy.network": net.id,
-        "deploy.probe":   probeTag,
-        "deploy.tool":    "bulletin-probe@0.1.0",
-      },
-    },
-    () =>
-      Sentry.startSpan(
-        {
-          name: "1b. chunk-upload",
-          op:   "deploy.chunk-upload",
-          attributes: {
-            "deploy.chunks.total":    1,
-            "deploy.car.bytes":       payload.length,
-            "deploy.car.mb":          carMb,
-            "deploy.car.size_bucket": "tiny",
-            "deploy.probe":           probeTag,
-            // Seeded denominators so Sentry ratio queries
-            // (count_if(probe.tx_dropped:true) / count()) carry the attribute
-            // on every span, not just failing ones. Mirrors the seeding
-            // pattern in bulletin-deploy/src/telemetry.ts:getDeployAttributes.
-            "probe.tx_dropped":       "false",
-            "probe.rpc_failed_over":  "false",
-            "probe.tx_timeout":       "false",
-          },
-        },
-        (span) => submitFinalized(net, payload, span),
-      ),
-  );
-}
-
-async function submitFinalized(
-  net: Network,
-  data: Uint8Array,
-  span: { setAttribute: (k: string, v: string | number | boolean) => void },
-): Promise<void> {
-  const client = createClient(getWsProvider(net.rpc));
+  const payload     = new Uint8Array(randomBytes(PAYLOAD_BYTES));
+  const contentHash = blake2b(payload, { dkLen: 32 });
+  const client      = createClient(getWsProvider(net.rpc));
   try {
     const api = client.getTypedApi(bulletin);
-    const tx  = api.tx.TransactionStorage.store({ data });
-    try {
-      await waitFinalized(tx, SIGNER, TX_TIMEOUT_MS);
-    } catch (e) {
-      if (e instanceof Error && e.message.includes("not finalized within")) {
-        span.setAttribute("probe.tx_timeout", "true");
-      }
-      throw e;
-    }
+    await probeWrite(api, net, payload);
+    await probeRead(api, net, contentHash);
   } finally {
     client.destroy();
   }
+}
+
+function probeWrite(api: BulletinApi, net: Network, payload: Uint8Array): Promise<void> {
+  return Sentry.startSpan(
+    {
+      name: "store one chunk",
+      op:   "probe.bulletin.store",
+      attributes: {
+        "probe.network":         net.id,
+        "probe.payload_bytes":   payload.length,
+        "probe.chunks":          1,
+        "probe.tool_version":    RELEASE,
+        // Seeded denominators so Sentry ratio queries work; flipped to "true"
+        // when the matching failure mode is hit.
+        "probe.tx_timeout":      "false",
+        "probe.tx_dropped":      "false",
+      },
+    },
+    async (span) => {
+      const tx = api.tx.TransactionStorage.store({ data: payload });
+      try {
+        await waitFinalized(tx, SIGNER, TX_TIMEOUT_MS);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("not finalized within")) span.setAttribute("probe.tx_timeout", "true");
+        if (msg.includes("dropped"))               span.setAttribute("probe.tx_dropped", "true");
+        throw e;
+      }
+    },
+  );
+}
+
+function probeRead(api: BulletinApi, net: Network, contentHash: Uint8Array): Promise<void> {
+  return Sentry.startSpan(
+    {
+      name: "query by content hash",
+      op:   "probe.bulletin.read",
+      attributes: {
+        "probe.network":      net.id,
+        "probe.tool_version": RELEASE,
+        // Seeded denominators.
+        "probe.read_miss":    "false",
+        "probe.read_timeout": "false",
+      },
+    },
+    async (span) => {
+      const hashHex = Binary.toHex(contentHash);
+      try {
+        const result = await Promise.race([
+          api.query.TransactionStorage.TransactionByContentHash.getValue(hashHex),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error(`read not returned within ${RD_TIMEOUT_MS}ms`)), RD_TIMEOUT_MS),
+          ),
+        ]);
+        if (!result) {
+          span.setAttribute("probe.read_miss", "true");
+          throw new Error("content hash absent from TransactionByContentHash");
+        }
+      } catch (e) {
+        if (e instanceof Error && e.message.includes("read not returned")) {
+          span.setAttribute("probe.read_timeout", "true");
+        }
+        throw e;
+      }
+    },
+  );
 }
 
 function waitFinalized(
