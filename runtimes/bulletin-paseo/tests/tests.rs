@@ -18,11 +18,9 @@
 
 use bulletin_paseo_runtime as runtime;
 use bulletin_paseo_runtime::{
-	paseo_constants::fee::WeightToFee,
-	xcm_config::{GovernanceLocation, LocationToAccountId},
-	AllPalletsWithoutSystem, Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
-	UncheckedExtrinsic,
+	paseo_constants::fee::WeightToFee, xcm_config::LocationToAccountId, AllPalletsWithoutSystem,
+	Balances, Block, HopPromotion, Runtime, RuntimeCall, RuntimeEvent, RuntimeGenesisConfig,
+	RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension, UncheckedExtrinsic,
 };
 use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, HashingAlgorithm};
 use frame_support::{
@@ -48,6 +46,12 @@ use xcm::latest::prelude::*;
 use xcm_runtime_apis::conversions::LocationToAccountHelper;
 
 const ALICE: [u8; 32] = [1u8; 32];
+
+/// Governance location used in tests: AssetHub, a configured `GovernanceParachainIds` member.
+fn governance_location() -> Location {
+	use bulletin_paseo_runtime::paseo_constants::system_parachain::ASSET_HUB_ID;
+	Location::new(1, [Parachain(ASSET_HUB_ID)])
+}
 
 /// Advance to the next block for testing transaction storage.
 fn advance_block() {
@@ -829,7 +833,7 @@ fn governance_authorize_upgrade_works() {
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,
-	>(GovernanceOrigin::Location(GovernanceLocation::get())));
+	>(GovernanceOrigin::Location(governance_location())));
 }
 
 #[test]
@@ -1779,9 +1783,9 @@ fn xcm_transact_store_is_blocked() {
 			});
 
 			// Build an XCM message: UnpaidExecution + Transact(Superuser, store).
-			// GovernanceLocation (relay chain) has LocationAsSuperuser in the
-			// OriginConverter, so origin conversion would succeed — but SafeCallFilter
-			// must block the call before that matters.
+			// The governance location has LocationAsSuperuser in the OriginConverter,
+			// so origin conversion would succeed — but SafeCallFilter must block the
+			// call before that matters.
 			let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
 				.unpaid_execution(Unlimited, None)
 				.transact(OriginKind::Superuser, None, store_call.encode())
@@ -1791,7 +1795,7 @@ fn xcm_transact_store_is_blocked() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			// SafeCallFilter returns false for store → XcmError::NoPermission
@@ -1849,7 +1853,7 @@ fn xcm_transact_wrapped_store_is_blocked() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			assert!(
@@ -1909,7 +1913,7 @@ fn xcm_transact_authorize_account_works() {
 			let outcome = xcm_executor::XcmExecutor::<
 				bulletin_paseo_runtime::xcm_config::XcmConfig,
 			>::prepare_and_execute(
-				GovernanceLocation::get(), message, &mut id, Weight::MAX, Weight::MAX
+				governance_location(), message, &mut id, Weight::MAX, Weight::MAX
 			);
 
 			assert!(

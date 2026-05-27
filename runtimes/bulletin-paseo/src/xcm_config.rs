@@ -56,7 +56,7 @@ use xcm_builder::{
 use xcm_executor::XcmExecutor;
 
 // Re-export
-pub use crate::paseo_constants::locations::{GovernanceLocation, PeopleLocation};
+pub use crate::paseo_constants::locations::PeopleLocation;
 
 /// The genesis hash of the Paseo testnet relay chain. Used to identify it over XCM.
 ///
@@ -176,8 +176,8 @@ impl Contains<Location> for IsGovernanceLocation {
 	}
 }
 
-/// Multi-paraId equivalent of `IsVoiceOfBody<GovernanceLocation, B>`: matches
-/// `Voice` of body `B` from any sibling parachain in [`GovernanceParachainIds`].
+/// Matches the `Voice` of body `B` from any sibling parachain listed in
+/// [`GovernanceParachainIds`] (multi-paraId variant of `IsVoiceOfBody`).
 pub struct IsGovernanceVoiceOfBody<B>(core::marker::PhantomData<B>);
 impl<B: frame_support::traits::Get<BodyId>> Contains<Location> for IsGovernanceVoiceOfBody<B> {
 	fn contains(location: &Location) -> bool {
