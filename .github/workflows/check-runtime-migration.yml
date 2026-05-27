@@ -74,6 +74,7 @@ jobs:
           mode: prepare
 
   prepare-snapshots:
+    name: prepare-snapshot (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
     needs: [runtime-matrix, prepare-try-runtime]
     runs-on: ubuntu-latest
     strategy:
@@ -156,6 +157,7 @@ jobs:
 
 
   check-migrations:
+    name: check-migration (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
     needs: [runtime-matrix, prepare-try-runtime, prepare-snapshots]
     runs-on: ubuntu-latest
     timeout-minutes: 120
