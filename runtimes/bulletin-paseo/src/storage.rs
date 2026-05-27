@@ -105,7 +105,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 			// Root can do whatever.
 			crate::EnsureRoot<Self::AccountId>,
 			// Sibling parachains listed in `AllowedParachainIds` can handle authorizations.
-			EnsureXcm<IsAllowedParachain>,
+			EnsureXcm<IsAuthorizerParachain>,
 		>,
 		// Accounts registered in `AllowedAuthorizers` storage (managed via
 		// `add_authorizer` / `remove_authorizer`).
