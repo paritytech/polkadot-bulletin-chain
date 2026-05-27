@@ -2366,6 +2366,121 @@ fn auto_renewal_lifecycle() {
 	});
 }
 
+/// A duplicate `store(data)` of content that already has an active
+/// auto-renewal registration must not cause the owner to be billed for
+/// an extra renewal cycle. The shadow `Transactions[S1]` entry left
+/// behind by the duplicate store at `S2` is skipped by the
+/// canonical-reference check in `on_initialize`, so only the canonical
+/// (`S2`) chain fires renewals.
+#[test]
+fn duplicate_store_does_not_double_charge_auto_renew() {
+	new_test_ext().execute_with(|| {
+		// `new_test_ext` configures RetentionPeriod = 10.
+		let alice = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		// S1 = block 1: Alice stores and registers auto-renew at block 2.
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+		assert_ok!(enable_auto_renew_via_extension(alice, content_hash));
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((1, 0)));
+		assert!(AutoRenewals::get(content_hash).unwrap().paid, "cycle 1 is prepaid");
+
+		// S2 = block 5: anyone re-stores the same data. The map now
+		// points at the latest (5, 0); the entry in Transactions[1]
+		// becomes a stale shadow.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((5, 0)));
+
+		// Build proofs for the two age-out boundaries: block 11 ages
+		// the proof for Transactions[1], block 15 for Transactions[5].
+		let data_for_proof = data.clone();
+		let proof_provider = move || {
+			let block_num = System::block_number();
+			let period: u64 = RetentionPeriod::get();
+			let target = block_num.saturating_sub(period);
+			if target > 0 && Transactions::get(target).is_some() {
+				let parent_hash = System::parent_hash();
+				let txs = Transactions::get(target).unwrap();
+				let data_vec: Vec<Vec<u8>> = txs.iter().map(|_| data_for_proof.clone()).collect();
+				build_proof(parent_hash.as_ref(), data_vec).unwrap()
+			} else {
+				None
+			}
+		};
+
+		// Advance to block 11 so block-1's storage proof is checked
+		// normally and Transactions[5] survives in the map.
+		run_to_block(11, proof_provider.clone());
+
+		// S1 + RP + 1 = 12. on_initialize takes Transactions[1] but
+		// finds the entry is no longer the canonical reference for
+		// `hash`, so it does *not* queue an auto-renewal. Without the
+		// fix, this would queue one and consume Alice's prepayment.
+		init_block(12);
+		assert!(Transactions::get(1).is_none(), "stale Transactions[1] is taken");
+		assert_eq!(
+			TransactionByContentHash::get(content_hash),
+			Some((5, 0)),
+			"canonical pointer to (5, 0) is untouched"
+		);
+		assert!(
+			PendingAutoRenewals::get().is_empty(),
+			"stale shadow must not schedule an auto-renewal"
+		);
+		// Prepayment is intact — the legitimate cycle at block 16 will consume it.
+		assert!(AutoRenewals::get(content_hash).unwrap().paid);
+
+		// Drain the (empty) inherent so `on_finalize`'s pending-empty
+		// invariant holds and block 12 finalizes cleanly.
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		assert!(System::events().iter().all(|r| !matches!(
+			r.event,
+			RuntimeEvent::TransactionStorage(Event::DataAutoRenewed { .. })
+		)));
+
+		// Advance to block 15 so the proof for Transactions[5] is
+		// submitted before it ages out.
+		run_to_block(15, proof_provider);
+
+		// S2 + RP + 1 = 16. on_initialize takes Transactions[5] —
+		// this *is* the canonical reference, so exactly one renewal
+		// is queued and Alice's prepayment is consumed.
+		init_block(16);
+		let pending = PendingAutoRenewals::get();
+		assert_eq!(pending.len(), 1, "exactly one auto-renewal for the canonical chain");
+		assert_eq!(pending[0].0, content_hash);
+		assert_eq!(pending[0].2.account, alice);
+
+		// Refresh authorization (the block-5 grant expired at block 15)
+		// and fire the cycle. It should succeed against the prepayment.
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::root(),
+			alice,
+			10,
+			100_000,
+		));
+		assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(Event::DataAutoRenewed {
+			index: 0,
+			content_hash,
+			account: alice,
+		}));
+		// Cycle 1 ran free against the prepayment; subsequent cycles will charge.
+		assert!(!AutoRenewals::get(content_hash).unwrap().paid);
+		assert_eq!(TransactionByContentHash::get(content_hash), Some((16, 0)));
+	});
+}
+
 #[test]
 fn auto_renewal_consumes_authorization() {
 	new_test_ext().execute_with(|| {

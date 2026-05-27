@@ -19,7 +19,7 @@
 //!
 //! Numbers below were copied from the bulletin-paseo runtime weight file
 //! (`runtimes/bulletin-paseo/src/weights/pallet_bulletin_transaction_storage.rs`,
-//! frame-omni-bencher, 2026-05-07). The `RocksDbWeight` impl substitutes
+//! frame-omni-bencher, 2026-05-22). The `RocksDbWeight` impl substitutes
 //! `T::DbWeight` with `RocksDbWeight` for the same component values so tests
 //! and the default runtime impl agree.
 
@@ -34,23 +34,23 @@ use core::marker::PhantomData;
 /// Weight functions needed for pallet_bulletin_transaction_storage.
 pub trait WeightInfo {
 	fn store(l: u32, ) -> Weight;
-	fn renew() -> Weight;
 	fn force_renew() -> Weight;
-	fn apply_block_inherents(n: u32) -> Weight;
-	fn on_initialize_with_expiry(n: u32) -> Weight;
+	fn renew() -> Weight;
 	fn authorize_account() -> Weight;
+	fn add_authorizer() -> Weight;
+	fn remove_authorizer() -> Weight;
 	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
-	fn enable_auto_renew() -> Weight;
-	fn disable_auto_renew() -> Weight;
+	fn remove_exhausted_authorizer() -> Weight;
 	fn validate_store(l: u32) -> Weight;
 	fn validate_renew() -> Weight;
-	fn add_authorizer() -> Weight;
-	fn remove_authorizer() -> Weight;
-	fn remove_exhausted_authorizer() -> Weight;
+	fn enable_auto_renew() -> Weight;
+	fn disable_auto_renew() -> Weight;
+	fn apply_block_inherents(n: u32) -> Weight;
+	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
 	fn migrate_v3_to_v4_step() -> Weight;
 }
@@ -67,104 +67,45 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `203`
 		//  Estimated: `45519`
-		// Minimum execution time: 15_797_000 picoseconds.
-		Weight::from_parts(16_440_000, 0)
+		// Minimum execution time: 16_080_000 picoseconds.
+		Weight::from_parts(16_556_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 15
-			.saturating_add(Weight::from_parts(6_866, 0).saturating_mul(l.into()))
+			// Standard Error: 8
+			.saturating_add(Weight::from_parts(6_132, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Placeholder weight for the one-shot scheduler `renew`. Reads `Transactions`
-	/// to derive the size + content hash, reads `AutoRenewals` for the conflict
-	/// check, writes `AutoRenewals` for the registration. Borrows
-	/// `enable_auto_renew`'s envelope — same storage operations.
-	fn renew() -> Weight {
-		<Self as WeightInfo>::enable_auto_renew()
-	}
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:1)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
 	fn force_renew() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `367`
+		//  Measured:  `412`
 		//  Estimated: `47519`
-		// Minimum execution time: 26_963_000 picoseconds.
-		Weight::from_parts(28_675_000, 0)
+		// Minimum execution time: 26_810_000 picoseconds.
+		Weight::from_parts(28_316_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
-	/// Proof: `TransactionStorage::ProofChecked` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
-	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:0)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `System::ParentHash` (r:1 w:0)
-	/// Proof: `System::ParentHash` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(76802), added: 77297, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
-	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Storage: `TransactionStorage::Authorizations` (r:512 w:512)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:512)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// The range of component `n` is `[0, 512]`.
-	fn apply_block_inherents(n: u32) -> Weight {
+	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
+	fn renew() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `44333 + n * (242 ±0)`
-		//  Estimated: `78287 + n * (2560 ±0)`
-		// Minimum execution time: 70_836_000 picoseconds.
-		Weight::from_parts(74_908_000, 0)
-			.saturating_add(Weight::from_parts(0, 78287))
-			// Standard Error: 18_089
-			.saturating_add(Weight::from_parts(15_826_692, 0).saturating_mul(n.into()))
-			.saturating_add(T::DbWeight::get().reads(8))
-			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(4))
-			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2560).saturating_mul(n.into()))
-	}
-	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
-	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
-	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(76802), added: 77297, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:512 w:512)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::AutoRenewals` (r:512 w:0)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(80), added: 2555, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
-	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// The range of component `n` is `[0, 512]`.
-	fn on_initialize_with_expiry(n: u32) -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `201 + n * (234 ±0)`
-		//  Estimated: `78287 + n * (2555 ±0)`
-		// Minimum execution time: 7_682_000 picoseconds.
-		Weight::from_parts(7_830_000, 0)
-			.saturating_add(Weight::from_parts(0, 78287))
-			// Standard Error: 13_093
-			.saturating_add(Weight::from_parts(11_392_590, 0).saturating_mul(n.into()))
-			.saturating_add(T::DbWeight::get().reads(6))
-			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(3))
-			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2555).saturating_mul(n.into()))
+		//  Measured:  `412`
+		//  Estimated: `47519`
+		// Minimum execution time: 25_963_000 picoseconds.
+		Weight::from_parts(27_475_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
@@ -172,9 +113,32 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
 		//  Estimated: `3550`
-		// Minimum execution time: 16_813_000 picoseconds.
-		Weight::from_parts(17_779_000, 0)
+		// Minimum execution time: 17_098_000 picoseconds.
+		Weight::from_parts(18_097_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(71), added: 2546, mode: `MaxEncodedLen`)
+	fn add_authorizer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `0`
+		//  Estimated: `0`
+		// Minimum execution time: 7_423_000 picoseconds.
+		Weight::from_parts(7_919_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(71), added: 2546, mode: `MaxEncodedLen`)
+	fn remove_authorizer() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `330`
+		//  Estimated: `3536`
+		// Minimum execution time: 13_292_000 picoseconds.
+		Weight::from_parts(14_054_000, 0)
+			.saturating_add(Weight::from_parts(0, 3536))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
@@ -184,8 +148,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
-		// Minimum execution time: 13_483_000 picoseconds.
-		Weight::from_parts(14_286_000, 0)
+		// Minimum execution time: 13_558_000 picoseconds.
+		Weight::from_parts(14_315_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -196,8 +160,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
 		//  Estimated: `3550`
-		// Minimum execution time: 12_256_000 picoseconds.
-		Weight::from_parts(13_053_000, 0)
+		// Minimum execution time: 12_343_000 picoseconds.
+		Weight::from_parts(13_240_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -208,8 +172,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
-		// Minimum execution time: 13_065_000 picoseconds.
-		Weight::from_parts(13_949_000, 0)
+		// Minimum execution time: 13_336_000 picoseconds.
+		Weight::from_parts(14_054_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -220,8 +184,8 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
-		// Minimum execution time: 19_035_000 picoseconds.
-		Weight::from_parts(20_127_000, 0)
+		// Minimum execution time: 19_053_000 picoseconds.
+		Weight::from_parts(20_142_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -232,73 +196,21 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
-		// Minimum execution time: 14_241_000 picoseconds.
-		Weight::from_parts(15_130_000, 0)
+		// Minimum execution time: 14_446_000 picoseconds.
+		Weight::from_parts(15_276_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
-	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(80), added: 2555, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:0)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Authorizations` (r:1 w:0)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn enable_auto_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `525`
-		//  Estimated: `47519`
-		// Minimum execution time: 36_710_000 picoseconds.
-		Weight::from_parts(38_719_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(4))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
-	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
-	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
-	fn add_authorizer() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `0`
-		//  Estimated: `0`
-		// Minimum execution time: 6_914_000 picoseconds.
-		Weight::from_parts(7_415_000, 0)
-			.saturating_add(Weight::from_parts(0, 0))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
-	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
-	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
-	fn remove_authorizer() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `0`
-		//  Estimated: `0`
-		// Minimum execution time: 6_564_000 picoseconds.
-		Weight::from_parts(7_033_000, 0)
-			.saturating_add(Weight::from_parts(0, 0))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
-	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(65), added: 2540, mode: `MaxEncodedLen`)
+	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(71), added: 2546, mode: `MaxEncodedLen`)
 	fn remove_exhausted_authorizer() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `290`
-		//  Estimated: `3530`
-		// Minimum execution time: 13_425_000 picoseconds.
-		Weight::from_parts(14_304_000, 0)
-			.saturating_add(Weight::from_parts(0, 3530))
-			.saturating_add(T::DbWeight::get().reads(1))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
-	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(80), added: 2555, mode: `MaxEncodedLen`)
-	fn disable_auto_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `371`
-		//  Estimated: `3545`
-		// Minimum execution time: 18_622_000 picoseconds.
-		Weight::from_parts(19_723_000, 0)
-			.saturating_add(Weight::from_parts(0, 3545))
+		//  Measured:  `330`
+		//  Estimated: `3536`
+		// Minimum execution time: 13_607_000 picoseconds.
+		Weight::from_parts(14_449_000, 0)
+			.saturating_add(Weight::from_parts(0, 3536))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
@@ -315,11 +227,11 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `45519`
-		// Minimum execution time: 22_277_000 picoseconds.
-		Weight::from_parts(22_601_000, 0)
+		// Minimum execution time: 23_410_000 picoseconds.
+		Weight::from_parts(23_874_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 13
-			.saturating_add(Weight::from_parts(2_792, 0).saturating_mul(l.into()))
+			// Standard Error: 7
+			.saturating_add(Weight::from_parts(2_727, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(5))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
@@ -337,11 +249,107 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 		// Proof Size summary in bytes:
 		//  Measured:  `533`
 		//  Estimated: `47519`
-		// Minimum execution time: 44_991_000 picoseconds.
-		Weight::from_parts(47_394_000, 0)
+		// Minimum execution time: 42_828_000 picoseconds.
+		Weight::from_parts(44_737_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
 			.saturating_add(T::DbWeight::get().reads(6))
 			.saturating_add(T::DbWeight::get().writes(3))
+	}
+	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:0)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
+	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
+	fn enable_auto_renew() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `412`
+		//  Estimated: `47519`
+		// Minimum execution time: 25_459_000 picoseconds.
+		Weight::from_parts(27_275_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
+	fn disable_auto_renew() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `375`
+		//  Estimated: `3547`
+		// Minimum execution time: 17_301_000 picoseconds.
+		Weight::from_parts(18_666_000, 0)
+			.saturating_add(Weight::from_parts(0, 3547))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
+	/// Proof: `TransactionStorage::ProofChecked` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
+	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
+	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
+	/// Storage: `System::ParentHash` (r:1 w:0)
+	/// Proof: `System::ParentHash` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(77826), added: 78321, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
+	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
+	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
+	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
+	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
+	/// Storage: `TransactionStorage::Authorizations` (r:512 w:512)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:512)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+	/// The range of component `n` is `[0, 512]`.
+	fn apply_block_inherents(n: u32) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `44333 + n * (244 ±0)`
+		//  Estimated: `79311 + n * (2560 ±0)`
+		// Minimum execution time: 65_637_000 picoseconds.
+		Weight::from_parts(67_731_000, 0)
+			.saturating_add(Weight::from_parts(0, 79311))
+			// Standard Error: 9_601
+			.saturating_add(Weight::from_parts(15_295_543, 0).saturating_mul(n.into()))
+			.saturating_add(T::DbWeight::get().reads(8))
+			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes(4))
+			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(n.into())))
+			.saturating_add(Weight::from_parts(0, 2560).saturating_mul(n.into()))
+	}
+	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
+	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
+	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
+	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::Transactions` (r:1 w:1)
+	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
+	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(77826), added: 78321, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:512 w:512)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::AutoRenewals` (r:512 w:0)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
+	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
+	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
+	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
+	/// The range of component `n` is `[0, 512]`.
+	fn on_initialize_with_expiry(n: u32) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `201 + n * (237 ±0)`
+		//  Estimated: `79311 + n * (2557 ±0)`
+		// Minimum execution time: 7_556_000 picoseconds.
+		Weight::from_parts(7_640_000, 0)
+			.saturating_add(Weight::from_parts(0, 79311))
+			// Standard Error: 11_242
+			.saturating_add(Weight::from_parts(10_958_277, 0).saturating_mul(n.into()))
+			.saturating_add(T::DbWeight::get().reads(6))
+			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(n.into())))
+			.saturating_add(T::DbWeight::get().writes(3))
+			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
+			.saturating_add(Weight::from_parts(0, 2557).saturating_mul(n.into()))
 	}
 	/// Storage: `TransactionStorage::RetentionPeriod` (r:1 w:0)
 	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
@@ -351,46 +359,133 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
 	fn migrate_v2_to_v3_step() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `41726`
+		//  Measured:  `41812`
 		//  Estimated: `94048`
-		// Minimum execution time: 134_237_000 picoseconds.
-		Weight::from_parts(140_689_000, 0)
+		// Minimum execution time: 137_920_000 picoseconds.
+		Weight::from_parts(144_128_000, 0)
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
-	/// Worst-case weight for one outer-loop iteration of the v3→v4 multi-block
-	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert) per
-	/// `AutoRenewals` entry. Placeholder until benchmarked.
+	/// Storage: `TransactionStorage::AutoRenewals` (r:2 w:1)
+	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
+	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
+	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:0 w:1)
 	fn migrate_v3_to_v4_step() -> Weight {
-		Weight::from_parts(10_000_000, 1_000)
+		// Proof Size summary in bytes:
+		//  Measured:  `394`
+		//  Estimated: `6104`
+		// Minimum execution time: 13_485_000 picoseconds.
+		Weight::from_parts(14_297_000, 0)
+			.saturating_add(Weight::from_parts(0, 6104))
 			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(1))
+			.saturating_add(T::DbWeight::get().writes(2))
 	}
 }
 
 // For backwards compatibility and tests
 impl WeightInfo for () {
 	fn store(l: u32, ) -> Weight {
-		Weight::from_parts(16_440_000, 0)
+		Weight::from_parts(16_556_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			.saturating_add(Weight::from_parts(6_866, 0).saturating_mul(l.into()))
+			.saturating_add(Weight::from_parts(6_132, 0).saturating_mul(l.into()))
 			.saturating_add(RocksDbWeight::get().reads(1))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
-	fn renew() -> Weight {
-		<Self as WeightInfo>::enable_auto_renew()
-	}
 	fn force_renew() -> Weight {
-		Weight::from_parts(28_675_000, 0)
+		Weight::from_parts(28_316_000, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(RocksDbWeight::get().reads(2))
+			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
+	fn renew() -> Weight {
+		Weight::from_parts(27_475_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(RocksDbWeight::get().reads(3))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn authorize_account() -> Weight {
+		Weight::from_parts(18_097_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn add_authorizer() -> Weight {
+		Weight::from_parts(7_919_000, 0)
+			.saturating_add(Weight::from_parts(0, 0))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_authorizer() -> Weight {
+		Weight::from_parts(14_054_000, 0)
+			.saturating_add(Weight::from_parts(0, 3536))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn refresh_account_authorization() -> Weight {
+		Weight::from_parts(14_315_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn authorize_preimage() -> Weight {
+		Weight::from_parts(13_240_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn refresh_preimage_authorization() -> Weight {
+		Weight::from_parts(14_054_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_expired_account_authorization() -> Weight {
+		Weight::from_parts(20_142_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_expired_preimage_authorization() -> Weight {
+		Weight::from_parts(15_276_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn remove_exhausted_authorizer() -> Weight {
+		Weight::from_parts(14_449_000, 0)
+			.saturating_add(Weight::from_parts(0, 3536))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn validate_store(l: u32) -> Weight {
+		Weight::from_parts(23_874_000, 0)
+			.saturating_add(Weight::from_parts(0, 45519))
+			.saturating_add(Weight::from_parts(2_727, 0).saturating_mul(l.into()))
+			.saturating_add(RocksDbWeight::get().reads(5))
+			.saturating_add(RocksDbWeight::get().writes(2))
+	}
+	fn validate_renew() -> Weight {
+		Weight::from_parts(44_737_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(RocksDbWeight::get().reads(6))
+			.saturating_add(RocksDbWeight::get().writes(3))
+	}
+	fn enable_auto_renew() -> Weight {
+		Weight::from_parts(27_275_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(RocksDbWeight::get().reads(3))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn disable_auto_renew() -> Weight {
+		Weight::from_parts(18_666_000, 0)
+			.saturating_add(Weight::from_parts(0, 3547))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
 	fn apply_block_inherents(n: u32) -> Weight {
-		Weight::from_parts(74_908_000, 0)
-			.saturating_add(Weight::from_parts(0, 78287))
-			.saturating_add(Weight::from_parts(15_826_692, 0).saturating_mul(n.into()))
+		Weight::from_parts(67_731_000, 0)
+			.saturating_add(Weight::from_parts(0, 79311))
+			.saturating_add(Weight::from_parts(15_295_543, 0).saturating_mul(n.into()))
 			.saturating_add(RocksDbWeight::get().reads(8))
 			.saturating_add(RocksDbWeight::get().reads((1_u64).saturating_mul(n.into())))
 			.saturating_add(RocksDbWeight::get().writes(4))
@@ -398,101 +493,25 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 2560).saturating_mul(n.into()))
 	}
 	fn on_initialize_with_expiry(n: u32) -> Weight {
-		Weight::from_parts(7_830_000, 0)
-			.saturating_add(Weight::from_parts(0, 78287))
-			.saturating_add(Weight::from_parts(11_392_590, 0).saturating_mul(n.into()))
+		Weight::from_parts(7_640_000, 0)
+			.saturating_add(Weight::from_parts(0, 79311))
+			.saturating_add(Weight::from_parts(10_958_277, 0).saturating_mul(n.into()))
 			.saturating_add(RocksDbWeight::get().reads(6))
 			.saturating_add(RocksDbWeight::get().reads((2_u64).saturating_mul(n.into())))
 			.saturating_add(RocksDbWeight::get().writes(3))
 			.saturating_add(RocksDbWeight::get().writes((1_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2555).saturating_mul(n.into()))
-	}
-	fn authorize_account() -> Weight {
-		Weight::from_parts(17_779_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn refresh_account_authorization() -> Weight {
-		Weight::from_parts(14_286_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn authorize_preimage() -> Weight {
-		Weight::from_parts(13_053_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn refresh_preimage_authorization() -> Weight {
-		Weight::from_parts(13_949_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn remove_expired_account_authorization() -> Weight {
-		Weight::from_parts(20_127_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn remove_expired_preimage_authorization() -> Weight {
-		Weight::from_parts(15_130_000, 0)
-			.saturating_add(Weight::from_parts(0, 3550))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn enable_auto_renew() -> Weight {
-		Weight::from_parts(38_719_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(RocksDbWeight::get().reads(4))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn disable_auto_renew() -> Weight {
-		Weight::from_parts(19_723_000, 0)
-			.saturating_add(Weight::from_parts(0, 3545))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn add_authorizer() -> Weight {
-		Weight::from_parts(7_415_000, 0)
-			.saturating_add(Weight::from_parts(0, 0))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn remove_authorizer() -> Weight {
-		Weight::from_parts(7_033_000, 0)
-			.saturating_add(Weight::from_parts(0, 0))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn remove_exhausted_authorizer() -> Weight {
-		Weight::from_parts(14_304_000, 0)
-			.saturating_add(Weight::from_parts(0, 3530))
-			.saturating_add(RocksDbWeight::get().reads(1))
-			.saturating_add(RocksDbWeight::get().writes(1))
-	}
-	fn validate_store(l: u32) -> Weight {
-		Weight::from_parts(22_601_000, 0)
-			.saturating_add(Weight::from_parts(0, 45519))
-			.saturating_add(Weight::from_parts(2_792, 0).saturating_mul(l.into()))
-			.saturating_add(RocksDbWeight::get().reads(5))
-			.saturating_add(RocksDbWeight::get().writes(2))
-	}
-	fn validate_renew() -> Weight {
-		Weight::from_parts(47_394_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(RocksDbWeight::get().reads(6))
-			.saturating_add(RocksDbWeight::get().writes(3))
+			.saturating_add(Weight::from_parts(0, 2557).saturating_mul(n.into()))
 	}
 	fn migrate_v2_to_v3_step() -> Weight {
-		Weight::from_parts(140_689_000, 0)
+		Weight::from_parts(144_128_000, 0)
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
 	}
 	fn migrate_v3_to_v4_step() -> Weight {
-		Weight::from_parts(10_000_000, 1_000)
+		Weight::from_parts(14_297_000, 0)
+			.saturating_add(Weight::from_parts(0, 6104))
 			.saturating_add(RocksDbWeight::get().reads(2))
-			.saturating_add(RocksDbWeight::get().writes(1))
+			.saturating_add(RocksDbWeight::get().writes(2))
 	}
 }
