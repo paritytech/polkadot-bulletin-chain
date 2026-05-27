@@ -48,20 +48,14 @@ async function main() {
         papiClient = createClient(getWsProvider(NODE_WS));
         const api = papiClient.getTypedApi(bulletin);
 
-        // Create signers: an authorizer (Alice) and a regular user account
         const authorizer = createSignerFromSeed(SEED);
         const user = createSignerFromSeed('//SDKSigner');
         console.log(`User account: ${user.address}`);
 
-        // Create SDK clients
         const authorizerClient = new AsyncBulletinClient(api, authorizer.signer);
         const userClient = new AsyncBulletinClient(api, user.signer);
 
-        // Step 1: Authorize the user account to store data.
-        // The authorizer's signed call goes through EnsureAllowedAuthorizers when
-        // seeded in `AllowedAuthorizers` at genesis (bulletin-polkadot), or through
-        // EnsureSignedBy<TestAccounts> on testnet runtimes (bulletin-westend/paseo).
-        // No sudo wrap — production parachains have no Sudo pallet.
+        // No sudo wrap: production bulletin parachains have no Sudo pallet.
         console.log('\nStep 1: Authorizing account...');
         await authorizerClient.authorizeAccount(
             user.address,

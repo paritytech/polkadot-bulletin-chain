@@ -185,8 +185,7 @@ jobs:
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-
           fail-on-cache-miss: true
 
-      # Resolve the external commit sha and key the WASM cache on it so subsequent
-      # runs skip the multi-minute out-of-tree build.
+      # Key the WASM cache on the commit sha so re-runs skip the out-of-tree build.
       - name: Resolve external runtime ref
         if: ${{ matrix.runtime.external_runtime != null }}
         id: external-runtime
@@ -225,8 +224,6 @@ jobs:
           RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
 
           if [ "$IS_EXTERNAL" = "true" ]; then
-            # External runtime was built by the previous step; locate the WASM
-            # in the external checkout's target directory.
             RUNTIME_BLOB_PATH="./target/external-runtimes/${RUNTIME_NAME}-try-runtime/target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
           else
             FEATURES="try-runtime"

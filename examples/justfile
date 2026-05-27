@@ -133,17 +133,8 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     echo "   Log: {{ test_dir }}/zombienet.log"
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
-# Build a runtime that lives in an external (Fellows) repo.
-# Reads `external_runtime.{repo,ref,path}` and `package` from
-# scripts/runtimes-matrix.json for the given matrix `name`. Clones into
-# {{ justfile_directory() }}/../target/external-runtimes/<name>[-<features>],
-# builds the runtime package (optionally with the given comma-separated
-# `features`), and prints the path to the compressed WASM on stdout.
-#
-# In CI, cache `target/external-runtimes/<name>[-<features>]` keyed by the
-# resolved Fellows commit sha (use `git ls-remote <repo> <ref>` to resolve)
-# to skip the rebuild on cache hit. Different feature sets get separate
-# checkouts so caches don't collide.
+# Build a runtime that lives in an external (Fellows) repo and print the WASM path.
+# Different feature sets use separate checkouts so their build caches don't collide.
 build-external-runtime name features="":
     #!/usr/bin/env bash
     set -e
