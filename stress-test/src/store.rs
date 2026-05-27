@@ -86,16 +86,16 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 								return;
 							}
 						}
-						log::warn!("monitor: best block subscription ended, reconnecting");
+						tracing::warn!("monitor: best block subscription ended, reconnecting");
 					},
 					Err(e) => {
-						log::warn!("monitor: best block subscribe failed: {e}, retrying in 2s");
+						tracing::warn!("monitor: best block subscribe failed: {e}, retrying in 2s");
 					},
 				}
 				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 				match crate::client::connect(&url).await {
 					Ok(new_client) => client = new_client,
-					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+					Err(e) => tracing::warn!("monitor: reconnect failed: {e}, retrying"),
 				}
 			}
 		});
@@ -115,16 +115,16 @@ pub async fn subscribe_blocks_dual(ws_url: &str) -> Result<DualBlockSubscription
 								return;
 							}
 						}
-						log::warn!("monitor: finalized subscription ended, reconnecting");
+						tracing::warn!("monitor: finalized subscription ended, reconnecting");
 					},
 					Err(e) => {
-						log::warn!("monitor: finalized subscribe failed: {e}, retrying in 2s");
+						tracing::warn!("monitor: finalized subscribe failed: {e}, retrying in 2s");
 					},
 				}
 				tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 				match crate::client::connect(&url).await {
 					Ok(new_client) => client = new_client,
-					Err(e) => log::warn!("monitor: reconnect failed: {e}, retrying"),
+					Err(e) => tracing::warn!("monitor: reconnect failed: {e}, retrying"),
 				}
 			}
 		});
@@ -423,7 +423,7 @@ pub(crate) async fn stored_content_hashes(
 						h.copy_from_slice(&fb[4..36]);
 						hashes.push(h);
 					} else {
-						log::warn!(
+						tracing::warn!(
 							"block #{block_number}: Stored event field_bytes too short ({})",
 							fb.len()
 						);
@@ -431,7 +431,7 @@ pub(crate) async fn stored_content_hashes(
 				}
 			},
 		Err(e) => {
-			log::warn!("block #{block_number}: failed to fetch events: {e}");
+			tracing::warn!("block #{block_number}: failed to fetch events: {e}");
 		},
 	}
 	hashes
@@ -491,7 +491,7 @@ pub async fn bulk_store_oneshot(
 	let total_items = work_items.len();
 	let num_submitters = submitters.min(total_items).max(1);
 	let num_connections = num_submitters.max(8).min(total_items).max(1);
-	log::info!(
+	tracing::info!(
 		"bulk_store: {total_items} items, {num_submitters} submitters, {num_connections} connections"
 	);
 
@@ -505,11 +505,11 @@ pub async fn bulk_store_oneshot(
 	// This avoids per-account RPC queries in the hot loop.
 	let nonce_tracker = NonceTracker::new();
 	let keypairs: Vec<_> = work_items.iter().map(|(kp, _)| kp.clone()).collect();
-	log::info!("bulk_store: pre-initializing nonces for {} accounts...", keypairs.len());
+	tracing::info!("bulk_store: pre-initializing nonces for {} accounts...", keypairs.len());
 	let (nonce_ok, nonce_fail) =
 		crate::accounts::batch_init_nonces(&pool, &nonce_tracker, &keypairs, num_connections * 4)
 			.await;
-	log::info!("bulk_store: nonces initialized: {nonce_ok} ok, {nonce_fail} failed");
+	tracing::info!("bulk_store: nonces initialized: {nonce_ok} ok, {nonce_fail} failed");
 	drop(keypairs);
 
 	let account_queue = Arc::new(Mutex::new(VecDeque::from(work_items)));
@@ -562,7 +562,7 @@ pub async fn bulk_store_oneshot(
 				if !is_prefill {
 					let mut ms = measure_start_monitor.lock().unwrap();
 					if ms.is_none() {
-						log::info!(
+						tracing::info!(
 							"bulk_store: measurement clock starts at block \
 							 #{block_number}"
 						);
@@ -571,7 +571,7 @@ pub async fn bulk_store_oneshot(
 				}
 
 				if store_tx_count > 0 || !is_prefill {
-					log::info!(
+					tracing::info!(
 						"bulk_store: {phase} block #{block_number}: \
 						 {store_tx_count} store txs"
 					);
@@ -592,7 +592,7 @@ pub async fn bulk_store_oneshot(
 					total_store_blocks += 1;
 					if let Some(limit) = stop_after_blocks {
 						if total_store_blocks >= limit {
-							log::info!(
+							tracing::info!(
 								"bulk_store: reached {total_store_blocks} measured \
 								 blocks with txs (target {limit}), stopping"
 							);
@@ -607,7 +607,7 @@ pub async fn bulk_store_oneshot(
 
 	// Wait for the monitor to be actively consuming blocks before submitting.
 	monitor_ready.notified().await;
-	log::info!("bulk_store: block monitor ready, starting submitters");
+	tracing::info!("bulk_store: block monitor ready, starting submitters");
 
 	// Spawn concurrent submitter tasks
 	let mut handles = Vec::new();
@@ -686,12 +686,12 @@ pub async fn bulk_store_oneshot(
 								pool_full_retries.fetch_add(1, Ordering::Relaxed);
 								consecutive_conn_errors = 0;
 								if !pool_saturated.swap(true, Ordering::Relaxed) {
-									log::info!(
+									tracing::info!(
 										"bulk_store submitter {task_id}: pool saturated \
 										 (first PoolFull) — measurement starts now"
 									);
 								}
-								log::debug!(
+								tracing::debug!(
 									"bulk_store submitter {task_id}: pool full (1016), \
 									 rollback nonce & re-queuing: {e}"
 								);
@@ -705,7 +705,7 @@ pub async fn bulk_store_oneshot(
 							TxPoolError::Banned | TxPoolError::ExhaustsResources => {
 								pool_full_retries.fetch_add(1, Ordering::Relaxed);
 								consecutive_conn_errors = 0;
-								log::warn!(
+								tracing::warn!(
 									"bulk_store submitter {task_id}: banned/exhausts, \
 									 rollback nonce & re-queuing: {e}"
 								);
@@ -725,7 +725,7 @@ pub async fn bulk_store_oneshot(
 								account_queue.lock().unwrap().push_front((signer, data));
 
 								if consecutive_conn_errors == 1 {
-									log::warn!(
+									tracing::warn!(
 										"bulk_store submitter {task_id}: connection dead, \
 										 attempting reconnect to {reconnect_url}"
 									);
@@ -740,7 +740,7 @@ pub async fn bulk_store_oneshot(
 								match crate::client::connect(&reconnect_url).await {
 									Ok(new_client) => {
 										worker_client = Arc::new(new_client);
-										log::info!(
+										tracing::info!(
 											"bulk_store submitter {task_id}: reconnected \
 											 after {consecutive_conn_errors} failures"
 										);
@@ -748,14 +748,14 @@ pub async fn bulk_store_oneshot(
 									},
 									Err(re) => {
 										if consecutive_conn_errors.is_multiple_of(10) {
-											log::warn!(
+											tracing::warn!(
 												"bulk_store submitter {task_id}: reconnect \
 												 failed ({consecutive_conn_errors} attempts): {re}"
 											);
 										}
 										// Give up after 60 consecutive failures (~5 min)
 										if consecutive_conn_errors >= 60 {
-											log::error!(
+											tracing::error!(
 												"bulk_store submitter {task_id}: giving up \
 												 after {consecutive_conn_errors} reconnect \
 												 failures"
@@ -772,13 +772,13 @@ pub async fn bulk_store_oneshot(
 								// included before eviction). Do NOT re-queue — treat
 								// as a loss.
 								consecutive_conn_errors = 0;
-								log::warn!(
+								tracing::warn!(
 									"bulk_store submitter {task_id}: tx dropped from \
 									 pool (nonce may be consumed), skipping: {e}"
 								);
 								pool_full_retries.fetch_add(1, Ordering::Relaxed);
 								if !pool_saturated.swap(true, Ordering::Relaxed) {
-									log::info!(
+									tracing::info!(
 										"bulk_store submitter {task_id}: pool saturated \
 										 (TxDropped) — measurement starts now"
 									);
@@ -786,14 +786,14 @@ pub async fn bulk_store_oneshot(
 							},
 							TxPoolError::AlreadyImported => {
 								consecutive_conn_errors = 0;
-								log::debug!(
+								tracing::debug!(
 									"bulk_store submitter {task_id}: already imported, \
 									 skipping: {e}"
 								);
 							},
 							TxPoolError::StaleNonce => {
 								consecutive_conn_errors = 0;
-								log::debug!(
+								tracing::debug!(
 									"bulk_store submitter {task_id}: stale nonce (already \
 									 used), skipping: {e}"
 								);
@@ -801,7 +801,7 @@ pub async fn bulk_store_oneshot(
 							},
 							TxPoolError::FutureNonce => {
 								consecutive_conn_errors = 0;
-								log::warn!(
+								tracing::warn!(
 									"bulk_store submitter {task_id}: future nonce, \
 									 skipping: {e}"
 								);
@@ -809,7 +809,7 @@ pub async fn bulk_store_oneshot(
 							},
 							TxPoolError::Other => {
 								consecutive_conn_errors = 0;
-								log::warn!("bulk_store submitter {task_id}: skipping: {e}");
+								tracing::warn!("bulk_store submitter {task_id}: skipping: {e}");
 								errors.fetch_add(1, Ordering::Relaxed);
 							},
 						}
@@ -831,7 +831,7 @@ pub async fn bulk_store_oneshot(
 	// If submitters finished without saturating the pool, treat everything as
 	// measured (no pre-fill distinction needed).
 	if !pool_saturated.load(Ordering::Relaxed) {
-		log::info!(
+		tracing::info!(
 			"bulk_store: submitters finished without pool saturation — all blocks are measured"
 		);
 		pool_saturated.store(true, Ordering::Relaxed);
@@ -861,7 +861,7 @@ pub async fn bulk_store_oneshot(
 				if stop.load(Ordering::Relaxed) {
 					let confirmed: u64 =
 						block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
-					log::info!("bulk_store: block target reached, {confirmed} txs confirmed");
+					tracing::info!("bulk_store: block target reached, {confirmed} txs confirmed");
 					break;
 				}
 				let current_confirmed: u64 =
@@ -875,7 +875,7 @@ pub async fn bulk_store_oneshot(
 					let n = bs.len();
 					let confirmed: u64 = bs.iter().map(|b| b.tx_count).sum();
 					drop(bs);
-					log::warn!(
+					tracing::warn!(
 						"bulk_store: no new confirmed txs for {:.0}s, stopping \
 						 ({n} blocks, {confirmed} txs)",
 						inactivity_limit.as_secs_f64()
@@ -891,11 +891,11 @@ pub async fn bulk_store_oneshot(
 				let confirmed: u64 = block_stats.lock().unwrap().iter().map(|b| b.tx_count).sum();
 				let sub = submitted.load(Ordering::Relaxed);
 				if confirmed >= sub || stop.load(Ordering::Relaxed) {
-					log::info!("bulk_store: all {confirmed}/{sub} txs confirmed");
+					tracing::info!("bulk_store: all {confirmed}/{sub} txs confirmed");
 					break;
 				}
 				if Instant::now() > deadline {
-					log::warn!(
+					tracing::warn!(
 						"bulk_store: timed out waiting for confirmations, {confirmed}/{sub}"
 					);
 					break;
@@ -925,7 +925,7 @@ pub async fn bulk_store_oneshot(
 	let prefill_count = all_blocks.iter().filter(|b| b.prefill).count();
 	let measured_count = all_blocks.len() - prefill_count;
 
-	log::info!(
+	tracing::info!(
 		"bulk_store: DONE — wall={:.1}s, measured={:.1}s, submitted={total_submitted}, \
 		 confirmed={total_confirmed}, errors={total_errors}, pool_full_retries={total_pool_full}, \
 		 stale_nonces={total_stale}, remaining_in_queue={remaining}, \

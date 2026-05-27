@@ -5,10 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
-import { AuthorizationCard } from "@/components/AuthorizationCard";
+import { AccountSummaryCard } from "@/components/AccountSummaryCard";
+import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
 import { useChainState, useApi, StorageType } from "@/state/chain.state";
-import { useSelectedAccount } from "@/state/wallet.state";
-import { formatAddress, formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
+import {
+  extentAllowanceBytes,
+  type RawTransactionInfo,
+} from "@/state/storage.state";
+import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
 function QuickActions() {
   return (
@@ -78,9 +82,16 @@ function ChainInfoCard() {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Network</span>
-            <Badge variant="secondary">{network.name}</Badge>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Network</span>
+              <Badge variant="secondary">{network.name}</Badge>
+            </div>
+            {network.endpoints[0] && (
+              <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
+                {network.endpoints[0]}
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Status</span>
@@ -120,47 +131,6 @@ function ChainInfoCard() {
               <span className="text-sm">{tokenSymbol}</span>
             </div>
           )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function AccountCard() {
-  const selectedAccount = useSelectedAccount();
-
-  if (!selectedAccount) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
-          <CardDescription>Connect a wallet to get started</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link to="/accounts">
-            <Button className="w-full">Connect Wallet</Button>
-          </Link>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connected Account</CardTitle>
-        <CardDescription>{selectedAccount.name || "Unknown"}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <p className="font-mono text-sm break-all">
-            {formatAddress(selectedAccount.address, 8)}
-          </p>
-          <Link to="/accounts">
-            <Button variant="outline" size="sm" className="w-full">
-              Manage Accounts
-            </Button>
-          </Link>
         </div>
       </CardContent>
     </Card>
@@ -266,58 +236,112 @@ function WelcomeCard({ storageType }: { storageType: StorageType }) {
 }
 
 interface UsageStats {
+  ephemeral: { count: number; bytes: bigint };
+  permanent: { count: number; used: bigint; cap: bigint };
   userAuths: { count: number; bytes: bigint };
   preimageAuths: { count: number; bytes: bigint };
-  transactions: { count: number; bytes: bigint };
 }
 
 function UsageCard() {
   const api = useApi();
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [palletError, setPalletError] = useState<string | null>(null);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue()
+      .then((p: bigint | number) => {
+        if (!cancelled) setRetentionPeriod(Number(p));
+      })
+      .catch(() => {
+        /* surfaced via palletError from the main effect */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (!api) return;
 
     let cancelled = false;
     setLoading(true);
+    setPalletError(null);
+
+    const recordPalletError = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!cancelled) setPalletError((prev) => prev ?? msg);
+    };
 
     Promise.all([
-      api.query.TransactionStorage.Authorizations.getEntries(),
-      api.query.TransactionStorage.Transactions.getEntries(),
+      api.query.TransactionStorage.Authorizations.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      api.query.TransactionStorage.Transactions.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      api.query.TransactionStorage.PermanentStorageUsed.getValue().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      Promise.resolve(api.constants.TransactionStorage.MaxPermanentStorageSize()).catch(
+        (err: unknown) => {
+          recordPalletError(err);
+          return null;
+        }
+      ),
     ])
-      .then(([authEntries, txEntries]: [any[], any[]]) => {
+      .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
 
         const userAuths = { count: 0, bytes: 0n };
         const preimageAuths = { count: 0, bytes: 0n };
 
-        for (const { keyArgs, value } of authEntries) {
-          const extent = value.extent;
-          if (keyArgs[0].type === "Account") {
-            userAuths.count += Number(extent.transactions);
-            userAuths.bytes += BigInt(extent.bytes);
-          } else if (keyArgs[0].type === "Preimage") {
-            preimageAuths.count += Number(extent.transactions);
-            preimageAuths.bytes += BigInt(extent.bytes);
+        if (authEntries) {
+          for (const { keyArgs, value } of authEntries) {
+            const extent = value.extent;
+            const bytesAllowance = extentAllowanceBytes(extent);
+            if (keyArgs[0].type === "Account") {
+              userAuths.count++;
+              userAuths.bytes += bytesAllowance;
+            } else if (keyArgs[0].type === "Preimage") {
+              preimageAuths.count++;
+              preimageAuths.bytes += bytesAllowance;
+            }
           }
         }
 
-        let txCount = 0;
-        let txBytes = 0n;
-        for (const { value } of txEntries) {
-          if (Array.isArray(value)) {
-            for (const info of value) {
-              txCount++;
-              txBytes += BigInt(info.size);
+        const ephemeral = { count: 0, bytes: 0n };
+        const permanentCount = { count: 0 };
+        if (txEntries) {
+          for (const { value } of txEntries) {
+            if (Array.isArray(value)) {
+              for (const info of value) {
+                if (info?.kind?.type === "Store") {
+                  ephemeral.count++;
+                  ephemeral.bytes += BigInt(info.size);
+                } else if (info?.kind?.type === "Renew") {
+                  permanentCount.count++;
+                }
+              }
             }
           }
         }
 
         setStats({
+          ephemeral,
+          permanent: {
+            count: permanentCount.count,
+            used: permUsed ?? 0n,
+            cap: permCap ?? 0n,
+          },
           userAuths,
           preimageAuths,
-          transactions: { count: txCount, bytes: txBytes },
         });
       })
       .catch((err) => {
@@ -346,66 +370,57 @@ function UsageCard() {
           <div className="flex items-center justify-center py-4">
             <Spinner size="sm" />
           </div>
+        ) : palletError ? (
+          <PalletUnavailableNotice pallet="TransactionStorage" details={palletError} />
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Transactions
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatNumber(stats.transactions.count)}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Bytes
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatBytes(stats.transactions.bytes)}
-                </p>
+            <div>
+              <p className="text-sm font-medium mb-2">
+                Ephemeral
+                {retentionPeriod !== null && (
+                  <span className="text-muted-foreground font-normal">
+                    {" "}(RetentionPeriod: {formatNumber(retentionPeriod)})
+                  </span>
+                )}
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <TotalsStat label="Transactions" value={formatNumber(stats.ephemeral.count)} />
+                <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
               </div>
             </div>
             <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Users</p>
+              <p className="text-sm font-medium mb-2">Permanent</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.userAuths.count)}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.userAuths.bytes)}
-                  </p>
-                </div>
+                <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
+                <TotalsStat
+                  label="Bytes"
+                  value={formatBytes(stats.permanent.used)}
+                  hint={`of ${formatBytes(stats.permanent.cap)}`}
+                />
               </div>
             </div>
+            <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Preimages</p>
+              <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Users ({formatNumber(stats.userAuths.count)})
                   </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.preimageAuths.count)}
-                  </p>
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.userAuths.bytes)}
+                  />
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Preimages ({formatNumber(stats.preimageAuths.count)})
                   </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.preimageAuths.bytes)}
-                  </p>
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.preimageAuths.bytes)}
+                  />
                 </div>
               </div>
             </div>
@@ -413,6 +428,16 @@ function UsageCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function TotalsStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-semibold">{value}</p>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
   );
 }
 
@@ -527,9 +552,8 @@ export function Dashboard() {
           <WelcomeCard storageType={storageType} />
           <ChainInfoCard />
           <QuickActions />
-          <AccountCard />
+          <AccountSummaryCard />
           <UsageCard />
-          <AuthorizationCard className="lg:col-start-3" />
         </div>
       )}
     </div>

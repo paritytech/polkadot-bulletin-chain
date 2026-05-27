@@ -26,8 +26,15 @@ p2p_port = 30433
 rpc_port = 9943
 balance = 2000000000000
 
+[[relaychain.nodes]]
+name = "charlie"
+validator = true
+p2p_port = 30533
+rpc_port = 9944
+balance = 2000000000000
+
 [[parachains]]
-id = 2487
+id = 1010
 chain_spec_path = "./zombienet/bulletin-westend-spec.json"
 cumulus_based = true
 
@@ -41,7 +48,15 @@ args = [
 	"--authoring=slot-based",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
-	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
+	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
+	# HOP
+	"--enable-hop",
+	# HOP data retention period in seconds (default: 86400 = 24h). Must be at least 1.
+	"--hop-retention-secs 60",
+	# HOP expiry cleanup interval in seconds (default: 300 = 5min). Must be at least 1.
+	"--hop-check-interval 10",
+	# Seconds before expiry at which to start promoting entries on-chain (default: 7200 = 2h). Must be at least 1.
+	"--hop-promotion-buffer-secs 15",
 	# Embedded relay chain args (after "--"):
 	# Use -:--port to exclude zombienet's auto-generated --port flag,
 	# then provide --listen-addr to bind only on 127.0.0.1 (avoids litep2p

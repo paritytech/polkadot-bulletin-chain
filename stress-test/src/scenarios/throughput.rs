@@ -122,7 +122,7 @@ fn scenario_result_from_bulk(
 	let all_blocks = &result.blocks;
 	let measured: Vec<_> = all_blocks.iter().filter(|b| !b.prefill).collect();
 	let with_txs = measured.iter().filter(|b| b.tx_count > 0).count();
-	log::debug!(
+	tracing::debug!(
 		"scenario_result_from_bulk({label}): {} total blocks, {} measured, \
 		 {} with txs, {} finalized",
 		all_blocks.len(),
@@ -171,7 +171,7 @@ fn scenario_result_from_bulk(
 		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
 	};
 
-	log::info!(
+	tracing::info!(
 		"block-cap: {} total blocks ({} prefill, {} measured), {} steady-state \
 		 ({} empty), avg={:.1}, peak={}, timing={}",
 		all_blocks.len(),
@@ -261,11 +261,15 @@ pub async fn run_block_capacity_sweep(
 			BlockCapacitySweepStep::Mixed { .. } => "mixed".to_string(),
 		})
 		.collect();
-	log::info!("Running {} block-capacity step(s): {}", sweep_steps.len(), step_labels.join(", "));
+	tracing::info!(
+		"Running {} block-capacity step(s): {}",
+		sweep_steps.len(),
+		step_labels.join(", ")
+	);
 
 	for step in &sweep_steps {
 		if cancel.load(Ordering::Relaxed) {
-			log::warn!("block-capacity sweep: cancelled, skipping remaining variants");
+			tracing::warn!("block-capacity sweep: cancelled, skipping remaining variants");
 			break;
 		}
 		let (
@@ -301,7 +305,7 @@ pub async fn run_block_capacity_sweep(
 					Some(s) => format!("--mix-seed {s}"),
 					None => "OS entropy (use --mix-seed to reproduce)".to_string(),
 				};
-				log::info!(
+				tracing::info!(
 					"mixed: weighted payload mix — mean ≈ {mean} B, min ≈ {min_b} B, \
 					 max ≈ {max_b} B, est ≤ {cap} txs/block (worst case); draws: {seed_note}",
 				);
@@ -323,7 +327,7 @@ pub async fn run_block_capacity_sweep(
 		let accounts_per_iter =
 			pipeline::block_capacity_accounts_per_iteration(est_block_cap, iteration_blocks);
 		let n_iterations = accounts_needed.div_ceil(accounts_per_iter);
-		log::info!(
+		tracing::info!(
 			"=== block-capacity variant: {label} payload, {accounts_needed} one-shot accounts \
 			 in {n_iterations} iteration(s) (~{iteration_blocks} measured blocks/iter × ~{est_block_cap} txs/block \
 			 ≈ {accounts_per_iter} accounts/iter), est. pool demand ~{est_pool_mb} MB ===",
@@ -337,7 +341,7 @@ pub async fn run_block_capacity_sweep(
 		let plans: Vec<IterationPlan> =
 			pipeline::build_iteration_plans(accounts_needed, accounts_per_iter, &seed);
 		let txpool_pause = pipeline::POOL_PENDING_PAUSE_THRESHOLD;
-		log::info!(
+		tracing::info!(
 			"{label}: iteration layout ready ({} iterations; interleaved Authorize + Store; \
 			 txpool gate every {txpool_pause} dispatches (pause if pool > {txpool_pause}); \
 			 authorize chunks of {})",
@@ -398,7 +402,7 @@ pub async fn run_block_capacity_sweep(
 			);
 
 			if largest_payload_in_step >= MAX_STORE_PAYLOAD_BYTES && result.total_confirmed == 0 {
-				log::warn!(
+				tracing::warn!(
 					"{label}: 0 txs confirmed (may be expected due to WASM heap limits) - \
 					 including result"
 				);
@@ -414,7 +418,7 @@ pub async fn run_block_capacity_sweep(
 				on_result(results);
 			},
 			Err(e) => {
-				log::error!("{label}: variant failed: {e}");
+				tracing::error!("{label}: variant failed: {e}");
 				results.push(ScenarioResult {
 					name: format!("block-cap: Block Capacity ({label}) — ERROR"),
 					payload_size: payload_size_report,
@@ -429,13 +433,13 @@ pub async fn run_block_capacity_sweep(
 		if cancel.load(Ordering::Relaxed) {
 			break;
 		}
-		log::info!("Draining pool after {label} variant...");
+		tracing::info!("Draining pool after {label} variant...");
 		if let Ok(mut blocks_sub) = client.blocks().subscribe_best().await {
 			let mut consecutive_empty = 0u32;
 			let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
 			loop {
 				if std::time::Instant::now() > drain_deadline {
-					log::warn!("Pool drain timed out after 120s, continuing");
+					tracing::warn!("Pool drain timed out after 120s, continuing");
 					break;
 				}
 				if let Some(Ok(block)) = blocks_sub.next().await {
@@ -443,7 +447,7 @@ pub async fn run_block_capacity_sweep(
 					if stored_count == 0 {
 						consecutive_empty += 1;
 						if consecutive_empty >= 2 {
-							log::info!(
+							tracing::info!(
 								"Pool drained (2 consecutive empty blocks, last #{}) \
 								 - safe for next variant",
 								block.number()
@@ -452,7 +456,7 @@ pub async fn run_block_capacity_sweep(
 						}
 					} else {
 						consecutive_empty = 0;
-						log::info!(
+						tracing::info!(
 							"Block #{} still has {stored_count} Stored events, waiting...",
 							block.number()
 						);
@@ -460,7 +464,7 @@ pub async fn run_block_capacity_sweep(
 				}
 			}
 		} else {
-			log::warn!("Could not subscribe to blocks for pool drain, skipping");
+			tracing::warn!("Could not subscribe to blocks for pool drain, skipping");
 		}
 	}
 

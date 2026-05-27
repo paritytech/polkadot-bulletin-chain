@@ -24,7 +24,7 @@ async fn get_parachain_network() -> Result<Arc<zombienet_sdk::Network<LocalFileS
 
 /// Run a single throughput variant against the shared parachain network.
 async fn run_variant(variant: &str, expectation: &Expectation) -> Result<()> {
-	env_logger::try_init().ok();
+	let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
 	let network = get_parachain_network().await?;
 	let rpc1_url = zombienet_common::get_node_ws_url(&network, "rpc-1")?;
@@ -65,7 +65,7 @@ fn validate_single_result(results: &[ScenarioResult], exp: &Expectation, chain: 
 				r.peak_tx_per_block,
 				min_peak
 			);
-			log::info!(
+			tracing::info!(
 				"{chain} [{}]: PASS — avg={:.1}, peak={}, confirmed={}",
 				exp.label,
 				r.avg_tx_per_block,
@@ -77,7 +77,7 @@ fn validate_single_result(results: &[ScenarioResult], exp: &Expectation, chain: 
 			panic!("{chain} [{}]: no result found (expected success)", exp.label);
 		},
 		(None, Some(r)) if r.total_confirmed > 0 => {
-			log::info!(
+			tracing::info!(
 				"{chain} [{}]: UNEXPECTED SUCCESS — confirmed={}, avg={:.1}, peak={}",
 				exp.label,
 				r.total_confirmed,
@@ -86,10 +86,10 @@ fn validate_single_result(results: &[ScenarioResult], exp: &Expectation, chain: 
 			);
 		},
 		(None, Some(_)) => {
-			log::info!("{chain} [{}]: expected rejection, confirmed=0 — OK", exp.label);
+			tracing::info!("{chain} [{}]: expected rejection, confirmed=0 — OK", exp.label);
 		},
 		(None, None) => {
-			log::info!("{chain} [{}]: expected rejection, no result — OK", exp.label);
+			tracing::info!("{chain} [{}]: expected rejection, no result — OK", exp.label);
 		},
 	}
 }
@@ -155,7 +155,7 @@ fn validate_bitswap_results(results: &[ScenarioResult], chain: &str) {
 		}
 
 		let status = if successful > 0 && failed == 0 && verified { "PASS" } else { "FAIL" };
-		log::info!(
+		tracing::info!(
 			"{chain} [{name}]: {status} — reads={successful}/{total}, rps={rps:.1}, verified={verified}",
 			name = r.name,
 			total = r.total_reads.unwrap_or(0),
@@ -171,7 +171,7 @@ fn validate_bitswap_results(results: &[ScenarioResult], chain: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_parachain_bitswap_read() -> Result<()> {
-	env_logger::try_init().ok();
+	let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
 	let network = get_parachain_network().await?;
 	// Bitswap reads go to a collator (has --ipfs-server); store txs go via RPC nodes.
