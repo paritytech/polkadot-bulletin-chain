@@ -117,7 +117,7 @@ pub type AssetTransactors = FungibleTransactor;
 /// bias the kind of local `Origin` it will become.
 pub type XcmOriginToTransactDispatchOrigin = (
 	// Governance locations can gain root.
-	LocationAsSuperuser<IsGovernance, RuntimeOrigin>,
+	LocationAsSuperuser<IsGovernanceLocation, RuntimeOrigin>,
 	// Sovereign account converter; this attempts to derive an `AccountId` from the origin location
 	// using `LocationToAccountId` and then turn that into the usual `Signed` origin. Useful for
 	// foreign chains who want to have a local sovereign account on this chain that they control.
@@ -173,8 +173,8 @@ impl Contains<Location> for IsAllowedParachain {
 }
 
 /// Filter matching sibling parachain origins listed in [`GovernanceParachainIds`].
-pub struct IsGovernance;
-impl Contains<Location> for IsGovernance {
+pub struct IsGovernanceLocation;
+impl Contains<Location> for IsGovernanceLocation {
 	fn contains(location: &Location) -> bool {
 		match location.unpack() {
 			(1, [Parachain(id)]) => GovernanceParachainIds::get().contains(id),
@@ -222,7 +222,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 			AllowExplicitUnpaidExecutionFrom<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
-				IsGovernance,
+				IsGovernanceLocation,
 				IsAllowedParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
