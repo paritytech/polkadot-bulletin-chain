@@ -736,8 +736,11 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			who: T::AccountId,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Account(who.clone()))?;
+			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
+			Self::refresh_authorization(
+				AuthorizationScope::Account(who.clone()),
+				maybe_authorizer,
+			)?;
 			Self::deposit_event(Event::AccountAuthorizationRefreshed { who });
 			Ok(())
 		}
@@ -764,8 +767,11 @@ pub mod pallet {
 			origin: OriginFor<T>,
 			content_hash: ContentHash,
 		) -> DispatchResult {
-			T::Authorizer::ensure_origin(origin)?;
-			Self::refresh_authorization(AuthorizationScope::Preimage(content_hash))?;
+			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
+			Self::refresh_authorization(
+				AuthorizationScope::Preimage(content_hash),
+				maybe_authorizer,
+			)?;
 			Self::deposit_event(Event::PreimageAuthorizationRefreshed { content_hash });
 			Ok(())
 		}
@@ -1718,8 +1724,17 @@ pub mod pallet {
 		/// grant additional capacity. To extend the caps, call `authorize_account` (additive
 		/// on the unexpired path); to start a fresh quota window, let the authorization
 		/// expire and re-authorize.
-		fn refresh_authorization(scope: AuthorizationScopeFor<T>) -> DispatchResult {
-			let expiration = Self::now().saturating_add(T::AuthorizationPeriod::get());
+		///
+		/// When `auth` is `Some(ctx)`, the new expiration is clamped to `ctx.valid_until` if
+		/// set — same invariant as [`authorize`], a grant cannot outlive its grantor.
+		fn refresh_authorization(
+			scope: AuthorizationScopeFor<T>,
+			auth: Option<AuthorizationOriginFor<T>>,
+		) -> DispatchResult {
+			let mut expiration = Self::now().saturating_add(T::AuthorizationPeriod::get());
+			if let Some(vu) = auth.and_then(|ctx| ctx.valid_until) {
+				expiration = expiration.min(vu);
+			}
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {

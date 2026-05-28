@@ -4397,6 +4397,45 @@ fn valid_until_clamps_authorization_expiry() {
 }
 
 #[test]
+fn valid_until_clamps_refresh_authorization_expiry() {
+	// Refresh must respect `valid_until` the same way `authorize` does: a refresh
+	// issued by an authorizer with `valid_until = 6` cannot extend the grant past
+	// block 6 even if `now + AuthorizationPeriod` would land later.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
+				valid_until: Some(6),
+			},
+		);
+		let who = 1u64;
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
+
+		// At block 5: refresh would naively set expiration = 5 + 10 = 15, but
+		// must be clamped to authorizer's valid_until = 6.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::refresh_account_authorization(
+			RuntimeOrigin::signed(authorizer),
+			who,
+		));
+		// At block 6 the refreshed authorization is already expired.
+		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
 fn valid_until_beyond_default_period_does_not_clamp() {
 	// `valid_until` past `now + AuthorizationPeriod` has no effect — the grant
 	// gets the full default window.
