@@ -17,45 +17,26 @@
 //! Storage-specific configurations.
 
 use super::{
-	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeHoldReason,
+	xcm_config::IsAuthorizerParachain, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 };
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{Contains, EitherOf, SortedMembers},
+	traits::{Contains, EitherOf},
 };
-use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
-use sp_keyring::Sr25519Keyring;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
-
-// 5GBhBA9H49M24LaZXaQopm3MzHtBT9i4mbQZbMSn5FcJNRb9
-pub const EXTRA_AUTHORIZER: AccountId = AccountId::new([
-	0xb6, 0x45, 0x5b, 0xc5, 0x38, 0x36, 0x5d, 0x32, 0xd3, 0x29, 0x67, 0xb6, 0xf2, 0x1a, 0x0c, 0x9b,
-	0x07, 0x15, 0x65, 0xe8, 0x78, 0xfe, 0x98, 0x5f, 0x88, 0xd1, 0x54, 0x3c, 0xb1, 0x99, 0x1a, 0x7d,
-]);
 
 parameter_types! {
 	/// Cap on the total bytes committed to permanent storage (via `renew`) across all
 	/// authorizations on this chain. Seeded at 1.7 TiB; storage-backed so governance
 	/// (root) can raise/lower it via `system.set_storage` without a runtime upgrade.
 	pub storage MaxPermanentStorageSize: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
-}
-
-/// Provides test accounts for use with `EnsureSignedBy`.
-pub struct TestAccounts;
-impl SortedMembers<AccountId> for TestAccounts {
-	fn sorted_members() -> Vec<AccountId> {
-		let mut members = vec![Sr25519Keyring::Alice.to_account_id(), EXTRA_AUTHORIZER];
-		members.sort();
-		members
-	}
 }
 
 parameter_types! {
@@ -121,22 +102,10 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
 		EitherOf<
-			EitherOf<
-				// Root can do whatever.
-				AsAuthorizer<
-					crate::EnsureRoot<Self::AccountId>,
-					Self::AccountId,
-					crate::BlockNumber,
-				>,
-				// Any sibling parachain can handle authorizations.
-				AsAuthorizer<EnsureXcm<IsSiblingParachain>, Self::AccountId, crate::BlockNumber>,
-			>,
-			// Test accounts can also authorize for testing purposes.
-			AsAuthorizer<
-				EnsureSignedBy<TestAccounts, Self::AccountId>,
-				Self::AccountId,
-				crate::BlockNumber,
-			>,
+			// Root can do whatever.
+			AsAuthorizer<crate::EnsureRoot<Self::AccountId>, Self::AccountId, crate::BlockNumber>,
+			// Sibling parachains listed in `AllowedParachainIds` can handle authorizations.
+			AsAuthorizer<EnsureXcm<IsAuthorizerParachain>, Self::AccountId, crate::BlockNumber>,
 		>,
 		// Accounts registered in `AllowedAuthorizers` storage (managed via
 		// `add_authorizer` / `remove_authorizer`).

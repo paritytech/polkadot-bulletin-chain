@@ -184,9 +184,6 @@ pub mod locations {
 			Location::new(1, Parachain(paseo_runtime_constants::system_parachain::ASSET_HUB_ID));
 		pub PeopleLocation: Location =
 			Location::new(1, Parachain(paseo_runtime_constants::system_parachain::PEOPLE_ID));
-
-		pub GovernanceLocation: Location =
-			Location::new(1, Parachain(paseo_runtime_constants::system_parachain::ASSET_HUB_ID));
 	}
 }
 
