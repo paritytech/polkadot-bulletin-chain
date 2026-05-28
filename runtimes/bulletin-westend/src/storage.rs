@@ -24,11 +24,11 @@ use alloc::{vec, vec::Vec};
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{ConstU64, Contains, EitherOfDiverse, SortedMembers},
+	traits::{ConstU64, Contains, EitherOf, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
@@ -116,16 +116,24 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
-	type Authorizer = EitherOfDiverse<
-		EitherOfDiverse<
-			EitherOfDiverse<
+	type Authorizer = EitherOf<
+		EitherOf<
+			EitherOf<
 				// Root can do whatever.
-				crate::EnsureRoot<Self::AccountId>,
+				AsAuthorizer<
+					crate::EnsureRoot<Self::AccountId>,
+					Self::AccountId,
+					crate::BlockNumber,
+				>,
 				// Any sibling parachain can handle authorizations.
-				EnsureXcm<IsSiblingParachain>,
+				AsAuthorizer<EnsureXcm<IsSiblingParachain>, Self::AccountId, crate::BlockNumber>,
 			>,
 			// Test accounts can also authorize for testing purposes.
-			EnsureSignedBy<TestAccounts, Self::AccountId>,
+			AsAuthorizer<
+				EnsureSignedBy<TestAccounts, Self::AccountId>,
+				Self::AccountId,
+				crate::BlockNumber,
+			>,
 		>,
 		// Accounts registered in `AllowedAuthorizers` storage (managed via
 		// `add_authorizer` / `remove_authorizer`).
