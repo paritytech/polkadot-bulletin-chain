@@ -858,3 +858,103 @@ pub mod v4 {
 		}
 	}
 }
+
+/// V4 → V5 migration: drops the `authorization_period` field from each
+/// `AllowedAuthorizers` entry.
+///
+/// The pre-PR `AuthorizerBudget` was `{ quota, authorization_period, valid_until }`;
+/// the field was a per-authorizer override that shortened the default
+/// `AuthorizationPeriod`. The PR removes the override entirely — grants are
+/// instead clamped to the authorizer's `valid_until`. Existing entries with a
+/// `Some(_)` override would otherwise SCALE-decode under the new layout as if
+/// the override value were `valid_until`, silently corrupting both fields.
+///
+/// Single-block translate is fine here: `AllowedAuthorizers` is an admin-managed
+/// allow-list with a tiny entry count (single digits in practice).
+pub mod v5 {
+	use super::*;
+	use crate::{
+		pallet::{AllowedAuthorizers, Pallet},
+		AuthorizerBudget, Quota,
+	};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	};
+
+	/// `AuthorizerBudget` layout at v4 (before removing `authorization_period`).
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V4AuthorizerBudget<BlockNumber> {
+		pub quota: Option<Quota>,
+		pub authorization_period: Option<BlockNumber>,
+		pub valid_until: Option<BlockNumber>,
+	}
+
+	pub struct VersionUncheckedMigrateV4ToV5<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV4ToV5<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let mut migrated: u64 = 0;
+			AllowedAuthorizers::<T>::translate::<V4AuthorizerBudget<BlockNumberFor<T>>, _>(
+				|_who, old| {
+					migrated = migrated.saturating_add(1);
+					Some(AuthorizerBudget { quota: old.quota, valid_until: old.valid_until })
+				},
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				migrated,
+				"v4->v5 AuthorizerBudget migration complete",
+			);
+			T::DbWeight::get().reads_writes(migrated, migrated)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+			let prefix = AllowedAuthorizers::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) = polkadot_sdk_frame::deps::sp_io::storage::next_key(&previous_key)
+				.filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(
+				target: LOG_TARGET,
+				count,
+				"v4->v5 pre_upgrade: AllowedAuthorizers entries",
+			);
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let new_count = AllowedAuthorizers::<T>::iter().count() as u64;
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count == old_count,
+				"v4->v5 post_upgrade: entry count changed",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				old_count,
+				new_count,
+				"v4->v5 post_upgrade: valid",
+			);
+			Ok(())
+		}
+	}
+
+	/// Versioned migration v4→v5: drops `authorization_period` from `AuthorizerBudget`.
+	pub type MigrateV4ToV5<T> = VersionedMigration<
+		4,
+		5,
+		VersionUncheckedMigrateV4ToV5<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
+}

@@ -257,7 +257,7 @@ pub mod pallet {
 		InsufficientAuthorizerBudget,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(5);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]

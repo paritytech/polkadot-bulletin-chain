@@ -1427,7 +1427,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(4));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(5));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 

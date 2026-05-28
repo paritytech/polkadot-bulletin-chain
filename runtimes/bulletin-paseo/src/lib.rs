@@ -160,6 +160,7 @@ pub mod migrations {
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
