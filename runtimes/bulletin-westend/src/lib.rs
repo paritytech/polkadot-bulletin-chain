@@ -147,6 +147,7 @@ pub mod migrations {
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
+		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
@@ -193,7 +194,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_014,
+	spec_version: 1_000_015,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,

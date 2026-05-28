@@ -36,14 +36,15 @@ fn account_authorization_returns_none_when_missing_or_expired() {
 }
 
 #[test]
-fn account_authorization_reports_raw_consumed_bytes() {
+fn account_authorization_reports_raw_consumption() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 4000));
 
 		// Drive the consumption through the signed pre_dispatch path so the
-		// account's `bytes` / `bytes_permanent` counters actually update.
+		// account's `bytes` / `bytes_permanent` / `transactions` counters
+		// actually update.
 		let data = vec![0u8; 1000];
 		let store_call = Call::store { data: data.clone() };
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
@@ -57,6 +58,8 @@ fn account_authorization_reports_raw_consumed_bytes() {
 		assert_eq!(summary.bytes_allowance, 4000);
 		assert_eq!(summary.bytes_used, 1000);
 		assert_eq!(summary.bytes_permanent_used, 1000);
+		assert_eq!(summary.transactions_allowance, 10);
+		assert_eq!(summary.transactions_used, 2);
 	});
 }
 
