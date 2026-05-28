@@ -135,8 +135,10 @@ async function main() {
         // TODO: check better way, when smoldot is synced, maybe some RPC/runtime api that checks best vs finalized block?
         await new Promise(resolve => setTimeout(resolve, SYNC_WAIT_SEC * 1000));
 
-        // Signers: //Alice (Authorizer) + dedicated upload key.
-        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+        // Signers: Use //Eve for the account being authorized to avoid nonce
+        // conflicts when running after the ws test (which uses //Alice) on
+        // the same chain.
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Eve', '//Papismoldotsigner');
 
         // Self-contained client over smoldot. `providers()` returns a
         // fresh JsonRpcProvider per pipelineStore invocation; smoldot

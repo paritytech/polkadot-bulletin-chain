@@ -53,7 +53,7 @@ import {
 // -------------------- CLI args --------------------
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const IMAGE_SIZE = args[3] || 'big64';
 
