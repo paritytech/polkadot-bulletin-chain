@@ -28,7 +28,7 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	CallInspector, EnsureAllowedAuthorizers, EnsureAnonymousAuthorizer,
+	CallInspector, EnsureAllowedAuthorizers, AsAuthorizer,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
@@ -123,20 +123,20 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		EitherOf<
 			EitherOf<
 				// Root can do whatever.
-				EnsureAnonymousAuthorizer<
+				AsAuthorizer<
 					crate::EnsureRoot<Self::AccountId>,
 					Self::AccountId,
 					crate::BlockNumber,
 				>,
 				// Any sibling parachain can handle authorizations.
-				EnsureAnonymousAuthorizer<
+				AsAuthorizer<
 					EnsureXcm<IsSiblingParachain>,
 					Self::AccountId,
 					crate::BlockNumber,
 				>,
 			>,
 			// Test accounts can also authorize for testing purposes.
-			EnsureAnonymousAuthorizer<
+			AsAuthorizer<
 				EnsureSignedBy<TestAccounts, Self::AccountId>,
 				Self::AccountId,
 				crate::BlockNumber,

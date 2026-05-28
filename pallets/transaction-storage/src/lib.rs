@@ -170,11 +170,10 @@ pub mod pallet {
 		type AuthorizerRegistrarOrigin: EnsureOrigin<Self::RuntimeOrigin>;
 		/// The origin that can authorize data storage. `Success` is
 		/// `Some(AuthorizationOrigin { .. })` when the dispatcher is an
-		/// [`AllowedAuthorizers`] entry — carrying the budget owner, the
-		/// per-authorizer `authorization_period` override, and the authorizer's
-		/// `valid_until` (exposed for inspection; not used to clamp the granted
-		/// authorization). `None` for Root / XCM / other non-account authorizers,
-		/// which have no budget and no overrides.
+		/// [`AllowedAuthorizers`] entry — carrying the budget owner and the
+		/// authorizer's `valid_until` (used to clamp the granted authorization's
+		/// expiry, so a grant cannot outlive its grantor). `None` for Root / XCM /
+		/// other non-account authorizers, which have no budget and no clamping.
 		type Authorizer: EnsureOrigin<
 			Self::RuntimeOrigin,
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
@@ -249,10 +248,6 @@ pub mod pallet {
 		/// cycle. The owner must wait until that cycle consumes the prepayment before
 		/// disabling. Root can disable regardless.
 		CannotDisablePrepaidAutoRenewal,
-		/// Authorizer's `authorization_period` override is zero or `>= T::AuthorizationPeriod`.
-		/// The override is intended to shorten an authorizer's window; to grant the default
-		/// length, pass `None` instead.
-		InvalidAuthorizationPeriodOverride,
 		/// `valid_until` supplied to `add_authorizer` is in the past (`<= now`, would
 		/// expire immediately). Pass `None` for no expiration.
 		InvalidValidUntil,
@@ -631,9 +626,14 @@ pub mod pallet {
 			transactions: u32,
 			bytes: u64,
 		) -> DispatchResult {
-			let signer = T::Authorizer::ensure_origin(origin)?;
+			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
-			Self::authorize(AuthorizationScope::Account(who.clone()), transactions, bytes, signer)?;
+			Self::authorize(
+				AuthorizationScope::Account(who.clone()),
+				transactions,
+				bytes,
+				maybe_authorizer,
+			)?;
 			Self::deposit_event(Event::AccountAuthorized { who, transactions, bytes });
 			Ok(())
 		}
@@ -663,10 +663,15 @@ pub mod pallet {
 			content_hash: ContentHash,
 			max_size: u64,
 		) -> DispatchResult {
-			let signer = T::Authorizer::ensure_origin(origin)?;
+			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			// Preimage scope is single-use, so the per-grant tx budget is `1`.
-			Self::authorize(AuthorizationScope::Preimage(content_hash), 1, max_size, signer)?;
+			Self::authorize(
+				AuthorizationScope::Preimage(content_hash),
+				1,
+				max_size,
+				maybe_authorizer,
+			)?;
 			Self::deposit_event(Event::PreimageAuthorized { content_hash, max_size });
 			Ok(())
 		}
@@ -910,12 +915,10 @@ pub mod pallet {
 		///
 		/// `budget` constraints:
 		///
-		/// - `authorization_period`: when `Some(p)`, must satisfy `0 < p <
-		///   T::AuthorizationPeriod::get()`; intended to *shorten* the default window. Pass `None`
-		///   to use the default.
-		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`; the entry stops authorizing
-		///   once `now >= t` and becomes eligible for permissionless cleanup via
-		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
+		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`. The entry stops
+		///   authorizing once `now >= t` and becomes eligible for permissionless cleanup
+		///   via [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
+		///   Authorizations granted by this entry have their expiration clamped to `t`.
 		///
 		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
@@ -927,12 +930,6 @@ pub mod pallet {
 			budget: AuthorizerBudget<BlockNumberFor<T>>,
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
-			if let Some(period) = budget.authorization_period {
-				ensure!(
-					!period.is_zero() && period < T::AuthorizationPeriod::get(),
-					Error::<T>::InvalidAuthorizationPeriodOverride,
-				);
-			}
 			ensure!(!budget.is_expired(Self::now()), Error::<T>::InvalidValidUntil);
 			AllowedAuthorizers::<T>::insert(&who, budget);
 			Self::deposit_event(Event::AuthorizerAdded { who });
@@ -1189,9 +1186,8 @@ pub mod pallet {
 					account,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: *transactions, bytes: *bytes }),
-						// Genesis authorizers default to the pallet's `AuthorizationPeriod` and
-						// never expire; root can re-add them later to set overrides.
-						authorization_period: None,
+						// Genesis authorizers never expire; root can re-add them later to set
+						// a `valid_until`.
 						valid_until: None,
 					},
 				);
@@ -1639,11 +1635,11 @@ pub mod pallet {
 		/// - **Missing**: create a fresh entry with all counters at `0`.
 		///
 		/// When `auth` is `Some(ctx)`, the dispatcher is an [`AllowedAuthorizers`]
-		/// entry: `ctx.signer`'s per-call budget is decremented (and an early error
-		/// returned if the budget can't cover the request) and `ctx.period_override`
-		/// (if set) becomes the new authorization's window length. When `auth` is
-		/// `None` (Root / XCM / other non-account authorizers) no budget is
-		/// consumed and the window falls back to `T::AuthorizationPeriod::get()`.
+		/// entry: `ctx.authorizer`'s per-call budget is decremented (and an early error
+		/// returned if the budget can't cover the request), and the new authorization's
+		/// expiration is clamped to `ctx.valid_until` if set — a grant cannot outlive
+		/// the authorizer that issued it. When `auth` is `None` (Root / XCM / other
+		/// non-account authorizers) no budget is consumed and no clamping is applied.
 		fn authorize(
 			scope: AuthorizationScopeFor<T>,
 			transactions_allowance: u32,
@@ -1652,17 +1648,17 @@ pub mod pallet {
 		) -> DispatchResult {
 			if let Some(ctx) = auth.as_ref() {
 				Self::consume_authorizer_budget(
-					&ctx.signer,
+					&ctx.authorizer,
 					transactions_allowance,
 					bytes_allowance,
 				)?;
 			}
 			let now = Self::now();
-			let period = auth
-				.as_ref()
-				.and_then(|ctx| ctx.period_override)
-				.unwrap_or_else(T::AuthorizationPeriod::get);
-			let expiration = now.saturating_add(period);
+			let default_expiration = now.saturating_add(T::AuthorizationPeriod::get());
+			let expiration = match auth.as_ref().and_then(|ctx| ctx.valid_until) {
+				Some(valid_until) => default_expiration.min(valid_until),
+				None => default_expiration,
+			};
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {

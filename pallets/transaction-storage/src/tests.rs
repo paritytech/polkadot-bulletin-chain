@@ -71,7 +71,6 @@ type TransactionByContentHash = super::TransactionByContentHash<Test>;
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
 	AuthorizerBudget {
 		quota: Some(Quota { transactions, bytes }),
-		authorization_period: None,
 		valid_until: None,
 	}
 }
@@ -1993,13 +1992,12 @@ fn ensure_allowed_authorizers_origin_rules() {
 		let registered = 7u64;
 		AllowedAuthorizers::<Test>::insert(registered, test_budget(100, 1024));
 		// Signed by a registered account → accepted, returns the full
-		// `AuthorizationOrigin` carrying the signer, period override, and
-		// `valid_until` (both `None` for `test_budget`).
+		// `AuthorizationOrigin` carrying the authorizer and `valid_until` (`None`
+		// for `test_budget`).
 		assert_eq!(
 			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
 			Some(Some(AuthorizationOrigin {
-				signer: registered,
-				period_override: None,
+				authorizer: registered,
 				valid_until: None,
 			})),
 		);
@@ -4217,28 +4215,6 @@ fn remove_exhausted_authorizer_rejects_when_not_removable() {
 }
 
 #[test]
-fn add_authorizer_authorization_period_override() {
-	// Mock's `AuthorizationPeriod = 10`. Override must satisfy `0 < period < 10`.
-	new_test_ext().execute_with(|| {
-		let who = 42u64;
-		let ok = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 1024) };
-		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, ok));
-		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap().authorization_period, Some(5));
-
-		// Reject 0, 10, 11 — anything outside the strict-open `(0, 10)` interval.
-		for period in [0, 10, 11] {
-			let bad =
-				AuthorizerBudget { authorization_period: Some(period), ..test_budget(100, 1024) };
-			assert_noop!(
-				TransactionStorage::add_authorizer(RuntimeOrigin::root(), 43u64, bad),
-				Error::InvalidAuthorizationPeriodOverride,
-			);
-		}
-		assert!(!AllowedAuthorizers::<Test>::contains_key(43u64));
-	});
-}
-
-#[test]
 fn add_authorizer_valid_until() {
 	new_test_ext().execute_with(|| {
 		run_to_block(5, || None);
@@ -4382,23 +4358,22 @@ fn root_bypasses_authorizer_budget() {
 }
 
 #[test]
-fn authorization_period_override_applied_at_dispatch() {
+fn valid_until_clamps_authorization_expiry() {
+	// Mock's `AuthorizationPeriod = 10`. An authorizer with `valid_until = 6`
+	// (issued at block 1) should produce an authorization that expires at block
+	// 6, not at block 11 — a grant cannot outlive its grantor.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let authorizer = 10u64;
-		// Authorizer with custom 5-block period (default is 10)
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
-				authorization_period: Some(5),
-				valid_until: None,
+				valid_until: Some(6),
 			},
 		);
 
 		let who = 1u64;
-		// Dispatch signed by the authorizer — `authorize_account` reads the override
-		// directly from `AllowedAuthorizers` at dispatch time.
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::signed(authorizer),
 			who,
@@ -4406,8 +4381,7 @@ fn authorization_period_override_applied_at_dispatch() {
 			1000,
 		));
 
-		// The authorization should expire at block 1 + 5 = 6 (not 1 + 10 = 11)
-		// Check: at block 5, authorization still valid
+		// At block 5, authorization still valid.
 		run_to_block(5, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -4419,8 +4393,54 @@ fn authorization_period_override_applied_at_dispatch() {
 				transactions_allowance: 1,
 			},
 		);
-		// At block 6, authorization expired — extent reads as zeros.
+		// At block 6 (= valid_until), authorization expired — extent reads as zeros.
 		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
+fn valid_until_beyond_default_period_does_not_clamp() {
+	// `valid_until` past `now + AuthorizationPeriod` has no effect — the grant
+	// gets the full default window.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 11u64;
+		// AuthorizationPeriod = 10, so default expiry from block 1 would be 11.
+		// `valid_until = 100` is past that — no clamping.
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
+				valid_until: Some(100),
+			},
+		);
+
+		let who = 2u64;
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
+
+		// At block 10, still valid (default window covers 1..11).
+		run_to_block(10, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 1000,
+				transactions: 0,
+				transactions_allowance: 1,
+			},
+		);
+		// At block 11 (= default expiry), expired.
+		run_to_block(11, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent::default(),

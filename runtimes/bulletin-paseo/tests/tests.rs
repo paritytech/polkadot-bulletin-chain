@@ -2020,7 +2020,6 @@ fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::Authorize
 			transactions: 1000,
 			bytes: 100 * 1024 * 1024,
 		}),
-		authorization_period: None,
 		valid_until: None,
 	}
 }

@@ -225,11 +225,11 @@ impl CheckContext {
 pub struct AuthorizerBudget<BlockNumber> {
 	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
 	pub quota: Option<Quota>,
-	/// Optional override for the authorization period.
-	pub authorization_period: Option<BlockNumber>,
 	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
 	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
 	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
+	/// Additionally, authorizations granted by this authorizer have their expiration
+	/// clamped to `t` — a grant cannot outlive the authorizer that issued it.
 	pub valid_until: Option<BlockNumber>,
 }
 
@@ -286,20 +286,17 @@ pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 /// an [`AllowedAuthorizers`] entry. Carries everything `authorize_*` needs from
 /// the authorizer:
 ///
-/// - `signer`: the account whose [`AllowedAuthorizers`] budget will be charged.
-/// - `period_override`: per-authorizer `authorization_period` to use instead of
-///   [`Config::AuthorizationPeriod`].
-/// - `valid_until`: the authorizer's expiry block, exposed for inspection by downstream logic. The
-///   pallet does **not** use this to cap the granted authorization — authorizations are independent
-///   of their grantor's remaining validity.
+/// - `authorizer`: the account whose [`AllowedAuthorizers`] budget will be charged.
+/// - `valid_until`: the authorizer's expiry block. Authorizations granted through
+///   this dispatch have their expiration clamped to `valid_until` — a grant cannot
+///   outlive the authorizer that issued it.
 ///
 /// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
 /// non-account authorizer (Root / XCM / signed-by list) — no budget to charge
-/// and no overrides.
+/// and no clamping.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorizationOrigin<AccountId, BlockNumber> {
-	pub signer: AccountId,
-	pub period_override: Option<BlockNumber>,
+	pub authorizer: AccountId,
 	pub valid_until: Option<BlockNumber>,
 }
 
@@ -322,8 +319,7 @@ where
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
 				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(Some(AuthorizationOrigin {
-					signer: who,
-					period_override: b.authorization_period,
+					authorizer: who,
 					valid_until: b.valid_until,
 				})),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
@@ -342,7 +338,6 @@ where
 					&new,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
-						authorization_period: None,
 						valid_until: None,
 					},
 				);
@@ -354,17 +349,17 @@ where
 }
 
 /// `EnsureOrigin` adapter that wraps an inner origin and projects its `Success` to
-/// `None: Option<AuthorizationOrigin<AccountId, BlockNumber>>`. Used to align
-/// non-account-bearing authorizers (Root, XCM, signed-by lists) with the
-/// `Option<AuthorizationOrigin<_, _>>` `Success` produced by
-/// [`EnsureAllowedAuthorizers`] when composing the [`Config::Authorizer`] chain
-/// via [`EitherOf`](polkadot_sdk_frame::deps::frame_support::traits::EitherOf).
-pub struct EnsureAnonymousAuthorizer<E, AccountId, BlockNumber>(
+/// `None: Option<AuthorizationOrigin<AccountId, BlockNumber>>`. Used to lift
+/// non-budgeted authorizers (Root, XCM, signed-by lists) into the
+/// `Option<AuthorizationOrigin<_, _>>` `Success` shape produced by
+/// [`EnsureAllowedAuthorizers`], so both kinds compose in the
+/// [`Config::Authorizer`] chain.
+pub struct AsAuthorizer<E, AccountId, BlockNumber>(
 	core::marker::PhantomData<(E, AccountId, BlockNumber)>,
 );
 
 impl<O, AccountId, BlockNumber, E: EnsureOrigin<O>> EnsureOrigin<O>
-	for EnsureAnonymousAuthorizer<E, AccountId, BlockNumber>
+	for AsAuthorizer<E, AccountId, BlockNumber>
 {
 	type Success = Option<AuthorizationOrigin<AccountId, BlockNumber>>;
 

@@ -19,7 +19,7 @@
 
 use crate::{
 	self as pallet_bulletin_transaction_storage, EnsureAllowedAuthorizers,
-	EnsureAnonymousAuthorizer, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	AsAuthorizer, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
@@ -96,7 +96,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
-		EnsureAnonymousAuthorizer<
+		AsAuthorizer<
 			EnsureRoot<Self::AccountId>,
 			Self::AccountId,
 			BlockNumberFor<Self>,
