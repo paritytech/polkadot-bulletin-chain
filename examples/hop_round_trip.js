@@ -27,7 +27,7 @@
  *
  * Usage:
  *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path]
- *   node examples/hop_round_trip.js ws://localhost:10000 //Alice
+ *   node examples/hop_round_trip.js ws://localhost:10000 //Eve
  */
 
 import { createClient } from 'polkadot-api';
@@ -58,7 +58,7 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SUDO_PATH = args[1] || '//Alice';
+const SUDO_PATH = args[1] || '//Eve';
 const SENDER_PATH = '//CustomSigner';
 
 // ── Timing constants ─────────────────────────────────────────────────────────
