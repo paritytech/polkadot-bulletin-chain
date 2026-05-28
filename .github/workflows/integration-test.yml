@@ -67,7 +67,7 @@ jobs:
 
   integration-tests:
     needs: [set-image, setup, runtime-matrix]
-    name: Integration Tests (${{ matrix.runtime.name }})
+    name: Integration Tests (${{ matrix.runtime.name }} / ${{ matrix.mode }})
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -76,6 +76,7 @@ jobs:
       fail-fast: false
       matrix:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
+        mode: [ws, smoldot]
 
     steps:
       - name: Checkout sources
@@ -130,39 +131,37 @@ jobs:
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
           just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
-      - name: Test authorize-and-store ws
+      - name: Test authorize-and-store
         working-directory: examples
-        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
-
-      - name: Test authorize-and-store smoldot
-        working-directory: examples
-        # Smoldot light-client bootstrap on the local zombienet parachain is
-        # flaky (sync-service may idle indefinitely after fetching block #0).
-        # The healthy run completes in ~2–3 min including the 30-s sync wait;
-        # cap at 10 min so a hang fails this step quickly instead of eating
-        # the whole 200-min job budget and skipping every test that follows.
+        # Smoldot light-client bootstrap takes ~30-60 s; cap each step at
+        # 10 min so a hang fails fast instead of eating the 200-min budget.
         timeout-minutes: 10
-        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test store-chunked-data
         working-directory: examples
-        run: just run-test-store-chunked-data "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-store-chunked-data "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test native-ipfs-dag-pb-chunked-data
         working-directory: examples
-        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test store-big-data
         working-directory: examples
-        run: just run-test-store-big-data "$TEST_DIR" "big32"
+        timeout-minutes: 30
+        run: just run-test-store-big-data "$TEST_DIR" "$RUNTIME_PACKAGE" "big32" "${{ matrix.mode }}"
 
       - name: Test authorize-preimage-and-store
         working-directory: examples
-        run: just run-test-authorize-preimage-and-store "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test HOP round trip
         working-directory: examples
-        run: just run-test-hop-round-trip "$TEST_DIR"
+        # HOP RPCs are node-only — the just-runner exits cleanly when mode=smoldot.
+        run: just run-test-hop-round-trip "$TEST_DIR" "${{ matrix.mode }}"
 
       - name: Test chopsticks compatibility
         working-directory: examples

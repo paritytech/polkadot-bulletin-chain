@@ -498,7 +498,9 @@ export interface ClientConfig {
    *
    * - ws-RPC, single node: `() => [getWsProvider(url)]`
    * - ws-RPC, multi-node:  `() => urls.map(getWsProvider)`
-   * - smoldot light client: `() => [getSmProvider(chainHandle)]`
+   * - smoldot light client: `() => [getSmProvider(() => chainHandle)]`
+   *   (sm-provider takes a *function* returning Chain, not the Chain itself —
+   *   passing the Chain directly silently hangs all PAPI requests)
    * - custom transport:    `() => [myJsonRpcProvider]`
    *
    * REQUIRED for any signed/unsigned upload — the upload paths throw

@@ -13,9 +13,14 @@
  *   image_size ∈ { small | big32 | big64 | big96 }
  *
  * Flags:
- *   --signer-disc=XX     Append discriminator to user seed for parallel CI runs.
- *   --skip-authorize     Skip account authorization (account is pre-auth'd).
- *   --skip-ipfs-verify   Skip IPFS download verification.
+ *   --signer-disc=XX                 Append discriminator to user seed for parallel CI runs.
+ *   --skip-authorize                 Skip account authorization (account is pre-auth'd).
+ *   --skip-ipfs-verify               Skip IPFS download verification.
+ *   --smoldot=<relay-spec>:<para-spec>
+ *                                    Use smoldot light client instead of ws.
+ *                                    Paths to relay + parachain chain spec
+ *                                    JSON files, colon-separated.
+ *   --smoldot-sync-wait=N            Seconds to wait for smoldot sync (default 30).
  */
 
 import assert from 'assert';
@@ -23,8 +28,6 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import {
@@ -39,6 +42,8 @@ import {
     fileToDisk,
     filesAreEqual,
     generateTextImage,
+    parseProviderArgs,
+    buildProviders,
     DEFAULT_IPFS_GATEWAY_URL,
 } from './common.js';
 import {
@@ -60,6 +65,7 @@ const IMAGE_SIZE = args[3] || 'big64';
 const signerDiscriminator = process.argv.find(arg => arg.startsWith('--signer-disc='))?.split('=')[1] ?? null;
 const SKIP_AUTHORIZE = process.argv.includes('--skip-authorize');
 const SKIP_IPFS_VERIFY = process.argv.includes('--skip-ipfs-verify');
+const PROVIDER_CFG = parseProviderArgs(process.argv);
 
 // -------------------- helpers --------------------
 function formatBytes(bytes) {
@@ -93,9 +99,13 @@ async function main() {
     await cryptoWaitReady();
 
     logHeader('STORE BIG DATA TEST (SDK)');
-    logConnection(NODE_WS, SEED, IPFS_GATEWAY_URL);
+    if (PROVIDER_CFG.mode === 'smoldot') {
+        console.log(`Mode: smoldot (relay=${PROVIDER_CFG.relaySpecPath}, para=${PROVIDER_CFG.paraSpecPath})`);
+    } else {
+        logConnection(NODE_WS, SEED, IPFS_GATEWAY_URL);
+    }
 
-    let client, resultCode;
+    let client, providersHandle, resultCode;
     try {
         // 1) Generate the input file
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bulletinimggen-'));
@@ -116,9 +126,12 @@ async function main() {
             : '//SDKBigDataSigner';
         const user = newSigner(userSeed);
         console.log(`User account: ${user.address}`);
+
+        providersHandle = await buildProviders({ ...PROVIDER_CFG, wsUrl: NODE_WS });
+
         client = new BulletinClient({
             descriptor: bulletin,
-            providers: () => [getWsProvider(NODE_WS)],
+            providers: providersHandle.providers,
             uploadSigner: user.signer,
             authorizerSigner,
         });
@@ -215,6 +228,7 @@ async function main() {
         resultCode = 1;
     } finally {
         if (client) await client.destroy();
+        if (providersHandle) await providersHandle.cleanup();
         process.exit(resultCode);
     }
 }
