@@ -56,6 +56,9 @@ mod runtime {
 
 	#[runtime::pallet_index(3)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+
+	#[runtime::pallet_index(4)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 }
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
@@ -111,9 +114,15 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type OnObsoleteTransactions = DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+impl pallet_bulletin_data_renewal::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = ();
 }
 
 impl pallet_bulletin_hop_promotion::Config for Test {

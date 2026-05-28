@@ -113,10 +113,13 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
-			Runtime,
-			storage::StorageCallInspector,
-		>,
+		(
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+				Runtime,
+				storage::StorageCallInspector,
+			>,
+			pallet_bulletin_data_renewal::extension::ValidateRenewalCalls<Runtime>,
+		),
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -135,7 +138,10 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,);
+	pub type Unreleased = (
+		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
+		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -559,10 +565,13 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-				Runtime,
-				storage::StorageCallInspector,
-			>::default(),
+			(
+				pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+					Runtime,
+					storage::StorageCallInspector,
+				>::default(),
+				pallet_bulletin_data_renewal::extension::ValidateRenewalCalls::<Runtime>::default(),
+			),
 			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
 				Runtime,
 				pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -619,6 +628,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]

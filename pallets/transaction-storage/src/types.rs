@@ -116,26 +116,28 @@ pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::
 
 /// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
-pub(crate) struct Authorization<BlockNumber> {
+pub struct Authorization<BlockNumber> {
 	/// Extent of the authorization (number of transactions/bytes).
-	pub(crate) extent: AuthorizationExtent,
+	pub extent: AuthorizationExtent,
 	/// The block at which this authorization expires.
-	pub(crate) expiration: BlockNumber,
+	pub expiration: BlockNumber,
 }
 
 impl<BlockNumber: PartialOrd + Copy> Authorization<BlockNumber> {
 	/// `true` once `now` has reached `expiration`; the authorization no longer
 	/// permits `store`/`renew` and is eligible for `remove_expired_*`.
-	pub(crate) fn expired(&self, now: BlockNumber) -> bool {
+	pub fn expired(&self, now: BlockNumber) -> bool {
 		now >= self.expiration
 	}
 }
 
-pub(crate) type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
+pub type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
 
 /// Distinguishes a stored transaction created by `store` (temporary) from one created by
-/// `renew` (permanent), so that `on_initialize`'s obsolete-block cleanup can decrement
-/// `PermanentStorageUsed` only for the renewed entries.
+/// `renew` (permanent). Carried opaquely by this pallet on each [`TransactionInfo`]; the
+/// renewal pallet inspects it at obsolete-block sweep time via
+/// [`OnObsoleteTransactions::handle_obsolete`] to decide which entries contribute to the
+/// chain-wide renewed-byte counter.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
@@ -144,11 +146,33 @@ pub enum TransactionKind {
 	Renew,
 }
 
+/// Callback fired by [`crate::Pallet::on_initialize`] when transactions age out of the
+/// `RetentionPeriod` window.
+///
+/// The storage pallet eagerly takes `Transactions[obsolete]`, computes `is_latest` for each
+/// entry (whether [`crate::TransactionByContentHash`] still points at this `(block, index)`),
+/// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
+/// resulting slice to this trait. Implementers — typically `pallet-bulletin-data-renewal` —
+/// use the slice to decrement chain-wide renewed-byte counters and queue auto-renewals.
+///
+/// Wiring `()` (the default impl) makes the obsolete sweep a pure storage-pallet concern,
+/// suitable for runtimes that omit the renewal pallet entirely.
+pub trait OnObsoleteTransactions<BlockNumber> {
+	/// `obsolete` is the block whose transactions just aged out. `items` are the entries
+	/// taken from `Transactions[obsolete]` paired with their `is_latest` flag. The order
+	/// preserves the original `BoundedVec` order.
+	fn handle_obsolete(obsolete: BlockNumber, items: &[(TransactionInfo, bool)]);
+}
+
+impl<BlockNumber> OnObsoleteTransactions<BlockNumber> for () {
+	fn handle_obsolete(_: BlockNumber, _: &[(TransactionInfo, bool)]) {}
+}
+
 /// State data for a stored transaction.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct TransactionInfo {
 	/// Chunk trie root.
-	pub(crate) chunk_root: <BlakeTwo256 as Hash>::Output,
+	pub chunk_root: <BlakeTwo256 as Hash>::Output,
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
@@ -168,7 +192,7 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunks.
-	pub(crate) block_chunks: ChunkIndex,
+	pub block_chunks: ChunkIndex,
 
 	/// Whether the entry was created by a `store` (temporary) or a `renew` (permanent).
 	/// Used by the obsolete-block cleanup in `on_initialize` to decrement the chain-wide
@@ -188,7 +212,7 @@ impl TransactionInfo {
 
 /// Context of a `check_signed`/`check_unsigned` call.
 #[derive(Clone, Copy)]
-pub(crate) enum CheckContext {
+pub enum CheckContext {
 	/// `validate_signed` or `validate_unsigned`.
 	Validate,
 	/// `pre_dispatch_signed` or `pre_dispatch`.
@@ -198,12 +222,12 @@ pub(crate) enum CheckContext {
 impl CheckContext {
 	/// Should authorization be consumed in this context? If not, we merely check that
 	/// authorization exists.
-	pub(crate) fn consume_authorization(self) -> bool {
+	pub fn consume_authorization(self) -> bool {
 		matches!(self, CheckContext::PreDispatch)
 	}
 
 	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
-	pub(crate) fn want_valid_transaction(self) -> bool {
+	pub fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
 	}
 }
