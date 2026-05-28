@@ -620,6 +620,11 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
+		#[pallet::feeless_if(
+			|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+				Pallet::<T>::is_feeless_authorizer(origin)
+			}
+		)]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -732,6 +737,9 @@ pub mod pallet {
 		/// [`AccountAuthorizationRefreshed`](Event::AccountAuthorizationRefreshed) when successful.
 		#[pallet::call_index(7)]
 		#[pallet::weight(T::WeightInfo::refresh_account_authorization())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId| -> bool {
+			Pallet::<T>::is_feeless_authorizer(origin)
+		})]
 		pub fn refresh_account_authorization(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -937,7 +945,11 @@ pub mod pallet {
 		) -> DispatchResult {
 			T::AuthorizerRegistrarOrigin::ensure_origin(origin)?;
 			ensure!(!budget.is_expired(Self::now()), Error::<T>::InvalidValidUntil);
+			let is_new = !AllowedAuthorizers::<T>::contains_key(&who);
 			AllowedAuthorizers::<T>::insert(&who, budget);
+			if is_new {
+				Self::inc_authorizer_providers(&who);
+			}
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
 		}
@@ -961,6 +973,7 @@ pub mod pallet {
 			// `take` returns the previous value; only emit the event when an entry
 			// actually existed so observers don't see phantom "removed" events.
 			if AllowedAuthorizers::<T>::take(&who).is_some() {
+				Self::dec_authorizer_providers(&who);
 				Self::deposit_event(Event::AuthorizerRemoved { who });
 			}
 			Ok(())
@@ -983,8 +996,9 @@ pub mod pallet {
 		) -> DispatchResult {
 			let budget =
 				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
-			ensure!(Self::authorizer_removable(&budget), Error::<T>::AuthorizerBudgetNotExhausted,);
+			ensure!(budget.is_inactive(Self::now()), Error::<T>::AuthorizerBudgetNotExhausted,);
 			AllowedAuthorizers::<T>::remove(&who);
+			Self::dec_authorizer_providers(&who);
 			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
 			Ok(())
 		}
@@ -1188,15 +1202,20 @@ pub mod pallet {
 				);
 			}
 			for (account, transactions, bytes) in &self.allowed_authorizers {
+				let is_new = !AllowedAuthorizers::<T>::contains_key(account);
 				AllowedAuthorizers::<T>::insert(
 					account,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: *transactions, bytes: *bytes }),
 						// Genesis authorizers never expire; root can re-add them later to set
-						// a `valid_until`.
+						// a `valid_until` or flip `feeless`.
 						valid_until: None,
+						feeless: true,
 					},
 				);
+				if is_new {
+					Pallet::<T>::inc_authorizer_providers(account);
+				}
 			}
 		}
 	}
@@ -1624,6 +1643,22 @@ pub mod pallet {
 			}
 		}
 
+		/// Keep `who` alive in System while it's registered in [`AllowedAuthorizers`],
+		/// so a `feeless` authorizer with no balance doesn't get reaped between
+		/// dispatches (which would reset its replay-protection nonce).
+		pub(crate) fn inc_authorizer_providers(who: &T::AccountId) {
+			frame_system::Pallet::<T>::inc_providers(who);
+		}
+
+		pub(crate) fn dec_authorizer_providers(who: &T::AccountId) {
+			if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
+				tracing::warn!(
+					target: LOG_TARGET, error=?err, ?who,
+					"dec_providers failed for allowed authorizer; leaking reference",
+				);
+			}
+		}
+
 		/// Authorize data storage for a scope. Behaviour for an existing entry:
 		/// - **Expired-but-present**: re-grant the caps and reset **all** consumed counters
 		///   (`bytes`, `bytes_permanent`, `transactions`) to `0`. The new window is fully
@@ -1725,8 +1760,7 @@ pub mod pallet {
 		/// on the unexpired path); to start a fresh quota window, let the authorization
 		/// expire and re-authorize.
 		///
-		/// When `auth` is `Some(ctx)`, the new expiration is clamped to `ctx.valid_until` if
-		/// set — same invariant as [`authorize`], a grant cannot outlive its grantor.
+		/// Same `valid_until` clamp as [`authorize`]: a grant cannot outlive its grantor.
 		fn refresh_authorization(
 			scope: AuthorizationScopeFor<T>,
 			auth: Option<AuthorizationOriginFor<T>>,
@@ -2183,7 +2217,7 @@ pub mod pallet {
 				},
 				Call::<T>::remove_exhausted_authorizer { who } => {
 					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
-					ensure!(Self::authorizer_removable(&budget), AUTHORIZATION_NOT_EXHAUSTED);
+					ensure!(budget.is_inactive(Self::now()), AUTHORIZATION_NOT_EXHAUSTED);
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExhaustedAuthorizer",
@@ -2456,11 +2490,22 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// `true` if the authorizer entry is eligible for permissionless cleanup —
-		/// either its budget is zero on at least one axis, or its `valid_until` has
-		/// elapsed.
-		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
-			budget.is_exhausted() || budget.is_expired(Self::now())
+		/// Backs `#[pallet::feeless_if]` on `authorize_account` and
+		/// `refresh_account_authorization`. Goes through `T::Authorizer::ensure_origin`
+		/// so Root / XCM (`Ok(None)`) are not feeless via this flag.
+		///
+		/// Also requires the authorizer's budget to be active (not exhausted or
+		/// expired). An inactive authorizer would fail downstream anyway; gating
+		/// `feeless` on it prevents spamming free, failing dispatches.
+		pub(crate) fn is_feeless_authorizer(origin: &OriginFor<T>) -> bool {
+			let Ok(Some(ctx)) = T::Authorizer::ensure_origin(origin.clone()) else {
+				return false;
+			};
+			if !ctx.feeless {
+				return false;
+			}
+			AllowedAuthorizers::<T>::get(&ctx.authorizer)
+				.is_some_and(|b| !b.is_inactive(Self::now()))
 		}
 
 		/// Atomically decrement `who`'s [`AllowedAuthorizers`] budget by
