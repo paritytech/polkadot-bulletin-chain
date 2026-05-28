@@ -25,7 +25,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
   }
   if (monitoring.telemetry) {
     chainHealth.push({
-      label: "Operator Set",
+      label: "Collators/Nodes",
       href: monitoring.telemetry,
       icon: Globe,
       description: "Live list of every node running this chain (version, block height, peers).",

@@ -275,7 +275,7 @@ function HelpMenu() {
           description: "Cache-check RPC reads against the chain",
         },
         monitoring.telemetry && {
-          label: "Operator Set",
+          label: "Collators/Nodes",
           href: monitoring.telemetry,
           icon: Globe,
           description: "Live list of every node running this chain",
