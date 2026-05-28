@@ -36,21 +36,31 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
   beforeAll(async () => {
     const derive = sr25519CreateDerive(DEV_MINI_SECRET)
     const aliceKeyPair = derive("//Alice")
-    const signer = getPolkadotSigner(
+    const aliceSigner = getPolkadotSigner(
       aliceKeyPair.publicKey,
       "Sr25519",
       aliceKeyPair.sign,
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
+    // The bulletin-westend and bulletin-paseo genesis presets put `Eve`
+    // in `AllowedAuthorizers` and only pre-authorize `Alice` as a regular
+    // user. Signing `authorize_account` with Alice fails with `BadSigner`
+    // because the `EnsureAllowedAuthorizers<T>` origin check rejects her.
+    const eveKeyPair = derive("//Eve")
+    const eveSigner = getPolkadotSigner(
+      eveKeyPair.publicKey,
+      "Sr25519",
+      eveKeyPair.sign,
+    )
+
     // Self-contained client: SDK owns the PAPI client lifecycle.
     // No `descriptor` here → SDK uses getUnsafeApi() (works at runtime,
-    // loses compile-time chain types). Alice is both uploader and
-    // authorizer in these tests.
+    // loses compile-time chain types). Alice uploads; Eve authorizes.
     client = new BulletinClient({
       providers: () => [getWsProvider(ENDPOINT)],
-      uploadSigner: signer,
-      authorizerSigner: signer,
+      uploadSigner: aliceSigner,
+      authorizerSigner: eveSigner,
       txTimeout: 120_000,
     })
 

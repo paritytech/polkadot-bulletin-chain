@@ -30,6 +30,7 @@ const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const PROVIDER_CFG = parseProviderArgs(process.argv);
+const SKIP_IPFS_VERIFY = process.argv.includes('--skip-ipfs-verify');
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 
 /**
@@ -239,6 +240,16 @@ async function main() {
         await waitForChainReady(client.api);
         await waitForBlockProduction(client.api);
 
+        // Pre-fetch the static APIs so PAPI caches metadata/constants
+        // before any long-running upload sequence. Without this, a later
+        // raw `signSubmitAndWatch` (the sudo.remark demo below) can hit
+        // BlockNotPinnedError when PAPI's chainHead-follower has already
+        // evicted the finalized block PAPI snapshotted for the validation
+        // walk. PAPI's own zombie integration test calls this for the
+        // same reason; see
+        // https://github.com/polkadot-api/polkadot-api/blob/main/integration-tests/zombie-tests/src/main.spec.ts
+        await client.api.getStaticApis();
+
         // Authorize the chunk-storage account. The proof DAG + System.remark
         // step is dispatched through this same account (no separate proof
         // signer needed since storage is just another upload).
@@ -255,49 +266,56 @@ async function main() {
         const { metadataCid } = await storeMetadata(client, chunks);
 
         ////////////////////////////////////////////////////////////////////////////////////
-        // 1. example manually retrieve the picture (no IPFS DAG feature)
-        const metadataJson = await retrieveMetadata(metadataCid)
-        await retrieveFileForMetadata(metadataJson, out1Path);
-        filesAreEqual(filePath, out1Path);
+        // 1. example manually retrieve the picture (no IPFS DAG feature).
+        //    Hits the IPFS HTTP gateway; only runnable when kubo is up.
+        if (!SKIP_IPFS_VERIFY) {
+            const metadataJson = await retrieveMetadata(metadataCid)
+            await retrieveFileForMetadata(metadataJson, out1Path);
+            filesAreEqual(filePath, out1Path);
+        }
 
         ////////////////////////////////////////////////////////////////////////////////////
-        // 2. example download picture by rootCID with IPFS DAG feature and HTTP gateway.
-        // Demonstrates how to download chunked content by one root CID.
-        // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
-        const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson, 0xb220)
+        // 2. UnixFS DAG-PB build from the in-memory chunk list. We don't
+        //    need to re-fetch the metadata via IPFS to build the DAG since
+        //    we already have the chunks here.
+        const { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220)
 
         // Store DAG bytes through `client` (chunk-storage signer is authorized
         // for them) and emit a sudo'd System.remark proof. The sudo call uses
         // `authorizationSigner` which is also the sudo key on dev chains.
         const { rawDagCid } = await storeProof(client, authorizationSigner, rootCid, Buffer.from(dagBytes));
-        await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
+        if (!SKIP_IPFS_VERIFY) {
+            await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
+        }
 
-        // Store DAG into IPFS.
         assert.strictEqual(
             rootCid.toString(),
             convertCid(rawDagCid, dagPB.code).toString(),
             '❌ DAG CID does not match expected root CID'
         );
-        console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
-        console.log('\n🌐 Try opening in browser:')
-        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
-        console.log("   (You'll see binary content since this is an image)")
-        console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
-        console.log("   (You'll see the encoded DAG descriptor content)")
+        console.log('🧱 DAG stored on Bulletin with CID:', rawDagCid.toString())
 
-        // Download the content from IPFS HTTP gateway
-        const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
-        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(out2Path, fullBuffer);
-        filesAreEqual(filePath, out1Path);
-        filesAreEqual(out1Path, out2Path);
+        if (!SKIP_IPFS_VERIFY) {
+            console.log('\n🌐 Try opening in browser:')
+            console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
+            console.log("   (You'll see binary content since this is an image)")
+            console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
+            console.log("   (You'll see the encoded DAG descriptor content)")
 
-        // Download the DAG descriptor raw file itself.
-        const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
-        logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
-        assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
-        const dagNode = dagPB.decode(downloadedDagBytes);
-        console.log('📄 Decoded DAG node:', dagNode);
+            // Download the content from IPFS HTTP gateway
+            const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
+            console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+            await fileToDisk(out2Path, fullBuffer);
+            filesAreEqual(filePath, out1Path);
+            filesAreEqual(out1Path, out2Path);
+
+            // Download the DAG descriptor raw file itself.
+            const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
+            logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
+            assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
+            const dagNode = dagPB.decode(downloadedDagBytes);
+            console.log('📄 Decoded DAG node:', dagNode);
+        }
 
         logTestResult(true, 'Store Chunked Data Test');
         resultCode = 0;
