@@ -1646,19 +1646,19 @@ pub mod pallet {
 			bytes_allowance: u64,
 			auth: Option<AuthorizationOriginFor<T>>,
 		) -> DispatchResult {
-			if let Some(ctx) = auth.as_ref() {
+			let now = Self::now();
+			let mut expiration = now.saturating_add(T::AuthorizationPeriod::get());
+
+			if let Some(ctx) = auth {
 				Self::consume_authorizer_budget(
 					&ctx.authorizer,
 					transactions_allowance,
 					bytes_allowance,
 				)?;
+				if let Some(vu) = ctx.valid_until {
+					expiration = expiration.min(vu);
+				}
 			}
-			let now = Self::now();
-			let default_expiration = now.saturating_add(T::AuthorizationPeriod::get());
-			let expiration = match auth.as_ref().and_then(|ctx| ctx.valid_until) {
-				Some(valid_until) => default_expiration.min(valid_until),
-				None => default_expiration,
-			};
 
 			Authorizations::<T>::mutate(&scope, |maybe_authorization| {
 				if let Some(authorization) = maybe_authorization {
