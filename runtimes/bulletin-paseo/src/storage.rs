@@ -23,10 +23,10 @@ use alloc::vec::Vec;
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{Contains, EitherOfDiverse},
+	traits::{Contains, EitherOf},
 };
 use pallet_bulletin_transaction_storage::{
-	CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
@@ -100,12 +100,12 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
-	type Authorizer = EitherOfDiverse<
-		EitherOfDiverse<
+	type Authorizer = EitherOf<
+		EitherOf<
 			// Root can do whatever.
-			crate::EnsureRoot<Self::AccountId>,
+			AsAuthorizer<crate::EnsureRoot<Self::AccountId>, Self::AccountId, crate::BlockNumber>,
 			// Sibling parachains listed in `AllowedParachainIds` can handle authorizations.
-			EnsureXcm<IsAuthorizerParachain>,
+			AsAuthorizer<EnsureXcm<IsAuthorizerParachain>, Self::AccountId, crate::BlockNumber>,
 		>,
 		// Accounts registered in `AllowedAuthorizers` storage (managed via
 		// `add_authorizer` / `remove_authorizer`).

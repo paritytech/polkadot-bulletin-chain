@@ -225,11 +225,11 @@ impl CheckContext {
 pub struct AuthorizerBudget<BlockNumber> {
 	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
 	pub quota: Option<Quota>,
-	/// Optional override for the authorization period.
-	pub authorization_period: Option<BlockNumber>,
 	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
 	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
 	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
+	/// Additionally, authorizations granted by this authorizer have their expiration
+	/// clamped to `t` — a grant cannot outlive the authorizer that issued it.
 	pub valid_until: Option<BlockNumber>,
 }
 
@@ -282,6 +282,27 @@ impl<BlockNumber: PartialOrd + Copy> AuthorizerBudget<BlockNumber> {
 
 pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 
+/// Per-dispatch context returned by [`Config::Authorizer`] when the dispatcher is
+/// an [`AllowedAuthorizers`] entry. Carries everything `authorize_*` needs from
+/// the authorizer:
+///
+/// - `authorizer`: the account whose [`AllowedAuthorizers`] budget will be charged.
+/// - `valid_until`: the authorizer's expiry block. Authorizations granted through this dispatch
+///   have their expiration clamped to `valid_until` — a grant cannot outlive the authorizer that
+///   issued it.
+///
+/// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
+/// non-account authorizer (Root / XCM / signed-by list) — no budget to charge
+/// and no clamping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizationOrigin<AccountId, BlockNumber> {
+	pub authorizer: AccountId,
+	pub valid_until: Option<BlockNumber>,
+}
+
+pub(crate) type AuthorizationOriginFor<T> =
+	AuthorizationOrigin<<T as frame_system::Config>::AccountId, BlockNumberFor<T>>;
+
 /// `EnsureOrigin` adapter that accepts a `Signed(account)` origin iff the signing
 /// account is registered in [`AllowedAuthorizers`]. Used to plug the runtime-mutable
 /// authorizer list into the pallet's `Authorizer` chain.
@@ -292,12 +313,13 @@ where
 	T::RuntimeOrigin: From<frame_system::RawOrigin<T::AccountId>>
 		+ Into<Result<frame_system::RawOrigin<T::AccountId>, T::RuntimeOrigin>>,
 {
-	type Success = T::AccountId;
+	type Success = Option<AuthorizationOriginFor<T>>;
 
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
-				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(who),
+				Some(b) if !b.is_expired(Pallet::<T>::now()) =>
+					Ok(Some(AuthorizationOrigin { authorizer: who, valid_until: b.valid_until })),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
 			},
 			other => Err(T::RuntimeOrigin::from(other)),
@@ -314,7 +336,6 @@ where
 					&new,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
-						authorization_period: None,
 						valid_until: None,
 					},
 				);
@@ -322,5 +343,30 @@ where
 			},
 		};
 		Ok(frame_system::RawOrigin::Signed(who).into())
+	}
+}
+
+/// `EnsureOrigin` adapter that wraps an inner origin and projects its `Success` to
+/// `None: Option<AuthorizationOrigin<AccountId, BlockNumber>>`. Used to lift
+/// non-budgeted authorizers (Root, XCM, signed-by lists) into the
+/// `Option<AuthorizationOrigin<_, _>>` `Success` shape produced by
+/// [`EnsureAllowedAuthorizers`], so both kinds compose in the
+/// [`Config::Authorizer`] chain.
+pub struct AsAuthorizer<E, AccountId, BlockNumber>(
+	core::marker::PhantomData<(E, AccountId, BlockNumber)>,
+);
+
+impl<O, AccountId, BlockNumber, E: EnsureOrigin<O>> EnsureOrigin<O>
+	for AsAuthorizer<E, AccountId, BlockNumber>
+{
+	type Success = Option<AuthorizationOrigin<AccountId, BlockNumber>>;
+
+	fn try_origin(o: O) -> Result<Self::Success, O> {
+		E::try_origin(o).map(|_| None)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn try_successful_origin() -> Result<O, ()> {
+		E::try_successful_origin()
 	}
 }

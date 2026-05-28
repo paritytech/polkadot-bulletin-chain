@@ -17,6 +17,7 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
+use pallet_bulletin_transaction_storage::AsAuthorizer;
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -104,7 +105,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
-	type Authorizer = EnsureRoot<Self::AccountId>;
+	type Authorizer =
+		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
