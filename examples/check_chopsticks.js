@@ -1,11 +1,10 @@
 import { ChopsticksProvider, setStorage, setup } from "@acala-network/chopsticks-core";
 
 const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";
-// Authoring past `RetentionPeriod` requires the collator-side InherentDataProvider to attach a
-// `TransactionStorageProof`. Chopsticks doesn't carry the off-chain chunks, so the only way
-// it can build N+RetentionPeriod blocks is if the runtime doesn't expect a proof at all.
-// `RetentionPeriod=u32::MAX` makes `target_number.saturating_sub(MAX) == 0` for every block,
-// short-circuiting `proof_ok` via the `target_number.is_zero()` branch.
+// Chopsticks doesn't carry the off-chain chunks, so it can't construct a
+// `TransactionStorageProof` for `apply_block_inherents` when authoring blocks past
+// `store_block + RetentionPeriod`. The override below makes the runtime stop
+// requiring a proof at all for any block on the fork.
 const newBlocksToProduce = parseInt(process.env.CHOPSTICKS_NEW_BLOCKS || "8", 10);
 
 console.log(`Setting up Chopsticks with Bulletin chain (endpoint: ${endpoint})...`);
