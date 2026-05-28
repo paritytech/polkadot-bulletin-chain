@@ -100,8 +100,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: "bulletin-cache-clippy"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-clippy-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Cargo clippy
         run: |
@@ -136,8 +136,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: "bulletin-cache-tests-${{ matrix.target.name }}"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-tests-${{ matrix.target.name }}-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Run tests
         run: ${{ matrix.target.cmd }}
@@ -180,8 +180,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
-          shared-key: "bulletin-cache-benchmarks-${{ matrix.runtime.name }}"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-benchmarks-${{ matrix.runtime.name }}-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries

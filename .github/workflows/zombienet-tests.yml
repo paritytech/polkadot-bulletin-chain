@@ -96,8 +96,8 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: .
-          shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Restore bulletin chain specs cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
@@ -154,8 +154,8 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: .
-          shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Restore bulletin chain specs cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5

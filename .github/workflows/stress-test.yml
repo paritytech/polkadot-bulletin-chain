@@ -91,8 +91,8 @@ jobs:
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: .
-          shared-key: "bulletin-cache-stress-test"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: "bulletin-cache-stress-test-${{ github.base_ref || github.ref_name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' }}
 
       - name: Build stress test binary
         run: cargo build --release -p bulletin-stress-test
