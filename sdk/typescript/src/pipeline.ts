@@ -1974,10 +1974,11 @@ export async function readStoredAt(
   at: string = "finalized",
 ): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
   if (!api.query) return undefined
-  const raw = await api.query.TransactionStorage.TransactionByContentHash.getValue(
-    contentHashHex,
-    { at },
-  )
+  const raw =
+    await api.query.TransactionStorage.TransactionByContentHash.getValue(
+      contentHashHex,
+      { at },
+    )
   if (raw == null) return undefined
   if (Array.isArray(raw)) {
     return { blockNumber: Number(raw[0]), extrinsicIndex: Number(raw[1]) }
