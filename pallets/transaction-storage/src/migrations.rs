@@ -13,9 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-	pallet::Pallet, AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET,
-};
+use crate::{Config, RetentionPeriod, LOG_TARGET};
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::marker::PhantomData;
@@ -23,64 +21,6 @@ use polkadot_sdk_frame::{
 	prelude::{BlockNumberFor, Weight},
 	traits::{Get, OnRuntimeUpgrade, Zero},
 };
-
-/// Runtime migration that seeds `AllowedAuthorizers` with the given accounts
-/// **only if the storage is currently empty**.
-///
-/// Intended as a one-shot seed: run it on the first deployment that introduces
-/// `AllowedAuthorizers`. The "empty" check makes back-to-back invocations a
-/// no-op, but it is *not* a true idempotency guarantee — if `remove_authorizer`
-/// / `remove_exhausted_authorizer` later drain the set, a subsequent run would
-/// re-seed. Wrap in a `VersionedMigration` so it executes at most once.
-pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>(
-	PhantomData<(T, Accounts, Budget)>,
-);
-impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFor<T>>>
-	OnRuntimeUpgrade for PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>
-{
-	fn on_runtime_upgrade() -> Weight {
-		let weight = T::DbWeight::get().reads(1);
-
-		if AllowedAuthorizers::<T>::iter_keys().next().is_some() {
-			tracing::info!(
-				target: LOG_TARGET,
-				"[PopulateAllowedAuthorizersIfEmpty] AllowedAuthorizers non-empty, skipping",
-			);
-			return weight;
-		}
-
-		let accounts = Accounts::get();
-		let count = accounts.len() as u64;
-		for who in accounts {
-			AllowedAuthorizers::<T>::insert(&who, Budget::get());
-			Pallet::<T>::inc_authorizer_providers(&who);
-		}
-
-		tracing::warn!(
-			target: LOG_TARGET,
-			count,
-			"[PopulateAllowedAuthorizersIfEmpty] seeded AllowedAuthorizers",
-		);
-
-		// 2 writes per seeded account: storage insert + System Account mutate
-		// (via inc_providers).
-		weight.saturating_add(T::DbWeight::get().writes(count.saturating_mul(2)))
-	}
-
-	#[cfg(feature = "try-runtime")]
-	fn post_upgrade(
-		_state: alloc::vec::Vec<u8>,
-	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::DispatchError> {
-		for who in Accounts::get() {
-			polkadot_sdk_frame::prelude::ensure!(
-				AllowedAuthorizers::<T>::contains_key(&who),
-				"expected authorizer missing from AllowedAuthorizers after migration",
-			);
-		}
-		tracing::info!(target: LOG_TARGET, "PopulateAllowedAuthorizersIfEmpty is OK!");
-		Ok(())
-	}
-}
 
 /// Runtime migration that sets the `RetentionPeriod` storage item to a
 /// non-zero `NewValue` value **only if it is currently zero**.

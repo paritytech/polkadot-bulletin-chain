@@ -37,10 +37,7 @@ use super::{
 	PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
 
-use crate::{
-	migrations::{v1::OldTransactionInfo, PopulateAllowedAuthorizersIfEmpty},
-	mock::RuntimeGenesisConfig,
-};
+use crate::{migrations::v1::OldTransactionInfo, mock::RuntimeGenesisConfig};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use polkadot_sdk_frame::{
@@ -2036,35 +2033,6 @@ fn genesis_populates_allowed_authorizers() {
 		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
 		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), expected(100, 1024));
 		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), expected(200, 2048));
-	});
-}
-
-#[test]
-fn populate_allowed_authorizers_migration_behavior() {
-	parameter_types! {
-		pub Seed: Vec<u64> = vec![10, 20];
-		pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
-	}
-
-	// 1. Empty storage → seeds the configured accounts with the configured budget.
-	new_test_ext().execute_with(|| {
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 0);
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-		assert_eq!(AllowedAuthorizers::<Test>::get(10).unwrap(), test_budget(500, 5000));
-
-		// 2. Idempotent: rerun on the now-populated storage is a no-op.
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-	});
-
-	// 3. Non-empty storage (existing unrelated entry) → migration skips entirely.
-	new_test_ext().execute_with(|| {
-		AllowedAuthorizers::<Test>::insert(99u64, test_budget(100, 1024));
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert!(AllowedAuthorizers::<Test>::contains_key(99));
-		assert!(!AllowedAuthorizers::<Test>::contains_key(10));
-		assert!(!AllowedAuthorizers::<Test>::contains_key(20));
 	});
 }
 
