@@ -2,11 +2,11 @@ name: Zombienet SDK Tests
 
 on:
   workflow_dispatch:
-  # Populate the binaries cache under main's scope so PRs can read it.
+  # Populate the binaries cache under the dev scope so PRs can read it.
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     # `labeled` lets the sync suite kick in when its label is added mid-PR.
     types: [opened, synchronize, reopened, labeled]
 

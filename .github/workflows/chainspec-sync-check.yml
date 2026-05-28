@@ -2,9 +2,9 @@ name: Chainspec sync check
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'chainspecs/**'
       - '.github/workflows/chainspec-sync-check.yml'

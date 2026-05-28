@@ -80,7 +80,7 @@ jobs:
             echo "Invalid branch name: $RELEASE_BRANCH" >&2; exit 1;
           }
           case "$RELEASE_BRANCH" in
-            main|master|HEAD|-*|*..*|*" "*)
+            main|master|dev|HEAD|-*|*..*|*" "*)
               echo "Disallowed branch name: $RELEASE_BRANCH" >&2; exit 1 ;;
           esac
 
