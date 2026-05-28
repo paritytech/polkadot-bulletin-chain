@@ -11,7 +11,10 @@ type LinkSpec = {
   description: string;
 };
 
-function group(monitoring: MonitoringLinks | undefined): { title: string; items: LinkSpec[] }[] {
+type Subgroup = { title: string; items: LinkSpec[] };
+type Group    = { title: string; items?: LinkSpec[]; subgroups?: Subgroup[] };
+
+function group(monitoring: MonitoringLinks | undefined): Group[] {
   if (!monitoring) return [];
 
   const chainHealth: LinkSpec[] = [];
@@ -77,7 +80,7 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
   }
   if (monitoring.sentry) {
     writes.push({
-      label: "Sentry — Bulletin Deploy Health",
+      label: "Bulletin Deploy Health",
       href: monitoring.sentry,
       icon: LineChart,
       description: "Full deploy dashboard.",
@@ -94,6 +97,10 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
 
+  const sentrySubgroups: Subgroup[] = [];
+  if (writes.length) sentrySubgroups.push({ title: "Write", items: writes });
+  if (reads.length)  sentrySubgroups.push({ title: "Read",  items: reads });
+
   const docs: LinkSpec[] = [];
   if (monitoring.runbook) {
     docs.push({
@@ -104,12 +111,14 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
     });
   }
 
-  return [
+  const groups: Group[] = [
     { title: "Chain Health", items: chainHealth },
-    { title: "Writes (Sentry)", items: writes },
-    { title: "Reads (Sentry)", items: reads },
-    { title: "Docs", items: docs },
-  ].filter((g) => g.items.length > 0);
+    { title: "Sentry",       subgroups: sentrySubgroups },
+    { title: "Docs",         items: docs },
+  ];
+  return groups.filter((g) =>
+    (g.items?.length ?? 0) > 0 || (g.subgroups?.length ?? 0) > 0,
+  );
 }
 
 function LinkCard({ link }: { link: LinkSpec }) {
@@ -131,6 +140,16 @@ function LinkCard({ link }: { link: LinkSpec }) {
         </CardHeader>
       </Card>
     </a>
+  );
+}
+
+function LinkGrid({ items }: { items: LinkSpec[] }) {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {items.map((link) => (
+        <LinkCard key={link.label} link={link} />
+      ))}
+    </div>
   );
 }
 
@@ -165,11 +184,15 @@ export function Ops() {
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
               {g.title}
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {g.items.map((link) => (
-                <LinkCard key={link.label} link={link} />
-              ))}
-            </div>
+            {g.items && <LinkGrid items={g.items} />}
+            {g.subgroups?.map((sg) => (
+              <div key={sg.title} className="space-y-2">
+                <h3 className="text-xs font-medium text-muted-foreground/80 ml-1">
+                  {sg.title}
+                </h3>
+                <LinkGrid items={sg.items} />
+              </div>
+            ))}
           </section>
         ))
       )}
