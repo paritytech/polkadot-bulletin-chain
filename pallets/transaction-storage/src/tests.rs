@@ -2025,11 +2025,7 @@ fn genesis_populates_allowed_authorizers() {
 	TestExternalities::new(t).execute_with(|| {
 		// Genesis authorizers default to `feeless: true`; root can re-add them
 		// later to flip `feeless` or set a `valid_until`.
-		let expected = |tx, by| AuthorizerBudget {
-			quota: Some(Quota { transactions: tx, bytes: by }),
-			valid_until: None,
-			feeless: true,
-		};
+		let expected = |tx, by| AuthorizerBudget { feeless: true, ..test_budget(tx, by) };
 		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
 		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), expected(100, 1024));
 		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), expected(200, 2048));
@@ -4344,11 +4340,7 @@ fn valid_until_clamps_authorization_expiry() {
 		let authorizer = 10u64;
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
-				valid_until: Some(6),
-				feeless: false,
-			},
+			AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 100_000) },
 		);
 
 		let who = 1u64;
@@ -4390,11 +4382,7 @@ fn valid_until_clamps_refresh_authorization_expiry() {
 		let authorizer = 10u64;
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
-				valid_until: Some(6),
-				feeless: false,
-			},
+			AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 100_000) },
 		);
 		let who = 1u64;
 		assert_ok!(TransactionStorage::authorize_account(
@@ -4431,11 +4419,7 @@ fn valid_until_beyond_default_period_does_not_clamp() {
 		// `valid_until = 100` is past that — no clamping.
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
-				valid_until: Some(100),
-				feeless: false,
-			},
+			AuthorizerBudget { valid_until: Some(100), ..test_budget(100, 100_000) },
 		);
 
 		let who = 2u64;
@@ -4499,14 +4483,7 @@ fn add_remove_authorizer_manages_system_providers() {
 		assert_eq!(providers_of(who), 0);
 
 		// `remove_exhausted_authorizer` path also dec's.
-		AllowedAuthorizers::<Test>::insert(
-			who,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 0, bytes: 0 }),
-				valid_until: None,
-				feeless: false,
-			},
-		);
+		AllowedAuthorizers::<Test>::insert(who, test_budget(0, 0));
 		frame_system::Pallet::<Test>::inc_providers(&who);
 		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
 		assert_eq!(providers_of(who), 0);
@@ -4523,11 +4500,7 @@ fn feeless_if_reflects_authorizer_budget_feeless_flag() {
 		let unregistered = 9u64;
 		AllowedAuthorizers::<Test>::insert(
 			feeless,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 10, bytes: 1000 }),
-				valid_until: None,
-				feeless: true,
-			},
+			AuthorizerBudget { feeless: true, ..test_budget(10, 1000) },
 		);
 		AllowedAuthorizers::<Test>::insert(charged, test_budget(10, 1000));
 
@@ -4549,38 +4522,33 @@ fn feeless_if_ignored_when_authorizer_budget_inactive() {
 	// of spamming free dispatches that would fail downstream.
 	new_test_ext().execute_with(|| {
 		let who = 21u64;
-		let insert = |quota, valid_until| {
-			AllowedAuthorizers::<Test>::insert(
-				who,
-				AuthorizerBudget { quota, valid_until, feeless: true },
-			);
-		};
+		let insert = |b| AllowedAuthorizers::<Test>::insert(who, b);
 
 		// Exhausted on both axes.
-		insert(Some(Quota { transactions: 0, bytes: 0 }), None);
+		insert(AuthorizerBudget { feeless: true, ..test_budget(0, 0) });
 		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 
 		// Exhausted on bytes axis only.
-		insert(Some(Quota { transactions: 0, bytes: 100 }), None);
+		insert(AuthorizerBudget { feeless: true, ..test_budget(0, 100) });
 		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 
 		// Exhausted on transactions axis only.
-		insert(Some(Quota { transactions: 5, bytes: 0 }), None);
+		insert(AuthorizerBudget { feeless: true, ..test_budget(5, 0) });
 		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 
 		// Sanity: budget with room on both axes is still feeless.
-		insert(Some(Quota { transactions: 5, bytes: 100 }), None);
+		insert(AuthorizerBudget { feeless: true, ..test_budget(5, 100) });
 		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 
 		// `quota = None` (unlimited) is never exhausted.
-		insert(None, None);
+		insert(AuthorizerBudget { quota: None, feeless: true, ..test_budget(0, 0) });
 		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 
 		// Expired authorizer is inactive even with unlimited quota.
 		// (`EnsureAllowedAuthorizers::try_origin` already rejects expired
 		// authorizers, so this also exercises that rejection.)
 		System::set_block_number(50);
-		insert(None, Some(10));
+		insert(AuthorizerBudget { quota: None, valid_until: Some(10), feeless: true });
 		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 	});
 }
