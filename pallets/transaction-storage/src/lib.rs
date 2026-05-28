@@ -996,7 +996,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let budget =
 				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
-			ensure!(Self::authorizer_removable(&budget), Error::<T>::AuthorizerBudgetNotExhausted,);
+			ensure!(budget.is_inactive(Self::now()), Error::<T>::AuthorizerBudgetNotExhausted,);
 			AllowedAuthorizers::<T>::remove(&who);
 			Self::dec_authorizer_providers(&who);
 			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
@@ -2217,7 +2217,7 @@ pub mod pallet {
 				},
 				Call::<T>::remove_exhausted_authorizer { who } => {
 					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
-					ensure!(Self::authorizer_removable(&budget), AUTHORIZATION_NOT_EXHAUSTED);
+					ensure!(budget.is_inactive(Self::now()), AUTHORIZATION_NOT_EXHAUSTED);
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExhaustedAuthorizer",
@@ -2490,21 +2490,22 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// `true` if the authorizer entry is eligible for permissionless cleanup —
-		/// either its budget is zero on at least one axis, or its `valid_until` has
-		/// elapsed.
-		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
-			budget.is_exhausted() || budget.is_expired(Self::now())
-		}
-
 		/// Backs `#[pallet::feeless_if]` on `authorize_account` and
 		/// `refresh_account_authorization`. Goes through `T::Authorizer::ensure_origin`
 		/// so Root / XCM (`Ok(None)`) are not feeless via this flag.
+		///
+		/// Also requires the authorizer's budget to be active (not exhausted or
+		/// expired). An inactive authorizer would fail downstream anyway; gating
+		/// `feeless` on it prevents spamming free, failing dispatches.
 		pub(crate) fn is_feeless_authorizer(origin: &OriginFor<T>) -> bool {
-			T::Authorizer::ensure_origin(origin.clone())
-				.ok()
-				.flatten()
-				.is_some_and(|ctx| ctx.feeless)
+			let Ok(Some(ctx)) = T::Authorizer::ensure_origin(origin.clone()) else {
+				return false;
+			};
+			if !ctx.feeless {
+				return false;
+			}
+			AllowedAuthorizers::<T>::get(&ctx.authorizer)
+				.is_some_and(|b| !b.is_inactive(Self::now()))
 		}
 
 		/// Atomically decrement `who`'s [`AllowedAuthorizers`] budget by

@@ -281,6 +281,12 @@ impl<BlockNumber: PartialOrd + Copy> AuthorizerBudget<BlockNumber> {
 	pub fn is_expired(&self, now: BlockNumber) -> bool {
 		self.valid_until.is_some_and(|t| now >= t)
 	}
+
+	/// `true` when this budget can no longer back new authorizations —
+	/// either exhausted on at least one axis, or past its `valid_until`.
+	pub fn is_inactive(&self, now: BlockNumber) -> bool {
+		self.is_exhausted() || self.is_expired(now)
+	}
 }
 
 pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;

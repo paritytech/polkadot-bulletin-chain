@@ -4543,6 +4543,49 @@ fn feeless_if_reflects_authorizer_budget_feeless_flag() {
 }
 
 #[test]
+fn feeless_if_ignored_when_authorizer_budget_inactive() {
+	// An inactive budget (exhausted on either axis, or past `valid_until`)
+	// disables the `feeless` flag — so the dispatcher pays for the call instead
+	// of spamming free dispatches that would fail downstream.
+	new_test_ext().execute_with(|| {
+		let who = 21u64;
+		let insert = |quota, valid_until| {
+			AllowedAuthorizers::<Test>::insert(
+				who,
+				AuthorizerBudget { quota, valid_until, feeless: true },
+			);
+		};
+
+		// Exhausted on both axes.
+		insert(Some(Quota { transactions: 0, bytes: 0 }), None);
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Exhausted on bytes axis only.
+		insert(Some(Quota { transactions: 0, bytes: 100 }), None);
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Exhausted on transactions axis only.
+		insert(Some(Quota { transactions: 5, bytes: 0 }), None);
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Sanity: budget with room on both axes is still feeless.
+		insert(Some(Quota { transactions: 5, bytes: 100 }), None);
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// `quota = None` (unlimited) is never exhausted.
+		insert(None, None);
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Expired authorizer is inactive even with unlimited quota.
+		// (`EnsureAllowedAuthorizers::try_origin` already rejects expired
+		// authorizers, so this also exercises that rejection.)
+		System::set_block_number(50);
+		insert(None, Some(10));
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+	});
+}
+
+#[test]
 fn store_records_extrinsic_index_in_transaction_info() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
