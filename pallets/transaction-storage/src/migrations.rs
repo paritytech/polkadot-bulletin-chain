@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET};
+use crate::{Config, RetentionPeriod, LOG_TARGET};
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::marker::PhantomData;
@@ -21,58 +21,6 @@ use polkadot_sdk_frame::{
 	prelude::{BlockNumberFor, Weight},
 	traits::{Get, OnRuntimeUpgrade, Zero},
 };
-
-/// Runtime migration that seeds `AllowedAuthorizers` with the given accounts
-/// **only if the storage is currently empty**.
-///
-/// Idempotent: safe to run multiple times. Skips if any authorizers already
-/// exist (e.g., set via genesis on a fresh chain, or by a previous run).
-pub struct PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>(
-	PhantomData<(T, Accounts, Budget)>,
-);
-impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFor<T>>>
-	OnRuntimeUpgrade for PopulateAllowedAuthorizersIfEmpty<T, Accounts, Budget>
-{
-	fn on_runtime_upgrade() -> Weight {
-		let weight = T::DbWeight::get().reads(1);
-
-		if AllowedAuthorizers::<T>::iter_keys().next().is_some() {
-			tracing::info!(
-				target: LOG_TARGET,
-				"[PopulateAllowedAuthorizersIfEmpty] AllowedAuthorizers non-empty, skipping",
-			);
-			return weight;
-		}
-
-		let accounts = Accounts::get();
-		let count = accounts.len() as u64;
-		for who in accounts {
-			AllowedAuthorizers::<T>::insert(&who, Budget::get());
-		}
-
-		tracing::warn!(
-			target: LOG_TARGET,
-			count,
-			"[PopulateAllowedAuthorizersIfEmpty] seeded AllowedAuthorizers",
-		);
-
-		weight.saturating_add(T::DbWeight::get().writes(count))
-	}
-
-	#[cfg(feature = "try-runtime")]
-	fn post_upgrade(
-		_state: alloc::vec::Vec<u8>,
-	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::DispatchError> {
-		for who in Accounts::get() {
-			polkadot_sdk_frame::prelude::ensure!(
-				AllowedAuthorizers::<T>::contains_key(&who),
-				"expected authorizer missing from AllowedAuthorizers after migration",
-			);
-		}
-		tracing::info!(target: LOG_TARGET, "PopulateAllowedAuthorizersIfEmpty is OK!");
-		Ok(())
-	}
-}
 
 /// Runtime migration that sets the `RetentionPeriod` storage item to a
 /// non-zero `NewValue` value **only if it is currently zero**.
@@ -854,4 +802,109 @@ pub mod v4 {
 			Ok(())
 		}
 	}
+}
+
+/// V4 → V5 migration for `AllowedAuthorizers`.
+///
+/// `AuthorizerBudget` went from `{ quota, authorization_period, valid_until }` to
+/// `{ quota, valid_until, feeless }`. Without translating, an existing
+/// `authorization_period: Some(p)` would silently SCALE-decode as `valid_until: p`,
+/// corrupting both fields. Existing entries default to `feeless: true` to match
+/// the new genesis default.
+///
+/// Single-block: `AllowedAuthorizers` is an admin allow-list (single-digit count).
+pub mod v5 {
+	use super::*;
+	use crate::{
+		pallet::{AllowedAuthorizers, Pallet},
+		AuthorizerBudget, Quota,
+	};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	};
+
+	/// `AuthorizerBudget` layout at v4 (before removing `authorization_period`).
+	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
+	pub(crate) struct V4AuthorizerBudget<BlockNumber> {
+		pub quota: Option<Quota>,
+		pub authorization_period: Option<BlockNumber>,
+		pub valid_until: Option<BlockNumber>,
+	}
+
+	pub struct VersionUncheckedMigrateV4ToV5<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV4ToV5<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let mut migrated: u64 = 0;
+			AllowedAuthorizers::<T>::translate::<V4AuthorizerBudget<BlockNumberFor<T>>, _>(
+				|who, old| {
+					migrated = migrated.saturating_add(1);
+					// Authorizers registered before v5 never had their System provider
+					// reference bumped (the feature was added together with this storage
+					// shape). Bring them in line with `add_authorizer` so a `feeless`
+					// authorizer with no balance can't be reaped between dispatches.
+					Pallet::<T>::inc_authorizer_providers(&who);
+					Some(AuthorizerBudget {
+						quota: old.quota,
+						valid_until: old.valid_until,
+						feeless: true,
+					})
+				},
+			);
+			tracing::info!(target: LOG_TARGET, migrated, "v4->v5 migration complete");
+			// 1 read + 1 write per entry for `AllowedAuthorizers` (via `translate`),
+			// plus 1 read + 1 write per entry for `frame_system::Account` (via
+			// `inc_providers`).
+			T::DbWeight::get().reads_writes(migrated.saturating_mul(2), migrated.saturating_mul(2))
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
+			let prefix = AllowedAuthorizers::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut count: u64 = 0;
+			while let Some(key) = polkadot_sdk_frame::deps::sp_io::storage::next_key(&previous_key)
+				.filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
+				count += 1;
+			}
+			tracing::info!(
+				target: LOG_TARGET,
+				count,
+				"v4->v5 pre_upgrade: AllowedAuthorizers entries",
+			);
+			Ok(count.encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let old_count =
+				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let new_count = AllowedAuthorizers::<T>::iter().count() as u64;
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count == old_count,
+				"v4->v5 post_upgrade: entry count changed",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				old_count,
+				new_count,
+				"v4->v5 post_upgrade: valid",
+			);
+			Ok(())
+		}
+	}
+
+	/// Versioned migration v4→v5: drops `authorization_period` from `AuthorizerBudget`.
+	pub type MigrateV4ToV5<T> = VersionedMigration<
+		4,
+		5,
+		VersionUncheckedMigrateV4ToV5<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
 }
