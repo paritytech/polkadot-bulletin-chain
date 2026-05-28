@@ -115,6 +115,7 @@ jobs:
     outputs:
       CMD: ${{ steps.get-comment.outputs.group2 }}
       pr-branch: ${{ steps.get-pr.outputs.pr_branch }}
+      base-branch: ${{ steps.get-pr.outputs.base_branch }}
       repo: ${{ steps.get-pr.outputs.repo }}
     steps:
       - name: Get command
@@ -147,9 +148,11 @@ jobs:
               pull_number: context.issue.number,
             });
             const prBranch = pr.data.head.ref;
+            const baseBranch = pr.data.base.ref;
             const repo = pr.data.head.repo.full_name;
-            console.log(prBranch, repo)
+            console.log(prBranch, baseBranch, repo)
             core.setOutput('pr_branch', prBranch);
+            core.setOutput('base_branch', baseBranch);
             core.setOutput('repo', repo);
 
       - name: Use PR Branch Name and Repo
@@ -312,6 +315,7 @@ jobs:
     env:
       CMD: ${{ needs.get-pr-info.outputs.CMD }}
       PR_BRANCH: ${{ needs.get-pr-info.outputs.pr-branch }}
+      BASE_BRANCH: ${{ needs.get-pr-info.outputs.base-branch }}
       RUNNER: ${{ needs.set-runner.outputs.RUNNER }}
       IMAGE: ${{ needs.set-runner.outputs.IMAGE }}
       REPO: ${{ needs.get-pr-info.outputs.repo }}
@@ -332,6 +336,7 @@ jobs:
             -f cmd="${CMD}" \
             -f repo="${REPO}" \
             -f pr_branch="${PR_BRANCH}" \
+            -f base_branch="${BASE_BRANCH}" \
             -f pr_num="${PR_NUMBER}" \
             -f runner="${RUNNER}" \
             -f is_org_member="${IS_ORG_MEMBER}" \

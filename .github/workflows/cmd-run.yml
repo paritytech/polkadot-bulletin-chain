@@ -12,6 +12,10 @@ on:
       pr_branch:
         description: "PR branch"
         required: true
+      base_branch:
+        description: "PR base branch"
+        required: false
+        default: "dev"
       runner:
         description: "Runner to use"
         required: true
@@ -150,6 +154,7 @@ jobs:
     env:
       CMD: ${{ github.event.inputs.cmd }}
       PR_BRANCH: ${{ github.event.inputs.pr_branch }}
+      BASE_BRANCH: ${{ github.event.inputs.base_branch }}
       PR_NUM: ${{ github.event.inputs.pr_num }}
       REPO: ${{ github.event.inputs.repo }}
     runs-on: ${{ github.event.inputs.runner }}
@@ -265,7 +270,7 @@ jobs:
             --no-color \
             --change added changed \
             --ignore-errors \
-            refs/remotes/origin/main $PR_BRANCH)
+            "refs/remotes/origin/${BASE_BRANCH}" $PR_BRANCH)
 
           echo $result
 
