@@ -837,8 +837,13 @@ pub mod v5 {
 		fn on_runtime_upgrade() -> Weight {
 			let mut migrated: u64 = 0;
 			AllowedAuthorizers::<T>::translate::<V4AuthorizerBudget<BlockNumberFor<T>>, _>(
-				|_who, old| {
+				|who, old| {
 					migrated = migrated.saturating_add(1);
+					// Authorizers registered before v5 never had their System provider
+					// reference bumped (the feature was added together with this storage
+					// shape). Bring them in line with `add_authorizer` so a `feeless`
+					// authorizer with no balance can't be reaped between dispatches.
+					Pallet::<T>::inc_authorizer_providers(&who);
 					Some(AuthorizerBudget {
 						quota: old.quota,
 						valid_until: old.valid_until,
@@ -847,7 +852,10 @@ pub mod v5 {
 				},
 			);
 			tracing::info!(target: LOG_TARGET, migrated, "v4->v5 migration complete");
-			T::DbWeight::get().reads_writes(migrated, migrated)
+			// 1 read + 1 write per entry for `AllowedAuthorizers` (via `translate`),
+			// plus 1 read + 1 write per entry for `frame_system::Account` (via
+			// `inc_providers`).
+			T::DbWeight::get().reads_writes(migrated.saturating_mul(2), migrated.saturating_mul(2))
 		}
 
 		#[cfg(feature = "try-runtime")]
