@@ -18,9 +18,8 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_bulletin_transaction_storage, EnsureAllowedAuthorizers,
-	AsAuthorizer, TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	self as pallet_bulletin_transaction_storage, AsAuthorizer, EnsureAllowedAuthorizers,
+	TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
@@ -96,11 +95,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
-		AsAuthorizer<
-			EnsureRoot<Self::AccountId>,
-			Self::AccountId,
-			BlockNumberFor<Self>,
-		>,
+		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
 	type StoreRenewPriority = StoreRenewPriority;

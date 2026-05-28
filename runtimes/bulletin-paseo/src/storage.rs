@@ -28,8 +28,8 @@ use frame_support::{
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
-	CallInspector, EnsureAllowedAuthorizers, AsAuthorizer,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
@@ -129,11 +129,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 					crate::BlockNumber,
 				>,
 				// Any sibling parachain can handle authorizations.
-				AsAuthorizer<
-					EnsureXcm<IsSiblingParachain>,
-					Self::AccountId,
-					crate::BlockNumber,
-				>,
+				AsAuthorizer<EnsureXcm<IsSiblingParachain>, Self::AccountId, crate::BlockNumber>,
 			>,
 			// Test accounts can also authorize for testing purposes.
 			AsAuthorizer<

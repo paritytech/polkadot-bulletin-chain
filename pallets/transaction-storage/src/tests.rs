@@ -69,10 +69,7 @@ type Transactions = super::Transactions<Test>;
 type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
-	AuthorizerBudget {
-		quota: Some(Quota { transactions, bytes }),
-		valid_until: None,
-	}
+	AuthorizerBudget { quota: Some(Quota { transactions, bytes }), valid_until: None }
 }
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -1996,10 +1993,7 @@ fn ensure_allowed_authorizers_origin_rules() {
 		// for `test_budget`).
 		assert_eq!(
 			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
-			Some(Some(AuthorizationOrigin {
-				authorizer: registered,
-				valid_until: None,
-			})),
+			Some(Some(AuthorizationOrigin { authorizer: registered, valid_until: None })),
 		);
 		// Signed by an unregistered account, Root, and None all rejected.
 		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(99)).is_err());

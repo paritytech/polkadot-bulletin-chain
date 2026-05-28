@@ -287,9 +287,9 @@ pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 /// the authorizer:
 ///
 /// - `authorizer`: the account whose [`AllowedAuthorizers`] budget will be charged.
-/// - `valid_until`: the authorizer's expiry block. Authorizations granted through
-///   this dispatch have their expiration clamped to `valid_until` — a grant cannot
-///   outlive the authorizer that issued it.
+/// - `valid_until`: the authorizer's expiry block. Authorizations granted through this dispatch
+///   have their expiration clamped to `valid_until` — a grant cannot outlive the authorizer that
+///   issued it.
 ///
 /// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
 /// non-account authorizer (Root / XCM / signed-by list) — no budget to charge
@@ -318,10 +318,8 @@ where
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
-				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(Some(AuthorizationOrigin {
-					authorizer: who,
-					valid_until: b.valid_until,
-				})),
+				Some(b) if !b.is_expired(Pallet::<T>::now()) =>
+					Ok(Some(AuthorizationOrigin { authorizer: who, valid_until: b.valid_until })),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
 			},
 			other => Err(T::RuntimeOrigin::from(other)),

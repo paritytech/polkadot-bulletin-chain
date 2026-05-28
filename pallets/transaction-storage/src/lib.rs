@@ -915,10 +915,10 @@ pub mod pallet {
 		///
 		/// `budget` constraints:
 		///
-		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`. The entry stops
-		///   authorizing once `now >= t` and becomes eligible for permissionless cleanup
-		///   via [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
-		///   Authorizations granted by this entry have their expiration clamped to `t`.
+		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`. The entry stops authorizing
+		///   once `now >= t` and becomes eligible for permissionless cleanup via
+		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer). Authorizations
+		///   granted by this entry have their expiration clamped to `t`.
 		///
 		/// The origin for this call must satisfy `AuthorizerRegistrarOrigin`. Emits
 		/// [`AuthorizerAdded`](Event::AuthorizerAdded) when successful.
