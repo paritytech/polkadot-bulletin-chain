@@ -48,7 +48,7 @@ args = [
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"--rpc-max-response-size=20",
-	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace,txpool=trace,network=trace",
+	"-lparachain=info,runtime=trace,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace,txpool=trace,network=trace",
 	# HOP
 	"--enable-hop",
 	# HOP data retention period in seconds (default: 86400 = 24h). Must be at least 1.
@@ -76,7 +76,7 @@ args = [
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"--rpc-max-response-size=20",
-	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,txpool=trace,network=trace",
+	"-lparachain=info,runtime=trace,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,txpool=trace,network=trace",
 	# Embedded relay chain args (after "--"):
 	"--",
 	"--listen-addr=/ip4/127.0.0.1/tcp/12349/ws",

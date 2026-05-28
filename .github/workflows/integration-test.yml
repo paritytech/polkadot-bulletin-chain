@@ -136,6 +136,12 @@ jobs:
 
       - name: Test authorize-and-store smoldot
         working-directory: examples
+        # Smoldot light-client bootstrap on the local zombienet parachain is
+        # flaky (sync-service may idle indefinitely after fetching block #0).
+        # The healthy run completes in ~2–3 min including the 30-s sync wait;
+        # cap at 10 min so a hang fails this step quickly instead of eating
+        # the whole 200-min job budget and skipping every test that follows.
+        timeout-minutes: 10
         run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
 
       - name: Test store-chunked-data

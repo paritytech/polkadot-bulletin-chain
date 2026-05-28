@@ -1296,10 +1296,19 @@ export class BulletinClient implements BulletinClientInterface {
     const allContentHashesHexUp = allItemCids.map((cid) =>
       Binary.toHex(cid.multihash.digest),
     )
+    // All TBCH dedup queries below use the PAPI `"finalized"` sentinel,
+    // which resolves through `chainHead_v1_storage` against PAPI's
+    // currently-tracked finalized block. Finalized never reorgs, so
+    // "stored at finalized" doesn't flip between forks across retries;
+    // staying on the chainHead path avoids the `archive_v1_storage`
+    // fallback that fails with UnknownBlock on non-archive RPCs (the
+    // public Paseo endpoint, e.g.).
     const preSkipped = new Set<number>()
     if (skipExisting) {
       const entries = await Promise.all(
-        allContentHashesHexUp.map((h) => readStoredAt(this.api, h)),
+        allContentHashesHexUp.map((h) =>
+          readStoredAt(this.api, h, "finalized"),
+        ),
       )
       for (let i = 0; i < items.length; i++) {
         const entry = entries[i]
@@ -1340,8 +1349,24 @@ export class BulletinClient implements BulletinClientInterface {
     // exactly like items that finalized during an earlier attempt.
     const finalizedOriginal = new Set<number>(preSkipped)
     const allContentHashesHex = allContentHashesHexUp
+    // Persisted nonces across retry boundaries, indexed by ORIGINAL item
+    // index. Populated from `error.cause.itemNonce` on each stall, mapped
+    // back from the prior call's compacted indices via `newToOriginal`.
+    // Seeding the next pipelineStore call with these prevents nonce
+    // re-assignment for items whose previous submission is still alive in
+    // the pool — without this, a retry would double-claim higher nonces
+    // and create duplicate submissions for the same content, charging the
+    // user twice. Items the within-call hijack detector cleared have
+    // `undefined` here; the new call's first wave will assign them fresh.
+    const originalItemNonces: Array<number | undefined> = new Array(
+      items.length,
+    ).fill(undefined)
     while (true) {
-      // Pre-retry TBCH dedup: items already on chain are skipped.
+      // Pre-retry TBCH dedup: items already on chain are skipped. Always
+      // query at PAPI's `"finalized"` sentinel — resolves through
+      // chainHead_v1_storage against the currently-tracked finalized
+      // block, so the answer is reorg-stable and never UnknownBlock-
+      // fails on non-archive nodes.
       if (attempt > 0) {
         const pendingIndexes: number[] = []
         const pendingHashes: string[] = []
@@ -1352,7 +1377,7 @@ export class BulletinClient implements BulletinClientInterface {
         }
         if (pendingIndexes.length > 0) {
           const entries = await Promise.all(
-            pendingHashes.map((h) => readStoredAt(this.api, h)),
+            pendingHashes.map((h) => readStoredAt(this.api, h, "finalized")),
           )
           for (let k = 0; k < pendingIndexes.length; k++) {
             const entry = entries[k]
@@ -1381,6 +1406,15 @@ export class BulletinClient implements BulletinClientInterface {
         remainingCids.push(allItemCids[i] as CID)
       }
       if (remaining.length === 0) break
+      // Build a seed nonce array aligned with `remaining` (compacted
+      // indices), sourced from `originalItemNonces` (which lives in
+      // original-index space). Items whose seed was cleared by the
+      // within-call hijack detector — or that have no carry-over yet —
+      // get `undefined`, which tells pipelineStore to assign fresh
+      // from the wave's poolNonce floor.
+      const seedItemNonces: (number | undefined)[] = newToOriginal.map(
+        (origIdx) => originalItemNonces[origIdx],
+      )
       try {
         await pipelineStore(this.api, this.signer!, remaining, {
           providers: this.requireProviders("upload()"),
@@ -1389,6 +1423,7 @@ export class BulletinClient implements BulletinClientInterface {
           bootstrap,
           precomputedCids: remainingCids,
           submissionStrategy: this.config.submissionStrategy,
+          seedItemNonces,
           onEvent: onEvent
             ? (ev) =>
                 onEvent({ ...ev, index: newToOriginal[ev.index] as number })
@@ -1400,6 +1435,18 @@ export class BulletinClient implements BulletinClientInterface {
           for (const newIdx of error.cause.finalizedIndices) {
             const originalIdx = newToOriginal[newIdx]
             if (originalIdx !== undefined) finalizedOriginal.add(originalIdx)
+          }
+          // Carry forward each in-flight item's nonce so the next call
+          // re-broadcasts at the same slot (same nonce, fresh era
+          // anchor). Items whose nonce was cleared by hijack detection
+          // in the stalled call arrive here as `undefined` and stay
+          // `undefined`.
+          const stalledNonces = error.cause.itemNonce ?? []
+          for (let newIdx = 0; newIdx < stalledNonces.length; newIdx++) {
+            const origIdx = newToOriginal[newIdx]
+            if (origIdx === undefined) continue
+            const n = stalledNonces[newIdx]
+            originalItemNonces[origIdx] = n
           }
           attempt += 1
           await new Promise((r) => setTimeout(r, 1_000 * 2 ** (attempt - 1)))

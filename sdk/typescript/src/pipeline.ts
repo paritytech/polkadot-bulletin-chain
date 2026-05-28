@@ -156,6 +156,17 @@ export interface PipelineConfig {
   precomputedCids?: CID[] | Promise<CID[]>
   /** Wire-level submission strategy. Defaults to `"nonce-tracking"`. */
   submissionStrategy?: SubmissionStrategyKind
+  /**
+   * @internal — `uploadItemsImpl`-only. Per-item nonces carried over from a
+   * previous stalled `pipelineStore` call. Indices align with `items[]`.
+   * An entry of `undefined` means "no carry-over, assign fresh." A defined
+   * entry locks the item to that nonce so re-broadcast across the retry
+   * boundary doesn't double-claim a fresh nonce and double-pay the user.
+   * Callers must validate against current chainNonce before seeding —
+   * stale seeds (chainNonce > seed) imply hijack/external consumption and
+   * must be passed as `undefined` so the new wave assigns fresh.
+   */
+  seedItemNonces?: ReadonlyArray<number | undefined>
 }
 
 /** Mutable bootstrap cache, populated by `pipelineStore` on first call. */
@@ -239,6 +250,16 @@ export interface PipelineResult extends PipelineStats {
 export interface StallCause {
   readonly finalized: number
   readonly finalizedIndices: ReadonlySet<number>
+  /**
+   * Snapshot of `itemNonce[]` at the moment of stall. Indices align with the
+   * `items[]` array passed into the stalled `pipelineStore` call. A defined
+   * entry is the nonce the SDK had committed to for that item; `undefined`
+   * means no nonce was ever assigned, or the within-call hijack detector
+   * cleared it. The client-level retry layer uses this to keep ownership of
+   * each item's nonce slot across the retry boundary so re-broadcasts replace
+   * pool entries at the same nonce rather than double-claiming above it.
+   */
+  readonly itemNonce: ReadonlyArray<number | undefined>
 }
 
 export function isStallError(
@@ -253,12 +274,17 @@ export function isStallError(
 
 function stallError(
   finalizedIndices: ReadonlySet<number>,
+  itemNonce: ReadonlyArray<number | undefined>,
   reason: string,
 ): BulletinError {
   return new BulletinError(
     `store stalled: ${reason}; finalized=${finalizedIndices.size}`,
     ErrorCode.STORE_STALLED,
-    { finalized: finalizedIndices.size, finalizedIndices } satisfies StallCause,
+    {
+      finalized: finalizedIndices.size,
+      finalizedIndices,
+      itemNonce,
+    } satisfies StallCause,
   )
 }
 
@@ -695,7 +721,7 @@ export async function pipelineStore(
       for (let i = 0; i < completedFlags.length; i++) {
         if (completedFlags[i]) finalizedIndices.add(i)
       }
-      reject(stallError(finalizedIndices, reason))
+      reject(stallError(finalizedIndices, itemNonce.slice(), reason))
     }
 
     function finish(): void {
@@ -899,6 +925,33 @@ export async function pipelineStore(
                 for (let i = 0; i < totalItems; i++) {
                   emit(UploadStatus.ItemStarted, i)
                   sendQueue.push(i)
+                }
+
+                // Apply seeded nonces from a prior stalled call. A seed
+                // entry below the freshly-read `startNonce` means the
+                // chain has already advanced past that slot without our
+                // content landing — either the previous submission was
+                // executed by someone else (hijack) or it was era-dropped
+                // and overtaken by another tx at that nonce. Either way
+                // re-broadcasting at the same nonce is impossible (nonce
+                // can only be consumed once), so we discard the stale seed
+                // and let the next wave assign a fresh nonce from the
+                // current poolNonce floor. Surviving seeds claim their
+                // original slot; re-broadcast at the same nonce with a
+                // fresh era anchor either replaces the stale pool entry
+                // or 1014-rejects — either way the nonce slot is consumed
+                // exactly once and the user pays exactly once.
+                const seed = config.seedItemNonces
+                if (!unsigned && seed) {
+                  for (let i = 0; i < totalItems && i < seed.length; i++) {
+                    const n = seed[i]
+                    if (n !== undefined && n >= startNonce) {
+                      itemNonce[i] = n
+                      if (n >= expectedFinalNonce) {
+                        expectedFinalNonce = n + 1
+                      }
+                    }
+                  }
                 }
 
                 // Bootstrap `lastFinalizedBlock` from chainHead's initial
@@ -1107,15 +1160,38 @@ export async function pipelineStore(
                 // Pop the consumed prefix from the queue.
                 sendQueue.splice(0, waveIndexes.length)
 
-                // Assign consecutive nonces from the running counter to
-                // any item that doesn't already have one. Items kept on
-                // the queue by a retryable broadcast error (1014/1016)
-                // arrive here with `itemNonce[i]` already set — they
-                // get re-broadcast at the SAME nonce so we don't leave
-                // a gap in the account's nonce sequence (same-account
-                // txs are processed in nonce order).
+                // Wave nonce-assignment floor: max of
+                //   - `poolNonce` (chain's view: chainNonce + contiguous
+                //     ready pool entries for this account). Authoritative
+                //     across calls — drops on reorg/eviction so we refill
+                //     freed slots, rises to avoid colliding with other
+                //     clients on the same account.
+                //   - one past our highest already-claimed nonce in
+                //     `itemNonce[]`. Necessary because `poolNonce` lags
+                //     our broadcasts (sub-second RPC propagation), so
+                //     within a single best-block tick we can submit a
+                //     wave at nonces N..N+k, fire wave #2 immediately,
+                //     and read `poolNonce` that hasn't yet seen wave #1
+                //     — without this floor, wave #2 would assign the
+                //     same nonces and the pool would either 1014 or
+                //     accept-and-orphan one of the conflicting items
+                //     (chain consumes the nonce with the wrong content
+                //     and the user pays for a hijack-like miss).
+                // Items already carrying `itemNonce[i]` (re-enqueued
+                // after a retryable broadcast error, or seeded from a
+                // prior stalled call) keep theirs so the chain's nonce
+                // sequence stays gap-free.
+                //
+                // `expectedFinalNonce` stays monotonic — it's the
+                // deferred-verification trigger and must not drop when
+                // poolNonce dips below a previously-claimed nonce.
                 if (!unsigned) {
-                  let next = Math.max(nextFreeNonce, poolNonce)
+                  let ourFloor = chainNonce
+                  for (let i = 0; i < itemNonce.length; i++) {
+                    const n = itemNonce[i]
+                    if (n !== undefined && n + 1 > ourFloor) ourFloor = n + 1
+                  }
+                  let next = Math.max(poolNonce, ourFloor)
                   for (let k = 0; k < waveIndexes.length; k++) {
                     const i = waveIndexes[k] as number
                     if (itemNonce[i] === undefined) {
@@ -1124,7 +1200,7 @@ export async function pipelineStore(
                     }
                   }
                   nextFreeNonce = next
-                  expectedFinalNonce = next
+                  expectedFinalNonce = Math.max(expectedFinalNonce, next)
                 }
 
                 // Re-sign every wave: reusing prior bytes is unsafe (stale
@@ -1790,16 +1866,17 @@ function computeBatchEnd(
 }
 
 /**
- * How many blocks of pool buffer to maintain per wave. Broadcasting one
- * block's worth per bestBlock event leaves the pool empty whenever the
- * block author runs slightly before us — full blocks degrade to 2–3
- * tx/block. Multiplying by N keeps ~N blocks queued in the pool so the
- * author always has items to grab. Also matters under hijack recovery:
- * when chain advances by K blocks at once and K items are reassigned,
- * all of them get rebroadcast in a single wave instead of trickled out
- * one block at a time.
+ * How many blocks of pool buffer to maintain per wave. Two blocks gives
+ * the next block author non-empty pool depth even when our previous
+ * wave's broadcasts haven't fully propagated across collators — the
+ * single-block buffer used to leave gaps (one full block followed by
+ * sparse / empty ones) because gossip lag from collator-A to collator-B
+ * could exceed the ~6 s block time. Items deferred by per-account
+ * future-tx caps (1014) re-broadcast at the same nonce on the next
+ * wave thanks to sticky `itemNonce`, so the larger wave doesn't strand
+ * pool slots.
  */
-const WAVE_BUFFER_BLOCKS = 3
+const WAVE_BUFFER_BLOCKS = 2
 
 /**
  * Select the prefix of `pendingIndexes` that fits in `bufferBlocks`
@@ -1881,25 +1958,26 @@ async function readStoredAtBlock(
 }
 
 /**
- * Same as `readStoredAtBlock` but optionally without a block hash — when
- * the caller doesn't have one (e.g. client-side dedup before the first
- * pipelineStore call), PAPI's `getValue` queries against the latest
- * known block.
+ * Same as `readStoredAtBlock` but accepts either a specific block hash
+ * (only safe when the caller knows PAPI's chainHead has that block
+ * pinned — e.g. the active follower's current best/finalized hash) or
+ * the PAPI sentinel `"finalized"` / `"best"`. Sentinels resolve through
+ * `chainHead_v1_storage` against a tracked block, so the read never
+ * falls back to `archive_v1_storage` and never UnknownBlock-fails on
+ * non-archive nodes. Passing an arbitrary external hash (e.g. one
+ * fetched via legacy `chain_getFinalizedHead`) forces the archive
+ * fallback and is the foot-gun this signature steers callers away from.
  */
 export async function readStoredAt(
   api: BulletinTypedApi,
   contentHashHex: string,
-  blockHash?: string,
+  at: string = "finalized",
 ): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
   if (!api.query) return undefined
-  const raw = blockHash
-    ? await api.query.TransactionStorage.TransactionByContentHash.getValue(
-        contentHashHex,
-        { at: blockHash },
-      )
-    : await api.query.TransactionStorage.TransactionByContentHash.getValue(
-        contentHashHex,
-      )
+  const raw = await api.query.TransactionStorage.TransactionByContentHash.getValue(
+    contentHashHex,
+    { at },
+  )
   if (raw == null) return undefined
   if (Array.isArray(raw)) {
     return { blockNumber: Number(raw[0]), extrinsicIndex: Number(raw[1]) }
