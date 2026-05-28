@@ -842,7 +842,7 @@ pub mod v5 {
 					Some(AuthorizerBudget {
 						quota: old.quota,
 						valid_until: old.valid_until,
-						feeless: true,
+						feeless: false,
 					})
 				},
 			);
