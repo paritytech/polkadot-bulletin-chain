@@ -115,10 +115,16 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
-			Runtime,
-			storage::StorageCallInspector,
-		>,
+		// Nested tuple keeps the runtime's `TxExtension` count within the 12-element
+		// limit for FRAME's tuple `TransactionExtension` impl while threading both the
+		// storage and renewal validation extensions.
+		(
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+				Runtime,
+				storage::StorageCallInspector,
+			>,
+			pallet_bulletin_data_renewal::extension::ValidateRenewalCalls<Runtime>,
+		),
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -151,6 +157,7 @@ pub mod migrations {
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -166,10 +173,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = (
-		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-	);
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -579,10 +584,13 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-				Runtime,
-				storage::StorageCallInspector,
-			>::default(),
+			(
+				pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+					Runtime,
+					storage::StorageCallInspector,
+				>::default(),
+				pallet_bulletin_data_renewal::extension::ValidateRenewalCalls::<Runtime>::default(),
+			),
 			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
 				Runtime,
 				pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -639,6 +647,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]

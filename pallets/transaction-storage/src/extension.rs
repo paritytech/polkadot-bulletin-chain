@@ -57,9 +57,11 @@ where
 	/// Returns `None` for non-wrapper calls.
 	fn inspect_wrapper(call: &RuntimeCallOf<T>) -> Option<Vec<&RuntimeCallOf<T>>>;
 
-	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (store,
-	/// store_with_cid_config, force_renew) — either directly or nested inside
-	/// wrappers.
+	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (`store`,
+	/// `store_with_cid_config`) — either directly or nested inside wrappers.
+	///
+	/// `force_renew` lives in `pallet-bulletin-data-renewal`; runtime `CallInspector`s
+	/// must additionally check for its call type if they care about renewal mutations.
 	///
 	/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
 	/// [`CallInspector`] provides the wrapper-recursion logic, so this function
@@ -68,10 +70,7 @@ where
 		// Check direct pallet calls first — these are always identifiable regardless
 		// of depth, matching the ordering in `traverse_storage_calls`.
 		if let Some(inner_call) = call.is_sub_type() {
-			return matches!(
-				inner_call,
-				Call::store { .. } | Call::store_with_cid_config { .. } | Call::force_renew { .. }
-			);
+			return matches!(inner_call, Call::store { .. } | Call::store_with_cid_config { .. });
 		}
 		if depth >= MAX_WRAPPER_DEPTH {
 			// Fail-safe: treat excessively nested wrappers as storage-mutating rather
@@ -208,8 +207,6 @@ where
 		match inner_call {
 			Call::store { data, .. } | Call::store_with_cid_config { data, .. } =>
 				T::WeightInfo::validate_store(data.len() as u32),
-			Call::renew { .. } | Call::force_renew { .. } | Call::enable_auto_renew { .. } =>
-				T::WeightInfo::validate_renew(),
 			_ => Weight::zero(),
 		}
 	}

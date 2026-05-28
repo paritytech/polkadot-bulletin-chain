@@ -24,7 +24,7 @@ use alloc::{vec, vec::Vec};
 use bulletin_pallets_common::{inspect_utility_wrapper, NoCurrency};
 use frame_support::{
 	parameter_types,
-	traits::{ConstU64, Contains, EitherOf, SortedMembers},
+	traits::{ConstU64, Contains, EitherOf, IsSubType, SortedMembers},
 };
 use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
@@ -91,6 +91,41 @@ impl pallet_bulletin_transaction_storage::CallInspector<Runtime> for StorageCall
 			_ => None,
 		}
 	}
+
+	/// Override to also flag renewal-mutating calls (`renew`, `force_renew`,
+	/// `enable_auto_renew`, `disable_auto_renew`) **when nested inside wrappers**.
+	/// Direct renewal calls are validated by
+	/// `pallet_bulletin_data_renewal::extension::ValidateRenewalCalls`, so they
+	/// must NOT be flagged at depth 0 — only when wrapped (depth ≥ 1), so the
+	/// storage-pallet extension rejects `Utility::batch(renew)`-style wrappers.
+	fn is_storage_mutating_call(call: &RuntimeCall, depth: u32) -> bool {
+		// Wrapped renewal call: reject (only inside a wrapper, hence depth > 0).
+		if depth > 0 {
+			if let RuntimeCall::DataRenewal(_) = call {
+				return true;
+			}
+		}
+		// Direct storage call: same match as the trait's default impl.
+		if let Some(inner) = <RuntimeCall as IsSubType<
+			pallet_bulletin_transaction_storage::Call<Runtime>,
+		>>::is_sub_type(call)
+		{
+			return matches!(
+				inner,
+				pallet_bulletin_transaction_storage::Call::store { .. } |
+					pallet_bulletin_transaction_storage::Call::store_with_cid_config { .. }
+			);
+		}
+		if depth >= pallet_bulletin_transaction_storage::MAX_WRAPPER_DEPTH {
+			return true;
+		}
+		if let Some(inner_calls) = Self::inspect_wrapper(call) {
+			return inner_calls
+				.into_iter()
+				.any(|inner| Self::is_storage_mutating_call(inner, depth + 1));
+		}
+		false
+	}
 }
 
 /// Returns `true` for storage-mutating TransactionStorage calls (store, store_with_cid_config,
@@ -143,9 +178,15 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+impl pallet_bulletin_data_renewal::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
 }
 
 parameter_types! {
