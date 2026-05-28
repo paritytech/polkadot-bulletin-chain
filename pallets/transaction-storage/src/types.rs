@@ -231,6 +231,9 @@ pub struct AuthorizerBudget<BlockNumber> {
 	/// Additionally, authorizations granted by this authorizer have their expiration
 	/// clamped to `t` — a grant cannot outlive the authorizer that issued it.
 	pub valid_until: Option<BlockNumber>,
+	/// When `true`, this authorizer's `authorize_account` / `refresh_account_authorization`
+	/// dispatches are fee-exempt.
+	pub feeless: bool,
 }
 
 /// Paired transaction / byte quota for an authorizer.
@@ -298,6 +301,9 @@ pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 pub struct AuthorizationOrigin<AccountId, BlockNumber> {
 	pub authorizer: AccountId,
 	pub valid_until: Option<BlockNumber>,
+	/// Mirrors [`AuthorizerBudget::feeless`]. Threaded here so `#[pallet::feeless_if]`
+	/// doesn't have to re-read the budget.
+	pub feeless: bool,
 }
 
 pub(crate) type AuthorizationOriginFor<T> =
@@ -318,8 +324,11 @@ where
 	fn try_origin(o: T::RuntimeOrigin) -> Result<Self::Success, T::RuntimeOrigin> {
 		o.into().and_then(|raw| match raw {
 			frame_system::RawOrigin::Signed(who) => match AllowedAuthorizers::<T>::get(&who) {
-				Some(b) if !b.is_expired(Pallet::<T>::now()) =>
-					Ok(Some(AuthorizationOrigin { authorizer: who, valid_until: b.valid_until })),
+				Some(b) if !b.is_expired(Pallet::<T>::now()) => Ok(Some(AuthorizationOrigin {
+					authorizer: who,
+					valid_until: b.valid_until,
+					feeless: b.feeless,
+				})),
 				_ => Err(T::RuntimeOrigin::from(frame_system::RawOrigin::Signed(who))),
 			},
 			other => Err(T::RuntimeOrigin::from(other)),
@@ -337,6 +346,7 @@ where
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
 						valid_until: None,
+						feeless: false,
 					},
 				);
 				new

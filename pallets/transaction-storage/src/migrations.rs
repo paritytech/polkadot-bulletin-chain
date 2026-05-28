@@ -13,7 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET};
+use crate::{
+	pallet::Pallet, AllowedAuthorizers, AuthorizerBudgetFor, Config, RetentionPeriod, LOG_TARGET,
+};
 use alloc::vec::Vec;
 use codec::{Decode, Encode, MaxEncodedLen};
 use core::marker::PhantomData;
@@ -51,6 +53,7 @@ impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFo
 		let count = accounts.len() as u64;
 		for who in accounts {
 			AllowedAuthorizers::<T>::insert(&who, Budget::get());
+			Pallet::<T>::inc_authorizer_providers(&who);
 		}
 
 		tracing::warn!(
@@ -59,7 +62,9 @@ impl<T: Config, Accounts: Get<Vec<T::AccountId>>, Budget: Get<AuthorizerBudgetFo
 			"[PopulateAllowedAuthorizersIfEmpty] seeded AllowedAuthorizers",
 		);
 
-		weight.saturating_add(T::DbWeight::get().writes(count))
+		// 2 writes per seeded account: storage insert + System Account mutate
+		// (via inc_providers).
+		weight.saturating_add(T::DbWeight::get().writes(count.saturating_mul(2)))
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -859,18 +864,15 @@ pub mod v4 {
 	}
 }
 
-/// V4 → V5 migration: drops the `authorization_period` field from each
-/// `AllowedAuthorizers` entry.
+/// V4 → V5 migration for `AllowedAuthorizers`.
 ///
-/// The pre-PR `AuthorizerBudget` was `{ quota, authorization_period, valid_until }`;
-/// the field was a per-authorizer override that shortened the default
-/// `AuthorizationPeriod`. The PR removes the override entirely — grants are
-/// instead clamped to the authorizer's `valid_until`. Existing entries with a
-/// `Some(_)` override would otherwise SCALE-decode under the new layout as if
-/// the override value were `valid_until`, silently corrupting both fields.
+/// `AuthorizerBudget` went from `{ quota, authorization_period, valid_until }` to
+/// `{ quota, valid_until, feeless }`. Without translating, an existing
+/// `authorization_period: Some(p)` would silently SCALE-decode as `valid_until: p`,
+/// corrupting both fields. Existing entries default to `feeless: true` to match
+/// the new genesis default.
 ///
-/// Single-block translate is fine here: `AllowedAuthorizers` is an admin-managed
-/// allow-list with a tiny entry count (single digits in practice).
+/// Single-block: `AllowedAuthorizers` is an admin allow-list (single-digit count).
 pub mod v5 {
 	use super::*;
 	use crate::{
@@ -897,14 +899,14 @@ pub mod v5 {
 			AllowedAuthorizers::<T>::translate::<V4AuthorizerBudget<BlockNumberFor<T>>, _>(
 				|_who, old| {
 					migrated = migrated.saturating_add(1);
-					Some(AuthorizerBudget { quota: old.quota, valid_until: old.valid_until })
+					Some(AuthorizerBudget {
+						quota: old.quota,
+						valid_until: old.valid_until,
+						feeless: true,
+					})
 				},
 			);
-			tracing::info!(
-				target: LOG_TARGET,
-				migrated,
-				"v4->v5 AuthorizerBudget migration complete",
-			);
+			tracing::info!(target: LOG_TARGET, migrated, "v4->v5 migration complete");
 			T::DbWeight::get().reads_writes(migrated, migrated)
 		}
 

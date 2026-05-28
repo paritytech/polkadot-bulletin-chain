@@ -69,7 +69,11 @@ type Transactions = super::Transactions<Test>;
 type TransactionByContentHash = super::TransactionByContentHash<Test>;
 
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
-	AuthorizerBudget { quota: Some(Quota { transactions, bytes }), valid_until: None }
+	AuthorizerBudget {
+		quota: Some(Quota { transactions, bytes }),
+		valid_until: None,
+		feeless: false,
+	}
 }
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
@@ -1989,11 +1993,15 @@ fn ensure_allowed_authorizers_origin_rules() {
 		let registered = 7u64;
 		AllowedAuthorizers::<Test>::insert(registered, test_budget(100, 1024));
 		// Signed by a registered account → accepted, returns the full
-		// `AuthorizationOrigin` carrying the authorizer and `valid_until` (`None`
-		// for `test_budget`).
+		// `AuthorizationOrigin` carrying the authorizer, `valid_until` and `feeless`
+		// (both `None`/`false` for `test_budget`).
 		assert_eq!(
 			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
-			Some(Some(AuthorizationOrigin { authorizer: registered, valid_until: None })),
+			Some(Some(AuthorizationOrigin {
+				authorizer: registered,
+				valid_until: None,
+				feeless: false,
+			})),
 		);
 		// Signed by an unregistered account, Root, and None all rejected.
 		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(99)).is_err());
@@ -2018,9 +2026,16 @@ fn genesis_populates_allowed_authorizers() {
 	.build_storage()
 	.unwrap();
 	TestExternalities::new(t).execute_with(|| {
+		// Genesis authorizers default to `feeless: true`; root can re-add them
+		// later to flip `feeless` or set a `valid_until`.
+		let expected = |tx, by| AuthorizerBudget {
+			quota: Some(Quota { transactions: tx, bytes: by }),
+			valid_until: None,
+			feeless: true,
+		};
 		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), test_budget(100, 1024));
-		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), test_budget(200, 2048));
+		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), expected(100, 1024));
+		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), expected(200, 2048));
 	});
 }
 
@@ -4364,6 +4379,7 @@ fn valid_until_clamps_authorization_expiry() {
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
 				valid_until: Some(6),
+				feeless: false,
 			},
 		);
 
@@ -4409,6 +4425,7 @@ fn valid_until_clamps_refresh_authorization_expiry() {
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
 				valid_until: Some(6),
+				feeless: false,
 			},
 		);
 		let who = 1u64;
@@ -4449,6 +4466,7 @@ fn valid_until_beyond_default_period_does_not_clamp() {
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
 				valid_until: Some(100),
+				feeless: false,
 			},
 		);
 
@@ -4478,6 +4496,81 @@ fn valid_until_beyond_default_period_does_not_clamp() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent::default(),
 		);
+	});
+}
+
+#[test]
+fn add_remove_authorizer_manages_system_providers() {
+	// add → inc, re-add → no double-bump, remove → dec, re-remove → no underflow,
+	// `remove_exhausted_authorizer` also dec's.
+	new_test_ext().execute_with(|| {
+		let who = 77u64;
+		let providers_of = |a| frame_system::Account::<Test>::get(a).providers;
+		assert_eq!(providers_of(who), 0);
+
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(100, 1024),
+		));
+		assert_eq!(providers_of(who), 1);
+
+		// Re-add must not double-bump.
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(200, 2048),
+		));
+		assert_eq!(providers_of(who), 1);
+
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert_eq!(providers_of(who), 0);
+
+		// Re-remove must not underflow.
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert_eq!(providers_of(who), 0);
+
+		// `remove_exhausted_authorizer` path also dec's.
+		AllowedAuthorizers::<Test>::insert(
+			who,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 0, bytes: 0 }),
+				valid_until: None,
+				feeless: false,
+			},
+		);
+		frame_system::Pallet::<Test>::inc_providers(&who);
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert_eq!(providers_of(who), 0);
+	});
+}
+
+#[test]
+fn feeless_if_reflects_authorizer_budget_feeless_flag() {
+	// `true` only for `Signed(_)` origins whose `AllowedAuthorizers` entry has
+	// `feeless = true`. Root / None / unregistered → not feeless via this flag.
+	new_test_ext().execute_with(|| {
+		let feeless = 7u64;
+		let charged = 8u64;
+		let unregistered = 9u64;
+		AllowedAuthorizers::<Test>::insert(
+			feeless,
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 10, bytes: 1000 }),
+				valid_until: None,
+				feeless: true,
+			},
+		);
+		AllowedAuthorizers::<Test>::insert(charged, test_budget(10, 1000));
+
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(feeless)));
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(charged)));
+		// Not in the allow-list → not feeless.
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(unregistered)));
+		// Root / None → not feeless (the dispatch is feeless by other means, not
+		// via this flag).
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::root()));
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::none()));
 	});
 }
 
