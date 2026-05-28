@@ -1,4 +1,4 @@
-import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart } from "lucide-react";
+import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart, ScrollText } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { useChainState } from "@/state/chain.state";
@@ -21,6 +21,14 @@ function group(monitoring: MonitoringLinks | undefined): { title: string; items:
       href: monitoring.grafana,
       icon: Activity,
       description: "Block production, finality, peer count.",
+    });
+  }
+  if (monitoring.collatorLogs) {
+    chainHealth.push({
+      label: "Collator Logs",
+      href: monitoring.collatorLogs,
+      icon: ScrollText,
+      description: "Live log stream from collator nodes (Grafana Loki).",
     });
   }
   if (monitoring.telemetry) {

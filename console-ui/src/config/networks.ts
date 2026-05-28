@@ -17,6 +17,8 @@ export interface MonitoringLinks {
   explorer?: string;
   /** Operational runbook. */
   runbook?: string;
+  /** Grafana Loki Explore link, pre-filtered to this chain's collator logs. */
+  collatorLogs?: string;
 }
 
 export interface Network {
@@ -88,6 +90,37 @@ function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
 }
 
+const LOKI_DATASOURCE_UID = "P44F328058D1A830B";
+
+/**
+ * Grafana Loki Explore deep-link filtered to a chain's collator pods. Chain
+ * value matches Loki's `chain=` label (set by SRE scrape config), which is
+ * typically `bulletin-next-paseo`, `bulletin-paseo`, etc.
+ */
+function lokiLogsLink(chain: string): string {
+  const panes = {
+    dt9: {
+      datasource: LOKI_DATASOURCE_UID,
+      queries: [
+        {
+          refId: "A",
+          expr: `{chain="${chain}"} |= \`\``,
+          queryType: "range",
+          datasource: { type: "loki", uid: LOKI_DATASOURCE_UID },
+          editorMode: "builder",
+          direction: "backward",
+        },
+      ],
+      range: { from: "now-1h", to: "now" },
+      compact: false,
+    },
+  };
+  return (
+    "https://grafana.teleport.parity.io/explore?schemaVersion=1" +
+    `&panes=${encodeURIComponent(JSON.stringify(panes))}&orgId=1`
+  );
+}
+
 export const BULLETIN_NETWORKS: Record<string, Network> = {
   local: {
     id: "local",
@@ -144,6 +177,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_PASEO_NEXT_V2,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
+      collatorLogs: lokiLogsLink("bulletin-next-paseo"),
     },
   },
   previewnet: {
