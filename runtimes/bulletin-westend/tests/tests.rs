@@ -77,13 +77,10 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		(
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-				Runtime,
-				bulletin_westend_runtime::storage::StorageCallInspector,
-			>::default(),
-			pallet_bulletin_data_renewal::extension::ValidateRenewalCalls::<Runtime>::default(),
-		),
+		pallet_bulletin_data_renewal::extension::ValidateBulletinCalls::<
+			Runtime,
+			bulletin_westend_runtime::storage::StorageCallInspector,
+		>::default(),
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
 		),
 		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),

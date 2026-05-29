@@ -113,13 +113,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		(
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
-				Runtime,
-				storage::StorageCallInspector,
-			>,
-			pallet_bulletin_data_renewal::extension::ValidateRenewalCalls<Runtime>,
-		),
+		pallet_bulletin_data_renewal::extension::ValidateBulletinCalls<
+			Runtime,
+			storage::StorageCallInspector,
+		>,
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -562,13 +559,10 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			(
-				pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-					Runtime,
-					storage::StorageCallInspector,
-				>::default(),
-				pallet_bulletin_data_renewal::extension::ValidateRenewalCalls::<Runtime>::default(),
-			),
+			pallet_bulletin_data_renewal::extension::ValidateBulletinCalls::<
+				Runtime,
+				storage::StorageCallInspector,
+			>::default(),
 			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
 				Runtime,
 				pallet_bulletin_transaction_storage::extension::FlatBoost,
