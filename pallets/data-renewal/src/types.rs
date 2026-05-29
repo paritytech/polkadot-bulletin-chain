@@ -19,36 +19,21 @@
 
 use codec::{Decode, Encode, MaxEncodedLen};
 
-/// Data associated with a renewal registration in [`crate::AutoRenewals`].
+/// Auto-renewal registration value stored in [`crate::AutoRenewals`].
 ///
-/// Holds the owner account, a `recurring` flag that decides whether the registration
-/// is consumed after a single successful renewal (`false`, set by [`crate::Pallet::renew`])
-/// or persists forever (`true`, set by [`crate::Pallet::enable_auto_renew`]), and a
-/// `paid` flag indicating that the next cycle has already been charged against the
-/// owner's authorization at registration time.
-///
-/// Both `renew` and `enable_auto_renew` insert with `paid: true`: the renewal pallet's
-/// extension charges `bytes_permanent`, the chain-wide `PermanentStorageUsed`, and one
-/// tx slot up front (same as `force_renew`). `do_process_auto_renewals` keys its
-/// charge-skip off `paid`: when `paid` is true the cycle renews without re-charging and
-/// then flips `paid` to `false` (for recurring entries) so subsequent cycles pay
-/// per-cycle. One-shot entries (`recurring: false`) are removed after the single
-/// renewal so the flag is inert after that point.
-///
-/// While `paid` is true, `disable_auto_renew` rejects signed callers — the owner must
-/// wait for the first cycle to consume the prepayment. This is what makes
-/// `enable_auto_renew` honestly cost a renewal even if the owner immediately disables.
-/// Root can still disable for governance cleanup.
+/// `recurring` distinguishes a forever-renewing entry (`enable_auto_renew`)
+/// from a one-shot (`renew`). `paid` marks the prepaid first cycle: both
+/// constructors set it to `true` (the extension's `pre_dispatch` charges the
+/// slot at registration); the next cycle delivers free and flips it to `false`
+/// for recurring entries. Signed `disable_auto_renew` is rejected while `paid`
+/// is `true` — without this, an owner could pocket the prepaid slot.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct RenewalData<AccountId> {
-	/// Account whose authorization will be consumed each time data is auto-renewed.
+	/// Account whose authorization is consumed on each (non-prepaid) cycle.
 	pub account: AccountId,
-	/// `true` — auto-renew forever (set by `enable_auto_renew`).
-	/// `false` — one-shot: removed from `AutoRenewals` after the first successful renewal
-	/// cycle (set by `renew`).
+	/// `true` for `enable_auto_renew` (forever), `false` for `renew` (one-shot,
+	/// removed after first cycle).
 	pub recurring: bool,
-	/// `true` — the next renewal cycle has already been charged at registration time and
-	/// will fire free. After the cycle delivers, the flag is flipped to `false` for
-	/// recurring entries; for one-shot entries the registration is removed outright.
+	/// `true` while the prepaid first cycle hasn't fired yet.
 	pub paid: bool,
 }
