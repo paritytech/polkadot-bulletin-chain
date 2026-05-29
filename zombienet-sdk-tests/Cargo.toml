@@ -44,6 +44,7 @@ pallet-bulletin-transaction-storage = { path = "../pallets/transaction-storage",
 [features]
 zombie-sync-tests = []
 zombie-auto-renew-tests = []
+zombie-hop-tests = []
 
 [build-dependencies]
 prost-build = "0.13"
