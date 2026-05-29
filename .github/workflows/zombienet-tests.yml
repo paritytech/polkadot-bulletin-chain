@@ -182,11 +182,6 @@ jobs:
           retention-days: 14
 
   zombienet-hop-tests:
-    # HOP test is currently *expected to fail* (it surfaces the HOP→col11/bitswap gap).
-    # Gate behind dispatch / `zombienet-hop-tests` label so it doesn't block every PR.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-hop-tests'))
     needs: [set-image, prepare-binaries]
     name: hop / ${{ matrix.runtime.name }}
     runs-on: parity-large
