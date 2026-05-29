@@ -23,10 +23,11 @@ use crate::{
 	utils::{
 		assert_proof_checked_at, authorize_account_via_sudo_finalized, blake2_256,
 		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		generate_test_data, get_alice_nonce, hop_submit, initialize_network, now_ms,
-		set_retention_period_finalized, verify_bitswap_fetch, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_session_change_on_node,
-		NETWORK_READY_TIMEOUT_SECS, TEST_DATA_SIZE,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, hop_submit,
+		initialize_network, now_ms, set_retention_period_finalized, transaction_location_at,
+		verify_bitswap_fetch, verify_parachain_binaries, wait_for_block_height,
+		wait_for_finalized_height, wait_for_session_change_on_node, NETWORK_READY_TIMEOUT_SECS,
+		TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -208,6 +209,11 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	tracing::info!("[AFTER promotion] bitswap content match = {}", after_match);
 
 	// --- Wait for retention period to elapse, then assert the storage-proof inherent ran ---
+	// First confirm the index still points the HOP content_hash at `store_block` when the
+	// proof inherent fires at `store_block + RetentionPeriod`. The runtime proves
+	// `Transactions[proof_block - RetentionPeriod] = Transactions[store_block]`, so this read
+	// ties the upcoming `ProofChecked` event to *our* HOP-promoted blob rather than just any
+	// proof that happened to fire.
 	let proof_block = store_block + RETENTION_PERIOD as u64;
 	let wait_until = proof_block + 1;
 	tracing::info!(
@@ -217,8 +223,45 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	);
 	wait_for_block_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	wait_for_finalized_height(collator1, wait_until, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	let proof_hash = finalized_block_hash_at(&client, proof_block).await?;
+	let location = transaction_location_at(&client, proof_hash, &content_hash)
+		.await
+		.with_context(|| {
+			format!("read TransactionByContentHash[{}] at proof_block {}", hash_hex, proof_block)
+		})?
+		.ok_or_else(|| {
+			anyhow::anyhow!(
+				"TransactionByContentHash[{}] missing at proof_block {} — HOP promotion not \
+				 indexed at the slot the proof inherent will read",
+				hash_hex,
+				proof_block,
+			)
+		})?;
+	assert_eq!(
+		location,
+		(store_block, 0),
+		"HOP-promoted blob ({}) is indexed at {:?} but the proof inherent at block {} reads \
+		 Transactions[{}] — the upcoming ProofChecked event would not cover our blob",
+		hash_hex,
+		location,
+		proof_block,
+		store_block,
+	);
+	tracing::info!(
+		"✓ TransactionByContentHash[{}] = ({}, {}) at proof_block {} — ProofChecked there \
+		 will be for the HOP-promoted blob",
+		hash_hex,
+		location.0,
+		location.1,
+		proof_block
+	);
+
 	assert_proof_checked_at(&client, proof_block, "post-HOP-promotion").await?;
-	tracing::info!("✓ ProofChecked event present at block {}", proof_block);
+	tracing::info!(
+		"✓ ProofChecked event present at block {} (for the HOP-promoted blob)",
+		proof_block
+	);
 
 	// --- The bitswap content-match demonstration --------------------------------------
 	// Both probes should ideally match the original. They will not — that's the goal of
