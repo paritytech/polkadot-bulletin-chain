@@ -123,6 +123,7 @@ fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 	AuthorizerBudget {
 		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
 		valid_until: None,
+		feeless: false,
 	}
 }
 
@@ -351,6 +352,7 @@ mod benchmarks {
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 0, bytes: 0 }),
 				valid_until: None,
+				feeless: false,
 			},
 		);
 
