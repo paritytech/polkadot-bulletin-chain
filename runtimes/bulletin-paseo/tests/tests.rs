@@ -2175,10 +2175,7 @@ mod parameters_tests {
 
 			// New value visible through the same `Get` the filter uses…
 			use frame_support::traits::Get;
-			assert_eq!(
-				xcm_params::AllowedParachainIds::get().to_vec(),
-				vec![NEW_AUTHORIZER_ID],
-			);
+			assert_eq!(xcm_params::AllowedParachainIds::get().to_vec(), vec![NEW_AUTHORIZER_ID],);
 			// …and through the filter itself: 9999 in, 1502 out.
 			assert!(IsAuthorizerParachain::contains(&new_para));
 			assert!(!IsAuthorizerParachain::contains(&old_para));

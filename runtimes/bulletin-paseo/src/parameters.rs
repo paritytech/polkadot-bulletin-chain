@@ -59,15 +59,13 @@ pub mod dynamic_params {
 		/// Sibling paraIds allowed to dispatch storage authorizations via XCM.
 		/// Defaults to the People chain paraIds on previewnet / paseo-next-v2.
 		#[codec(index = 0)]
-		pub static AllowedParachainIds:
-			BoundedVec<u32, ConstU32<MAX_ALLOWED_PARACHAIN_IDS>> =
+		pub static AllowedParachainIds: BoundedVec<u32, ConstU32<MAX_ALLOWED_PARACHAIN_IDS>> =
 			BoundedVec::truncate_from(vec![1502, 5140]);
 
 		/// Sibling paraIds whose origins are treated as governance (granted
 		/// Root via XCM). Defaults to the paseo-next-v2 governance chain.
 		#[codec(index = 1)]
-		pub static GovernanceParachainIds:
-			BoundedVec<u32, ConstU32<MAX_ALLOWED_PARACHAIN_IDS>> =
+		pub static GovernanceParachainIds: BoundedVec<u32, ConstU32<MAX_ALLOWED_PARACHAIN_IDS>> =
 			BoundedVec::truncate_from(vec![1500]);
 	}
 }
