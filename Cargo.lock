@@ -8079,6 +8079,7 @@ dependencies = [
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",
+ "sp-core 41.0.0",
  "sp-io",
  "sp-keyring",
  "sp-keystore",

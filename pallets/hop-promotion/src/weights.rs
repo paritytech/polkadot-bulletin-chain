@@ -18,7 +18,9 @@
 //! `authorize_promote` measures the cost of the `#[pallet::authorize]` path for
 //! [`crate::Call::promote`]: storage reads for block-fullness / timestamp /
 //! account authorization, a `blake2_256` over the data (parameterized by `d`),
-//! and an `sr25519` signature verify. The dispatch body itself reuses
+//! and an `sr25519` signature verify. `authorize_promote_v2` adds a second
+//! `blake2_256` over the SCALE-encoded recipients list, parameterized by `r` =
+//! recipient count. The dispatch body itself reuses
 //! `pallet_bulletin_transaction_storage::WeightInfo::store`, so no `promote`
 //! weight is needed here.
 
@@ -29,10 +31,17 @@ pub trait WeightInfo {
 	/// Worst-case weight of the `#[pallet::authorize]` closure for
 	/// [`crate::Call::promote`], parameterized by `d` = data length in bytes.
 	fn authorize_promote(d: u32) -> Weight;
+	/// Worst-case weight of the `#[pallet::authorize]` closure for
+	/// [`crate::Call::promote_v2`], parameterized by `d` = data length in bytes
+	/// and `r` = recipient count.
+	fn authorize_promote_v2(d: u32, r: u32) -> Weight;
 }
 
 impl WeightInfo for () {
 	fn authorize_promote(_d: u32) -> Weight {
+		Weight::zero()
+	}
+	fn authorize_promote_v2(_d: u32, _r: u32) -> Weight {
 		Weight::zero()
 	}
 }

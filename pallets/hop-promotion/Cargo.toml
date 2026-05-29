@@ -22,6 +22,7 @@ polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
 ] }
 scale-info = { features = ["derive"], workspace = true }
+sp-core = { workspace = true }
 sp-io = { workspace = true }
 sp-runtime = { workspace = true }
 bulletin-transaction-storage-primitives = { workspace = true }
@@ -43,6 +44,7 @@ std = [
 	"pallet-timestamp/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
+	"sp-core/std",
 	"sp-io/std",
 	"sp-keyring/std",
 	"sp-keystore/std",
