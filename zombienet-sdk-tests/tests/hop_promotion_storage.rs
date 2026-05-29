@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! HOP (Hand-Off Protocol) promotion end-to-end: `hop_submit` -> wait for the on-chain
-//! `Stored` event -> wait `RetentionPeriod` -> assert `ProofChecked` covers our blob.
-//! The bitswap content-match check (before & after promotion) is the bug the test
-//! surfaces and is expected to fail.
+//! `Stored` event -> wait `RetentionPeriod` -> assert `ProofChecked` covers our blob, and
+//! bitswap serves the original content via the published CID. A pre-promotion bitswap
+//! probe asserts the blob is *not* yet served — guarding against a stale col11 entry
+//! leaking through.
 
 use crate::{
 	test_log,
@@ -166,10 +167,13 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	assert_proof_checked_at(&client, proof_block, "HOP-promoted blob").await?;
 	tracing::info!("✓ ProofChecked at block {} covers HOP blob {}", proof_block, hash_hex);
 
-	// The HOP -> bitswap gap demonstration. Both assertions are by design — `before` is
-	// expected to fail (data not yet on-chain), `after` is the surprising failure the test
-	// drives out.
-	assert!(before_match, "bitswap did not match BEFORE promotion (no col11 entry yet)");
+	// BEFORE is expected to be `false` (blob lives only in the HOP pool, no col11 entry yet).
+	// Guard against a stale col11 entry leaking through but don't fail the test on the
+	// tautological case. The real signal is the AFTER probe.
+	assert!(
+		!before_match,
+		"bitswap returned matching content BEFORE promotion — stale col11 entry?",
+	);
 	assert!(
 		after_match,
 		"bitswap did not match AFTER promotion at block {} (proof at {}) — \

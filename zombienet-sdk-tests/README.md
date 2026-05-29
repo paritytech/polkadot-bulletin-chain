@@ -95,7 +95,7 @@ are resource-intensive.
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
 | `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
 | `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
-| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` passes; bitswap-content-match assertion is **expected to fail** (drives out the HOP↔bitswap CID/indexing gap) |
+| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. |
 
 ## Environment variables
 
@@ -149,7 +149,7 @@ A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 |---|---|
 | `zombienet-auto-renew-tests` | Every PR push + `workflow_dispatch` |
 | `zombienet-sync-tests` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
-| `zombienet-hop-tests` | Every PR push + `workflow_dispatch` (test is expected to fail until the HOP→col11/bitswap gap is fixed) |
+| `zombienet-hop-tests` | Every PR push + `workflow_dispatch` |
 
 A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
 as an artifact; both suites download that artifact instead of building locally. Each suite
