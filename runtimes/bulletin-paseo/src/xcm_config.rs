@@ -19,8 +19,10 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
-use crate::parameters::dynamic_params::xcm::{AllowedParachainIds, GovernanceParachainIds};
-use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+use crate::{
+	parameters::dynamic_params::xcm::{AllowedParachainIds, GovernanceParachainIds},
+	paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID},
+};
 use frame_support::{
 	parameter_types,
 	traits::{
