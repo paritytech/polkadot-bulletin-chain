@@ -149,6 +149,7 @@ A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 |---|---|
 | `zombienet-auto-renew-tests` | Every PR push + `workflow_dispatch` |
 | `zombienet-sync-tests` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
+| `zombienet-hop-tests` | `zombienet-hop-tests` PR label + `workflow_dispatch` (test is expected to fail until the HOP→col11/bitswap gap is fixed) |
 
 A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
 as an artifact; both suites download that artifact instead of building locally. Each suite
