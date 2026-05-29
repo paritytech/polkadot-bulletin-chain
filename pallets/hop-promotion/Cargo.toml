@@ -40,6 +40,7 @@ std = [
 	"codec/std",
 	"frame-support/std",
 	"frame-system/std",
+	"pallet-bulletin-data-renewal/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-timestamp/std",
 	"polkadot-sdk-frame/std",
@@ -48,25 +49,24 @@ std = [
 	"sp-keyring/std",
 	"sp-keystore/std",
 	"sp-runtime/std",
-	"pallet-bulletin-data-renewal/std"
 ]
 runtime-benchmarks = [
 	"bulletin-pallets-common/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
+	"pallet-bulletin-data-renewal/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
-	"pallet-bulletin-data-renewal/runtime-benchmarks"
 ]
 try-runtime = [
 	"bulletin-pallets-common/try-runtime",
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
+	"pallet-bulletin-data-renewal/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"polkadot-sdk-frame/try-runtime",
 	"sp-runtime/try-runtime",
-	"pallet-bulletin-data-renewal/try-runtime"
 ]
