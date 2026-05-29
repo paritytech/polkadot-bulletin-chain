@@ -48,8 +48,8 @@ export ROCKSDB_LDB_PATH=/path/to/ldb
 
 ## Running tests
 
-Tests are gated behind feature flags (`zombie-sync-tests`, `zombie-auto-renew-tests`)
-so `cargo test --workspace` doesn't accidentally fire them.
+Tests are gated behind feature flags (`zombie-sync-tests`, `zombie-auto-renew-tests`,
+`zombie-hop-tests`) so `cargo test --workspace` doesn't accidentally fire them.
 
 Recommended path — `just` recipes from the repo root:
 
@@ -65,6 +65,9 @@ just test-zombienet-auto-renew
 
 # Single auto-renew test:
 just test-zombienet-auto-renew westend parachain_auto_renew_quota_exhaustion_test
+
+# HOP promotion suite:
+just test-zombienet-hop
 ```
 
 The recipes fetch the right binaries, generate the chain spec, export the env
@@ -92,6 +95,7 @@ are resource-intensive.
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
 | `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
 | `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
+| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` passes; bitswap-content-match assertion is **expected to fail** (drives out the HOP↔bitswap CID/indexing gap) |
 
 ## Environment variables
 
@@ -145,6 +149,7 @@ A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 |---|---|
 | `zombienet-auto-renew-tests` | Every PR push + `workflow_dispatch` |
 | `zombienet-sync-tests` | `zombienet-sync-tests` PR label + `workflow_dispatch` |
+| `zombienet-hop-tests` | Every PR push + `workflow_dispatch` (test is expected to fail until the HOP→col11/bitswap gap is fixed) |
 
 A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
 as an artifact; both suites download that artifact instead of building locally. Each suite
