@@ -21,8 +21,8 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_account_via_sudo_finalized, blake2_256,
-		build_parachain_network_config_three_relay_validators, content_hash_and_cid, count_event,
+		assert_proof_checked_at, authorize_account_via_sudo_finalized, blake2_256,
+		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
 		generate_test_data, get_alice_nonce, hop_submit, initialize_network, now_ms,
 		set_retention_period_finalized, verify_bitswap_fetch, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_session_change_on_node,
@@ -105,56 +105,6 @@ async fn wait_for_promoted(
 		timeout_secs,
 		hex::encode(content_hash)
 	)
-}
-
-/// Locate the canonical block at `target` by walking back from the latest finalized block.
-/// Polls until finality reaches `target`.
-async fn finalized_block_hash_at(
-	client: &OnlineClient<SubstrateConfig>,
-	target: u64,
-) -> Result<subxt::utils::H256> {
-	const POLL_INTERVAL_SECS: u64 = 2;
-	const POLL_TIMEOUT_SECS: u64 = 180;
-	let start = std::time::Instant::now();
-	let mut current = client.blocks().at_latest().await?;
-	while (current.number() as u64) < target {
-		if start.elapsed().as_secs() > POLL_TIMEOUT_SECS {
-			anyhow::bail!(
-				"finalized height {} did not reach target {} within {}s",
-				current.number(),
-				target,
-				POLL_TIMEOUT_SECS
-			);
-		}
-		tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
-		current = client.blocks().at_latest().await?;
-	}
-	while (current.number() as u64) > target {
-		let parent_hash = current.header().parent_hash;
-		current = client.blocks().at(parent_hash).await?;
-	}
-	Ok(current.hash())
-}
-
-/// Strong assertion: exactly one `ProofChecked` event at `block`. Reads on the finalized
-/// chain so the verdict is stable.
-async fn assert_proof_checked_at(
-	client: &OnlineClient<SubstrateConfig>,
-	block: u64,
-	context: &str,
-) -> Result<()> {
-	let hash = finalized_block_hash_at(client, block).await?;
-	let events = client.blocks().at(hash).await?.events().await?;
-	let count = count_event(&events, "ProofChecked");
-	if count != 1 {
-		anyhow::bail!(
-			"{}: expected exactly 1 ProofChecked at block {}, saw {}",
-			context,
-			block,
-			count
-		);
-	}
-	Ok(())
 }
 
 /// HOP-promotion smoke test. Demonstrates the proof-check path works while the

@@ -35,6 +35,7 @@ macro_rules! test_error {
 }
 
 pub mod bitswap;
+pub mod blocks;
 pub mod config;
 pub mod crypto;
 pub mod events;
@@ -45,6 +46,7 @@ pub mod sync;
 pub mod tx;
 
 pub use bitswap::*;
+pub use blocks::*;
 pub use config::*;
 pub use crypto::*;
 pub use events::*;
