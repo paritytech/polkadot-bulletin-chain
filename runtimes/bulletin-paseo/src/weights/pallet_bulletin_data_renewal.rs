@@ -16,7 +16,7 @@
 
 //! Weights for `pallet_bulletin_data_renewal`.
 //!
-//! Hand-seeded from the pre-E1-split `pallet_bulletin_transaction_storage` weights
+//! Hand-seeded from the pre-split `pallet_bulletin_transaction_storage` weights
 //! for the renewal-related dispatchables, which exercise the same on-chain code
 //! paths (per-account auth lookup, `bytes_permanent` consumption, chain-wide
 //! `PermanentStorageUsed` bump, `AutoRenewals` write, optional in-block renew
