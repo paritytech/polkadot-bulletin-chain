@@ -39,7 +39,7 @@ use polkadot_sdk_frame::{
 use sp_transaction_storage_proof::{num_chunks, registration::build_proof};
 
 // ---------------------------------------------------------------------------
-// E1-split smoke tests
+// Smoke tests
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -145,7 +145,7 @@ fn _ensure_imports() {
 }
 
 // ---------------------------------------------------------------------------
-// Ported from pre-E1-split `pallet-bulletin-transaction-storage::tests` —
+// Ported from the pre-split `pallet-bulletin-transaction-storage::tests` —
 // critical renewal coverage. Remaining tests will be ported in a follow-up.
 // ---------------------------------------------------------------------------
 
@@ -431,7 +431,7 @@ fn renews_data() {
 
 /// `renew` accepts a content-hash variant of [`TransactionRef`] equivalently to
 /// the position variant.
-#[ignore = "phase-4-followup: needs adaptation post E1 inherent/extension split"]
+#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn renew_by_content_hash_schedules_one_shot() {
 	new_test_ext().execute_with(|| {
@@ -566,7 +566,7 @@ fn content_hash_map_not_cleaned_if_renewed() {
 	});
 }
 
-#[ignore = "phase-4-followup: needs adaptation post E1 inherent/extension split"]
+#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn signed_renew_prefers_preimage_authorization() {
 	new_test_ext().execute_with(|| {
@@ -729,9 +729,9 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_eq!(txs[0].cid_codec, 0x55);
 		assert_eq!(txs[0].content_hash, sha2_hash);
 
-		// TODO(e1-followup): the unsigned `force_renew` path with preimage
+		// TODO(follow-up): the unsigned `force_renew` path with preimage
 		// authorization used to be validated by storage pallet's `check_unsigned`;
-		// after the E1 split it needs a corresponding branch in
+		// after this split it needs a corresponding branch in
 		// `pallet-bulletin-data-renewal::ValidateUnsigned`. Once added, restore
 		// the assertions below.
 	});
@@ -1559,7 +1559,7 @@ fn renew_rejects_unsigned_and_root_origin() {
 /// inherent ran, asserting that the storage is empty. The mock's `run_to_block` always
 /// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
 /// the assert actually fires when an auto-renewal is pending and the inherent is missing.
-#[ignore = "phase-4-followup: needs adaptation post E1 inherent/extension split"]
+#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 #[should_panic(expected = "All pending auto-renewals must be processed by apply_block_inherents")]
 fn on_finalize_panics_when_inherent_missing() {
@@ -1620,7 +1620,7 @@ fn on_finalize_panics_when_inherent_missing() {
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
 /// proof) are pending, the chain would panic at on_finalize without any test catching it.
-#[ignore = "phase-4-followup: needs adaptation post E1 inherent/extension split"]
+#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn create_inherent_emits_call_when_pending_renewals_present() {
 	use polkadot_sdk_frame::{deps::sp_inherents::InherentData, runtime::prelude::ProvideInherent};
@@ -2341,7 +2341,7 @@ fn uses_preimage_authorization() {
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
-		// TODO(e1-followup): the unsigned `force_renew` + preimage authorization
+		// TODO(follow-up): the unsigned `force_renew` + preimage authorization
 		// path needs a corresponding branch in
 		// `pallet-bulletin-data-renewal::ValidateUnsigned`. The original
 		// assertion (renew bumps `bytes_permanent` on the preimage extent) is

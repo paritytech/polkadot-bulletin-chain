@@ -15,12 +15,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Weights for the data-renewal pallet.
-//!
-//! Auto-generated weights are produced by the benchmarking pipeline and wired in
-//! `runtimes/bulletin-westend/src/weights/pallet_bulletin_data_renewal.rs`. The
-//! defaults here are placeholders that mirror the renewal-related entries from
-//! `pallet-bulletin-transaction-storage`'s `WeightInfo` until benchmarks land.
+//! Weights for the data-renewal pallet. Concrete numbers live in the runtime
+//! at `runtimes/<runtime>/src/weights/pallet_bulletin_data_renewal.rs`.
 
 use polkadot_sdk_frame::deps::frame_support::weights::Weight;
 
@@ -29,18 +25,13 @@ pub trait WeightInfo {
 	fn force_renew() -> Weight;
 	fn enable_auto_renew() -> Weight;
 	fn disable_auto_renew() -> Weight;
-	/// Weight charged by the renewal extension during signed renew-call validation
-	/// (authorization lookup + per-account `bytes_permanent` + chain-wide
-	/// `PermanentStorageUsed` checks). Returned from
-	/// [`crate::extension::ValidateRenewalCalls::weight`].
+	/// Per-call weight charged inside the renewal extension's signed validation
+	/// (auth lookup + `bytes_permanent` + `PermanentStorageUsed` checks).
 	fn validate_renew() -> Weight;
 	/// Drain `n` pending auto-renewals (linear in `n`).
 	fn process_pending_renewals(n: u32) -> Weight;
-	/// One outer-loop iteration of the v3→v4 `AutoRenewals` layout migration
-	/// (re-encoding one entry from the pre-`recurring` shape). Used by the
-	/// multi-block migration; kept here as a placeholder for the eventual port
-	/// from the pre-split storage pallet — currently unused because the
-	/// migration has run on every live deployment.
+	/// One step of the v3→v4 `AutoRenewals` layout migration. Placeholder until
+	/// the migration is ported into this pallet.
 	fn migrate_v3_to_v4_step() -> Weight;
 }
 

@@ -15,25 +15,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Data renewal pallet for the Bulletin chain.
+//! Data-renewal layer for the Bulletin chain. Sits on top of
+//! [`pallet_bulletin_transaction_storage`] via a `Config:
+//! pallet_bulletin_transaction_storage::Config` bound (direct calls, no virtual
+//! dispatch).
 //!
-//! Sits on top of [`pallet_bulletin_transaction_storage`]. Owns the dispatchables
-//! `renew`, `force_renew`, `enable_auto_renew`, `disable_auto_renew`, the per-block
-//! drain inherent for queued auto-renewals, and the in-memory renew mechanics
-//! (`do_renew_in_memory` + `BlockTransactions` mutation).
+//! ## Surface
 //!
-//! Storage-pallet state is read/mutated via a
-//! `Config: pallet_bulletin_transaction_storage::Config` bound (direct calls, no
-//! virtual dispatch). The upward call (storage pallet → renewal pallet, when
-//! transactions age out at the `RetentionPeriod` boundary) goes through
-//! [`pallet_bulletin_transaction_storage::OnObsoleteTransactions`] — the only trait
-//! used in this split. Wired by the runtime as
-//! `type OnObsoleteTransactions = DataRenewal;`.
+//! - **Dispatchables:** `force_renew` (synchronous), `renew` (one-shot scheduler),
+//!   `enable_auto_renew` / `disable_auto_renew` (recurring), `process_pending_renewals` (mandatory
+//!   drain inherent).
+//! - **Storage:** [`AutoRenewals`] (per-content-hash registration) and [`PendingAutoRenewals`]
+//!   (per-block scratch queue, drained by the inherent).
 //!
-//! The chain-wide `PermanentStorageUsed` counter and per-account `bytes_permanent`
-//! accounting stay in the storage pallet (called via
-//! [`pallet_bulletin_transaction_storage::Pallet::check_authorization`] with
-//! `is_renew = true`).
+//! ## Cross-pallet contract
+//!
+//! - **Down → storage:** dispatchables and the trait callback read/mutate `Transactions`,
+//!   `TransactionByContentHash`, `BlockTransactions`, and `Authorizations` directly through
+//!   `pallet_bulletin_transaction_storage`'s public API.
+//! - **Up ← storage:** [`OnObsoleteTransactions::handle_obsolete`] is called by the storage
+//!   pallet's `on_initialize` when entries age out at the `RetentionPeriod` boundary; entries with
+//!   an `AutoRenewals` registration are pushed to [`PendingAutoRenewals`] for the same block's
+//!   inherent to drain.
+//! - **Per-cycle accounting** (per-account `bytes_permanent` and the chain-wide
+//!   `PermanentStorageUsed`) is charged by the storage pallet's `check_authorization` with
+//!   `is_renew = true`.
+//!
+//! ## Prepayment model
+//!
+//! Both `renew` and `enable_auto_renew` are *feeless* registrations: the
+//! transaction-extension's `pre_dispatch` charges one tx slot + `size` bytes
+//! up front. The first cycle then fires free (`paid = true` on the inserted
+//! [`RenewalData`]), and every subsequent recurring cycle charges per-cycle in
+//! [`Pallet::do_process_auto_renewals`].
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -162,23 +176,11 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// Schedule a **one-shot** auto-renewal of previously stored data. The renewal fires
-		/// exactly once, when the data reaches its `RetentionPeriod` boundary, and then the
-		/// registration is removed. For continuous renewal, use
-		/// [`enable_auto_renew`](Self::enable_auto_renew) instead.
-		///
-		/// `entry` identifies the data either by `(block, index)` or by content hash.
-		///
-		/// Feeless. Registration cost (one transaction unit) is charged in
-		/// `check_signed`; the eventual renewal cycle charges bytes against
-		/// `bytes_permanent` and the chain-wide cap.
-		///
-		/// Rejects with [`Error::AutoRenewalAlreadyEnabled`] if a scheduled renewal already
-		/// exists for this content hash.
-		///
-		/// Emits [`Event::RenewalEnabled`] `{ recurring: false }`.
-		///
-		/// For synchronous renewal at dispatch time, see [`force_renew`](Self::force_renew).
+		/// Schedule a one-shot auto-renewal. Fires once at the
+		/// `RetentionPeriod` boundary, then the registration is removed.
+		/// Prepaid at registration; see [`force_renew`](Self::force_renew) for
+		/// synchronous renewal or [`enable_auto_renew`](Self::enable_auto_renew)
+		/// for recurring.
 		#[pallet::call_index(0)]
 		#[pallet::weight(<T as Config>::WeightInfo::renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _entry: &TransactionRef<BlockNumberFor<T>>| -> bool { true })]
@@ -208,13 +210,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Immediately renew previously stored data, synchronous at dispatch time.
-		///
-		/// Authorization is required (as with `store`). Charges `info.size` against
-		/// `bytes_permanent` (per-account renew cap) and `PermanentStorageUsed`
-		/// (chain-wide cap).
-		///
-		/// Emits [`Event::Renewed`] when successful.
+		/// Renew previously stored data synchronously. Charges `info.size` against
+		/// the caller's `bytes_permanent` and the chain-wide `PermanentStorageUsed`.
 		#[pallet::call_index(1)]
 		#[pallet::weight((<T as Config>::WeightInfo::force_renew(), DispatchClass::Operational))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _entry: &TransactionRef<BlockNumberFor<T>>| -> bool { true })]
@@ -238,21 +235,11 @@ pub mod pallet {
 			Ok(().into())
 		}
 
-		/// Enable automatic renewal for a previously stored piece of data.
-		///
-		/// Recurring scheduler with pre-paid first cycle. The extension's `check_signed`
-		/// charges `bytes_permanent`, `PermanentStorageUsed`, and one tx slot at
-		/// registration (same hard-cap accounting as `force_renew` / one-shot `renew`).
-		/// The registration is inserted as `RenewalData { recurring: true, paid: true }`.
-		/// The first renewal cycle fires at the next `RetentionPeriod` boundary **without**
-		/// re-charging — the slot is already paid for; the cycle then flips `paid` to
-		/// `false`. From that point on, every subsequent cycle charges the owner's
-		/// authorization in [`Self::do_process_auto_renewals`], dropping the registration
-		/// with [`Event::AutoRenewalFailed`] if the quota is exhausted at cycle time.
-		///
-		/// Emits [`Event::RenewalEnabled`] `{ recurring: true }` for the registration;
-		/// the first actual renewal is emitted as [`Event::DataAutoRenewed`] at cycle
-		/// time.
+		/// Register recurring auto-renewal for `content_hash`. First cycle is
+		/// prepaid at registration (`paid = true`); subsequent cycles charge
+		/// the owner's authorization in [`Self::do_process_auto_renewals`] and
+		/// drop the registration on quota exhaustion with
+		/// [`Event::AutoRenewalFailed`].
 		#[pallet::call_index(2)]
 		#[pallet::weight(<T as Config>::WeightInfo::enable_auto_renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
@@ -292,18 +279,10 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Disable automatic renewal for a piece of data.
-		///
-		/// Signed: the caller must be the account that originally enabled the renewal,
-		/// and the registration must not be in its prepaid window — see
-		/// [`Error::CannotDisablePrepaidAutoRenewal`]. Both registrations from
-		/// [`Self::renew`] and [`Self::enable_auto_renew`] start with `paid: true`;
-		/// the owner has to wait for the first cycle to consume the prepayment before
-		/// they can disable.
-		///
-		/// Root: bypasses the owner check and the prepaid-window check (governance/cleanup).
-		///
-		/// Emits [`Event::AutoRenewalDisabled`] when successful.
+		/// Disable auto-renewal. Signed callers must own the registration AND
+		/// wait for the prepaid first cycle to have fired (else
+		/// [`Error::CannotDisablePrepaidAutoRenewal`]). Root bypasses both
+		/// checks.
 		#[pallet::call_index(3)]
 		#[pallet::weight(<T as Config>::WeightInfo::disable_auto_renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
@@ -332,10 +311,8 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Drain [`PendingAutoRenewals`] queued by [`OnObsoleteTransactions::handle_obsolete`].
-		///
-		/// Emitted by [`Pallet::create_inherent`] when the pending vec is non-empty. Refunds
-		/// to the actually-drained count via `PostDispatchInfo`.
+		/// Mandatory inherent: drain [`PendingAutoRenewals`] for the current
+		/// block. Refunds to the actually-drained count via `PostDispatchInfo`.
 		#[pallet::call_index(4)]
 		#[pallet::weight((
 			<T as Config>::WeightInfo::process_pending_renewals(
@@ -393,21 +370,10 @@ pub mod pallet {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// Implementations outside the `#[pallet]` module
-// -----------------------------------------------------------------------------
-
 impl<T: Config> Pallet<T> {
-	/// Single-renewal entry point for [`Pallet::force_renew`].
-	///
-	/// Wraps [`Self::do_renew_in_memory`] (the centralized renewal mechanics) with a
-	/// [`BlockTransactions`] read/write. Auto-renewals do not go through this wrapper
-	/// — [`Self::do_process_auto_renewals`] amortizes a single read/write across the
-	/// whole drain loop instead.
-	///
-	/// Hard-cap accounting (per-account `bytes_permanent`, chain-wide
-	/// `PermanentStorageUsed`) is enforced by `check_authorization` in the
-	/// extension's `pre_dispatch` before this runs.
+	/// Single-renewal wrapper for [`Pallet::force_renew`]. Amortizes one
+	/// `BlockTransactions` read/write. Hard-cap accounting runs earlier in the
+	/// extension's `pre_dispatch`.
 	pub(crate) fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 		let extrinsic_index =
 			<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
@@ -417,13 +383,11 @@ impl<T: Config> Pallet<T> {
 		})
 	}
 
-	/// Push a `kind = Renew` entry onto the in-memory accumulator and update
-	/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
-	///
-	/// Called by:
-	/// - [`Self::do_renew`] for the single-renewal manual flow (`force_renew`).
-	/// - [`Self::do_process_auto_renewals`] in a loop, amortizing one [`BlockTransactions`]
-	///   read/write across all pending entries.
+	/// Push a `kind = Renew` entry onto the in-memory `BlockTransactions`
+	/// accumulator, host-index the renewal, and update
+	/// [`TransactionByContentHash`]. Returns `None` at
+	/// `MaxBlockTransactions`. Used by both the manual flow ([`Self::do_renew`])
+	/// and the batched drain ([`Self::do_process_auto_renewals`]).
 	pub(crate) fn do_renew_in_memory(
 		transactions: &mut BoundedVec<
 			TransactionInfo,
@@ -454,15 +418,16 @@ impl<T: Config> Pallet<T> {
 		Some(new_index)
 	}
 
-	/// Drain [`PendingAutoRenewals`] and return the count drained.
+	/// Drain [`PendingAutoRenewals`], returning the count drained. Threads one
+	/// `BlockTransactions::mutate` across all entries. Per-cycle charges
+	/// (recurring cycles past the prepaid one) go through `check_authorization`;
+	/// the prepaid bump is refunded when a paid cycle is rejected by the
+	/// per-block slot cap.
 	///
-	/// Batches the [`BlockTransactions`] read/write across all `n` renewals by threading
-	/// an in-memory accumulator through repeated [`Self::do_renew_in_memory`] calls.
-	///
-	/// On failure (auth missing/expired, per-account or chain-wide cap exceeded, or
-	/// per-block slot cap reached), the registration is removed from `AutoRenewals` and
-	/// `AutoRenewalFailed` is emitted. The data is **gone** at that point: the obsolete
-	/// `Transactions` entry was already taken by storage pallet's `on_initialize`.
+	/// On any failure (auth, caps, slot cap) the registration is removed and
+	/// `AutoRenewalFailed` emitted — the data is gone, since the obsolete
+	/// `Transactions` entry was already taken by storage pallet's
+	/// `on_initialize`.
 	pub(crate) fn do_process_auto_renewals() -> u32 {
 		let pending = PendingAutoRenewals::<T>::take();
 		let n_actual = pending.len() as u32;
@@ -549,17 +514,15 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// OnObsoleteTransactions implementation — the one upward callback in this split
-// -----------------------------------------------------------------------------
-
+/// Upward callback fired by `pallet_bulletin_transaction_storage::on_initialize`
+/// with the obsolete-block sweep result. For each `is_latest` entry with a
+/// matching [`AutoRenewals`] registration, queue it into [`PendingAutoRenewals`]
+/// for the same block's `process_pending_renewals` inherent to drain.
 impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>> for Pallet<T> {
-	/// Invoked by storage pallet's `on_initialize` with the obsolete-block sweep
-	/// results. Sums renewed bytes (chain-wide counter decrement is left to storage
-	/// pallet's own loop), and queues auto-renewals for any `is_latest` entry that
-	/// has a matching `AutoRenewals` registration.
 	fn handle_obsolete(_obsolete: BlockNumberFor<T>, items: &[(TransactionInfo, bool)]) {
-		// Build the queue in memory, write once.
+		// One read, one write — `try_push` cannot overflow under
+		// `items.len() <= MaxBlockTransactions` plus the `on_finalize`
+		// empty-pending invariant.
 		let mut pending = PendingAutoRenewals::<T>::get();
 		for (tx_info, is_latest) in items.iter() {
 			if !is_latest {
@@ -567,8 +530,6 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>> for Pallet<T> {
 			}
 			let hash = tx_info.content_hash;
 			if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
-				// try_push cannot overflow under the on_finalize empty-pending invariant
-				// plus `items.len() <= MaxBlockTransactions`.
 				let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
 			}
 		}
