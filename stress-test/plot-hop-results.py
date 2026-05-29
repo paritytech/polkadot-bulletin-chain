@@ -11,6 +11,8 @@ Usage:
   ./plot-hop-results.py results/hop-all.json -o stress-test/hop-results.png
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re

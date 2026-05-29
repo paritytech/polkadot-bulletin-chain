@@ -6,6 +6,7 @@ use std::{
 	},
 	time::{Duration, Instant},
 };
+use subxt_signer::sr25519::Keypair;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -18,15 +19,24 @@ use crate::{
 const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] =
 	&[(1024, "1KB"), (10 * 1024, "10KB"), (100 * 1024, "100KB"), (1024 * 1024, "1MB")];
 
+// Disjoint payload index spaces so scenarios run back-to-back without colliding
+// on `DuplicateEntry` (HOP pool deduplicates by content hash).
+const FULL_CYCLE_INDEX_BASE: u64 = 100_000_000;
+const GROUP_INDEX_BASE: u64 = 200_000_000;
+const POOL_FILL_INDEX_BASE: u64 = 300_000_000;
+const MIXED_INDEX_BASE: u64 = 400_000_000;
+
 // ---------------------------------------------------------------------------
 // S1: Submit throughput
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_submit_throughput(
 	ws_urls: &[&str],
 	items: u32,
 	payload_size: usize,
 	concurrency: usize,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -58,6 +68,7 @@ pub async fn run_submit_throughput(
 		let bytes = total_bytes.clone();
 		let lats = latencies.clone();
 		let cancel = cancel.clone();
+		let submitter = submitter.clone();
 
 		handles.push(tokio::spawn(async move {
 			let ws = match client::connect_ws(&url).await {
@@ -75,7 +86,7 @@ pub async fn run_submit_throughput(
 				let data = hop::generate_payload(payload_size, i as u64);
 				let recipients = vec![RecipientKeypair::generate()];
 
-				match hop::hop_submit(&ws, &data, &recipients).await {
+				match hop::hop_submit(&ws, &data, &recipients, &submitter).await {
 					Ok((_hash, _result, latency)) => {
 						submitted.fetch_add(1, Ordering::Relaxed);
 						bytes.fetch_add(payload_size as u64, Ordering::Relaxed);
@@ -148,11 +159,13 @@ struct SubmittedEntry {
 	collator_url: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_full_cycle(
 	ws_urls: &[&str],
 	items: u32,
 	payload_size: usize,
 	concurrency: usize,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -181,6 +194,7 @@ pub async fn run_full_cycle(
 		let lats = submit_lats.clone();
 		let errors = submit_errors.clone();
 		let cancel = cancel.clone();
+		let submitter = submitter.clone();
 
 		handles.push(tokio::spawn(async move {
 			let ws = match client::connect_ws(&url).await {
@@ -194,9 +208,9 @@ pub async fn run_full_cycle(
 				if cancel.load(Ordering::Relaxed) {
 					break;
 				}
-				let data = hop::generate_payload(payload_size, i as u64);
+				let data = hop::generate_payload(payload_size, FULL_CYCLE_INDEX_BASE + i as u64);
 				let recipients = vec![RecipientKeypair::generate()];
-				match hop::hop_submit(&ws, &data, &recipients).await {
+				match hop::hop_submit(&ws, &data, &recipients, &submitter).await {
 					Ok((hash, _result, latency)) => {
 						lats.lock().await.push(latency);
 						entries.lock().await.push(SubmittedEntry {
@@ -291,11 +305,13 @@ pub async fn run_full_cycle(
 // S3: Group recipients
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_group(
 	ws_urls: &[&str],
 	items: u32,
 	payload_size: usize,
 	num_recipients: usize,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -316,11 +332,11 @@ pub async fn run_group(
 		if cancel.load(Ordering::Relaxed) {
 			break;
 		}
-		let data = hop::generate_payload(payload_size, i as u64);
+		let data = hop::generate_payload(payload_size, GROUP_INDEX_BASE + i as u64);
 		let recipients: Vec<RecipientKeypair> =
 			(0..num_recipients).map(|_| RecipientKeypair::generate()).collect();
 
-		match hop::hop_submit(&ws, &data, &recipients).await {
+		match hop::hop_submit(&ws, &data, &recipients, submitter).await {
 			Ok((hash, _result, latency)) => {
 				submit_lats.push(latency);
 				submitted.push(SubmittedEntry {
@@ -426,6 +442,7 @@ pub async fn run_group(
 pub async fn run_pool_fill(
 	ws_urls: &[&str],
 	payload_size: usize,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -461,10 +478,10 @@ pub async fn run_pool_fill(
 			break;
 		}
 
-		let data = hop::generate_payload(payload_size, i);
+		let data = hop::generate_payload(payload_size, POOL_FILL_INDEX_BASE + i);
 		let recipients = vec![RecipientKeypair::generate()];
 
-		match hop::hop_submit(&ws, &data, &recipients).await {
+		match hop::hop_submit(&ws, &data, &recipients, submitter).await {
 			Ok((_hash, result, latency)) => {
 				submitted += 1;
 				total_bytes += payload_size as u64;
@@ -546,11 +563,13 @@ pub async fn run_pool_fill(
 // S5: Mixed read/write
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_mixed(
 	ws_urls: &[&str],
 	payload_size: usize,
 	concurrency: usize,
 	duration_secs: u64,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -594,6 +613,7 @@ pub async fn run_mixed(
 		let bytes = submit_bytes.clone();
 		let lats = submit_lats.clone();
 		let cancel = cancel.clone();
+		let submitter = submitter.clone();
 
 		writer_handles.push(tokio::spawn(async move {
 			let ws = match client::connect_ws(&url).await {
@@ -604,13 +624,13 @@ pub async fn run_mixed(
 				},
 			};
 
-			let mut idx = w_idx as u64 * 1_000_000;
+			let mut idx = MIXED_INDEX_BASE + (w_idx as u64) * 1_000_000;
 			while Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
 				let data = hop::generate_payload(payload_size, idx);
 				let recipients = vec![RecipientKeypair::generate()];
 				idx += 1;
 
-				match hop::hop_submit(&ws, &data, &recipients).await {
+				match hop::hop_submit(&ws, &data, &recipients, &submitter).await {
 					Ok((hash, _result, latency)) => {
 						count.fetch_add(1, Ordering::Relaxed);
 						bytes.fetch_add(payload_size as u64, Ordering::Relaxed);
@@ -756,7 +776,7 @@ pub async fn run_mixed(
 // S6: Error handling
 // ---------------------------------------------------------------------------
 
-pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
+pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bool> {
 	tracing::info!("Error handling tests");
 
 	let ws = client::connect_ws(ws_urls[0]).await?;
@@ -766,7 +786,7 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 	// Helper: expect a specific error code from hop_submit
 	macro_rules! expect_submit_error {
 		($name:expr, $code:expr, $data:expr, $recipients:expr) => {{
-			match hop::try_hop_submit(&ws, $data, $recipients).await {
+			match hop::try_hop_submit(&ws, $data, $recipients, submitter).await {
 				Some(code) if code == $code => {
 					tracing::info!("  PASS: {} (code {})", $name, code);
 					passed += 1;
@@ -816,7 +836,7 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 		let valid_kp = RecipientKeypair::generate();
 		let wrong_kp = RecipientKeypair::generate();
 
-		match hop::hop_submit(&ws, &data, std::slice::from_ref(&valid_kp)).await {
+		match hop::hop_submit(&ws, &data, std::slice::from_ref(&valid_kp), submitter).await {
 			Ok((hash, _, _)) => {
 				match hop::try_hop_claim(&ws, &hash, &wrong_kp).await {
 					Some(1010) => {
@@ -846,7 +866,7 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 		let data = hop::generate_payload(512, 998_998);
 		let kp = RecipientKeypair::generate();
 
-		match hop::hop_submit(&ws, &data, &[kp]).await {
+		match hop::hop_submit(&ws, &data, &[kp], submitter).await {
 			Ok(_) => {
 				let kp2 = RecipientKeypair::generate();
 				expect_submit_error!("DuplicateEntry", 1003, &data, &[kp2]);
@@ -897,6 +917,7 @@ pub async fn run_hop_sweep(
 	concurrency: usize,
 	num_recipients: usize,
 	duration_secs: u64,
+	submitter: &Keypair,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -916,6 +937,7 @@ pub async fn run_hop_sweep(
 					items,
 					*size,
 					concurrency,
+					submitter,
 					results,
 					on_result,
 					cancel,
@@ -925,29 +947,48 @@ pub async fn run_hop_sweep(
 		},
 		"full-cycle" => {
 			let size = payload_size.unwrap_or(100 * 1024);
-			run_full_cycle(ws_urls, items, size, concurrency, results, on_result, cancel).await?;
+			run_full_cycle(
+				ws_urls,
+				items,
+				size,
+				concurrency,
+				submitter,
+				results,
+				on_result,
+				cancel,
+			)
+			.await?;
 		},
 		"group" => {
 			let size = payload_size.unwrap_or(100 * 1024);
-			run_group(ws_urls, items, size, num_recipients, results, on_result, cancel).await?;
+			run_group(ws_urls, items, size, num_recipients, submitter, results, on_result, cancel)
+				.await?;
 		},
 		"pool-fill" => {
 			let size = payload_size.unwrap_or(10 * 1024);
-			run_pool_fill(ws_urls, size, results, on_result, cancel).await?;
+			run_pool_fill(ws_urls, size, submitter, results, on_result, cancel).await?;
 		},
 		"mixed" => {
 			let size = payload_size.unwrap_or(10 * 1024);
-			run_mixed(ws_urls, size, concurrency, duration_secs, results, on_result, cancel)
-				.await?;
+			run_mixed(
+				ws_urls,
+				size,
+				concurrency,
+				duration_secs,
+				submitter,
+				results,
+				on_result,
+				cancel,
+			)
+			.await?;
 		},
 		"errors" | "error-handling" => {
-			let ok = run_error_tests(ws_urls).await?;
+			let ok = run_error_tests(ws_urls, submitter).await?;
 			if !ok {
 				anyhow::bail!("Error handling tests failed");
 			}
 		},
 		"all" => {
-			// Run all scenarios in sequence
 			for (size, _label) in SUBMIT_PAYLOAD_SIZES {
 				if cancel.load(Ordering::Relaxed) {
 					break;
@@ -957,6 +998,7 @@ pub async fn run_hop_sweep(
 					items,
 					*size,
 					concurrency,
+					submitter,
 					results,
 					on_result,
 					cancel,
@@ -965,20 +1007,48 @@ pub async fn run_hop_sweep(
 			}
 			if !cancel.load(Ordering::Relaxed) {
 				let size = payload_size.unwrap_or(100 * 1024);
-				run_full_cycle(ws_urls, items, size, concurrency, results, on_result, cancel)
-					.await?;
+				run_full_cycle(
+					ws_urls,
+					items,
+					size,
+					concurrency,
+					submitter,
+					results,
+					on_result,
+					cancel,
+				)
+				.await?;
 			}
 			if !cancel.load(Ordering::Relaxed) {
 				let size = payload_size.unwrap_or(100 * 1024);
-				run_group(ws_urls, items, size, num_recipients, results, on_result, cancel).await?;
+				run_group(
+					ws_urls,
+					items,
+					size,
+					num_recipients,
+					submitter,
+					results,
+					on_result,
+					cancel,
+				)
+				.await?;
 			}
 			if !cancel.load(Ordering::Relaxed) {
 				let size = payload_size.unwrap_or(10 * 1024);
-				run_mixed(ws_urls, size, concurrency, duration_secs, results, on_result, cancel)
-					.await?;
+				run_mixed(
+					ws_urls,
+					size,
+					concurrency,
+					duration_secs,
+					submitter,
+					results,
+					on_result,
+					cancel,
+				)
+				.await?;
 			}
 			if !cancel.load(Ordering::Relaxed) {
-				let _ = run_error_tests(ws_urls).await;
+				let _ = run_error_tests(ws_urls, submitter).await;
 			}
 		},
 		other => anyhow::bail!("Unknown HOP scenario: {other}"),

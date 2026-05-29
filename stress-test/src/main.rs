@@ -10,7 +10,7 @@ use std::{
 use subxt_signer::sr25519::Keypair;
 
 use bulletin_stress_test::{
-	accounts, bitswap,
+	accounts, authorize, bitswap,
 	chain_info::{ChainLimits, EnvironmentInfo},
 	client, report, scenarios,
 };
@@ -154,23 +154,6 @@ async fn main() -> Result<()> {
 
 	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
-	// HOP command is pure RPC — skip subxt client, authorization, and chain limits.
-	if let Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =
-		cli.command
-	{
-		return run_hop_standalone(
-			&ws_url_refs,
-			scenario,
-			items,
-			payload_size,
-			concurrency,
-			recipients,
-			duration,
-			&cli,
-		)
-		.await;
-	}
-
 	let client = client::connect(control_url).await?;
 
 	let authorizer_secret_uri: subxt_signer::SecretUri = cli
@@ -288,7 +271,12 @@ async fn main() -> Result<()> {
 			}
 		},
 		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
-			if let Err(e) = scenarios::hop::run_hop_sweep(
+			if let Err(e) =
+				ensure_hop_submitter_authorized(&client, &authorizer_signer, &nonce_tracker).await
+			{
+				tracing::error!("Failed to authorize HOP submitter: {e}");
+				command_error = Some(e);
+			} else if let Err(e) = scenarios::hop::run_hop_sweep(
 				&ws_url_refs,
 				scenario,
 				items,
@@ -296,6 +284,7 @@ async fn main() -> Result<()> {
 				concurrency,
 				recipients,
 				duration,
+				&authorizer_signer,
 				&mut all_results,
 				&flush,
 				&cancel,
@@ -343,7 +332,13 @@ async fn main() -> Result<()> {
 				}
 			}
 			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
-				if let Err(e) = scenarios::hop::run_hop_sweep(
+				if let Err(e) =
+					ensure_hop_submitter_authorized(&client, &authorizer_signer, &nonce_tracker)
+						.await
+				{
+					tracing::error!("Failed to authorize HOP submitter: {e}");
+					command_error = Some(e);
+				} else if let Err(e) = scenarios::hop::run_hop_sweep(
 					&ws_url_refs,
 					"all",
 					100,
@@ -351,6 +346,7 @@ async fn main() -> Result<()> {
 					4,
 					10,
 					30,
+					&authorizer_signer,
 					&mut all_results,
 					&flush,
 					&cancel,
@@ -473,71 +469,31 @@ async fn run_bitswap(
 	Ok(())
 }
 
-/// Run HOP stress tests without subxt client or chain-limits setup.
-#[allow(clippy::too_many_arguments)]
-async fn run_hop_standalone(
-	ws_urls: &[&str],
-	scenario: &str,
-	items: u32,
-	payload_size: Option<usize>,
-	concurrency: usize,
-	recipients: usize,
-	duration: u64,
-	cli: &Cli,
+/// Self-authorize the HOP submitter via the storage pallet.
+///
+/// HOP's `can_account_promote` reads from
+/// `pallet-bulletin-transaction-storage::AccountAuthorization`. Reusing the authorizer keypair as
+/// the submitter is OK on bulletin-westend/paseo where the authorizer is also in `TestAccounts`.
+/// The numeric extents (`u32::MAX` txs, ~1 GiB) only bound the storage pallet; HOP just needs an
+/// unexpired entry to exist.
+async fn ensure_hop_submitter_authorized(
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer: &subxt_signer::sr25519::Keypair,
+	nonce_tracker: &accounts::NonceTracker,
 ) -> Result<()> {
-	let mut all_results = Vec::new();
-	let cancel = Arc::new(AtomicBool::new(false));
-
-	{
-		let cancel = cancel.clone();
-		tokio::spawn(async move {
-			tokio::signal::ctrl_c().await.ok();
-			tracing::warn!("Ctrl+C received — stopping gracefully");
-			cancel.store(true, Ordering::Relaxed);
-			tokio::signal::ctrl_c().await.ok();
-			std::process::exit(130);
-		});
-	}
-
-	let flush = |results: &mut Vec<report::ScenarioResult>| {
-		if let Some(ref path) = cli.output_file {
-			if let Ok(json) = serde_json::to_string_pretty(results) {
-				if let Err(e) = std::fs::write(path, &json) {
-					tracing::warn!("Failed to write results to {}: {e}", path.display());
-				}
-			}
-		}
-	};
-
-	scenarios::hop::run_hop_sweep(
-		ws_urls,
-		scenario,
-		items,
-		payload_size,
-		concurrency,
-		recipients,
-		duration,
-		&mut all_results,
-		&flush,
-		&cancel,
+	let submitter_id = authorizer.public_key().to_account_id();
+	tracing::info!(
+		"Authorizing HOP submitter {submitter_id} via TransactionStorage::authorize_account"
+	);
+	authorize::authorize_account_batch(
+		client,
+		authorizer,
+		nonce_tracker,
+		&[submitter_id],
+		u32::MAX,
+		1024 * 1024 * 1024,
 	)
-	.await?;
-
-	match cli.output {
-		OutputFormat::Text =>
-			for result in &all_results {
-				result.print_text();
-			},
-		OutputFormat::Json => {
-			println!("{}", serde_json::to_string_pretty(&all_results)?);
-		},
-	}
-
-	if all_results.len() > 1 && matches!(cli.output, OutputFormat::Text) {
-		report::print_summary_table(&all_results);
-	}
-
-	Ok(())
+	.await
 }
 
 /// Resolve the node's P2P multiaddr from CLI args or RPC auto-discovery.
