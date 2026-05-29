@@ -106,7 +106,7 @@ pub async fn batch_init_nonces(
 						true
 					},
 					Err(e) => {
-						log::warn!("batch_init_nonces: failed for account {i}: {e}");
+						tracing::warn!("batch_init_nonces: failed for account {i}: {e}");
 						false
 					},
 				}

@@ -244,7 +244,7 @@ async fn wait_until_txpool_can_pull_work(
 
 		if estimated_pending <= POOL_PENDING_PAUSE_THRESHOLD {
 			if logged {
-				log::debug!(
+				tracing::debug!(
 					"pipeline: estimated pending at {estimated_pending} \
 					 (≤ {POOL_PENDING_PAUSE_THRESHOLD}), resuming reader",
 				);
@@ -253,7 +253,7 @@ async fn wait_until_txpool_can_pull_work(
 		}
 
 		if !logged {
-			log::debug!(
+			tracing::debug!(
 				"pipeline: estimated pending {estimated_pending} \
 				 (> {POOL_PENDING_PAUSE_THRESHOLD}), pausing reader \
 				 (backpressure, submitted={submitted} confirmed={confirmed})",
@@ -366,7 +366,7 @@ fn spawn_pipeline_dual_monitor(
 						match read_timestamp_at(&monitor_client, block_hash).await {
 							Ok(ts) => Some(ts),
 							Err(e) => {
-								log::warn!(
+								tracing::warn!(
 									"pipeline: block #{block_number}: timestamp read failed, \
 									 reconnecting: {e}"
 								);
@@ -378,7 +378,7 @@ fn spawn_pipeline_dual_monitor(
 											.ok()
 									},
 									Err(re) => {
-										log::warn!("pipeline: monitor reconnect failed: {re}");
+										tracing::warn!("pipeline: monitor reconnect failed: {re}");
 										None
 									},
 								}
@@ -389,7 +389,7 @@ fn spawn_pipeline_dual_monitor(
 					{
 						let mut ms = measure_start.lock().unwrap();
 						if ms.is_none() {
-							log::info!(
+							tracing::info!(
 								"pipeline: measurement clock starts at block #{block_number}"
 							);
 							*ms = Some(Instant::now());
@@ -398,13 +398,13 @@ fn spawn_pipeline_dual_monitor(
 
 					if store_tx_count > 0 {
 						best_measured_blocks += 1;
-						log::info!(
+						tracing::info!(
 							"pipeline: [measured] block #{block_number}: \
 							 {store_tx_count} store txs, {store_tx_bytes} bytes \
 							 (best measured #{best_measured_blocks})"
 						);
 						if target_blocks.is_some_and(|t| best_measured_blocks >= t) {
-							log::info!(
+							tracing::info!(
 								"pipeline monitor: reached {best_measured_blocks} \
 								 measured best blocks (target {target_blocks:?}), signalling stop",
 							);
@@ -440,7 +440,7 @@ fn spawn_pipeline_dual_monitor(
 
 		// After work loop stopped: wait for remaining best blocks to finalize.
 		if !pending.is_empty() && !cancel.load(Ordering::Relaxed) {
-			log::info!(
+			tracing::info!(
 				"pipeline monitor: waiting for {} pending best blocks to finalize",
 				pending.len()
 			);
@@ -458,7 +458,7 @@ fn spawn_pipeline_dual_monitor(
 						);
 					},
 					Ok(None) => {
-						log::warn!("pipeline monitor: finalized subscription closed");
+						tracing::warn!("pipeline monitor: finalized subscription closed");
 						break;
 					},
 					Err(_) => {
@@ -467,7 +467,7 @@ fn spawn_pipeline_dual_monitor(
 				}
 			}
 			if !pending.is_empty() {
-				log::warn!(
+				tracing::warn!(
 					"pipeline monitor: {} blocks not finalized after timeout, dropping",
 					pending.len()
 				);
@@ -509,13 +509,15 @@ impl StoreWorker {
 					self.content_hash_map.lock().unwrap().insert(msg.content_hash, ext_len);
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
-						log::debug!("pipeline store: worker {id} accepted total={n} hash={hash:?}");
+						tracing::debug!(
+							"pipeline store: worker {id} accepted total={n} hash={hash:?}"
+						);
 					}
 					return Ok(());
 				},
 				Err(e) => {
 					let class = classify_tx_error(&e);
-					log::debug!(
+					tracing::debug!(
 						"pipeline store: worker {id} class={class:?} account={} err={e:#}",
 						msg.account_id
 					);
@@ -538,7 +540,7 @@ impl StoreWorker {
 						TxPoolError::ConnectionDead => {
 							self.consecutive_conn_errors += 1;
 							if self.consecutive_conn_errors == 1 {
-								log::warn!(
+								tracing::warn!(
 									"pipeline store: worker {id} connection dead, reconnecting"
 								);
 							}
@@ -553,7 +555,7 @@ impl StoreWorker {
 								},
 								Err(_) =>
 									if self.consecutive_conn_errors >= 60 {
-										log::error!(
+										tracing::error!(
 											"pipeline store: worker {id}: giving up reconnect"
 										);
 										self.counters.errors.fetch_add(1, Ordering::Relaxed);
@@ -584,7 +586,7 @@ impl StoreWorker {
 						},
 						TxPoolError::Other => {
 							self.consecutive_conn_errors = 0;
-							log::warn!("pipeline store: worker {id} (class={class:?}): {e:#}");
+							tracing::warn!("pipeline store: worker {id} (class={class:?}): {e:#}");
 							self.counters.errors.fetch_add(1, Ordering::Relaxed);
 							return Ok(());
 						},
@@ -704,7 +706,7 @@ pub async fn run_block_capacity_pipeline(
 	);
 
 	monitor_ready.notified().await;
-	log::info!("pipeline: block monitor ready, starting work reader + store workers");
+	tracing::info!("pipeline: block monitor ready, starting work reader + store workers");
 
 	let num_connections = submitters.max(1).max(8);
 
@@ -716,7 +718,7 @@ pub async fn run_block_capacity_pipeline(
 		.collect();
 	let pool: Vec<_> = futures::future::try_join_all(connect_futs).await?;
 
-	log::info!("pipeline: {num_connections} store worker(s) connected");
+	tracing::info!("pipeline: {num_connections} store worker(s) connected");
 
 	let ws_urls_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 
@@ -744,11 +746,11 @@ pub async fn run_block_capacity_pipeline(
 
 	'work: loop {
 		if cancel.load(Ordering::Relaxed) {
-			log::warn!("pipeline: cancel requested, stopping work loop");
+			tracing::warn!("pipeline: cancel requested, stopping work loop");
 			break;
 		}
 		if target_reached.load(Ordering::Relaxed) {
-			log::info!("pipeline: target block count reached, stopping work loop");
+			tracing::info!("pipeline: target block count reached, stopping work loop");
 			break;
 		}
 
@@ -757,7 +759,7 @@ pub async fn run_block_capacity_pipeline(
 			wait_until_txpool_can_pull_work(&counters, &confirmed_count, &new_block_notify).await;
 			let bp_elapsed = bp_start.elapsed();
 			if bp_elapsed.as_millis() > 100 {
-				log::debug!(
+				tracing::debug!(
 					"pipeline: backpressure paused reader for {:.1}s",
 					bp_elapsed.as_secs_f64()
 				);
@@ -781,7 +783,7 @@ pub async fn run_block_capacity_pipeline(
 				);
 				dbg_work_auth += 1;
 				let n_accounts: usize = batches.iter().map(|b| b.len()).sum();
-				log::info!(
+				tracing::info!(
 					"pipeline: Authorize {n_accounts} accounts, {} batches \
 					 (dispatch #{dbg_work_auth})",
 					batches.len(),
@@ -806,7 +808,7 @@ pub async fn run_block_capacity_pipeline(
 						.await
 						{
 							failed += 1;
-							log::warn!(
+							tracing::warn!(
 								"pipeline: auth batch failed ({} accounts), \
 								 continuing with remaining batches: {e:#}",
 								account_ids.len()
@@ -824,19 +826,19 @@ pub async fn run_block_capacity_pipeline(
 				if let Some(handle) = pending_auth.take() {
 					match handle.await {
 						Ok(Ok(())) => {
-							log::debug!(
+							tracing::debug!(
 								"pipeline: AwaitPendingAuth completed in {:.1}s (auth #{dbg_work_auth})",
 								await_start.elapsed().as_secs_f64()
 							);
 						},
 						Ok(Err(e)) => {
-							log::warn!(
+							tracing::warn!(
 								"pipeline: auth task failed after {:.1}s (continuing): {e:#}",
 								await_start.elapsed().as_secs_f64()
 							);
 						},
 						Err(e) => {
-							log::warn!("pipeline: auth task join failed (continuing): {e}");
+							tracing::warn!("pipeline: auth task join failed (continuing): {e}");
 						},
 					}
 				}
@@ -849,7 +851,7 @@ pub async fn run_block_capacity_pipeline(
 				)
 				.await
 				{
-					log::error!("pipeline: dispatch_store_to_workers failed: {e:#}");
+					tracing::error!("pipeline: dispatch_store_to_workers failed: {e:#}");
 					work_error = Some(e);
 					break 'work;
 				}
@@ -858,7 +860,7 @@ pub async fn run_block_capacity_pipeline(
 				if dbg_work_store.is_multiple_of(512) {
 					let sub = counters.submitted.load(Ordering::Relaxed);
 					let conf = confirmed_count.load(Ordering::Relaxed);
-					log::debug!(
+					tracing::debug!(
 						"pipeline: dispatched={dbg_work_store} submitted={sub} \
 						 confirmed={conf} pending_estimate={}",
 						sub.saturating_sub(conf)
@@ -889,7 +891,7 @@ pub async fn run_block_capacity_pipeline(
 		.await
 		.is_err()
 	{
-		log::warn!("pipeline: monitor did not exit in time, aborting");
+		tracing::warn!("pipeline: monitor did not exit in time, aborting");
 	}
 
 	collect_results(start, &measure_start, &counters, &block_stats, work_error)
@@ -920,20 +922,20 @@ async fn shutdown_pipeline(
 		if let Some(handle) = pending_auth {
 			match tokio::time::timeout(Duration::from_secs(2), handle).await {
 				Ok(Ok(Ok(()))) => {},
-				Ok(Ok(Err(e))) => log::warn!("pipeline: trailing auth task failed: {e:#}"),
-				Ok(Err(e)) => log::warn!("pipeline: trailing auth task join failed: {e}"),
-				Err(_) => log::warn!("pipeline: trailing auth task timed out, skipping"),
+				Ok(Ok(Err(e))) => tracing::warn!("pipeline: trailing auth task failed: {e:#}"),
+				Ok(Err(e)) => tracing::warn!("pipeline: trailing auth task join failed: {e}"),
+				Err(_) => tracing::warn!("pipeline: trailing auth task timed out, skipping"),
 			}
 		}
 
-		log::info!("pipeline: work stream finished, closing store worker inputs");
+		tracing::info!("pipeline: work stream finished, closing store worker inputs");
 		drop(worker_txs);
 
 		if tokio::time::timeout(Duration::from_secs(10), join_all(&mut *worker_handles))
 			.await
 			.is_err()
 		{
-			log::warn!("pipeline: store workers did not finish in time, aborting");
+			tracing::warn!("pipeline: store workers did not finish in time, aborting");
 			for h in worker_handles.iter() {
 				h.abort();
 			}
@@ -949,7 +951,7 @@ async fn shutdown_pipeline(
 					break;
 				}
 				if Instant::now() > deadline {
-					log::warn!(
+					tracing::warn!(
 						"pipeline: confirmation wait timed out — \
 						 confirmed={confirmed} submitted={sub}, proceeding with partial results",
 					);
@@ -982,19 +984,19 @@ fn collect_results(
 	let total_confirmed: u64 = all_blocks.iter().map(|b| b.tx_count).sum();
 
 	if let Some(e) = &work_error {
-		log::warn!(
+		tracing::warn!(
 			"pipeline: FINISHED WITH ERROR — wall={:.1}s, submitted={total_submitted}, \
 			 confirmed={total_confirmed}, errors={total_errors}, cause: {e:#}",
 			total_wall.as_secs_f64(),
 		);
 	} else {
-		log::info!(
+		tracing::info!(
 			"pipeline: DONE — wall={:.1}s, submitted={total_submitted}, \
 			 confirmed={total_confirmed}, errors={total_errors}",
 			total_wall.as_secs_f64(),
 		);
 	}
-	log::debug!(
+	tracing::debug!(
 		"pipeline: DONE detail — pool_full_retries={total_pool_full} stale_nonces={total_stale}"
 	);
 
@@ -1095,7 +1097,7 @@ pub async fn generate_block_capacity_work(
 		if plan.account_count == 0 {
 			continue;
 		}
-		log::info!(
+		tracing::info!(
 			"pipeline: block-capacity iteration {} of {} ({} accounts)",
 			iter_idx + 1,
 			plans.len(),
@@ -1123,14 +1125,14 @@ pub async fn generate_block_capacity_work(
 		// or by signing now (first batch, or if look-ahead wasn't possible).
 		let sign_start = Instant::now();
 		let (auth_batches, store_items) = if let Some(handle) = pending_sign.take() {
-			log::debug!(
+			tracing::debug!(
 				"generator: batch {batch_num}/{} — awaiting look-ahead signing \
 				 ({n_accounts} accounts)",
 				batches.len(),
 			);
 			handle.await.map_err(|e| anyhow::anyhow!("pipeline: sign task join: {e}"))??
 		} else {
-			log::debug!(
+			tracing::debug!(
 				"generator: batch {batch_num}/{} — signing {n_accounts} accounts (no look-ahead)",
 				batches.len(),
 			);
@@ -1148,7 +1150,7 @@ pub async fn generate_block_capacity_work(
 				_ => 0,
 			})
 			.sum();
-		log::info!(
+		tracing::info!(
 			"generator: batch {batch_num}/{} — {} stores ready \
 			 ({:.1} MB, signed {:.1}s)",
 			batches.len(),
@@ -1191,7 +1193,7 @@ pub async fn generate_block_capacity_work(
 				.await
 				.map_err(|_| anyhow::anyhow!("pipeline work channel closed (store)"))?;
 		}
-		log::debug!(
+		tracing::debug!(
 			"generator: batch {batch_num}/{} — dispatched {n_stores} stores in {:.1}s",
 			batches.len(),
 			dispatch_start.elapsed().as_secs_f64(),

@@ -29,7 +29,7 @@ scale-info = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
 # P2P Bitswap (UserProtocol approach with protobuf)
-litep2p = { version = "0.13.0", features = ["websocket"] }
+litep2p = { workspace = true, features = ["websocket"] }
 cid = { workspace = true, features = ["std"] }
 multihash = { version = "0.19", default-features = false, features = ["std"] }
 prost = "0.13"
@@ -49,8 +49,8 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 
 # Utilities
 anyhow = "1"
-log = { workspace = true, features = ["std"] }
-env_logger = "0.11"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 hex = { workspace = true }
 rand = "0.8"
 

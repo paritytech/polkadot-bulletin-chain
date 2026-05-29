@@ -5,10 +5,11 @@
  * Utility functions for CID calculation and data manipulation
  */
 
-import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from "@polkadot/util-crypto"
+import { blake2b } from "@noble/hashes/blake2.js"
+import { sha256 } from "@noble/hashes/sha2.js"
+import { keccak_256 } from "@noble/hashes/sha3.js"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
-import type { Binary } from "polkadot-api"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
 import { BulletinError, CidCodec, ErrorCode, HashAlgorithm } from "./types.js"
 
@@ -24,13 +25,13 @@ export async function getContentHash(
 ): Promise<Uint8Array> {
   switch (hashAlgorithm) {
     case HashAlgorithm.Blake2b256: {
-      return blake2AsU8a(data)
+      return blake2b(data, { dkLen: 32 })
     }
     case HashAlgorithm.Sha2_256: {
-      return sha256AsU8a(data)
+      return sha256(data)
     }
     case HashAlgorithm.Keccak256: {
-      return keccak256AsU8a(data)
+      return keccak_256(data)
     }
     default:
       throw new BulletinError(
@@ -88,11 +89,6 @@ export function parseCid(cidString: string): CID {
       error,
     )
   }
-}
-
-/** Convert Binary or Uint8Array to Uint8Array */
-export function toBytes(data: Binary | Uint8Array): Uint8Array {
-  return data instanceof Uint8Array ? data : data.asBytes()
 }
 
 /**

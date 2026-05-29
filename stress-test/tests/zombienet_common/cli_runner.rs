@@ -16,7 +16,7 @@ pub struct CliOutput {
 ///
 /// `ws_url` can be a single URL or comma-separated list for multi-node submission.
 ///
-/// Stderr is streamed in real-time via `log::info!` so progress is visible
+/// Stderr is streamed in real-time via `tracing::info!` so progress is visible
 /// during long-running tests (e.g. parachain bitswap with 512 items).
 pub async fn run_stress_test(ws_url: &str, args: &[&str]) -> Result<CliOutput> {
 	let bin = env!("CARGO_BIN_EXE_bulletin-stress-test");
@@ -29,7 +29,7 @@ pub async fn run_stress_test(ws_url: &str, args: &[&str]) -> Result<CliOutput> {
 		cmd.env("RUST_LOG", log_val);
 	}
 
-	log::info!("CLI runner: {bin} --ws-url {ws_url} --output json {}", args.join(" "));
+	tracing::info!("CLI runner: {bin} --ws-url {ws_url} --output json {}", args.join(" "));
 
 	let mut child = cmd
 		.stdout(std::process::Stdio::piped())
@@ -44,7 +44,7 @@ pub async fn run_stress_test(ws_url: &str, args: &[&str]) -> Result<CliOutput> {
 		let mut lines = reader.lines();
 		let mut collected = String::new();
 		while let Ok(Some(line)) = lines.next_line().await {
-			log::info!("CLI: {line}");
+			tracing::info!("CLI: {line}");
 			collected.push_str(&line);
 			collected.push('\n');
 		}
@@ -60,7 +60,7 @@ pub async fn run_stress_test(ws_url: &str, args: &[&str]) -> Result<CliOutput> {
 	let exit_code = output.status.code().unwrap_or(-1);
 
 	if !output.status.success() {
-		log::error!("CLI exited with code {exit_code}");
+		tracing::error!("CLI exited with code {exit_code}");
 		return Ok(CliOutput { results: vec![], exit_code, stderr });
 	}
 
@@ -70,9 +70,9 @@ pub async fn run_stress_test(ws_url: &str, args: &[&str]) -> Result<CliOutput> {
 	let json_filename = format!("stress-test-results-{}.json", args.join("-"));
 	let json_path = std::env::temp_dir().join(&json_filename);
 	if let Err(e) = std::fs::write(&json_path, stdout.as_bytes()) {
-		log::warn!("Failed to save raw JSON to {}: {e}", json_path.display());
+		tracing::warn!("Failed to save raw JSON to {}: {e}", json_path.display());
 	} else {
-		log::info!("Raw JSON results saved to {}", json_path.display());
+		tracing::info!("Raw JSON results saved to {}", json_path.display());
 	}
 
 	let results: Vec<ScenarioResult> = serde_json::from_str(&stdout).with_context(|| {
