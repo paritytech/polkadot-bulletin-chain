@@ -2116,3 +2116,129 @@ fn non_sudo_cannot_add_authorizer() {
 			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin));
 		});
 }
+
+mod parameters_tests {
+	//! Smoke tests for the dynamic-parameter wiring (`pallet-parameters`).
+	//!
+	//! These exercise the full update path used by governance: build a typed
+	//! `RuntimeParameters` value, dispatch `set_parameter`, then observe the
+	//! new value through the same `Get<T>` accessor the rest of the runtime
+	//! reads. The negative test pins the `DynamicParameterOrigin` rejection
+	//! of non-Root callers.
+
+	use super::*;
+	use bulletin_paseo_runtime::{
+		parameters::{
+			dynamic_params::xcm as xcm_params, RuntimeParameters, RuntimeParametersKey,
+			RuntimeParametersValue,
+		},
+		xcm_config::{IsAuthorizerParachain, IsGovernanceLocation},
+		Parameters,
+	};
+	use frame_support::{traits::Contains, BoundedVec};
+
+	const NEW_AUTHORIZER_ID: u32 = 9_999;
+	const ORIGINAL_AUTHORIZER_ID: u32 = 1_502;
+
+	fn authorizer_allowlist_update(ids: Vec<u32>) -> RuntimeParameters {
+		RuntimeParameters::Xcm(xcm_params::Parameters::AllowedParachainIds(
+			xcm_params::AllowedParachainIds,
+			Some(BoundedVec::truncate_from(ids)),
+		))
+	}
+
+	#[test]
+	fn defaults_match_pr_561_values() {
+		ExtBuilder::<Runtime>::default().build().execute_with(|| {
+			use frame_support::traits::Get;
+			// Sanity: the dynamic-param defaults reproduce the values introduced by
+			// PR #561, so this conversion is a no-op for any unmigrated chain state.
+			assert_eq!(xcm_params::AllowedParachainIds::get().to_vec(), vec![1_502, 5_140]);
+			assert_eq!(xcm_params::GovernanceParachainIds::get().to_vec(), vec![1_500]);
+		});
+	}
+
+	#[test]
+	fn set_parameter_updates_authorizer_allowlist_and_emits_event() {
+		ExtBuilder::<Runtime>::default().build().execute_with(|| {
+			// Drain genesis events so `assert_has_event` matches only what this test emits.
+			System::reset_events();
+
+			// Filter reflects the default before the update.
+			let new_para = Location::new(1, [Parachain(NEW_AUTHORIZER_ID)]);
+			let old_para = Location::new(1, [Parachain(ORIGINAL_AUTHORIZER_ID)]);
+			assert!(!IsAuthorizerParachain::contains(&new_para));
+			assert!(IsAuthorizerParachain::contains(&old_para));
+
+			let update = authorizer_allowlist_update(vec![NEW_AUTHORIZER_ID]);
+			assert_ok!(Parameters::set_parameter(RuntimeOrigin::root(), update));
+
+			// New value visible through the same `Get` the filter uses…
+			use frame_support::traits::Get;
+			assert_eq!(
+				xcm_params::AllowedParachainIds::get().to_vec(),
+				vec![NEW_AUTHORIZER_ID],
+			);
+			// …and through the filter itself: 9999 in, 1502 out.
+			assert!(IsAuthorizerParachain::contains(&new_para));
+			assert!(!IsAuthorizerParachain::contains(&old_para));
+			// Governance allowlist is untouched.
+			assert!(IsGovernanceLocation::contains(&Location::new(1, [Parachain(1_500)])));
+
+			// `Updated` event records the typed key + old/new values.
+			// `old_value` is `None` because pallet-parameters stores nothing until
+			// the first `set_parameter` — `Get` falls back to the macro default.
+			System::assert_has_event(RuntimeEvent::Parameters(pallet_parameters::Event::Updated {
+				key: RuntimeParametersKey::Xcm(xcm_params::ParametersKey::AllowedParachainIds(
+					xcm_params::AllowedParachainIds,
+				)),
+				old_value: None,
+				new_value: Some(RuntimeParametersValue::Xcm(
+					xcm_params::ParametersValue::AllowedParachainIds(BoundedVec::truncate_from(
+						vec![NEW_AUTHORIZER_ID],
+					)),
+				)),
+			}));
+
+			// A second update now sees the previous value as `old_value`.
+			System::reset_events();
+			let second_value = vec![NEW_AUTHORIZER_ID, NEW_AUTHORIZER_ID + 1];
+			assert_ok!(Parameters::set_parameter(
+				RuntimeOrigin::root(),
+				authorizer_allowlist_update(second_value.clone()),
+			));
+			System::assert_has_event(RuntimeEvent::Parameters(pallet_parameters::Event::Updated {
+				key: RuntimeParametersKey::Xcm(xcm_params::ParametersKey::AllowedParachainIds(
+					xcm_params::AllowedParachainIds,
+				)),
+				old_value: Some(RuntimeParametersValue::Xcm(
+					xcm_params::ParametersValue::AllowedParachainIds(BoundedVec::truncate_from(
+						vec![NEW_AUTHORIZER_ID],
+					)),
+				)),
+				new_value: Some(RuntimeParametersValue::Xcm(
+					xcm_params::ParametersValue::AllowedParachainIds(BoundedVec::truncate_from(
+						second_value,
+					)),
+				)),
+			}));
+		});
+	}
+
+	#[test]
+	fn non_root_origin_cannot_update_parameter() {
+		ExtBuilder::<Runtime>::default().build().execute_with(|| {
+			let signed = RuntimeOrigin::signed(Sr25519Keyring::Alice.to_account_id());
+			assert_err!(
+				Parameters::set_parameter(
+					signed,
+					authorizer_allowlist_update(vec![NEW_AUTHORIZER_ID]),
+				),
+				DispatchError::BadOrigin,
+			);
+			// Defaults unchanged after the rejected call.
+			use frame_support::traits::Get;
+			assert_eq!(xcm_params::AllowedParachainIds::get().to_vec(), vec![1_502, 5_140]);
+		});
+	}
+}

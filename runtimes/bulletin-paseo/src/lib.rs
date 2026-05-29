@@ -28,6 +28,7 @@ pub mod fast_runtime_binary {
 }
 
 mod genesis_config_presets;
+pub mod parameters;
 pub mod paseo_constants;
 pub mod storage;
 mod weights;
@@ -424,6 +425,15 @@ impl pallet_migrations::Config for Runtime {
 	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
 }
 
+impl pallet_parameters::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type RuntimeParameters = parameters::RuntimeParameters;
+	type AdminOrigin = parameters::DynamicParameterOrigin;
+	// TODO: replace with locally generated `weights::pallet_parameters::WeightInfo<Runtime>`
+	// once benchmarks are wired for this runtime.
+	type WeightInfo = ();
+}
+
 parameter_types! {
 	/// Fellows pluralistic body.
 	pub const FellowsBodyId: BodyId = BodyId::Technical;
@@ -633,6 +643,8 @@ mod runtime {
 	pub type Utility = pallet_utility;
 	#[runtime::pallet_index(7)]
 	pub type MultiBlockMigrations = pallet_migrations;
+	#[runtime::pallet_index(8)]
+	pub type Parameters = pallet_parameters;
 
 	// Monetary stuff.
 	#[runtime::pallet_index(10)]
