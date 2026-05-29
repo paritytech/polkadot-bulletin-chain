@@ -2028,7 +2028,7 @@ dependencies = [
 
 [[package]]
 name = "bulletin-pallets-common"
-version = "0.1.0"
+version = "0.6.0-draft"
 dependencies = [
  "pallet-proxy",
  "pallet-sudo",
@@ -2159,7 +2159,7 @@ dependencies = [
 
 [[package]]
 name = "bulletin-transaction-storage-primitives"
-version = "0.1.0"
+version = "0.6.0-draft"
 dependencies = [
  "cid",
  "parity-scale-codec",
@@ -8068,7 +8068,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-bulletin-hop-promotion"
-version = "0.1.0"
+version = "0.6.0-draft"
 dependencies = [
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
@@ -8087,7 +8087,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-bulletin-transaction-storage"
-version = "0.1.0"
+version = "0.6.0-draft"
 dependencies = [
  "array-bytes 6.2.3",
  "bulletin-pallets-common",
@@ -8102,7 +8102,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-bulletin-transaction-storage-runtime-api"
-version = "0.1.0"
+version = "0.6.0-draft"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "parity-scale-codec",
