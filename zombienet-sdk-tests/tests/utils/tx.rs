@@ -518,46 +518,6 @@ pub async fn resolve_canonical_store_block(
 	)
 }
 
-/// Read `TransactionByContentHash[content_hash]` at the given block hash. Returns the
-/// `(block_number, tx_index)` of the most-recent store/renew/promote that landed the
-/// content, or `None` if the index has no entry.
-pub async fn transaction_location_at(
-	client: &OnlineClient<SubstrateConfig>,
-	at_block_hash: subxt::utils::H256,
-	content_hash: &[u8; 32],
-) -> Result<Option<(u64, u32)>> {
-	use subxt::ext::scale_value::{Primitive, ValueDef};
-
-	let address = subxt::dynamic::storage(
-		"TransactionStorage",
-		"TransactionByContentHash",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
-	let Some(value) = client.storage().at(at_block_hash).fetch(&address).await? else {
-		return Ok(None);
-	};
-	let decoded = value.to_value()?;
-	let ValueDef::Composite(ref c) = decoded.value else {
-		anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded);
-	};
-	let mut iter = c.values();
-	let block_number = iter
-		.next()
-		.and_then(|v| match &v.value {
-			ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
-			_ => None,
-		})
-		.ok_or_else(|| anyhow!("TransactionByContentHash: missing block number"))?;
-	let tx_index = iter
-		.next()
-		.and_then(|v| match &v.value {
-			ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
-			_ => None,
-		})
-		.ok_or_else(|| anyhow!("TransactionByContentHash: missing tx index"))?;
-	Ok(Some((block_number as u64, tx_index as u32)))
-}
-
 /// Canonical store/renew block number, read from `TransactionByContentHash` at the
 /// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
@@ -568,17 +528,35 @@ pub async fn canonical_store_block(
 	at_block_hash: subxt::utils::H256,
 	content_hash: &[u8; 32],
 ) -> Result<u64> {
-	transaction_location_at(client, at_block_hash, content_hash)
-		.await?
-		.map(|(block, _)| block)
-		.ok_or_else(|| {
-			anyhow!(
-				"TransactionByContentHash[0x{}] is empty at block 0x{} — the store extrinsic \
+	let address = subxt::dynamic::storage(
+		"TransactionStorage",
+		"TransactionByContentHash",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let value = client.storage().at(at_block_hash).fetch(&address).await?.ok_or_else(|| {
+		anyhow!(
+			"TransactionByContentHash[0x{}] is empty at block 0x{} — the store extrinsic \
 				 should have populated this entry in the same block",
-				hex::encode(content_hash),
-				hex::encode(&at_block_hash.0[..8]),
-			)
-		})
+			hex::encode(content_hash),
+			hex::encode(&at_block_hash.0[..8]),
+		)
+	})?;
+	use subxt::ext::scale_value::{Primitive, ValueDef};
+	let decoded = value.to_value()?;
+	let block_number = match decoded.value {
+		ValueDef::Composite(ref c) => c
+			.values()
+			.next()
+			.and_then(|v| match &v.value {
+				ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
+				_ => None,
+			})
+			.ok_or_else(|| {
+				anyhow!("TransactionByContentHash value composite empty or non-numeric")
+			})?,
+		_ => anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded),
+	};
+	Ok(block_number as u64)
 }
 
 /// Two `force_renew` calls signed by Alice and Bob respectively — synchronous immediate
