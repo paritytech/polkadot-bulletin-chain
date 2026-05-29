@@ -31,7 +31,7 @@ pub async fn run_submit_throughput(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!(
+	tracing::info!(
 		"S1: Submit throughput — {} items × {} bytes, concurrency {}, {} collator(s)",
 		items,
 		payload_size,
@@ -44,7 +44,7 @@ pub async fn run_submit_throughput(
 	let total_bytes = Arc::new(AtomicU64::new(0));
 	let latencies = Arc::new(Mutex::new(Vec::<Duration>::new()));
 
-	let items_per_stream = (items as usize + concurrency - 1) / concurrency;
+	let items_per_stream = (items as usize).div_ceil(concurrency);
 
 	let start = Instant::now();
 
@@ -63,7 +63,7 @@ pub async fn run_submit_throughput(
 			let ws = match client::connect_ws(&url).await {
 				Ok(ws) => ws,
 				Err(e) => {
-					log::error!("Failed to connect to {url}: {e}");
+					tracing::error!("Failed to connect to {url}: {e}");
 					return;
 				},
 			};
@@ -85,7 +85,7 @@ pub async fn run_submit_throughput(
 						errors.fetch_add(1, Ordering::Relaxed);
 						let err_count = errors.load(Ordering::Relaxed);
 						if err_count <= 5 {
-							log::warn!("submit error [{i}]: {e}");
+							tracing::warn!("submit error [{i}]: {e}");
 						}
 					},
 				}
@@ -125,7 +125,7 @@ pub async fn run_submit_throughput(
 	// Print pool status
 	if let Ok(ws) = client::connect_ws(ws_urls[0]).await {
 		if let Ok(status) = hop::hop_pool_status(&ws).await {
-			log::info!(
+			tracing::info!(
 				"Pool: {} entries, {} / {} bytes",
 				status.entry_count,
 				status.total_bytes,
@@ -157,7 +157,7 @@ pub async fn run_full_cycle(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!(
+	tracing::info!(
 		"S2: Full cycle — {} items × {} bytes, concurrency {}",
 		items,
 		payload_size,
@@ -168,7 +168,7 @@ pub async fn run_full_cycle(
 	let submit_lats = Arc::new(Mutex::new(Vec::<Duration>::new()));
 	let submit_errors = Arc::new(AtomicU64::new(0));
 
-	let items_per_stream = (items as usize + concurrency - 1) / concurrency;
+	let items_per_stream = (items as usize).div_ceil(concurrency);
 	let start = Instant::now();
 
 	// Submit phase
@@ -186,7 +186,7 @@ pub async fn run_full_cycle(
 			let ws = match client::connect_ws(&url).await {
 				Ok(ws) => ws,
 				Err(e) => {
-					log::error!("Failed to connect to {url}: {e}");
+					tracing::error!("Failed to connect to {url}: {e}");
 					return;
 				},
 			};
@@ -209,7 +209,7 @@ pub async fn run_full_cycle(
 					Err(e) => {
 						errors.fetch_add(1, Ordering::Relaxed);
 						if errors.load(Ordering::Relaxed) <= 5 {
-							log::warn!("submit error [{i}]: {e}");
+							tracing::warn!("submit error [{i}]: {e}");
 						}
 					},
 				}
@@ -223,7 +223,10 @@ pub async fn run_full_cycle(
 	let submit_duration = start.elapsed();
 	let mut submit_lats = submit_lats.lock().await;
 	let submitted = entries.lock().await.len() as u64;
-	log::info!("Submit phase done: {submitted} entries in {:.1}s", submit_duration.as_secs_f64());
+	tracing::info!(
+		"Submit phase done: {submitted} entries in {:.1}s",
+		submit_duration.as_secs_f64()
+	);
 
 	// Claim phase
 	let claim_start = Instant::now();
@@ -241,7 +244,7 @@ pub async fn run_full_cycle(
 			match hop::hop_claim(&ws, &entry.hash, kp).await {
 				Ok((data, latency)) => {
 					if data != entry.data {
-						log::error!("Data mismatch! hash=0x{}", hex::encode(&entry.hash[..8]));
+						tracing::error!("Data mismatch! hash=0x{}", hex::encode(&entry.hash[..8]));
 					}
 					claim_lats.push(latency);
 					claim_bytes += data.len() as u64;
@@ -249,7 +252,7 @@ pub async fn run_full_cycle(
 				Err(e) => {
 					claim_errors += 1;
 					if claim_errors <= 5 {
-						log::warn!("claim error: {e}");
+						tracing::warn!("claim error: {e}");
 					}
 				},
 			}
@@ -297,7 +300,7 @@ pub async fn run_group(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!(
+	tracing::info!(
 		"S3: Group — {} items × {} bytes, {} recipients each",
 		items,
 		payload_size,
@@ -328,7 +331,7 @@ pub async fn run_group(
 				});
 			},
 			Err(e) => {
-				log::warn!("submit error [{i}]: {e}");
+				tracing::warn!("submit error [{i}]: {e}");
 			},
 		}
 	}
@@ -363,13 +366,13 @@ pub async fn run_group(
 						lats.lock().await.push(latency);
 						bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
 						if data.len() != expected_len {
-							log::error!("Data length mismatch in group claim");
+							tracing::error!("Data length mismatch in group claim");
 						}
 					},
 					Err(e) => {
 						errors.fetch_add(1, Ordering::Relaxed);
 						if errors.load(Ordering::Relaxed) <= 5 {
-							log::warn!("group claim error: {e}");
+							tracing::warn!("group claim error: {e}");
 						}
 					},
 				}
@@ -406,7 +409,7 @@ pub async fn run_group(
 		..Default::default()
 	};
 
-	log::info!(
+	tracing::info!(
 		"Group: {claimed}/{total_claims_expected} claims OK, {} errors",
 		claim_errors.load(Ordering::Relaxed)
 	);
@@ -427,7 +430,7 @@ pub async fn run_pool_fill(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!(
+	tracing::info!(
 		"S4: Pool fill — {} byte payloads until PoolFull or UserQuotaExceeded",
 		payload_size
 	);
@@ -435,7 +438,7 @@ pub async fn run_pool_fill(
 	let ws = client::connect_ws(ws_urls[0]).await?;
 
 	if let Ok(status) = hop::hop_pool_status(&ws).await {
-		log::info!(
+		tracing::info!(
 			"Initial pool: {} entries, {} / {} bytes",
 			status.entry_count,
 			status.total_bytes,
@@ -453,7 +456,7 @@ pub async fn run_pool_fill(
 	for i in 0u64.. {
 		if cancel.load(Ordering::Relaxed) || i >= 100_000 {
 			if i >= 100_000 {
-				log::info!("Hit 100k entries safety cap");
+				tracing::info!("Hit 100k entries safety cap");
 			}
 			break;
 		}
@@ -467,8 +470,8 @@ pub async fn run_pool_fill(
 				total_bytes += payload_size as u64;
 				lats.push(latency);
 
-				if submitted % 100 == 0 {
-					log::info!(
+				if submitted.is_multiple_of(100) {
+					tracing::info!(
 						"  {} submitted, pool: {} entries, {} / {} bytes",
 						submitted,
 						result.pool_status.entry_count,
@@ -481,21 +484,21 @@ pub async fn run_pool_fill(
 				let err_str = e.to_string();
 				// Check for PoolFull (1002) or UserQuotaExceeded (1013)
 				if err_str.contains("1002") || err_str.contains("Pool full") {
-					log::info!("PoolFull hit after {submitted} entries");
+					tracing::info!("PoolFull hit after {submitted} entries");
 					pool_full = true;
 					break;
 				}
 				if err_str.contains("1013") || err_str.contains("quota") {
-					log::info!("UserQuotaExceeded hit after {submitted} entries");
+					tracing::info!("UserQuotaExceeded hit after {submitted} entries");
 					pool_full = true;
 					break;
 				}
 				errors += 1;
 				if errors <= 5 {
-					log::warn!("pool-fill submit error [{i}]: {e}");
+					tracing::warn!("pool-fill submit error [{i}]: {e}");
 				}
 				if errors > 10 {
-					log::error!("Too many errors, stopping");
+					tracing::error!("Too many errors, stopping");
 					break;
 				}
 			},
@@ -526,7 +529,7 @@ pub async fn run_pool_fill(
 	result.print_text();
 
 	if let Ok(status) = hop::hop_pool_status(&ws).await {
-		log::info!(
+		tracing::info!(
 			"Final pool: {} entries, {} / {} bytes",
 			status.entry_count,
 			status.total_bytes,
@@ -552,7 +555,7 @@ pub async fn run_mixed(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	log::info!(
+	tracing::info!(
 		"S5: Mixed — {} byte payloads, concurrency {}, {}s duration",
 		payload_size,
 		concurrency,
@@ -596,7 +599,7 @@ pub async fn run_mixed(
 			let ws = match client::connect_ws(&url).await {
 				Ok(ws) => ws,
 				Err(e) => {
-					log::error!("Writer {w_idx} connect failed: {e}");
+					tracing::error!("Writer {w_idx} connect failed: {e}");
 					return;
 				},
 			};
@@ -689,7 +692,7 @@ pub async fn run_mixed(
 			}
 			let elapsed = start.elapsed().as_secs_f64();
 			let plen = p_ref.lock().await.len();
-			log::info!(
+			tracing::info!(
 				"[{:.0}s] submitted: {}, claimed: {}, pending: {}, errors: {}/{}",
 				elapsed,
 				s_count.load(Ordering::Relaxed),
@@ -754,7 +757,7 @@ pub async fn run_mixed(
 // ---------------------------------------------------------------------------
 
 pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
-	log::info!("Error handling tests");
+	tracing::info!("Error handling tests");
 
 	let ws = client::connect_ws(ws_urls[0]).await?;
 	let mut passed = 0u32;
@@ -765,15 +768,15 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 		($name:expr, $code:expr, $data:expr, $recipients:expr) => {{
 			match hop::try_hop_submit(&ws, $data, $recipients).await {
 				Some(code) if code == $code => {
-					log::info!("  PASS: {} (code {})", $name, code);
+					tracing::info!("  PASS: {} (code {})", $name, code);
 					passed += 1;
 				},
 				Some(code) => {
-					log::error!("  FAIL: {} — expected {}, got {}", $name, $code, code);
+					tracing::error!("  FAIL: {} — expected {}, got {}", $name, $code, code);
 					failed += 1;
 				},
 				None => {
-					log::error!("  FAIL: {} — expected error {}, got success", $name, $code);
+					tracing::error!("  FAIL: {} — expected error {}, got success", $name, $code);
 					failed += 1;
 				},
 			}
@@ -792,16 +795,16 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 		let fake_hash = [0xABu8; 32];
 		let fake_kp = RecipientKeypair::generate();
 		match hop::try_hop_claim(&ws, &fake_hash, &fake_kp).await {
-			Some(code) if code == 1004 => {
-				log::info!("  PASS: NotFound (code 1004)");
+			Some(1004) => {
+				tracing::info!("  PASS: NotFound (code 1004)");
 				passed += 1;
 			},
 			Some(code) => {
-				log::error!("  FAIL: NotFound — expected 1004, got {code}");
+				tracing::error!("  FAIL: NotFound — expected 1004, got {code}");
 				failed += 1;
 			},
 			None => {
-				log::error!("  FAIL: NotFound — expected error, got success");
+				tracing::error!("  FAIL: NotFound — expected error, got success");
 				failed += 1;
 			},
 		}
@@ -813,19 +816,19 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 		let valid_kp = RecipientKeypair::generate();
 		let wrong_kp = RecipientKeypair::generate();
 
-		match hop::hop_submit(&ws, &data, &[valid_kp.clone()]).await {
+		match hop::hop_submit(&ws, &data, std::slice::from_ref(&valid_kp)).await {
 			Ok((hash, _, _)) => {
 				match hop::try_hop_claim(&ws, &hash, &wrong_kp).await {
-					Some(code) if code == 1010 => {
-						log::info!("  PASS: NotRecipient (code 1010)");
+					Some(1010) => {
+						tracing::info!("  PASS: NotRecipient (code 1010)");
 						passed += 1;
 					},
 					Some(code) => {
-						log::error!("  FAIL: NotRecipient — expected 1010, got {code}");
+						tracing::error!("  FAIL: NotRecipient — expected 1010, got {code}");
 						failed += 1;
 					},
 					None => {
-						log::error!("  FAIL: NotRecipient — expected error, got success");
+						tracing::error!("  FAIL: NotRecipient — expected error, got success");
 						failed += 1;
 					},
 				}
@@ -833,7 +836,7 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 				let _ = hop::hop_claim(&ws, &hash, &valid_kp).await;
 			},
 			Err(e) => {
-				log::warn!("  SKIP: NotRecipient — submit failed: {e}");
+				tracing::warn!("  SKIP: NotRecipient — submit failed: {e}");
 			},
 		}
 	}
@@ -849,35 +852,35 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 				expect_submit_error!("DuplicateEntry", 1003, &data, &[kp2]);
 			},
 			Err(e) => {
-				log::warn!("  SKIP: DuplicateEntry — submit failed: {e}");
+				tracing::warn!("  SKIP: DuplicateEntry — submit failed: {e}");
 			},
 		}
 	}
 
 	// 6. DataTooLarge -> skip (64 MiB impractical over WS)
-	log::info!("  SKIP: DataTooLarge (65 MiB payload too large for WS transport)");
+	tracing::info!("  SKIP: DataTooLarge (65 MiB payload too large for WS transport)");
 
 	// 7. Invalid hash length -> 1008
 	{
 		let short_hash = [0xCCu8; 16];
 		let kp = RecipientKeypair::generate();
 		match hop::try_hop_claim(&ws, &short_hash, &kp).await {
-			Some(code) if code == 1008 => {
-				log::info!("  PASS: InvalidHashLength (code 1008)");
+			Some(1008) => {
+				tracing::info!("  PASS: InvalidHashLength (code 1008)");
 				passed += 1;
 			},
 			Some(code) => {
-				log::error!("  FAIL: InvalidHashLength — expected 1008, got {code}");
+				tracing::error!("  FAIL: InvalidHashLength — expected 1008, got {code}");
 				failed += 1;
 			},
 			None => {
-				log::error!("  FAIL: InvalidHashLength — expected error, got success");
+				tracing::error!("  FAIL: InvalidHashLength — expected error, got success");
 				failed += 1;
 			},
 		}
 	}
 
-	log::info!("Results: {passed} passed, {failed} failed");
+	tracing::info!("Results: {passed} passed, {failed} failed");
 	Ok(failed == 0)
 }
 
@@ -885,6 +888,7 @@ pub async fn run_error_tests(ws_urls: &[&str]) -> Result<bool> {
 // Sweep runner (called from main)
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_hop_sweep(
 	ws_urls: &[&str],
 	scenario: &str,

@@ -179,7 +179,7 @@ pub fn generate_payload(size: usize, index: u64) -> Vec<u8> {
 	use rand::{Rng, SeedableRng};
 	use std::sync::OnceLock;
 	static SALT: OnceLock<u64> = OnceLock::new();
-	let salt = *SALT.get_or_init(|| rand::random());
+	let salt = *SALT.get_or_init(rand::random);
 	let seed = index ^ salt ^ (size as u64).wrapping_mul(0x9E3779B97F4A7C15);
 	let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
 	let mut data = vec![0u8; size];

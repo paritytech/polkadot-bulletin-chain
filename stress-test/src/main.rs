@@ -302,7 +302,7 @@ async fn main() -> Result<()> {
 			)
 			.await
 			{
-				log::error!("HOP command failed: {e}");
+				tracing::error!("HOP command failed: {e}");
 				command_error = Some(e);
 			},
 		Commands::Full => {
@@ -357,7 +357,7 @@ async fn main() -> Result<()> {
 				)
 				.await
 				{
-					log::error!("HOP command failed: {e}");
+					tracing::error!("HOP command failed: {e}");
 					command_error = Some(e);
 				}
 			}
@@ -492,7 +492,7 @@ async fn run_hop_standalone(
 		let cancel = cancel.clone();
 		tokio::spawn(async move {
 			tokio::signal::ctrl_c().await.ok();
-			log::warn!("Ctrl+C received — stopping gracefully");
+			tracing::warn!("Ctrl+C received — stopping gracefully");
 			cancel.store(true, Ordering::Relaxed);
 			tokio::signal::ctrl_c().await.ok();
 			std::process::exit(130);
@@ -503,7 +503,7 @@ async fn run_hop_standalone(
 		if let Some(ref path) = cli.output_file {
 			if let Ok(json) = serde_json::to_string_pretty(results) {
 				if let Err(e) = std::fs::write(path, &json) {
-					log::warn!("Failed to write results to {}: {e}", path.display());
+					tracing::warn!("Failed to write results to {}: {e}", path.display());
 				}
 			}
 		}
