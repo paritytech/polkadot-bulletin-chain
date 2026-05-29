@@ -16,8 +16,16 @@ use crate::{
 };
 
 /// Payload sizes for the submit sweep.
-const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] =
-	&[(1024, "1KB"), (10 * 1024, "10KB"), (100 * 1024, "100KB"), (1024 * 1024, "1MB")];
+const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] = &[
+	(1024, "1KB"),
+	(10 * 1024, "10KB"),
+	(100 * 1024, "100KB"),
+	(128 * 1024, "128KB"),
+	(256 * 1024, "256KB"),
+	(512 * 1024, "512KB"),
+	(1024 * 1024, "1MB"),
+	(2 * 1024 * 1024, "2MB"),
+];
 
 // Disjoint payload index spaces so scenarios run back-to-back without colliding
 // on `DuplicateEntry` (HOP pool deduplicates by content hash).

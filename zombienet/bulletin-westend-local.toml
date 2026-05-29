@@ -51,6 +51,8 @@ args = [
 	# HOP
 	"--enable-hop",
 	"--hop-disable-rate-limit",
+	# Headroom for the stress-test sweep (default per-user cap is 256 MiB).
+	"--hop-max-user-size 2048",
 	# HOP data retention period in seconds (default: 86400 = 24h). Must be at least 1.
 	"--hop-retention-secs 60",
 	# HOP expiry cleanup interval in seconds (default: 300 = 5min). Must be at least 1.
@@ -78,6 +80,8 @@ args = [
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
 	"--enable-hop",
 	"--hop-disable-rate-limit",
+	# Headroom for the stress-test sweep (default per-user cap is 256 MiB).
+	"--hop-max-user-size 2048",
 	"--hop-retention-secs 60",
 	"--hop-check-interval 10",
 	"--hop-promotion-buffer-secs 15",
