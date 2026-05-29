@@ -15,15 +15,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Storage relocation migration for the data-renewal pallet.
-//!
-//! `AutoRenewals` and `PendingAutoRenewals` previously lived under the
-//! `TransactionStorage` pallet prefix. After the renewal-pallet split they live
-//! under the `DataRenewal` prefix. This migration relocates existing entries on
-//! a single runtime upgrade.
-//!
-//! `PermanentStorageUsed` stayed in the storage pallet for E1, so only the two
-//! items above need relocation.
+//! One-shot relocation: moves `AutoRenewals` and `PendingAutoRenewals` from
+//! the legacy `TransactionStorage::*` storage prefix to `DataRenewal::*`.
+//! `PermanentStorageUsed` continues to live in the storage pallet and needs no
+//! relocation.
 
 extern crate alloc;
 
