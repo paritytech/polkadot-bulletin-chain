@@ -1100,7 +1100,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -1144,7 +1144,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 				.iter()
 				.filter_map(|e| e.ok())
 				.filter(|e| {
-					e.pallet_name() == "TransactionStorage" && e.variant_name() == "RenewalEnabled"
+					e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalEnabled"
 				})
 				.count();
 			if current.number() == 0 {
@@ -1305,14 +1305,14 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			.iter()
 			.filter_map(|e| e.ok())
 			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
+				e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
 			})
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
 			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
+				e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
 			})
 			.count() as u32;
 		let weight_value = client
@@ -1721,7 +1721,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (worker, hash) in workers.iter().zip(content_hashes.iter()) {
 		let call =
-			tx("TransactionStorage", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
+			tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(1).immortal().build();
 		let signer = worker.clone();
 		let cli = client.clone();
@@ -1835,14 +1835,14 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 			.iter()
 			.filter_map(|e| e.ok())
 			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
+				e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
 			})
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
 			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
+				e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
 			})
 			.count() as u32;
 		let weight_value = client
@@ -2125,7 +2125,7 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2319,7 +2319,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2353,7 +2353,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
 			for ev in events.iter().filter_map(|e| e.ok()) {
-				if ev.pallet_name() == "TransactionStorage" && ev.variant_name() == "RenewalEnabled"
+				if ev.pallet_name() == "DataRenewal" && ev.variant_name() == "RenewalEnabled"
 				{
 					enabled_count += 1;
 					if block_n > latest_enable_block {
@@ -2503,14 +2503,14 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 		.iter()
 		.filter_map(|e| e.ok())
 		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
+			e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
 		})
 		.count() as u32;
 	let auto_renewal_failed = events
 		.iter()
 		.filter_map(|e| e.ok())
 		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
+			e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
 		})
 		.count() as u32;
 	assert_eq!(
@@ -2968,7 +2968,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let idx = candidates[(pseudo_random(block_n + 1) as usize) % candidates.len()];
 				let hash = stored[idx].content_hash;
 				let renew_call = tx(
-					"TransactionStorage",
+					"DataRenewal",
 					"force_renew",
 					vec![Value::unnamed_variant(
 						"ContentHash",
@@ -3439,7 +3439,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
 	// lags ~10s behind best on cumulus).
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
+		"DataRenewal",
 		"AutoRenewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
@@ -3622,7 +3622,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
+		"DataRenewal",
 		"AutoRenewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);

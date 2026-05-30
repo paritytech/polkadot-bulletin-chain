@@ -1147,6 +1147,34 @@ fn try_state_tolerates_counter_above_renewed_sum() {
 	});
 }
 
+/// The other side of the renewed-bytes invariant: `PermanentStorageUsed` must be at
+/// least the renewed bytes recorded in `Transactions`. Replaces the pre-split
+/// `try_state_detects_permanent_used_mismatch_with_transactions`, adapted to the
+/// `renewed_sum <= used` check (the split relaxed strict equality, since paid
+/// auto-renewals are now reconciled in the data-renewal pallet's own `try_state`).
+#[test]
+fn try_state_detects_permanent_used_below_renewed_sum() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		// A 2000-byte renewed entry while the chain-wide counter is left at 0.
+		let renewed = TransactionInfo {
+			chunk_root: Default::default(),
+			content_hash: [0u8; 32],
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 2000,
+			extrinsic_index: u32::MAX,
+			block_chunks: num_chunks(2000),
+			kind: TransactionKind::Renew,
+		};
+		Transactions::insert(1u64, BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap());
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageUsed < Σ renewed sizes in Transactions"
+		);
+	});
+}
+
 /// `PermanentStorageUsed` over `MaxPermanentStorageSize` is caught.
 #[test]
 fn try_state_detects_permanent_used_exceeds_chain_cap() {
@@ -1386,16 +1414,6 @@ fn authorize_storage_extension_passes_through_non_storage_calls() {
 		assert!(returned_origin.as_system_origin_signer().is_some());
 		assert_eq!(returned_origin.as_system_origin_signer().unwrap(), &caller);
 	});
-}
-
-/// Helper: initialize block N with proper extrinsic context for manual on_initialize + dispatch.
-#[allow(dead_code)]
-fn init_block(n: u64) {
-	System::set_block_number(n);
-	System::reset_events();
-	// Set extrinsic index so sp_io::transaction_index::renew works
-	unhashed::put::<u32>(b":extrinsic_index", &0);
-	<TransactionStorage as polkadot_sdk_frame::traits::Hooks<u64>>::on_initialize(n);
 }
 
 #[test]
