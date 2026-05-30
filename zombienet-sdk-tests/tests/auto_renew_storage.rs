@@ -1304,16 +1304,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -1720,8 +1716,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (worker, hash) in workers.iter().zip(content_hashes.iter()) {
-		let call =
-			tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
+		let call = tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(1).immortal().build();
 		let signer = worker.clone();
 		let cli = client.clone();
@@ -1834,16 +1829,12 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -2353,8 +2344,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
 			for ev in events.iter().filter_map(|e| e.ok()) {
-				if ev.pallet_name() == "DataRenewal" && ev.variant_name() == "RenewalEnabled"
-				{
+				if ev.pallet_name() == "DataRenewal" && ev.variant_name() == "RenewalEnabled" {
 					enabled_count += 1;
 					if block_n > latest_enable_block {
 						latest_enable_block = block_n;
@@ -2502,16 +2492,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let auto_renewed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 		.count() as u32;
 	let auto_renewal_failed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 		.count() as u32;
 	assert_eq!(
 		auto_renewed, ON_INIT_CLEANUP_ITEMS_PER_SET,

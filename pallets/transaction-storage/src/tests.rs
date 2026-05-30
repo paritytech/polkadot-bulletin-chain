@@ -1167,7 +1167,10 @@ fn try_state_detects_permanent_used_below_renewed_sum() {
 			block_chunks: num_chunks(2000),
 			kind: TransactionKind::Renew,
 		};
-		Transactions::insert(1u64, BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap());
+		Transactions::insert(
+			1u64,
+			BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap(),
+		);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
 			"PermanentStorageUsed < Σ renewed sizes in Transactions"
