@@ -140,7 +140,6 @@ pub fn new_test_ext() -> TestExternalities {
 /// renewal-pallet drain inherent before each `on_finalize`. Mirrors the runtime's
 /// block-author behaviour so the per-block `ProofChecked` and `PendingAutoRenewals`
 /// invariants are satisfied.
-#[allow(dead_code)]
 pub fn run_to_block(
 	n: u64,
 	f: impl Fn() -> Option<sp_transaction_storage_proof::TransactionStorageProof> + 'static,
@@ -161,7 +160,6 @@ pub fn run_to_block(
 /// (storage pallet) then renewal drain (renewal pallet). Mirrors what
 /// `run_to_block`'s `before_finalize` does for tests that drove block setup
 /// manually with [`init_block`].
-#[allow(dead_code)]
 pub fn apply_block_inherents_full(
 	proof: Option<sp_transaction_storage_proof::TransactionStorageProof>,
 ) -> polkadot_sdk_frame::deps::sp_runtime::DispatchResult {
@@ -178,7 +176,6 @@ pub fn apply_block_inherents_full(
 
 /// Initialize block `n` for tests that need an extrinsic context to call
 /// dispatchables manually (without the runtime's authorize/prepare pipeline).
-#[allow(dead_code)]
 pub fn init_block(n: u64) {
 	System::set_block_number(n);
 	System::reset_events();
@@ -196,7 +193,6 @@ pub fn init_block(n: u64) {
 /// `pre_dispatch_renewal_signed` (charges bytes_permanent + tx slot at the
 /// extension level), then dispatches `DataRenewal::enable_auto_renew` with the
 /// `Origin::Authorized` the extension would have set.
-#[allow(dead_code)]
 pub fn enable_auto_renew_via_extension(
 	who: <Test as frame_system::Config>::AccountId,
 	content_hash: bulletin_transaction_storage_primitives::ContentHash,
@@ -215,7 +211,6 @@ pub fn enable_auto_renew_via_extension(
 /// Sibling helper for `disable_auto_renew`. Builds the rewritten origin directly
 /// (skips `pre_dispatch_renewal_signed`) since most disable tests exercise
 /// dispatch-level errors after admission.
-#[allow(dead_code)]
 pub fn disable_auto_renew_via_extension(
 	who: <Test as frame_system::Config>::AccountId,
 	content_hash: bulletin_transaction_storage_primitives::ContentHash,
@@ -230,7 +225,6 @@ pub fn disable_auto_renew_via_extension(
 
 /// Sibling helper for one-shot `renew`. Runs `pre_dispatch_renewal_signed`
 /// (charges the slot) and dispatches with the rewritten origin.
-#[allow(dead_code)]
 pub fn renew_via_extension(
 	who: <Test as frame_system::Config>::AccountId,
 	entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumberFor<Test>>,
