@@ -30,9 +30,6 @@ pub trait WeightInfo {
 	fn validate_renew() -> Weight;
 	/// Drain `n` pending auto-renewals (linear in `n`).
 	fn process_pending_renewals(n: u32) -> Weight;
-	/// One step of the v3→v4 `AutoRenewals` layout migration. Placeholder until
-	/// the migration is ported into this pallet.
-	fn migrate_v3_to_v4_step() -> Weight;
 }
 
 impl WeightInfo for () {
@@ -52,9 +49,6 @@ impl WeightInfo for () {
 		Weight::zero()
 	}
 	fn process_pending_renewals(_n: u32) -> Weight {
-		Weight::zero()
-	}
-	fn migrate_v3_to_v4_step() -> Weight {
 		Weight::zero()
 	}
 }

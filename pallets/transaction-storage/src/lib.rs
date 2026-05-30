@@ -1748,6 +1748,52 @@ pub mod pallet {
 				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
 		}
 
+		/// Pool/dispatch validation for an unsigned renew (preimage-only). Resolves
+		/// `entry` then checks — and, in [`CheckContext::PreDispatch`], consumes — a
+		/// `Preimage(content_hash)` authorization. No account fallback: unsigned
+		/// renewals must be backed by a preimage grant. Used by
+		/// `pallet-bulletin-data-renewal`'s `ValidateUnsigned` for `force_renew`.
+		pub fn check_renew_unsigned(
+			entry: &TransactionRef<BlockNumberFor<T>>,
+			context: CheckContext,
+		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
+			let info = Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
+			Self::check_store_renew_unsigned(info.size as usize, || info.content_hash, context, true)
+		}
+
+		/// Signed-renew authorization with preimage-preference: try a
+		/// `Preimage(content_hash)` grant first (lets anyone renew pre-authorized
+		/// content without spending their own account quota), falling back to
+		/// `Account(who)`. Runs the `data_size_ok` / `block_transactions_full`
+		/// guards, then the hard-cap renew check against the chosen scope. Returns
+		/// the scope charged so the caller can rewrite the origin; `consume` mutates
+		/// the chosen authorization on success.
+		pub fn authorize_renew(
+			who: &T::AccountId,
+			content_hash: ContentHash,
+			size: u32,
+			consume: bool,
+		) -> Result<AuthorizationScopeFor<T>, TransactionValidityError> {
+			if !Self::data_size_ok(size as usize) {
+				return Err(BAD_DATA_SIZE.into());
+			}
+			if Self::block_transactions_full() {
+				return Err(InvalidTransaction::ExhaustsResources.into());
+			}
+			if Self::check_authorization(
+				&AuthorizationScope::Preimage(content_hash),
+				size,
+				consume,
+				true,
+			)
+			.is_ok()
+			{
+				return Ok(AuthorizationScope::Preimage(content_hash));
+			}
+			Self::check_authorization(&AuthorizationScope::Account(who.clone()), size, consume, true)?;
+			Ok(AuthorizationScope::Account(who.clone()))
+		}
+
 		fn check_unsigned(
 			call: &Call<T>,
 			context: CheckContext,

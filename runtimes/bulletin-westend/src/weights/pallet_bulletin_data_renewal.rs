@@ -83,14 +83,6 @@ impl<T: frame_system::Config> pallet_bulletin_data_renewal::WeightInfo for Weigh
 			.saturating_add(T::DbWeight::get().writes(3))
 	}
 
-	/// Storage: `DataRenewal::AutoRenewals` (r:2 w:1)
-	fn migrate_v3_to_v4_step() -> Weight {
-		Weight::from_parts(14_297_000, 0)
-			.saturating_add(Weight::from_parts(0, 6104))
-			.saturating_add(T::DbWeight::get().reads(2))
-			.saturating_add(T::DbWeight::get().writes(2))
-	}
-
 	/// Storage: `DataRenewal::PendingAutoRenewals` (r:1 w:1)
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
 	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)

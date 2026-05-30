@@ -58,6 +58,8 @@ pub mod migrations;
 pub mod types;
 pub mod weights;
 
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
@@ -194,7 +196,8 @@ pub mod pallet {
 				return Err(DispatchError::BadOrigin);
 			};
 			let info =
-				pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(&entry)?;
+				pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(&entry)
+					.map_err(|_| Error::<T>::RenewedNotFound)?;
 			let content_hash = info.content_hash;
 
 			ensure!(
@@ -222,7 +225,8 @@ pub mod pallet {
 			let _caller =
 				pallet_bulletin_transaction_storage::Pallet::<T>::ensure_authorized(origin)?;
 			let info =
-				pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(&entry)?;
+				pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(&entry)
+					.map_err(|_| Error::<T>::RenewedNotFound)?;
 
 			pallet_bulletin_transaction_storage::Pallet::<T>::ensure_data_size_ok(
 				info.size as usize,
@@ -358,11 +362,29 @@ pub mod pallet {
 			if Self::is_inherent(call) {
 				return Ok(ValidTransaction::default());
 			}
+			// Unsigned `force_renew` is admitted only when backed by a preimage
+			// authorization (checked, not consumed, here).
+			if let Call::force_renew { entry } = call {
+				return pallet_bulletin_transaction_storage::Pallet::<T>::check_renew_unsigned(
+					entry,
+					pallet_bulletin_transaction_storage::CheckContext::Validate,
+				)?
+				.ok_or_else(|| InvalidTransaction::Call.into());
+			}
 			Err(InvalidTransaction::Call.into())
 		}
 
 		fn pre_dispatch(call: &Self::Call) -> Result<(), TransactionValidityError> {
 			if Self::is_inherent(call) {
+				return Ok(());
+			}
+			// Consume the preimage authorization so the dispatch runs against
+			// post-consumption state (mirrors the signed extension's `prepare`).
+			if let Call::force_renew { entry } = call {
+				pallet_bulletin_transaction_storage::Pallet::<T>::check_renew_unsigned(
+					entry,
+					pallet_bulletin_transaction_storage::CheckContext::PreDispatch,
+				)?;
 				return Ok(());
 			}
 			Err(InvalidTransaction::Call.into())
