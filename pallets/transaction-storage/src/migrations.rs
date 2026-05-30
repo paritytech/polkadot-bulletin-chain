@@ -639,6 +639,42 @@ pub mod v3 {
 	}
 }
 
+/// V3 → V4 migration: storage-version bump only.
+///
+/// On `main` this reshaped `AutoRenewals` (`{ account }` →
+/// `{ account, recurring, paid }`). The renewal split moved `AutoRenewals` out of
+/// this pallet into `pallet-bulletin-data-renewal`, so that reshape now happens
+/// there, during relocation (see
+/// [`pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage`]).
+/// This migration is kept as a no-op solely to keep the storage-version chain
+/// continuous (3 → 4) so [`v5::MigrateV4ToV5`] — gated on on-chain version `== 4` —
+/// still runs on a chain that is only at 3.
+pub mod v4 {
+	use super::*;
+	use crate::pallet::Pallet;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
+	};
+
+	pub struct VersionUncheckedMigrateV3ToV4<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV3ToV4<T> {
+		fn on_runtime_upgrade() -> Weight {
+			// No data change: `AutoRenewals` left this pallet in the renewal split.
+			Weight::zero()
+		}
+	}
+
+	/// Versioned no-op v3→v4: storage-version bump only (see module docs).
+	pub type MigrateV3ToV4<T> = VersionedMigration<
+		3,
+		4,
+		VersionUncheckedMigrateV3ToV4<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
+}
+
 /// V4 → V5 migration for `AllowedAuthorizers`.
 ///
 /// `AuthorizerBudget` went from `{ quota, authorization_period, valid_until }` to

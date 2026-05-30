@@ -1760,7 +1760,12 @@ pub mod pallet {
 			context: CheckContext,
 		) -> Result<Option<ValidTransaction>, TransactionValidityError> {
 			let info = Self::resolve_transaction_ref(entry).map_err(|_| RENEWED_NOT_FOUND)?;
-			Self::check_store_renew_unsigned(info.size as usize, || info.content_hash, context, true)
+			Self::check_store_renew_unsigned(
+				info.size as usize,
+				|| info.content_hash,
+				context,
+				true,
+			)
 		}
 
 		/// Signed-renew authorization with preimage-preference: try a
@@ -1792,7 +1797,12 @@ pub mod pallet {
 			{
 				return Ok(AuthorizationScope::Preimage(content_hash));
 			}
-			Self::check_authorization(&AuthorizationScope::Account(who.clone()), size, consume, true)?;
+			Self::check_authorization(
+				&AuthorizationScope::Account(who.clone()),
+				size,
+				consume,
+				true,
+			)?;
 			Ok(AuthorizationScope::Account(who.clone()))
 		}
 
