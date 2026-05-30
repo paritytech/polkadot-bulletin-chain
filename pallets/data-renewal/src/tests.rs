@@ -17,7 +17,6 @@
 
 //! Tests for the data-renewal pallet.
 
-#![cfg(test)]
 #![allow(deprecated)]
 
 use crate::{mock::*, AutoRenewals, PendingAutoRenewals, RenewalData};
