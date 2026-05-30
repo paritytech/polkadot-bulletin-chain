@@ -169,16 +169,6 @@ fn relocation_migration_reshapes_legacy_v3_layout() {
 	});
 }
 
-#[allow(dead_code)]
-fn _ensure_imports() {
-	let _ = txs::TransactionKind::Store;
-}
-
-// ---------------------------------------------------------------------------
-// Ported from the pre-split `pallet-bulletin-transaction-storage::tests` —
-// critical renewal coverage. Remaining tests will be ported in a follow-up.
-// ---------------------------------------------------------------------------
-
 /// `enable_auto_renew` is a feeless registration: the extension's
 /// `pre_dispatch` charges one tx slot, `bytes_permanent`, and the chain-wide
 /// `PermanentStorageUsed`; the dispatchable then inserts an `AutoRenewals`
