@@ -25,7 +25,9 @@ use super::{Pallet as DataRenewal, *};
 use crate::extension::ValidateBulletinCalls;
 use alloc::vec;
 use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
-use pallet_bulletin_transaction_storage::{self as txs, pallet::Origin, Pallet as TransactionStorage};
+use pallet_bulletin_transaction_storage::{
+	self as txs, pallet::Origin, Pallet as TransactionStorage,
+};
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
 	deps::{

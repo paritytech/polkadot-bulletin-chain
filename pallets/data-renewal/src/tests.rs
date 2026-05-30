@@ -139,6 +139,36 @@ fn relocation_migration_moves_legacy_entries_under_new_prefix() {
 	});
 }
 
+/// A pre-v4 `AutoRenewals` entry (bare `{ account }`, no `recurring`/`paid`) is
+/// reshaped to the current `RenewalData` layout during relocation — the case a
+/// plain `move_prefix` could not handle. Covers a chain still at tx-storage v3.
+#[test]
+fn relocation_migration_reshapes_legacy_v3_layout() {
+	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<crate::Pallet<Test>>();
+		let old_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
+		let hash = [0xBBu8; 32];
+		let mut key = old_prefix.to_vec();
+		key.extend_from_slice(&sp_io::hashing::blake2_128(&hash));
+		key.extend_from_slice(&hash);
+		// v3 layout: just the account, no `recurring`/`paid` fields.
+		let account: u64 = 7;
+		sp_io::storage::set(&key, &account.encode());
+
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+
+		assert!(sp_io::storage::get(&key).is_none(), "old-prefix entry must be removed");
+		assert_eq!(AutoRenewals::<Test>::iter().count(), 1);
+		let entry = AutoRenewals::<Test>::get(hash).expect("entry relocated under new prefix");
+		assert_eq!(
+			entry,
+			RenewalData::<u64> { account, recurring: true, paid: false },
+			"v3 entry must be reshaped to recurring & prepaid",
+		);
+	});
+}
+
 #[allow(dead_code)]
 fn _ensure_imports() {
 	let _ = txs::TransactionKind::Store;
@@ -730,8 +760,9 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		// Renew with the sha2 preimage auth still present — succeeds via the unsigned
 		// `force_renew` path, accumulating on `bytes_permanent` while leaving `bytes`
 		// (store-only) untouched.
-		let renew_call =
-			crate::Call::<Test>::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		let renew_call = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 1, index: 0 },
+		};
 		assert_ok!(DataRenewal::pre_dispatch(&renew_call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(sha2_hash),
@@ -1569,7 +1600,9 @@ fn renew_rejects_unsigned_and_root_origin() {
 /// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
 /// the assert actually fires when an auto-renewal is pending and the inherent is missing.
 #[test]
-#[should_panic(expected = "All pending auto-renewals must be processed by process_pending_renewals")]
+#[should_panic(
+	expected = "All pending auto-renewals must be processed by process_pending_renewals"
+)]
 fn on_finalize_panics_when_inherent_missing() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -2348,8 +2381,9 @@ fn uses_preimage_authorization() {
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
 		// Renew also uses the same preimage auth; it bumps `bytes_permanent` rather than `bytes`.
-		let call =
-			crate::Call::<Test>::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		let call = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 1, index: 0 },
+		};
 		assert_ok!(DataRenewal::pre_dispatch(&call));
 		assert_eq!(
 			TransactionStorage::preimage_authorization_extent(hash),
