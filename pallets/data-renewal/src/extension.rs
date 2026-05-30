@@ -301,19 +301,25 @@ impl<T: Config> Pallet<T> {
 			Call::force_renew { entry } => {
 				let info = txs::Pallet::<T>::resolve_transaction_ref(entry)
 					.map_err(|_| txs::RENEWED_NOT_FOUND)?;
-				txs::Pallet::<T>::check_authorization(
-					&AuthorizationScope::Account(who.clone()),
-					info.size,
-					consume,
-					true,
-				)?;
-				let scope = AuthorizationScope::Account(who.clone());
+				// Prefer a preimage grant, fall back to the caller's account quota.
+				let scope =
+					txs::Pallet::<T>::authorize_renew(who, info.content_hash, info.size, consume)?;
 				let valid = if want_valid {
-					ValidTransaction::with_tag_prefix("DataRenewalForceRenew")
-						.and_provides((who.clone(), info.content_hash))
-						.priority(<T as txs::Config>::StoreRenewPriority::get())
-						.longevity(<T as txs::Config>::StoreRenewLongevity::get())
-						.into()
+					match &scope {
+						// Preimage renewals are submitter-agnostic: tag on the content
+						// hash alone so they don't dedup against the account path.
+						AuthorizationScope::Preimage(hash) =>
+							ValidTransaction::with_tag_prefix("DataRenewalForceRenewPreimage")
+								.and_provides(*hash)
+								.priority(<T as txs::Config>::StoreRenewPriority::get())
+								.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+								.into(),
+						_ => ValidTransaction::with_tag_prefix("DataRenewalForceRenew")
+							.and_provides((who.clone(), info.content_hash))
+							.priority(<T as txs::Config>::StoreRenewPriority::get())
+							.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+							.into(),
+					}
 				} else {
 					ValidTransaction::default()
 				};

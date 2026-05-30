@@ -431,7 +431,6 @@ fn renews_data() {
 
 /// `renew` accepts a content-hash variant of [`TransactionRef`] equivalently to
 /// the position variant.
-#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn renew_by_content_hash_schedules_one_shot() {
 	new_test_ext().execute_with(|| {
@@ -566,7 +565,6 @@ fn content_hash_map_not_cleaned_if_renewed() {
 	});
 }
 
-#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn signed_renew_prefers_preimage_authorization() {
 	new_test_ext().execute_with(|| {
@@ -729,11 +727,22 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		assert_eq!(txs[0].cid_codec, 0x55);
 		assert_eq!(txs[0].content_hash, sha2_hash);
 
-		// TODO(follow-up): the unsigned `force_renew` path with preimage
-		// authorization used to be validated by storage pallet's `check_unsigned`;
-		// after this split it needs a corresponding branch in
-		// `pallet-bulletin-data-renewal::ValidateUnsigned`. Once added, restore
-		// the assertions below.
+		// Renew with the sha2 preimage auth still present — succeeds via the unsigned
+		// `force_renew` path, accumulating on `bytes_permanent` while leaving `bytes`
+		// (store-only) untouched.
+		let renew_call =
+			crate::Call::<Test>::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		assert_ok!(DataRenewal::pre_dispatch(&renew_call));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			AuthorizationExtent {
+				bytes: 2000,
+				bytes_permanent: 2000,
+				bytes_allowance: 2000,
+				transactions: 2,
+				transactions_allowance: 1,
+			}
+		);
 	});
 }
 
@@ -1559,9 +1568,8 @@ fn renew_rejects_unsigned_and_root_origin() {
 /// inherent ran, asserting that the storage is empty. The mock's `run_to_block` always
 /// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
 /// the assert actually fires when an auto-renewal is pending and the inherent is missing.
-#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
-#[should_panic(expected = "All pending auto-renewals must be processed by apply_block_inherents")]
+#[should_panic(expected = "All pending auto-renewals must be processed by process_pending_renewals")]
 fn on_finalize_panics_when_inherent_missing() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -1609,8 +1617,9 @@ fn on_finalize_panics_when_inherent_missing() {
 			"on_initialize should have populated pending"
 		);
 
-		// on_finalize must panic on the PendingAutoRenewals invariant.
-		<TransactionStorage as polkadot_sdk_frame::traits::Hooks<u64>>::on_finalize(13);
+		// on_finalize must panic on the PendingAutoRenewals invariant. The assert
+		// now lives on the renewal pallet (the inherent moved there in the split).
+		<DataRenewal as polkadot_sdk_frame::traits::Hooks<u64>>::on_finalize(13);
 	});
 }
 
@@ -1620,7 +1629,6 @@ fn on_finalize_panics_when_inherent_missing() {
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
 /// proof) are pending, the chain would panic at on_finalize without any test catching it.
-#[ignore = "needs adaptation against the combined extension; tracked as a follow-up"]
 #[test]
 fn create_inherent_emits_call_when_pending_renewals_present() {
 	use polkadot_sdk_frame::{deps::sp_inherents::InherentData, runtime::prelude::ProvideInherent};
@@ -1628,11 +1636,11 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 
-		// Baseline: no proof, no pending renewals → no inherent emitted.
+		// Baseline: no pending renewals → the renewal pallet emits no inherent.
 		let empty = InherentData::new();
 		assert!(
-			<TransactionStorage as ProvideInherent>::create_inherent(&empty).is_none(),
-			"no inherent should be emitted when neither proof nor pending renewals are present",
+			<DataRenewal as ProvideInherent>::create_inherent(&empty).is_none(),
+			"no renewal inherent should be emitted when no auto-renewals are pending",
 		);
 
 		let who = 1;
@@ -1669,16 +1677,14 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 		init_block(13);
 		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
 
-		// `InherentData` carries no proof. The provider must still emit the composite call so
-		// that the inherent-driven drain runs in this block.
-		let result = <TransactionStorage as ProvideInherent>::create_inherent(&empty);
+		// `InherentData` carries no proof, but the renewal pallet must still emit its
+		// drain inherent so the pending renewals are processed in this block.
+		let result = <DataRenewal as ProvideInherent>::create_inherent(&empty);
 		match result {
-			Some(pallet_bulletin_transaction_storage::Call::<Test>::apply_block_inherents {
-				proof: None,
-			}) => {},
+			Some(crate::Call::<Test>::process_pending_renewals {}) => {},
 			other => panic!(
-				"expected Some(apply_block_inherents {{ proof: None }}) when only pending renewals \
-				 are present, got {other:?}"
+				"expected Some(process_pending_renewals) when pending renewals are present, \
+				 got {other:?}"
 			),
 		}
 	});
@@ -2341,11 +2347,20 @@ fn uses_preimage_authorization() {
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
 		run_to_block(3, || None);
-		// TODO(follow-up): the unsigned `force_renew` + preimage authorization
-		// path needs a corresponding branch in
-		// `pallet-bulletin-data-renewal::ValidateUnsigned`. The original
-		// assertion (renew bumps `bytes_permanent` on the preimage extent) is
-		// restored once that branch lands.
+		// Renew also uses the same preimage auth; it bumps `bytes_permanent` rather than `bytes`.
+		let call =
+			crate::Call::<Test>::force_renew { entry: TransactionRef::Position { block: 1, index: 0 } };
+		assert_ok!(DataRenewal::pre_dispatch(&call));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent {
+				bytes: 2000,
+				bytes_permanent: 2000,
+				bytes_allowance: 2002,
+				transactions: 2,
+				transactions_allowance: 1,
+			}
+		);
 	});
 }
 
