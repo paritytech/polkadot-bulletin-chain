@@ -57,7 +57,7 @@ import {
 	logTestResult,
 } from './logger.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -214,7 +214,7 @@ async function main() {
 		logStep('3️⃣', `Sudo authorizing ${senderAddress}…`);
 		await sdkClient
 			.authorizeAccount(senderAddress, 10 /* transactions */, BigInt(10 * 1024 * 1024))
-			.withWaitFor('finalized')
+			.withWaitFor(WaitFor.Finalized)
 			.send();
 		logSuccess('Authorization confirmed on-chain.');
 

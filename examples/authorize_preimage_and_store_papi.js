@@ -20,7 +20,7 @@ import assert from 'assert';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 import { fetchCid } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
@@ -77,7 +77,7 @@ async function runPreimageStoreTest({ label, client, userAddress, signed, cidCod
 
     await client
         .authorizePreimage(contentHash, BigInt(dataToStore.length))
-        .withWaitFor('finalized')
+        .withWaitFor(WaitFor.Finalized)
         .send();
     logSuccess('Preimage authorized');
 
@@ -85,14 +85,14 @@ async function runPreimageStoreTest({ label, client, userAddress, signed, cidCod
         logInfo(`Also authorizing account ${userAddress} to verify preimage auth is preferred`);
         await client
             .authorizeAccount(userAddress, 10, BigInt(10_000))
-            .withWaitFor('finalized')
+            .withWaitFor(WaitFor.Finalized)
             .send();
     }
 
     const item = { data: dataBytes };
     if (cidCodec != null) item.codec = cidCodec;
     if (mhCode != null) item.hashAlgo = mhCode;
-    let builder = client.upload([item]).withWaitFor('finalized');
+    let builder = client.upload([item]).withWaitFor(WaitFor.Finalized);
     if (!signed) builder = builder.asUnsigned();
     const { cids } = await builder.send();
     const cid = cids[0];

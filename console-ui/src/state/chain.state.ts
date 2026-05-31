@@ -430,10 +430,14 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
       const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
       let bulletin = cache.get(key);
       if (!bulletin && providers) {
+        // The dev console drives both upload and authorize flows from the
+        // same connected account, so reuse `signer` for both SDK roles —
+        // see runtime genesis `allowed_authorizers` vs `account_authorizations`.
         bulletin = new BulletinClient({
           descriptor,
           providers,
           uploadSigner: signer,
+          authorizerSigner: signer,
         });
         cache.set(key, bulletin);
       }

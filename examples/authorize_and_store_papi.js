@@ -20,7 +20,7 @@ import assert from 'assert';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 import { fetchCid } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
@@ -98,7 +98,7 @@ async function main() {
         // Authorize the user account.
         await client
             .authorizeAccount(whoAddress, 100, BigInt(100 * 1024 * 1024)) // 100 MiB
-            .withWaitFor('finalized')
+            .withWaitFor(WaitFor.Finalized)
             .send();
         logSuccess(`Account ${whoAddress} authorized`);
 

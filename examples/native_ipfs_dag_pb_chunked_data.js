@@ -26,7 +26,7 @@ import {
 } from './common.js';
 import { fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 import assert from 'assert';
 
 import fs from 'fs';
@@ -78,7 +78,7 @@ async function main() {
         // Authorize the user account for chunks + DAG storage.
         await client
             .authorizeAccount(whoAddress, 128, BigInt(64 * 1024 * 1024))
-            .withWaitFor('finalized')
+            .withWaitFor(WaitFor.Finalized)
             .send();
 
         // Chunk the file locally, then store all chunks via one SDK upload.
@@ -92,7 +92,7 @@ async function main() {
         console.log(`✂️ Split into ${chunks.length} chunks`);
 
         const items = chunks.map((c) => ({ data: c.bytes }));
-        const { cids: chunkCids } = await client.upload(items).withWaitFor('finalized').send();
+        const { cids: chunkCids } = await client.upload(items).withWaitFor(WaitFor.Finalized).send();
         for (let i = 0; i < chunks.length; i++) {
             assert.deepStrictEqual(chunkCids[i].toString(), chunks[i].cid.toString());
         }
@@ -106,7 +106,7 @@ async function main() {
         // Store the DAG bytes through the SDK with the DAG-PB / SHA2-256 codec.
         const { cids: rootCids } = await client
             .upload([{ data: dagBytes, codec: 0x70, hashAlgo: 0x12 }])
-            .withWaitFor('finalized')
+            .withWaitFor(WaitFor.Finalized)
             .send();
         const rootCid = rootCids[0];
         assert.deepStrictEqual(expectedRootCid.toString(), rootCid.toString());

@@ -20,9 +20,8 @@ import {
 import { logHeader, logConnection, logConfig, logSuccess, logError, logTestResult } from './logger.js'
 import { fetchCid } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
-import { Binary } from '@polkadot-api/substrate-bindings';
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient } from '../sdk/typescript/dist/index.mjs';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -97,7 +96,7 @@ async function storeMetadata(client, chunks) {
     };
     const jsonBytes = Buffer.from(new TextEncoder().encode(JSON.stringify(metadata)));
     console.log(`🧾 Metadata size: ${jsonBytes.length} bytes`);
-    const { cids } = await client.upload([{ data: jsonBytes }]).withWaitFor('finalized').send();
+    const { cids } = await client.upload([{ data: jsonBytes }]).withWaitFor(WaitFor.Finalized).send();
     const metadataCid = cids[0];
     console.log('🧩 Metadata CID:', metadataCid.toString());
     return { metadataCid };
@@ -120,7 +119,7 @@ async function storeChunkedFileViaSdk(client, filePath, chunkSize) {
     console.log(`✂️ Split into ${chunks.length} chunks`);
 
     const items = chunks.map((c) => ({ data: c.bytes }));
-    const { cids } = await client.upload(items).withWaitFor('finalized').send();
+    const { cids } = await client.upload(items).withWaitFor(WaitFor.Finalized).send();
     for (let i = 0; i < chunks.length; i++) {
         assert.deepStrictEqual(
             cids[i].toString(),
@@ -173,36 +172,6 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode 
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-// TODO: revisit sudo usage with https://github.com/paritytech/polkadot-bulletin-chain/pull/265
-async function storeProof(client, proofSigner, rootCID, dagFileBytes) {
-    console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
-
-    // Store DAG bytes in Bulletin via the SDK pipeline.
-    const { cids } = await client.upload([{ data: dagFileBytes }]).withWaitFor('finalized').send();
-    const rawDagCid = cids[0];
-    console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
-
-    // Demonstration only — System.remark wrapped in Sudo.sudo. Direct PAPI
-    // tx via the SDK-exposed typed API; the SDK's pipeline is store-only.
-    const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
-    const remarkTx = client.api.tx.System.remark({ remark: Binary.fromText(proof) });
-    const sudoTx = client.api.tx.Sudo.sudo({ call: remarkTx.decodedCall });
-    await new Promise((resolve, reject) => {
-        sudoTx.signSubmitAndWatch(proofSigner).subscribe({
-            next: (ev) => {
-                console.log(`✅ Proof remark event:`, ev.type);
-                if (ev.type === 'finalized') resolve();
-            },
-            error: (err) => {
-                console.error(`❌ Proof remark error:`, err);
-                reject(err);
-            },
-        });
-    });
-    console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
-    return { rawDagCid };
-}
-
 async function main() {
     await cryptoWaitReady()
 
@@ -240,22 +209,10 @@ async function main() {
         await waitForChainReady(client.api);
         await waitForBlockProduction(client.api);
 
-        // Pre-fetch the static APIs so PAPI caches metadata/constants
-        // before any long-running upload sequence. Without this, a later
-        // raw `signSubmitAndWatch` (the sudo.remark demo below) can hit
-        // BlockNotPinnedError when PAPI's chainHead-follower has already
-        // evicted the finalized block PAPI snapshotted for the validation
-        // walk. PAPI's own zombie integration test calls this for the
-        // same reason; see
-        // https://github.com/polkadot-api/polkadot-api/blob/main/integration-tests/zombie-tests/src/main.spec.ts
-        await client.api.getStaticApis();
-
-        // Authorize the chunk-storage account. The proof DAG + System.remark
-        // step is dispatched through this same account (no separate proof
-        // signer needed since storage is just another upload).
+        // Authorize the chunk-storage account.
         await client
             .authorizeAccount(whoAddress, 200, BigInt(200 * 1024 * 1024)) // 200 MiB
-            .withWaitFor('finalized')
+            .withWaitFor(WaitFor.Finalized)
             .send();
         logSuccess(`Authorized ${whoAddress}`);
 
@@ -280,10 +237,14 @@ async function main() {
         //    we already have the chunks here.
         const { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220)
 
-        // Store DAG bytes through `client` (chunk-storage signer is authorized
-        // for them) and emit a sudo'd System.remark proof. The sudo call uses
-        // `authorizationSigner` which is also the sudo key on dev chains.
-        const { rawDagCid } = await storeProof(client, authorizationSigner, rootCid, Buffer.from(dagBytes));
+        // Upload the DAG-PB descriptor so an IPFS client can dereference
+        // `rootCid` over Bitswap. Bulletin returns the raw-codec CID for the
+        // same bytes (`rawDagCid`); `convertCid` re-tags it as dag-pb below
+        // to compare against the locally-computed `rootCid`.
+        const { cids: [rawDagCid] } = await client
+            .upload([{ data: Buffer.from(dagBytes) }])
+            .withWaitFor(WaitFor.Finalized)
+            .send();
         if (!SKIP_IPFS_VERIFY) {
             await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
         }

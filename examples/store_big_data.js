@@ -33,6 +33,7 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 import {
     BulletinClient,
     UploadStatus,
+    WaitFor,
 } from '../sdk/typescript/dist/index.mjs';
 
 import { fetchCid } from './api.js';
@@ -141,7 +142,7 @@ async function main() {
             logStep('1️⃣', 'Authorizing user account...');
             await client
                 .authorizeAccount(user.address, 100, BigInt(100 * 1024 * 1024)) // 100 MiB
-                .withWaitFor('finalized')
+                .withWaitFor(WaitFor.Finalized)
                 .send();
             logSuccess('Account authorized');
         }
