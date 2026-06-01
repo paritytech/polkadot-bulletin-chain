@@ -900,11 +900,15 @@ PASEO_IPFS_GATEWAY          := "http://TODO-paseo-bulletin-ipfs"
 PASEO_NEXT_V2_IPFS_GATEWAY  := "http://TODO-paseo-bulletin-next-ipfs"
 PREVIEWNET_IPFS_GATEWAY     := "http://TODO-previewnet-bulletin-ipfs"
 
-# Parachain chainspecs used by the Smoldot light-client test.
+# Bulletin parachain chainspecs, matched to each network by the spec's `id`:
+#   westend-chainspec.json    -> id bulletin-westend   (relay westend, para 2487)
+#   paseo-next-chainspec.json -> id bulletin-paseo     (relay paseo,   para 5118)
+#   paseo-next-v2-chainspec.json -> id next-bulletin-paseo (relay paseo, para 1501)
+# Previewnet has no chainspec in the repo yet. TODO(#580): add it.
 WESTEND_PARACHAIN_SPEC          := justfile_directory() + "/../chainspecs/westend-chainspec.json"
-PASEO_PARACHAIN_SPEC            := justfile_directory() + "/../chainspecs/polkadot-chainspec.json"
+PASEO_PARACHAIN_SPEC            := justfile_directory() + "/../chainspecs/paseo-next-chainspec.json"
 PASEO_NEXT_V2_PARACHAIN_SPEC    := justfile_directory() + "/../chainspecs/paseo-next-v2-chainspec.json"
-PREVIEWNET_PARACHAIN_SPEC       := justfile_directory() + "/../chainspecs/paseo-next-chainspec.json"
+PREVIEWNET_PARACHAIN_SPEC       := "TODO-previewnet-bulletin-chainspec.json"
 
 # Internal: run all four canonical live tests against the given endpoints.
 _run-live-tests rpc_url collator_url ipfs_gateway parachain_spec seed image_size="small": npm-install
@@ -921,7 +925,11 @@ _run-live-tests rpc_url collator_url ipfs_gateway parachain_spec seed image_size
     node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}"
 
     echo "▶️  authorize_and_store_papi_smoldot.js"
-    # Smoldot picks up the relay it needs from the parachain chainspec's `relay_chain` field.
+    # TODO(#580): smoldot parachain mode needs the RELAY chainspec as arg 1 and the
+    # bulletin parachain chainspec as arg 2 (see run-test-authorize-and-store). Only
+    # the parachain spec is passed here, so the script runs in solochain mode and
+    # cannot sync — the relay chainspecs are not in the repo yet. The seed is also
+    # not threaded through (the script hardcodes //Eve as authorizer).
     node authorize_and_store_papi_smoldot.js "{{ parachain_spec }}" "" "{{ ipfs_gateway }}"
 
     echo "▶️  hop_round_trip.js"
