@@ -1505,6 +1505,15 @@ pub mod pallet {
 
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
+		///
+		/// FOOTGUN: `sp_io::transaction_index::index` (called below) indexes the
+		/// *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
+		/// encodes as `preamble ++ call`, `data` must be the LAST field of any
+		/// dispatchable that funnels into `do_store` (e.g. [`store`](Self::store),
+		/// [`store_with_cid_config`](Self::store_with_cid_config),
+		/// `pallet-bulletin-hop-promotion::promote`). A field encoded after `data`
+		/// shifts the indexed window onto the wrong bytes and corrupts the stored
+		/// blob — without any dispatch error to flag it.
 		pub fn do_store(
 			data: Vec<u8>,
 			hashing: HashingAlgorithm,
@@ -1544,6 +1553,8 @@ pub mod pallet {
 				TransactionKind::Store,
 			)?;
 			// Index after the runtime mutation — index ops aren't rolled back on dispatch error.
+			// Indexes the trailing `data_len` bytes of the extrinsic, so `data` must be the
+			// caller's last call argument (see the FOOTGUN note on `do_store`).
 			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			Self::deposit_event(Event::Stored {
