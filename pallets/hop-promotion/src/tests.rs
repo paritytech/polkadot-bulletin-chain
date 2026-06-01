@@ -95,11 +95,11 @@ fn make_promote_v2_call(
 	recipients: BoundedVec<MultiSigner, RecipientsBound>,
 ) -> RuntimeCall {
 	RuntimeCall::HopPromotion(crate::Call::promote_v2 {
-		data,
 		signer,
 		signature,
 		submit_timestamp,
 		recipients,
+		data,
 	})
 }
 
@@ -713,6 +713,6 @@ fn promote_v2_succeeds_with_authorized_origin() {
 		let data = vec![42u8; 100];
 		let (signer, sig) = dummy_signer_and_sig();
 		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
-		assert_ok!(HopPromotion::promote_v2(authorized_origin(), data, signer, sig, 0, recipients));
+		assert_ok!(HopPromotion::promote_v2(authorized_origin(), signer, sig, 0, recipients, data));
 	});
 }

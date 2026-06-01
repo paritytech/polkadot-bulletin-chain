@@ -126,7 +126,7 @@ mod benchmarks {
 		let signature = MultiSignature::Sr25519(sig);
 
 		let call =
-			Call::<T>::promote_v2 { data, signer, signature, submit_timestamp: ts, recipients };
+			Call::<T>::promote_v2 { signer, signature, submit_timestamp: ts, recipients, data };
 
 		#[block]
 		{

@@ -231,11 +231,11 @@ pub mod pallet {
 		#[allow(clippy::ptr_arg)]
 		pub fn authorize_promote_v2(
 			source: TransactionSource,
-			data: &Vec<u8>,
 			signer: &MultiSigner,
 			signature: &MultiSignature,
 			submit_timestamp: &u64,
 			recipients: &BoundedVec<MultiSigner, RecipientsBound>,
+			data: &Vec<u8>,
 		) -> Result<(ValidTransaction, Weight), TransactionValidityError> {
 			if matches!(source, TransactionSource::External) {
 				return Err(InvalidTransaction::Call.into());
@@ -326,13 +326,17 @@ pub mod pallet {
 		#[pallet::weight_of_authorize(
 			<T as Config>::WeightInfo::authorize_promote_v2(data.len() as u32, recipients.len() as u32)
 		)]
+		// `data` MUST be the last argument — see the FOOTGUN note on
+		// `pallet_bulletin_transaction_storage::Pallet::do_store`: the trailing
+		// `data.len()` bytes of the encoded extrinsic get indexed, so any field
+		// encoded after `data` corrupts the stored blob.
 		pub fn promote_v2(
 			origin: OriginFor<T>,
-			data: Vec<u8>,
 			_signer: MultiSigner,
 			_signature: MultiSignature,
 			_submit_timestamp: u64,
 			recipients: BoundedVec<MultiSigner, RecipientsBound>,
+			data: Vec<u8>,
 		) -> DispatchResult {
 			ensure_authorized(origin)?;
 			// `recipients` is read by `#[pallet::weight_of_authorize]` above; the dispatch
