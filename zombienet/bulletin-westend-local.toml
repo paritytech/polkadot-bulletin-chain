@@ -75,16 +75,16 @@ validator = true
 p2p_port = 12347
 rpc_port = 12346
 args = [
+	"--enable-hop",
+	"--hop-check-interval 10",
+	"--hop-disable-rate-limit",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
-	"--enable-hop",
-	"--hop-disable-rate-limit",
 	# Headroom for the stress-test sweep (default per-user cap is 256 MiB).
 	"--hop-max-user-size 2048",
-	"--hop-retention-secs 60",
-	"--hop-check-interval 10",
 	"--hop-promotion-buffer-secs 15",
+	"--hop-retention-secs 60",
 	# Embedded relay chain args (after "--"):
 	"--",
 	"--listen-addr=/ip4/127.0.0.1/tcp/12349/ws",
