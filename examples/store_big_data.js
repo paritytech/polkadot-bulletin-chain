@@ -29,8 +29,6 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
 // Note: --signer-disc=XX flag is also supported for parallel runs
-// Note: --skip-authorize flag skips account authorization (for live networks)
-// Note: --skip-ipfs-verify flag skips IPFS download verification
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Eve';
@@ -41,8 +39,6 @@ const NUM_SIGNERS = 16;
 
 // Optional flags
 const signerDiscriminator = process.argv.find(arg => arg.startsWith("--signer-disc="))?.split("=")[1] ?? null;
-const SKIP_AUTHORIZE = process.argv.includes("--skip-authorize");
-const SKIP_IPFS_VERIFY = process.argv.includes("--skip-ipfs-verify");
 
 // -------------------- queue --------------------
 const queue = [];
@@ -266,18 +262,15 @@ async function main() {
             }
         });
 
-        // Authorize accounts (skip for live networks with pre-authorized accounts)
-        if (!SKIP_AUTHORIZE) {
-            const { authorizationSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
-            await authorizeAccount(
-                bulletinAPI,
-                authorizationSigner,
-                signers.map(a => a.address),
-                100,
-                BigInt(100 * 1024 * 1024), // 100 MiB
-                TX_MODE_FINALIZED_BLOCK,
-            );
-        }
+        const { authorizationSigner, _ } = setupKeyringAndSigners(SEED, '//Bigdatasigner');
+        await authorizeAccount(
+            bulletinAPI,
+            authorizationSigner,
+            signers.map(a => a.address),
+            100,
+            BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
+        );
 
         // Start 8 workers
         signers.forEach((signer, i) => {
@@ -317,38 +310,35 @@ async function main() {
         // Print storage statistics
         await printStatistics(dataSize, bulletinAPI);
 
-        // IPFS verification (skip with --skip-ipfs-verify)
-        if (!SKIP_IPFS_VERIFY) {
-            let downloadedContent = await fetchCid(IPFS_GATEWAY_URL, rootCid);
-            console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
-            await fileToDisk(downloadedFileByDagPath, downloadedContent);
-            filesAreEqual(filePath, downloadedFileByDagPath);
-            assert.strictEqual(
-                dataSize,
-                downloadedContent.length,
-                '❌ Failed to download all the data!'
-            );
+        let downloadedContent = await fetchCid(IPFS_GATEWAY_URL, rootCid);
+        console.log(`✅ Reconstructed file size: ${downloadedContent.length} bytes`);
+        await fileToDisk(downloadedFileByDagPath, downloadedContent);
+        filesAreEqual(filePath, downloadedFileByDagPath);
+        assert.strictEqual(
+            dataSize,
+            downloadedContent.length,
+            '❌ Failed to download all the data!'
+        );
 
-            // Check all chunks are there.
-            console.log(`Downloading by chunks...`);
-            let downloadedChunks = [];
-            for (const chunk of chunks) {
-                // Download the chunk from IPFS.
-                let block = await fetchCid(IPFS_GATEWAY_URL, chunk.cid);
-                downloadedChunks.push(block);
-            }
-            let fullBuffer = Buffer.concat(downloadedChunks);
-            console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-            await fileToDisk(downloadedFilePath, fullBuffer);
-            filesAreEqual(filePath, downloadedFilePath);
-            assert.strictEqual(
-                dataSize,
-                fullBuffer.length,
-                '❌ Failed to download all the data!'
-            );
+        // Check all chunks are there.
+        console.log(`Downloading by chunks...`);
+        let downloadedChunks = [];
+        for (const chunk of chunks) {
+            // Download the chunk from IPFS.
+            let block = await fetchCid(IPFS_GATEWAY_URL, chunk.cid);
+            downloadedChunks.push(block);
         }
+        let fullBuffer = Buffer.concat(downloadedChunks);
+        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+        await fileToDisk(downloadedFilePath, fullBuffer);
+        filesAreEqual(filePath, downloadedFilePath);
+        assert.strictEqual(
+            dataSize,
+            fullBuffer.length,
+            '❌ Failed to download all the data!'
+        );
 
-        logTestResult(true, SKIP_IPFS_VERIFY ? 'Store Big Data Test (Storage Only)' : 'Store Big Data Test');
+        logTestResult(true, 'Store Big Data Test');
         resultCode = 0;
     } catch (error) {
         logError(`Error: ${error.message}`);

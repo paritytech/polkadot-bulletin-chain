@@ -864,34 +864,89 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed
 # Live network tests (external endpoints - Westend, Paseo, etc.)
 # ============================================================================
 #
-# Run store-big-data test against live Bulletin chain deployments.
-# These require pre-authorized accounts.
+# Runs the four canonical end-to-end scripts against a live Bulletin
+# deployment: store_big_data.js (IPFS + multi-chunked files),
+# authorize_and_store_papi_smoldot.js (Smoldot light client),
+# hop_round_trip.js (HOP), and check_chopsticks.js (Chopsticks fork).
 #
-# Usage:
-#   just run-live-tests-westend <seed>
-#   just run-live-tests-westend <seed> http://127.0.0.1:8283 small
+# The seed must hold authorizer rights on the target network — the scripts
+# authorize their worker signers inline (no pre-provisioned accounts needed).
+#
+# Per-network usage:
+#   just run-live-tests-westend         <seed>
+#   just run-live-tests-paseo           <seed>
+#   just run-live-tests-paseo-next-v2   <seed>
+#   just run-live-tests-previewnet      <seed>
+#
+# Ad-hoc usage (any network, supply all endpoints):
+#   just run-live-tests <seed> <rpc_url> <collator_url> <ipfs_gateway> <parachain_chainspec>
 
-# Live network endpoints
-WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
-PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+# Live RPC endpoints (mirrors scripts/runtimes-matrix.json `try_runtime.instances[].uris`)
+WESTEND_RPC         := "wss://westend-bulletin-rpc.polkadot.io"
+PASEO_RPC           := "wss://paseo-bulletin-rpc.polkadot.io"
+PASEO_NEXT_V2_RPC   := "wss://paseo-bulletin-next-rpc.polkadot.io"
+PREVIEWNET_RPC      := "wss://previewnet.substrate.dev/bulletin"
 
-# Run store-big-data test against a live endpoint
-# Parameters:
-#   ws_url - WebSocket URL of the Bulletin chain node
-#   seed - Account seed phrase (must be pre-authorized on the network)
-#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-#   image_size - Image size preset: small, big32, big64, big96 (default: small)
-_run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small": npm-install
+# HOP collator RPC endpoints (NOT the same as the public RPC node — HOP RPC methods
+# live on the collator's local interface). TODO(#580): fill in once published.
+WESTEND_HOP_RPC         := "wss://TODO-westend-bulletin-collator.polkadot.io"
+PASEO_HOP_RPC           := "wss://TODO-paseo-bulletin-collator.polkadot.io"
+PASEO_NEXT_V2_HOP_RPC   := "wss://TODO-paseo-bulletin-next-collator.polkadot.io"
+PREVIEWNET_HOP_RPC      := "wss://TODO-previewnet-bulletin-collator.polkadot.io"
+
+# Network-specific IPFS gateways. TODO(#580): fill in once published.
+WESTEND_IPFS_GATEWAY        := "http://TODO-westend-bulletin-ipfs"
+PASEO_IPFS_GATEWAY          := "http://TODO-paseo-bulletin-ipfs"
+PASEO_NEXT_V2_IPFS_GATEWAY  := "http://TODO-paseo-bulletin-next-ipfs"
+PREVIEWNET_IPFS_GATEWAY     := "http://TODO-previewnet-bulletin-ipfs"
+
+# Parachain chainspecs used by the Smoldot light-client test.
+WESTEND_PARACHAIN_SPEC          := justfile_directory() + "/../chainspecs/westend-chainspec.json"
+PASEO_PARACHAIN_SPEC            := justfile_directory() + "/../chainspecs/polkadot-chainspec.json"
+PASEO_NEXT_V2_PARACHAIN_SPEC    := justfile_directory() + "/../chainspecs/paseo-next-v2-chainspec.json"
+PREVIEWNET_PARACHAIN_SPEC       := justfile_directory() + "/../chainspecs/paseo-next-chainspec.json"
+
+# Internal: run all four canonical live tests against the given endpoints.
+_run-live-tests rpc_url collator_url ipfs_gateway parachain_spec seed image_size="small": npm-install
     #!/usr/bin/env bash
     set -e
-    echo "🌐 Running live tests against: {{ ws_url }}"
-    just papi-generate "{{ ws_url }}"
-    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
+    echo "🌐 Running live tests"
+    echo "   RPC:           {{ rpc_url }}"
+    echo "   HOP collator:  {{ collator_url }}"
+    echo "   IPFS gateway:  {{ ipfs_gateway }}"
+    echo "   Parachain spec:{{ parachain_spec }}"
+    just papi-generate "{{ rpc_url }}"
+
+    echo "▶️  store_big_data.js"
+    node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}"
+
+    echo "▶️  authorize_and_store_papi_smoldot.js"
+    # Smoldot picks up the relay it needs from the parachain chainspec's `relay_chain` field.
+    node authorize_and_store_papi_smoldot.js "{{ parachain_spec }}" "" "{{ ipfs_gateway }}"
+
+    echo "▶️  hop_round_trip.js"
+    # HOP needs the collator's RPC; the public RPC node doesn't host hop_*.
+    node hop_round_trip.js "{{ collator_url }}" "{{ seed }}" "{{ ipfs_gateway }}"
+
+    echo "▶️  check_chopsticks.js"
+    node check_chopsticks.js "{{ rpc_url }}"
 
 # Run live tests against Westend Bulletin
-run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
-    just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+run-live-tests-westend seed image_size="small":
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against Paseo Bulletin
-run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
-    just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+run-live-tests-paseo seed image_size="small":
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+
+# Run live tests against Paseo Bulletin next-v2 (staging)
+run-live-tests-paseo-next-v2 seed image_size="small":
+    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+
+# Run live tests against Previewnet Bulletin
+run-live-tests-previewnet seed image_size="small":
+    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+
+# Run live tests against any endpoint set (caller supplies all URLs)
+run-live-tests seed rpc_url collator_url ipfs_gateway parachain_spec image_size="small":
+    just _run-live-tests "{{ rpc_url }}" "{{ collator_url }}" "{{ ipfs_gateway }}" "{{ parachain_spec }}" "{{ seed }}" "{{ image_size }}"
