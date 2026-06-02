@@ -9,7 +9,7 @@
     "verbatimModuleSyntax": false,
     // Pull in Node's globals (setTimeout/clearTimeout/etc) explicitly. The
     // preset's `lib: es2022` excludes both DOM and Node, so the standard
-    // timer functions used in async-client.ts wouldn't otherwise resolve.
+    // timer functions used in client.ts wouldn't otherwise resolve.
     // Listing @types/node here is robust against changes in the dependency
     // graph — previously `@types/node` was reached through a runtime path
     // (via @types/bn.js → @polkadot/util-crypto), but that path is gone

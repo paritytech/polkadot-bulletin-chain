@@ -6,20 +6,30 @@ import { CID } from 'multiformats/cid'
 import * as dagPB from '@ipld/dag-pb'
 import { TextDecoder } from 'util'
 import assert from "assert";
-import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
-import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
-import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
+import {
+    generateTextImage,
+    filesAreEqual,
+    fileToDisk,
+    setupKeyringAndSigners,
+    waitForChainReady,
+    waitForBlockProduction,
+    parseProviderArgs,
+    buildProviders,
+    DEFAULT_IPFS_GATEWAY_URL,
+} from './common.js'
+import { logHeader, logConnection, logConfig, logSuccess, logError, logTestResult } from './logger.js'
+import { fetchCid } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
-import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws";
-import { Binary } from '@polkadot-api/substrate-bindings';
 import { bulletin } from './.papi/descriptors/dist/index.js';
+import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
+const PROVIDER_CFG = parseProviderArgs(process.argv);
+const SKIP_IPFS_VERIFY = process.argv.includes('--skip-ipfs-verify');
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 
 /**
@@ -69,11 +79,10 @@ async function retrieveFileForMetadata(metadataJson, outputPath) {
 }
 
 /**
- * Creates and stores metadata describing the file chunks.
- * Returns { metadataCid }
+ * Builds metadata describing the file chunks, stores it via the SDK,
+ * returns `{ metadataCid }`.
  */
-export async function storeMetadata(typedApi, signer, chunks) {
-    // 1️⃣ Prepare JSON metadata (without bytes)
+async function storeMetadata(client, chunks) {
     const metadata = {
         type: 'file',
         version: 1,
@@ -82,18 +91,51 @@ export async function storeMetadata(typedApi, signer, chunks) {
         chunks: chunks.map((c, i) => ({
             index: i,
             cid: c.cid.toString(),
-            len: c.len
-        }))
+            len: c.len,
+        })),
     };
-
     const jsonBytes = Buffer.from(new TextEncoder().encode(JSON.stringify(metadata)));
     console.log(`🧾 Metadata size: ${jsonBytes.length} bytes`);
-
-    // 2️⃣ Store JSON bytes in Bulletin
-    const { cid: metadataCid } = await store(typedApi, signer, jsonBytes);
+    const metaItems = [{ data: jsonBytes }];
+    const { cids } = await client
+        .submit(await client.estimateUpload(metaItems), blobFromItems(metaItems))
+        .withWaitFor(WaitFor.Finalized)
+        .send();
+    const metadataCid = cids[0];
     console.log('🧩 Metadata CID:', metadataCid.toString());
-
     return { metadataCid };
+}
+
+/**
+ * Splits the file into chunks, stores them via the SDK pipeline, and
+ * verifies CIDs match the precomputed expectations.
+ */
+async function storeChunkedFileViaSdk(client, filePath, chunkSize) {
+    const fileData = fs.readFileSync(filePath);
+    console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`);
+
+    const chunks = [];
+    for (let i = 0; i < fileData.length; i += chunkSize) {
+        const chunk = fileData.subarray(i, i + chunkSize);
+        const cid = await cidFromBytes(chunk);
+        chunks.push({ cid, bytes: chunk, len: chunk.length });
+    }
+    console.log(`✂️ Split into ${chunks.length} chunks`);
+
+    const items = chunks.map((c) => ({ data: c.bytes }));
+    const { cids } = await client
+        .submit(await client.estimateUpload(items), blobFromItems(items))
+        .withWaitFor(WaitFor.Finalized)
+        .send();
+    for (let i = 0; i < chunks.length; i++) {
+        assert.deepStrictEqual(
+            cids[i].toString(),
+            chunks[i].cid.toString(),
+            `❌ Chunk #${i + 1} CID mismatch`,
+        );
+    }
+    console.log(`✅ Stored ${chunks.length} chunks; all CIDs verified`);
+    return { chunks };
 }
 
 /**
@@ -137,104 +179,112 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode 
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-// TODO: revisit sudo usage with https://github.com/paritytech/polkadot-bulletin-chain/pull/265
-async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
-    console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
-
-    // Store DAG bytes in Bulletin using PAPI store function
-    const { cid: rawDagCid } = await store(typedApi, proofSigner, dagFileBytes);
-    console.log('📤 DAG proof "bytes" stored in Bulletin with CID:', rawDagCid.toString());
-
-    // This can be a serious pallet, this is just a demonstration.
-    const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
-    const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    const sudoTx = typedApi.tx.Sudo.sudo({ call: remarkTx.decodedCall });
-    await sudoTx.signSubmitAndWatch(proofSigner).subscribe({
-        next: (ev) => console.log(`✅ Proof remark event:`, ev.type),
-        error: (err) => console.error(`❌ Proof remark error:`, err),
-    });
-    console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
-    return { rawDagCid }
-}
-
 async function main() {
     await cryptoWaitReady()
 
     logHeader('STORE CHUNKED DATA TEST');
-    logConnection(NODE_WS, SEED, HTTP_IPFS_API);
+    if (PROVIDER_CFG.mode === 'smoldot') {
+        logConfig({
+            Mode: 'Smoldot Light Client',
+            'Relay Spec': PROVIDER_CFG.relaySpecPath,
+            'Para Spec': PROVIDER_CFG.paraSpecPath,
+            'IPFS API': HTTP_IPFS_API,
+        });
+    } else {
+        logConnection(NODE_WS, SEED, HTTP_IPFS_API);
+    }
 
-    let client, resultCode;
+    let client, providersHandle, resultCode;
     try {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bulletin-chunked-"));
         const filePath = path.join(tmpDir, "image.jpeg");
         const out1Path = path.join(tmpDir, "retrieved1.jpeg");
         const out2Path = path.join(tmpDir, "retrieved2.jpeg");
-        generateTextImage(filePath, "Hello, Bulletin with PAPI chunked - " + new Date().toString(), "small");
+        generateTextImage(filePath, "Hello, Bulletin chunked - " + new Date().toString(), "small");
 
-        // Init WS PAPI client and typed api.
-        client = createClient(getWsProvider(NODE_WS));
-        const bulletinAPI = client.getTypedApi(bulletin);
-        await waitForBlockProduction(bulletinAPI);
-        const { authorizationSigner, authorizationAddress, whoSigner, whoAddress } = setupKeyringAndSigners(SEED, '//Chunkedsigner');
+        providersHandle = await buildProviders({ ...PROVIDER_CFG, wsUrl: NODE_WS });
+        const { authorizationSigner, whoSigner, whoAddress } =
+            setupKeyringAndSigners(SEED, '//Chunkedsigner');
 
-        // Authorize accounts (both whoAddress for chunk storage and authorizationAddress for proof storage).
-        await authorizeAccount(
-            bulletinAPI,
-            authorizationSigner,
-            [whoAddress, authorizationAddress],
-            100,
-            BigInt(100 * 1024 * 1024), // 100 MiB
-            TX_MODE_FINALIZED_BLOCK
-        );
+        client = new BulletinClient({
+            descriptor: bulletin,
+            providers: providersHandle.providers,
+            uploadSigner: whoSigner,
+            authorizerSigner: authorizationSigner,
+        });
 
-        // Read the file, chunk it, store in Bulletin and return CIDs (using PAPI).
-        let { chunks} = await storeChunkedFile(bulletinAPI, whoSigner, filePath, CHUNK_SIZE);
+        await waitForChainReady(client.api);
+        await waitForBlockProduction(client.api);
 
-        // Store metadata file with all the CIDs to the Bulletin.
-        const { metadataCid} = await storeMetadata(bulletinAPI, whoSigner, chunks);
+        // Authorize the chunk-storage account.
+        await client
+            .authorizeAccount(whoAddress, 200, BigInt(200 * 1024 * 1024)) // 200 MiB
+            .withWaitFor(WaitFor.Finalized)
+            .send();
+        logSuccess(`Authorized ${whoAddress}`);
+
+        // Chunk the file and store all chunks through the SDK pipeline.
+        const { chunks } = await storeChunkedFileViaSdk(client, filePath, CHUNK_SIZE);
+
+        // Store metadata describing the chunks.
+        const { metadataCid } = await storeMetadata(client, chunks);
 
         ////////////////////////////////////////////////////////////////////////////////////
-        // 1. example manually retrieve the picture (no IPFS DAG feature)
-        const metadataJson = await retrieveMetadata(metadataCid)
-        await retrieveFileForMetadata(metadataJson, out1Path);
-        filesAreEqual(filePath, out1Path);
+        // 1. example manually retrieve the picture (no IPFS DAG feature).
+        //    Hits the IPFS HTTP gateway; only runnable when kubo is up.
+        if (!SKIP_IPFS_VERIFY) {
+            const metadataJson = await retrieveMetadata(metadataCid)
+            await retrieveFileForMetadata(metadataJson, out1Path);
+            filesAreEqual(filePath, out1Path);
+        }
 
         ////////////////////////////////////////////////////////////////////////////////////
-        // 2. example download picture by rootCID with IPFS DAG feature and HTTP gateway.
-        // Demonstrates how to download chunked content by one root CID.
-        // Basically, just take the `metadataJson` with already stored chunks and convert it to the DAG-PB format.
-        const { rootCid, dagBytes } = await buildUnixFSDag(metadataJson, 0xb220)
+        // 2. UnixFS DAG-PB build from the in-memory chunk list. We don't
+        //    need to re-fetch the metadata via IPFS to build the DAG since
+        //    we already have the chunks here.
+        const { rootCid, dagBytes } = await buildUnixFSDagPB(chunks, 0xb220)
 
-        // Store DAG and proof to the Bulletin.
-        let { rawDagCid } = await storeProof(bulletinAPI, authorizationSigner, rootCid, Buffer.from(dagBytes));
-        await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
+        // Upload the DAG-PB descriptor so an IPFS client can dereference
+        // `rootCid` over Bitswap. Bulletin returns the raw-codec CID for the
+        // same bytes (`rawDagCid`); `convertCid` re-tags it as dag-pb below
+        // to compare against the locally-computed `rootCid`.
+        const dagItems = [{ data: Buffer.from(dagBytes) }];
+        const { cids: [rawDagCid] } = await client
+            .submit(await client.estimateUpload(dagItems), blobFromItems(dagItems))
+            .withWaitFor(WaitFor.Finalized)
+            .send();
+        if (!SKIP_IPFS_VERIFY) {
+            await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
+        }
 
-        // Store DAG into IPFS.
         assert.strictEqual(
             rootCid.toString(),
             convertCid(rawDagCid, dagPB.code).toString(),
             '❌ DAG CID does not match expected root CID'
         );
-        console.log('🧱 DAG stored on IPFS with CID:', rawDagCid.toString())
-        console.log('\n🌐 Try opening in browser:')
-        console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
-        console.log("   (You'll see binary content since this is an image)")
-        console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
-        console.log("   (You'll see the encoded DAG descriptor content)")
+        console.log('🧱 DAG stored on Bulletin with CID:', rawDagCid.toString())
 
-        // Download the content from IPFS HTTP gateway
-        const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
-        console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
-        await fileToDisk(out2Path, fullBuffer);
-        filesAreEqual(filePath, out1Path);
-        filesAreEqual(out1Path, out2Path);
+        if (!SKIP_IPFS_VERIFY) {
+            console.log('\n🌐 Try opening in browser:')
+            console.log(`   ${HTTP_IPFS_API}/ipfs/${rootCid.toString()}`)
+            console.log("   (You'll see binary content since this is an image)")
+            console.log(`   ${HTTP_IPFS_API}/ipfs/${rawDagCid.toString()}`)
+            console.log("   (You'll see the encoded DAG descriptor content)")
 
-        // Download the DAG descriptor raw file itself.
-        const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
-        logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
-        assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
-        const dagNode = dagPB.decode(downloadedDagBytes);
-        console.log('📄 Decoded DAG node:', dagNode);
+            // Download the content from IPFS HTTP gateway
+            const fullBuffer = await fetchCid(HTTP_IPFS_API, rootCid);
+            console.log(`✅ Reconstructed file size: ${fullBuffer.length} bytes`);
+            await fileToDisk(out2Path, fullBuffer);
+            filesAreEqual(filePath, out1Path);
+            filesAreEqual(out1Path, out2Path);
+
+            // Download the DAG descriptor raw file itself.
+            const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
+            logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
+            assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
+            const dagNode = dagPB.decode(downloadedDagBytes);
+            console.log('📄 Decoded DAG node:', dagNode);
+        }
 
         logTestResult(true, 'Store Chunked Data Test');
         resultCode = 0;
@@ -243,7 +293,8 @@ async function main() {
         console.error(error);
         resultCode = 1;
     } finally {
-        if (client) client.destroy();
+        if (client) await client.destroy();
+        if (providersHandle) await providersHandle.cleanup();
         process.exit(resultCode);
     }
 }

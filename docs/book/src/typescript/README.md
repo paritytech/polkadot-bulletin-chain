@@ -1,64 +1,44 @@
 # TypeScript SDK
 
-The `@parity/bulletin-sdk` package provides a modern, type-safe client for Node.js and Browser environments.
+The `@parity/bulletin-sdk` package is a type-safe client for Node.js and the browser.
 
 ## Features
 
-### Core Storage
-- **Unified API**: Single `store()` method handles both small and large files (up to 64 MiB)
-- **Automatic Chunking**: Files are automatically chunked (up to 2 MiB per chunk)
-- **Progress Tracking**: Real-time callbacks for upload progress
-- **DAG-PB Manifests**: Standard manifest generation for chunked data
-- **CID Support**: Multiple codecs (Raw, DAG-PB, DAG-CBOR) and hash algorithms
-
-### Authorization Management
-- **Complete Operations**: Authorize, refresh, and manage authorizations
-
-### Error Handling
-- **Typed Error Codes**: `ErrorCode` enum with IDE autocomplete
-- **Retryable Detection**: `error.retryable` identifies transient failures
-- **Recovery Hints**: `error.recoveryHint` provides actionable suggestions
-- **Transaction Events**: Full lifecycle tracking (validated, broadcasted, finalized, etc.)
-
-### Developer Experience
-- **Full Type Support**: Written in TypeScript with complete definitions
-- **Direct PAPI Integration**: Tightly coupled to Polkadot API for type-safe blockchain interaction
-- **Builder Pattern**: Fluent API for configuring store operations
-- **Isomorphic**: Works in Node.js, Browsers, and other JS runtimes
-- **Mock Support**: `MockBulletinClient` for testing without a blockchain node
+- **One submission API**: `submit(estimate, source)` covers single items, batches, and chunked files — signed or unsigned.
+- **Estimate first**: `estimateUpload()` returns the CIDs, transaction count, and byte cost up front, so a UI can preview a store before paying.
+- **Streamed chunking**: large files are chunked and given a DAG-PB manifest without holding the whole file in memory.
+- **CID control**: per-item codec (Raw, DAG-PB, DAG-CBOR) and hash algorithm (Blake2b-256, SHA2-256, Keccak-256).
+- **Authorization**: `authorizeAccount`, `authorizePreimage`, refresh, and remove-expired.
+- **Progress callbacks**: per-item `ItemStarted` / `ItemInBlock` / `ItemFinalized` / `ItemFailed` events.
+- **Typed errors**: `BulletinError` with an `ErrorCode` enum, `retryable`, and `recoveryHint`.
+- **Mock client**: `MockBulletinClient` for tests without a node.
 
 ## Quick Example
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
-import { createClient } from 'polkadot-api';
+import { BulletinClient, blobFromBytes } from '@parity/bulletin-sdk';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
-// Setup PAPI client
-const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
-const papiClient = createClient(wsProvider);
-const api = papiClient.getTypedApi(bulletinDescriptor);
+// The SDK owns its PAPI connection — give it a providers factory.
+const client = new BulletinClient({
+  providers: () => [getWsProvider('wss://bulletin-rpc.polkadot.io')],
+  uploadSigner: signer,
+});
 
-// Create SDK client with PAPI client, signer, and submit function
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const src = blobFromBytes(new Uint8Array(50_000_000)); // 50 MB
+const { cids } = await client.submit(await client.estimateUpload(src), src).send();
 
-// Store any size file using builder pattern
-const data = new Uint8Array(50_000_000); // 50 MB
-const result = await client.store(data).send();
-
-console.log('Stored with CID:', result.cid.toString());
+// Last CID is the retrieval id: the manifest root, or the lone chunk's CID.
+console.log('Stored with CID:', cids[cids.length - 1].toString());
 ```
-
-## Getting Started
-
-Proceed to [Installation](./installation.md) to get started.
 
 ## Guides
 
 - [Installation](./installation.md) - Install the SDK
 - [Authorization](./authorization.md) - Manage authorization for storage
-- [Basic Storage](./basic-storage.md) - Store small files with a single transaction
-- [Chunked Uploads](./chunked-uploads.md) - Handle large files with automatic chunking
-- [Renewal](./renewal.md) - Extend data retention period
+- [Basic Storage](./basic-storage.md) - Store items with `estimateUpload` → `submit`
+- [Chunked Uploads](./chunked-uploads.md) - Large files, manifests, and progress
+- [Renewal](./renewal.md) - Extend data retention
 - [Error Handling](./error-handling.md) - Error codes, retry logic, and recovery hints
-- [PAPI Integration](./papi-integration.md) - Integrate with Polkadot API
+- [PAPI Integration](./papi-integration.md) - Providers, light clients, and signers
+- [API Reference](./api-reference.md) - Full type and method reference

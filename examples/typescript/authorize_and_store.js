@@ -3,8 +3,8 @@
  *
  * TypeScript equivalent of the Rust authorize-and-store example.
  * Demonstrates:
- * 1. Authorizing an account to store data (sudo via AsyncBulletinClient)
- * 2. Storing data on chain via AsyncBulletinClient.store().send()
+ * 1. Authorizing an account to store data (sudo via BulletinClient)
+ * 2. Storing data on chain via client.submit(estimate, source).send()
  * 3. Verifying the returned CID
  *
  * Usage:
@@ -17,14 +17,14 @@ import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { bulletin } from '../.papi/descriptors/dist/index.js';
-import { AsyncBulletinClient } from '../../sdk/typescript/dist/index.mjs';
+import { blobFromBytes, BulletinClient, WaitFor } from '../../sdk/typescript/dist/index.mjs';
 
 // Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Eve';
+const SEED = args[1] || '//Alice';
 
-// Create a PAPI-compatible signer from a dev seed (e.g. "//Eve")
+// Create a PAPI-compatible signer from a dev seed (e.g. "//Alice")
 function createSignerFromSeed(seed) {
     const keyring = new Keyring({ type: 'sr25519' });
     const account = keyring.addFromUri(seed);
@@ -42,29 +42,29 @@ async function main() {
     console.log(`Connecting to: ${NODE_WS}`);
     console.log(`Using seed: ${SEED}`);
 
-    let papiClient, resultCode;
+    let client, resultCode;
     try {
-        // Initialize PAPI client
-        papiClient = createClient(getWsProvider(NODE_WS));
-        const api = papiClient.getTypedApi(bulletin);
-
-        // Create signers: authorizer (default seed, must be in `AllowedAuthorizers`)
-        // and a regular user account.
+        // Create signers: an Authorizer (e.g. //Alice) and a regular user account.
         const authorizer = createSignerFromSeed(SEED);
         const user = createSignerFromSeed('//SDKSigner');
         console.log(`User account: ${user.address}`);
 
-        // Create SDK clients
-        const authorizerClient = new AsyncBulletinClient(api, authorizer.signer);
-        const userClient = new AsyncBulletinClient(api, user.signer);
+        // SDK owns the PAPI client lifecycle. `uploadSigner` is the
+        // user; `authorizerSigner` is REQUIRED to call authorize/refresh.
+        client = new BulletinClient({
+            descriptor: bulletin,
+            providers: () => [getWsProvider(NODE_WS)],
+            uploadSigner: user.signer,
+            authorizerSigner: authorizer.signer,
+        });
 
-        // Step 1: Authorize the user account to store data.
+        // Step 1: Authorize the account to store data
         console.log('\nStep 1: Authorizing account...');
-        await authorizerClient.authorizeAccount(
+        await client.authorizeAccount(
             user.address,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
-        ).withWaitFor('finalized').send();
+        ).withWaitFor(WaitFor.Finalized).send();
         console.log('Account authorized successfully!');
 
         // Step 2: Store data using the SDK
@@ -73,10 +73,12 @@ async function main() {
         console.log(`\nStep 2: Storing data: "${dataToStore}"`);
         console.log(`  Size: ${dataBytes.length} bytes`);
 
-        const result = await userClient.store(dataBytes).send();
+        const src = blobFromBytes(dataBytes);
+        const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+        const cid = cids[cids.length - 1];
 
         console.log('Data stored successfully!');
-        console.log(`  CID: ${result.cid.toString()}`);
+        console.log(`  CID: ${cid.toString()}`);
 
         console.log('\nTest passed!');
         resultCode = 0;
@@ -84,7 +86,7 @@ async function main() {
         console.error('Error:', error);
         resultCode = 1;
     } finally {
-        if (papiClient) papiClient.destroy();
+        if (client) await client.destroy();
         process.exit(resultCode);
     }
 }

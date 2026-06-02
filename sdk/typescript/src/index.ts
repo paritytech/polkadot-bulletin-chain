@@ -43,21 +43,15 @@
  */
 
 export { CID } from "multiformats/cid"
-
-// async-client: core client, builders, and public interfaces
+// blob-source: re-openable byte source for streamed uploads (input to
+// estimateUpload / submit)
 export {
-  AsyncBulletinClient,
-  AuthCallBuilder,
-  type AuthCallOptions,
-  type BulletinClientInterface,
-  type BulletinTypedApi,
-  CallBuilder,
-  type CallOptions,
-  StoreBuilder,
-  type SubmitFn,
-  type TransactionReceipt,
-} from "./async-client.js"
-
+  type BlobSource,
+  blobFromBytes,
+  blobFromFactory,
+  blobFromItems,
+  type SeekableSource,
+} from "./blob-source.js"
 // chunker: data splitting and reassembly
 export {
   FixedSizeChunker,
@@ -65,6 +59,19 @@ export {
   MAX_FILE_SIZE,
   reassembleChunks,
 } from "./chunker.js"
+// client: core client, builders, and public interfaces
+export {
+  AuthCallBuilder,
+  type AuthCallOptions,
+  BulletinClient,
+  type BulletinClientInterface,
+  type BulletinTypedApi,
+  CallBuilder,
+  type CallOptions,
+  type SubmitAndWatchFn,
+  SubmitBuilder,
+  type TransactionReceipt,
+} from "./client.js"
 
 // dag: DAG-PB manifest building
 export { type DagManifest, UnixFsDagBuilder } from "./dag.js"
@@ -75,6 +82,8 @@ export {
   type MockClientConfig,
   type MockOperation,
 } from "./mock-client.js"
+// Block-capacity tuning knob for chunked store; everything else is internal.
+export type { BlockLimits } from "./pipeline.js"
 
 // preparer: offline CID calculation and chunking
 export { BulletinPreparer } from "./preparer.js"
@@ -87,8 +96,7 @@ export {
   type ChunkDetails,
   type ChunkedStoreResult,
   type ChunkerConfig,
-  type ChunkProgressEvent,
-  ChunkStatus,
+  type ChunkPlan,
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
@@ -101,8 +109,17 @@ export {
   resolveClientConfig,
   type StoreOptions,
   type StoreResult,
+  type StreamEstimate,
   type TransactionStatusEvent,
   TxStatus,
+  type UploadCallback,
+  type UploadEstimate,
+  type UploadEstimateItem,
+  type UploadEstimateOptions,
+  type UploadEvent,
+  type UploadItem,
+  type UploadResult,
+  UploadStatus,
   WaitFor,
 } from "./types.js"
 

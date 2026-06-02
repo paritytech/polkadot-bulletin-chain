@@ -47,27 +47,25 @@ npm install @parity/bulletin-sdk polkadot-api
 ### Step 2: Store Data
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-import { createClient, Binary } from "polkadot-api";
+import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
 async function main() {
-  // 1. Connect to testnet
-  const papiClient = createClient(
-    getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")
-  );
-  const api = papiClient.getTypedApi(bulletin);
+  // 1. Create the client — it owns its PAPI connection.
+  const client = new BulletinClient({
+    providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+    uploadSigner: signer,
+    descriptor: bulletin, // optional; omit to use getUnsafeApi()
+  });
 
-  // 2. Create SDK client with PAPI client, signer, and submit function
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+  // 2. Estimate (lets a UI preview cost), then submit. Requires
+  //    authorization — use the Faucet first!
+  const src = blobFromBytes(new TextEncoder().encode("Hello, Bulletin Chain!"));
+  const { cids } = await client.submit(await client.estimateUpload(src), src).send();
 
-  // 3. Store data (requires authorization - use Faucet first!)
-  const data = Binary.fromText("Hello, Bulletin Chain!");
-  const result = await client.store(data).send();
-
-  console.log("CID:", result.cid.toString());
-  console.log("Stored in block:", result.blockNumber);
+  // Last CID is the retrieval id: the manifest root, or the lone chunk's CID.
+  console.log("CID:", cids[cids.length - 1].toString());
 }
 
 main();
@@ -75,11 +73,11 @@ main();
 
 ### Step 3: Get Authorization (Required)
 
-Before storing, you need authorization. On testnets, use the Faucet in the Console UI, or if you have sudo access:
+Before storing, you need authorization. On testnets, use the Faucet in the Console UI. If your account is in the chain's `AllowedAuthorizers` set (or you have sudo), grant it yourself:
 
 ```typescript
-// Only works if you have sudo/root access
-await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).withSudo().send();
+// Pass the authorizer as `authorizerSigner` when constructing the client.
+await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).send();
 ```
 
 ---

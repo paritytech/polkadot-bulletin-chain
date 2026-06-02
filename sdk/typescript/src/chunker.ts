@@ -5,6 +5,7 @@
  * Data chunking utilities for splitting large files into smaller pieces
  */
 
+import type { BlobSource } from "./blob-source.js"
 import {
   BulletinError,
   type Chunk,
@@ -89,6 +90,53 @@ export class FixedSizeChunker {
    */
   get chunkSize(): number {
     return this.config.chunkSize
+  }
+}
+
+/**
+ * Re-slice an arbitrary-boundary byte stream into fixed `chunkSize` pieces.
+ *
+ * Carries a small remainder across input reads, so peak working memory is
+ * ~`chunkSize` regardless of file size. The final chunk may be shorter. Used by
+ * the streaming estimate/plan path; the in-memory {@link FixedSizeChunker} is
+ * the eager, whole-buffer alternative.
+ */
+export async function* chunkStream(
+  source: BlobSource,
+  chunkSize: number,
+): AsyncIterable<{ index: number; data: Uint8Array }> {
+  if (chunkSize <= 0) {
+    throw new BulletinError(
+      "Chunk size must be greater than 0",
+      ErrorCode.INVALID_CHUNK_SIZE,
+    )
+  }
+  if (chunkSize > MAX_CHUNK_SIZE) {
+    throw new BulletinError(
+      `Chunk size ${chunkSize} exceeds maximum allowed size of ${MAX_CHUNK_SIZE}`,
+      ErrorCode.CHUNK_TOO_LARGE,
+    )
+  }
+
+  let buf: Uint8Array = new Uint8Array(0)
+  let index = 0
+  for await (const part of source.open()) {
+    if (part.length === 0) continue
+    if (buf.length === 0) {
+      buf = part
+    } else {
+      const merged = new Uint8Array(buf.length + part.length)
+      merged.set(buf, 0)
+      merged.set(part, buf.length)
+      buf = merged
+    }
+    while (buf.length >= chunkSize) {
+      yield { index: index++, data: buf.subarray(0, chunkSize) }
+      buf = buf.subarray(chunkSize)
+    }
+  }
+  if (buf.length > 0) {
+    yield { index: index++, data: buf }
   }
 }
 

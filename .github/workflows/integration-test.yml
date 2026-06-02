@@ -67,7 +67,7 @@ jobs:
 
   integration-tests:
     needs: [set-image, setup, runtime-matrix]
-    name: Integration Tests (${{ matrix.runtime.name }})
+    name: Integration Tests (${{ matrix.runtime.name }} / ${{ matrix.mode }})
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -76,6 +76,7 @@ jobs:
       fail-fast: false
       matrix:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
+        mode: [ws, smoldot]
 
     steps:
       - name: Checkout sources
@@ -102,6 +103,15 @@ jobs:
           cache-dependency-path: |
             examples/package.json
             console-ui/package-lock.json
+            sdk/typescript/package-lock.json
+
+      - name: Build TypeScript SDK
+        # Several examples import from `../sdk/typescript/dist/index.mjs` —
+        # ensure the SDK is built before any test step runs.
+        working-directory: sdk/typescript
+        run: |
+          npm ci
+          npm run build
 
       - name: Install subxt-cli
         run: |
@@ -121,33 +131,37 @@ jobs:
           echo "RUNTIME_PACKAGE=${RUNTIME_PACKAGE}" >> "$GITHUB_ENV"
           just KUBO_VERSION="${KUBO_VERSION}" start-services "$TEST_DIR" "$RUNTIME_PACKAGE" "kubo-native"
 
-      - name: Test authorize-and-store ws
+      - name: Test authorize-and-store
         working-directory: examples
-        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "ws"
-
-      - name: Test authorize-and-store smoldot
-        working-directory: examples
-        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "smoldot"
+        # Smoldot light-client bootstrap takes ~30-60 s; cap each step at
+        # 10 min so a hang fails fast instead of eating the 200-min budget.
+        timeout-minutes: 10
+        run: just run-test-authorize-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test store-chunked-data
         working-directory: examples
-        run: just run-test-store-chunked-data "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-store-chunked-data "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test native-ipfs-dag-pb-chunked-data
         working-directory: examples
-        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-native-ipfs-dag-pb-chunked-data "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test store-big-data
         working-directory: examples
-        run: just run-test-store-big-data "$TEST_DIR" "big32"
+        timeout-minutes: 30
+        run: just run-test-store-big-data "$TEST_DIR" "$RUNTIME_PACKAGE" "big32" "${{ matrix.mode }}"
 
       - name: Test authorize-preimage-and-store
         working-directory: examples
-        run: just run-test-authorize-preimage-and-store "$TEST_DIR"
+        timeout-minutes: 15
+        run: just run-test-authorize-preimage-and-store "$TEST_DIR" "$RUNTIME_PACKAGE" "${{ matrix.mode }}"
 
       - name: Test HOP round trip
         working-directory: examples
-        run: just run-test-hop-round-trip "$TEST_DIR"
+        # HOP RPCs are node-only — the just-runner exits cleanly when mode=smoldot.
+        run: just run-test-hop-round-trip "$TEST_DIR" "${{ matrix.mode }}"
 
       - name: Test chopsticks compatibility
         working-directory: examples
@@ -157,6 +171,18 @@ jobs:
       - name: Test Rust SDK
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
+
+      - name: Test Rust SDK (pipeline_live integration suite)
+        # The `#[ignore]`d live suite drives the full upload pipeline against the
+        # running chain. Run it once, on the westend/ws leg: it uses the committed
+        # westend `metadata.scale` and WS providers. Serial (`--test-threads=1`)
+        # because the tests share the `//Alice` account and would otherwise race.
+        if: matrix.runtime.name == 'bulletin-westend' && matrix.mode == 'ws'
+        timeout-minutes: 25
+        env:
+          BULLETIN_RPC_URL: ws://127.0.0.1:10000
+          BULLETIN_RPC_URL_2: ws://127.0.0.1:12346
+        run: cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored --test-threads=1 --nocapture
 
       - name: Test TypeScript SDK
         working-directory: examples

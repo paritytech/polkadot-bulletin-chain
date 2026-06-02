@@ -155,6 +155,62 @@ impl UnixFsDagBuilder {
 
 		buf
 	}
+
+	/// Build a manifest from already-computed chunk CIDs + sizes — the chunk
+	/// data is never needed. This is the seam the streaming path uses: chunks
+	/// are hashed once during the estimate pass and freed, so only their CIDs
+	/// and sizes reach the manifest. Mirrors the TypeScript `buildFromParts`.
+	pub fn build_from_parts(
+		&self,
+		chunk_cids: &[CidData],
+		chunk_sizes: &[u64],
+		hash_algo: HashingAlgorithm,
+	) -> Result<DagManifest> {
+		if chunk_cids.is_empty() {
+			return Err(Error::EmptyData);
+		}
+		if chunk_cids.len() != chunk_sizes.len() {
+			return Err(Error::DagEncodingFailed(alloc::format!(
+				"chunk CID count ({}) does not match chunk size count ({})",
+				chunk_cids.len(),
+				chunk_sizes.len()
+			)));
+		}
+		// Prevent excessive memory allocation for very large files
+		if chunk_cids.len() > MAX_MANIFEST_CHUNKS {
+			return Err(Error::DagEncodingFailed(alloc::format!(
+				"Too many chunks ({}) for single manifest. Maximum is {}. \
+				 Consider using hierarchical DAG structure for files this large.",
+				chunk_cids.len(),
+				MAX_MANIFEST_CHUNKS
+			)));
+		}
+
+		let total_size: u64 = chunk_sizes.iter().sum();
+
+		// Encode UnixFS file metadata
+		let unixfs_data = Self::encode_unixfs_file_data(chunk_sizes, total_size);
+
+		// Encode DAG-PB links for each chunk
+		let mut links = Vec::with_capacity(chunk_cids.len());
+		for (cid_data, &size) in chunk_cids.iter().zip(chunk_sizes) {
+			let cid_bytes = cid_data
+				.to_bytes()
+				.ok_or_else(|| Error::DagEncodingFailed("Failed to serialize CID".into()))?;
+			links.push(Self::encode_dag_link(&cid_bytes, "", size));
+		}
+
+		// Encode DAG-PB node
+		let dag_bytes = Self::encode_dag_node(&links, &unixfs_data);
+
+		// Calculate root CID (using dag-pb codec)
+		let root_config = CidConfig { codec: CidCodec::DagPb.code(), hashing: hash_algo };
+		let root_cid = calculate_cid(&dag_bytes, root_config).map_err(|e| {
+			Error::DagEncodingFailed(alloc::format!("Failed to calculate root CID: {e:?}"))
+		})?;
+
+		Ok(DagManifest { root_cid, chunk_cids: chunk_cids.to_vec(), total_size, dag_bytes })
+	}
 }
 
 impl DagBuilder for UnixFsDagBuilder {
@@ -163,58 +219,19 @@ impl DagBuilder for UnixFsDagBuilder {
 			return Err(Error::EmptyData);
 		}
 
-		// Prevent excessive memory allocation for very large files
-		if chunks.len() > MAX_MANIFEST_CHUNKS {
-			return Err(Error::DagEncodingFailed(alloc::format!(
-				"Too many chunks ({}) for single manifest. Maximum is {}. \
-				 Consider using hierarchical DAG structure for files this large.",
-				chunks.len(),
-				MAX_MANIFEST_CHUNKS
-			)));
-		}
-
-		// Calculate CIDs for all chunks (using raw codec)
-		let mut chunk_cids = Vec::with_capacity(chunks.len());
-		let mut block_sizes = Vec::with_capacity(chunks.len());
-		let mut total_size = 0u64;
+		// Compute each chunk's CID (raw codec) then defer to `build_from_parts`.
 		let cid_config = CidConfig { codec: CidCodec::Raw.code(), hashing: hash_algo };
-
+		let mut chunk_cids = Vec::with_capacity(chunks.len());
+		let mut chunk_sizes = Vec::with_capacity(chunks.len());
 		for chunk in chunks {
 			let cid_data = calculate_cid(&chunk.data, cid_config.clone()).map_err(|e| {
 				Error::DagEncodingFailed(alloc::format!("Failed to calculate chunk CID: {e:?}"))
 			})?;
-
-			let chunk_size = chunk.data.len() as u64;
-			block_sizes.push(chunk_size);
-			total_size += chunk_size;
 			chunk_cids.push(cid_data);
+			chunk_sizes.push(chunk.data.len() as u64);
 		}
 
-		// Encode UnixFS file metadata
-		let unixfs_data = Self::encode_unixfs_file_data(&block_sizes, total_size);
-
-		// Encode DAG-PB links for each chunk
-		let mut links = Vec::with_capacity(chunks.len());
-		for (i, cid_data) in chunk_cids.iter().enumerate() {
-			let cid_bytes = cid_data
-				.to_bytes()
-				.ok_or_else(|| Error::DagEncodingFailed("Failed to serialize CID".into()))?;
-
-			let link = Self::encode_dag_link(&cid_bytes, "", chunks[i].data.len() as u64);
-			links.push(link);
-		}
-
-		// Encode DAG-PB node
-		let dag_bytes = Self::encode_dag_node(&links, &unixfs_data);
-
-		// Calculate root CID (using dag-pb codec)
-		let root_config = CidConfig { codec: CidCodec::DagPb.code(), hashing: hash_algo };
-
-		let root_cid = calculate_cid(&dag_bytes, root_config).map_err(|e| {
-			Error::DagEncodingFailed(alloc::format!("Failed to calculate root CID: {e:?}"))
-		})?;
-
-		Ok(DagManifest { root_cid, chunk_cids, total_size, dag_bytes })
+		self.build_from_parts(&chunk_cids, &chunk_sizes, hash_algo)
 	}
 }
 

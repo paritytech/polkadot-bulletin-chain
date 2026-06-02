@@ -40,97 +40,72 @@
 //!
 //! ## Usage
 //!
-//! ### Using TransactionClient (Recommended)
+//! Uploads go through one primitive: [`estimate_upload`] → [`submit`]. The
+//! estimate plans the upload and sizes the authorization (skipping units already
+//! on chain); `submit` drives the items to finality through a wave-batched,
+//! reconcile-driven pipeline with exactly-once guarantees, fetching each unit's
+//! bytes lazily from the source.
 //!
-//! The SDK provides `TransactionClient` for direct transaction submission:
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::prelude::*;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Connect to the chain
-//!     let client = TransactionClient::new("ws://localhost:9944").await?;
-//!
-//!     // Store data
-//!     let receipt = client.store(b"Hello, Bulletin!".to_vec(), &signer).await?;
-//!     println!("Stored in block: {}", receipt.block_hash);
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ### Low-Level: Prepare and Submit Separately
-//!
-//! For more control, prepare operations with `BulletinClient` and submit manually:
-//!
-//! ### Step 1: Prepare the Operation
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::{BulletinClient, StoreOptions};
-//!
-//! let client = BulletinClient::new();
-//! let data = b"Hello, Bulletin!".to_vec();
-//! let options = StoreOptions::default();
-//!
-//! // This only prepares the data and calculates the CID - no network calls yet
-//! let operation = client.prepare_store(data, options)?;
-//! println!("Will store {} bytes", operation.size());
-//! ```
-//!
-//! ### Step 2: Submit via Subxt
-//!
-//! ```ignore
-//! use subxt::{OnlineClient, PolkadotConfig};
-//!
-//! // Connect to the chain
-//! let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
-//!
-//! // Build and submit the transaction
-//! // (exact call depends on your runtime's metadata)
-//! let tx = bulletin::tx().transaction_storage().store(
-//!     operation.data,
-//!     Some(operation.cid_config),
-//! );
-//! let result = tx.sign_and_submit_then_watch_default(&api, &signer).await?;
-//! ```
-//!
-//! ### Chunked Store (Large Files)
-//!
-//! For files larger than 2 MiB, use chunked storage:
+//! [`estimate_upload`]: crate::TransactionClient::estimate_upload
+//! [`submit`]: crate::TransactionClient::submit
 //!
 //! ```ignore
 //! use bulletin_sdk_rust::prelude::*;
 //! use std::sync::Arc;
 //!
-//! let client = BulletinClient::new();
-//! let large_data = vec![0u8; 100_000_000]; // 100 MB
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Connect (use `from_endpoints` for multi-provider broadcast).
+//!     let client = TransactionClient::new("ws://localhost:10000").await?;
 //!
-//! let config = ChunkerConfig {
-//!     chunk_size: 1024 * 1024, // 1 MiB chunks
-//!     max_parallel: 8,
-//!     create_manifest: true,
-//! };
-//!
-//! // Progress callback (must be Arc<dyn Fn> for thread safety)
-//! let progress = Arc::new(|event: ProgressEvent| {
-//!     println!("Progress: {:?}", event);
-//! });
-//!
-//! let (batch, manifest) = client.prepare_store_chunked(
-//!     &large_data,
-//!     Some(config),
-//!     StoreOptions::default(),
-//!     Some(progress),
-//! )?;
-//!
-//! println!("Prepared {} chunks", batch.len());
-//! if let Some(ref m) = manifest {
-//!     println!("Manifest size: {} bytes", m.len());
+//!     // Upload in-memory items: plan, then submit.
+//!     let items = vec![UploadItem::new(b"hello".to_vec())];
+//!     let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
+//!     let estimate = client
+//!         .estimate_upload(UploadInput::Items(items), UploadEstimateOptions::default())
+//!         .await?;
+//!     let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(datas));
+//!     let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
+//!     println!("stored CIDs: {:?}", result.cids);
+//!     Ok(())
 //! }
+//! ```
 //!
-//! // Submit each operation in batch.operations via subxt
-//! // Then submit the manifest if present
+//! ### Streaming a large file
+//!
+//! For files, pass a [`SeekableSource`] — chunked into a DAG-PB file, streamed
+//! once for the estimate, then range-read lazily during submission so resident
+//! memory tracks the in-flight window, not the whole file.
+//!
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//! use std::sync::Arc;
+//!
+//! let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(file_bytes));
+//! let estimate = client
+//!     .estimate_upload(UploadInput::Source(source.clone()), UploadEstimateOptions::default())
+//!     .await?;
+//! let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
+//! // `result.cids` ends with the manifest root CID.
+//! ```
+//!
+//! Use [`submit_unsigned`] for the preimage-authorized (no-signer) path.
+//!
+//! [`submit_unsigned`]: crate::TransactionClient::submit_unsigned
+//! [`SeekableSource`]: crate::SeekableSource
+//!
+//! ### Offline preparation
+//!
+//! For custom submission, [`BulletinClient`] prepares operations (CID,
+//! chunking, DAG building) without network access; submit them via your own
+//! subxt client.
+//!
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//!
+//! let client = BulletinClient::new();
+//! let operation = client.prepare_store(b"Hello, Bulletin!".to_vec(), StoreOptions::default())?;
+//! println!("CID: {:?}", operation.cid_bytes);
 //! ```
 //!
 //! ## Feature Flags
@@ -165,6 +140,14 @@ pub(crate) mod types;
 #[cfg(feature = "std")]
 pub(crate) mod transaction;
 
+// Wave-batched upload pipeline (std-only)
+#[cfg(feature = "std")]
+pub(crate) mod pipeline;
+
+// Re-openable byte sources + streaming plan/estimate (std-only)
+#[cfg(feature = "std")]
+pub(crate) mod blob_source;
+
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
@@ -176,6 +159,29 @@ pub use types::{
 
 // Re-export CID types from pallet
 pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm};
+
+// Re-export pipeline upload types (std-only)
+#[cfg(feature = "std")]
+pub use pipeline::{
+	BlockLimits, BroadcastArgs, ItemBroadcastResult, NonceTrackingStrategy, SubmissionStrategy,
+	SubmissionStrategyKind, UploadCallback, UploadConfig, UploadEvent, UploadItem, UploadResult,
+	UploadStatus, WaveResult, DEFAULT_BLOCK_LIMITS,
+};
+
+// Re-export streaming source + plan/estimate types (std-only)
+#[cfg(feature = "std")]
+pub use blob_source::{
+	blob_from_bytes, blob_from_factory, blob_from_items, collect_blob, plan_stream, BlobSource,
+	ChunkPlan, SeekableSource, SkipReason, StreamEstimate, UploadEstimate, UploadEstimateItem,
+	UploadEstimateOptions,
+};
+
+// Re-export the transaction client + receipts (std-only)
+#[cfg(feature = "std")]
+pub use transaction::{
+	AuthorizationReceipt, AuthorizeAccountEntry, PreimageAuthorizationReceipt, RenewReceipt,
+	StoreReceipt, TransactionClient, UploadInput,
+};
 
 // Re-export key traits
 pub use chunker::Chunker;
@@ -202,8 +208,22 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::transaction::{
-		AuthorizationReceipt, PreimageAuthorizationReceipt, RenewReceipt, StoreReceipt,
-		TransactionClient,
+		AuthorizationReceipt, AuthorizeAccountEntry, PreimageAuthorizationReceipt, RenewReceipt,
+		StoreReceipt, TransactionClient, UploadInput,
+	};
+
+	#[cfg(feature = "std")]
+	pub use crate::pipeline::{
+		BlockLimits, BroadcastArgs, ItemBroadcastResult, NonceTrackingStrategy, SubmissionStrategy,
+		SubmissionStrategyKind, UploadCallback, UploadConfig, UploadEvent, UploadItem,
+		UploadResult, UploadStatus, WaveResult, DEFAULT_BLOCK_LIMITS,
+	};
+
+	#[cfg(feature = "std")]
+	pub use crate::blob_source::{
+		blob_from_bytes, blob_from_factory, blob_from_items, collect_blob, plan_stream, BlobSource,
+		ChunkPlan, SeekableSource, SkipReason, StreamEstimate, UploadEstimate, UploadEstimateItem,
+		UploadEstimateOptions,
 	};
 }
 

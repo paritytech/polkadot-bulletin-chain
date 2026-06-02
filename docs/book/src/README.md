@@ -59,16 +59,18 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 
 ```typescript
 // TypeScript - Store data
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-import { createClient, Binary } from "polkadot-api";
+import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
-const api = papiClient.getTypedApi(bulletinDescriptor);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+// The SDK owns its PAPI connection.
+const client = new BulletinClient({
+  providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+  uploadSigner: signer,
+});
 
-const result = await client.store(Binary.fromText("Hello, Bulletin!")).send();
-console.log("CID:", result.cid.toString());
+const src = blobFromBytes(new TextEncoder().encode("Hello, Bulletin!"));
+const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+console.log("CID:", cids[cids.length - 1].toString());
 ```
 
 ```rust

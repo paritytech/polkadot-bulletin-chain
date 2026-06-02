@@ -1,324 +1,50 @@
 # API Reference
 
-Complete reference for the `@parity/bulletin-sdk` TypeScript package.
+Reference for the `@parity/bulletin-sdk` package.
 
-## Classes
+## BulletinClient
 
-### AsyncBulletinClient
-
-The primary client for interacting with Bulletin Chain. Wraps a PAPI connection and provides high-level storage, authorization, and renewal operations.
+The primary client. It owns its PAPI connection (built from `providers()[0]`) and exposes storage, authorization, and renewal operations.
 
 ```typescript
-class AsyncBulletinClient implements BulletinClientInterface {
-  api: BulletinTypedApi;
-  signer: PolkadotSigner;
-  submit: SubmitFn;
-  config: Required<ClientConfig>;
+class BulletinClient implements BulletinClientInterface {
+  readonly api: BulletinTypedApi;       // typed PAPI API, for your own queries
+  readonly signer?: PolkadotSigner;     // upload signer (undefined → unsigned-only)
+  readonly config: ResolvedClientConfig;
 
-  constructor(
-    api: BulletinTypedApi,
-    signer: PolkadotSigner,
-    submit: SubmitFn,
-    config?: Partial<ClientConfig>,
-  );
+  constructor(options: BulletinClientOptions);
 }
 ```
 
-**Methods:**
+### Methods
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data)` | `StoreBuilder` | Start a store operation with builder pattern |
-| `storeWithOptions(data, options?, callback?, chunkerConfig?)` | `Promise<StoreResult>` | Store with explicit options (no builder) |
-| `storeWithPreimageAuth(data, options?)` | `Promise<StoreResult>` | Store using preimage-based authorization |
-| `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize an account for storage |
+| `estimateUpload(input, options?)` | `Promise<StreamEstimate>` | Hash offline; return CIDs + cost. `input`: `UploadItem[]` or `BlobSource` |
+| `submit(estimate, source)` | `SubmitBuilder` | Store a prepared estimate, fetching bytes from `source` |
+| `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize one account |
+| `authorizeAccount(entries)` | `AuthCallBuilder` | Authorize many atomically (`Utility.batch_all`) |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
-| `renew(block, index)` | `CallBuilder` | Renew storage at a given block/index |
-| `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
-| `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Refresh a preimage authorization expiry |
+| `renew(block, index)` | `CallBuilder` | Renew the item stored at `(block, index)` |
+| `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Extend an account authorization's expiry |
+| `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Extend a preimage authorization's expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
 | `removeExpiredPreimageAuthorization(contentHash)` | `CallBuilder` | Remove an expired preimage authorization |
-| `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Estimate authorization needed for a given data size |
+| `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Authorization a data size will consume |
+| `destroy()` | `Promise<void>` | Tear down the PAPI connection |
 
----
+`estimateUpload` + `submit` are the only storage path; see [Basic Storage](./basic-storage.md).
 
-### StoreBuilder
+### BulletinClientOptions
 
-Builder pattern for configuring and executing a store operation. Obtained via `client.store(data)`.
-
-```typescript
-class StoreBuilder {
-  withCodec(codec: CidCodec | number): this;
-  withHashAlgorithm(algorithm: HashAlgorithm): this;
-  withWaitFor(waitFor: WaitFor): this;
-  withCallback(callback: ProgressCallback): this;
-  withChunkSize(chunkSize: number): this;
-  withManifest(enabled: boolean): this;
-  send(): Promise<StoreResult>;
-  sendUnsigned(): Promise<StoreResult>;
-}
-```
-
-**Example:**
+Extends `Partial<ClientConfig>`.
 
 ```typescript
-const result = await client
-  .store(data)
-  .withCodec(CidCodec.Raw)
-  .withHashAlgorithm(HashAlgorithm.Blake2b256)
-  .withWaitFor(WaitFor.Finalized)
-  .withCallback((event) => console.log(event))
-  .send();
-```
-
----
-
-### CallBuilder
-
-Builder for non-authorization transaction calls (e.g., `renew`, `removeExpired*`).
-
-```typescript
-class CallBuilder {
-  withWaitFor(waitFor: WaitFor): this;
-  withCallback(callback: ProgressCallback): this;
-  send(): Promise<TransactionReceipt>;
-}
-```
-
----
-
-### AuthCallBuilder
-
-Builder for authorization-related calls. Extends `CallBuilder` with sudo support.
-
-```typescript
-class AuthCallBuilder {
-  withWaitFor(waitFor: WaitFor): this;
-  withCallback(callback: ProgressCallback): this;
-  withSudo(): this;
-  send(): Promise<TransactionReceipt>;
-}
-```
-
-**Example:**
-
-```typescript
-// Authorize with sudo
-await client.authorizeAccount(address, 10, BigInt(1024 * 1024))
-  .withSudo()
-  .send();
-```
-
----
-
-### BulletinPreparer
-
-Offline data preparation without a blockchain connection. Useful for pre-calculating CIDs and preparing chunks.
-
-```typescript
-class BulletinPreparer {
-  constructor(config?: ClientConfig);
-
-  prepareStore(
-    data: Uint8Array,
-    options?: StoreOptions,
-  ): Promise<{ data: Uint8Array; cid: CID }>;
-
-  prepareStoreChunked(
-    data: Uint8Array,
-    config?: Partial<ChunkerConfig>,
-    options?: StoreOptions,
-  ): Promise<{
-    chunks: Chunk[];
-    manifest?: { data: Uint8Array; cid: CID };
-  }>;
-
-  estimateAuthorization(dataSize: number): { transactions: number; bytes: number };
-}
-```
-
----
-
-### MockBulletinClient
-
-A mock client for testing without a blockchain connection. Implements the same interface as `AsyncBulletinClient`.
-
-```typescript
-class MockBulletinClient implements BulletinClientInterface {
-  constructor(config?: Partial<MockClientConfig>);
-
-  // Same methods as AsyncBulletinClient, plus:
-  getOperations(): MockOperation[];
-  clearOperations(): void;
-}
-```
-
-**Mock config options:**
-
-```typescript
-interface MockClientConfig extends ClientConfig {
-  simulateAuthFailure?: boolean;
-  simulateStorageFailure?: boolean;
-  simulateInsufficientAuth?: boolean;
-}
-```
-
----
-
-### FixedSizeChunker
-
-Splits data into fixed-size chunks for large file uploads.
-
-```typescript
-class FixedSizeChunker {
-  constructor(config?: Partial<ChunkerConfig>);
-
-  chunk(data: Uint8Array): Chunk[];
-  numChunks(dataSize: number): number;
-  get chunkSize(): number;
-}
-```
-
----
-
-### UnixFsDagBuilder
-
-Builds DAG-PB (UnixFS) manifests from chunks, creating an IPFS-compatible content graph.
-
-```typescript
-class UnixFsDagBuilder {
-  constructor();
-
-  build(
-    chunks: Chunk[],
-    hashAlgorithm?: HashAlgorithm,
-  ): Promise<DagManifest>;
-
-  parse(dagBytes: Uint8Array): Promise<{
-    chunkCids: CID[];
-    totalSize: number;
-  }>;
-}
-```
-
----
-
-### BulletinError
-
-Custom error class with structured error codes, retry guidance, and recovery hints.
-
-```typescript
-class BulletinError extends Error {
-  readonly code: ErrorCode;
-  readonly cause?: unknown;
-
-  constructor(message: string, code: ErrorCode, cause?: unknown);
-
-  get retryable(): boolean;
-  get recoveryHint(): string;
-}
-```
-
----
-
-## Enums
-
-### CidCodec
-
-Content identifier codec types.
-
-| Value | Code | Description |
-|-------|------|-------------|
-| `CidCodec.Raw` | `0x55` | Raw binary data |
-| `CidCodec.DagPb` | `0x70` | DAG-PB (UnixFS manifests) |
-| `CidCodec.DagCbor` | `0x71` | DAG-CBOR |
-
-### HashAlgorithm
-
-Hash algorithms for CID calculation.
-
-| Value | Code | Description |
-|-------|------|-------------|
-| `HashAlgorithm.Blake2b256` | `0xb220` | BLAKE2b-256 (default, Substrate-native) |
-| `HashAlgorithm.Sha2_256` | `0x12` | SHA2-256 |
-| `HashAlgorithm.Keccak256` | `0x1b` | Keccak-256 |
-
-### AuthorizationScope
-
-| Value | Description |
-|-------|-------------|
-| `AuthorizationScope.Account` | Account-based authorization |
-| `AuthorizationScope.Preimage` | Preimage-based authorization |
-
-### ErrorCode
-
-| Value | Description |
-|-------|-------------|
-| `ErrorCode.EMPTY_DATA` | Data is empty |
-| `ErrorCode.DATA_TOO_LARGE` | Data exceeds 64 MiB limit |
-| `ErrorCode.CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB limit |
-| `ErrorCode.INVALID_CHUNK_SIZE` | Invalid chunk size configuration |
-| `ErrorCode.INVALID_CONFIG` | Invalid client configuration |
-| `ErrorCode.INVALID_CID` | Malformed or invalid CID |
-| `ErrorCode.INVALID_HASH_ALGORITHM` | Unsupported hash algorithm |
-| `ErrorCode.CID_CALCULATION_FAILED` | CID calculation error |
-| `ErrorCode.DAG_ENCODING_FAILED` | DAG-PB encoding error |
-| `ErrorCode.INSUFFICIENT_AUTHORIZATION` | Not enough authorization |
-| `ErrorCode.AUTHORIZATION_FAILED` | Authorization call failed |
-| `ErrorCode.TRANSACTION_FAILED` | Transaction submission failed |
-| `ErrorCode.CHUNK_FAILED` | Chunk upload failed |
-| `ErrorCode.MISSING_CHUNK` | Expected chunk not found |
-| `ErrorCode.TIMEOUT` | Operation timed out |
-| `ErrorCode.UNSUPPORTED_OPERATION` | Operation not supported |
-
-### TxStatus
-
-Transaction lifecycle states.
-
-| Value | Description |
-|-------|-------------|
-| `TxStatus.Signed` | Transaction signed |
-| `TxStatus.Validated` | Transaction validated by node |
-| `TxStatus.Broadcasted` | Broadcasted to network |
-| `TxStatus.InBlock` | Included in a block |
-| `TxStatus.Finalized` | Block finalized |
-| `TxStatus.NoLongerInBlock` | Block retracted |
-| `TxStatus.Invalid` | Transaction invalid |
-| `TxStatus.Dropped` | Transaction dropped |
-
-### ChunkStatus
-
-Chunk upload lifecycle states.
-
-| Value | Description |
-|-------|-------------|
-| `ChunkStatus.ChunkStarted` | Chunk upload started |
-| `ChunkStatus.ChunkCompleted` | Chunk upload completed |
-| `ChunkStatus.ChunkFailed` | Chunk upload failed |
-| `ChunkStatus.ManifestStarted` | Manifest creation started |
-| `ChunkStatus.ManifestCreated` | Manifest created |
-| `ChunkStatus.Completed` | All chunks and manifest uploaded |
-
-### WaitFor
-
-Controls when a transaction is considered complete.
-
-| Value | Description |
-|-------|-------------|
-| `WaitFor.InBlock` | Wait for block inclusion (faster) |
-| `WaitFor.Finalized` | Wait for block finalization (safer) |
-
----
-
-## Types & Interfaces
-
-### StoreOptions
-
-```typescript
-interface StoreOptions {
-  cidCodec?: CidCodec | number;        // default: CidCodec.Raw
-  hashingAlgorithm?: HashAlgorithm;    // default: HashAlgorithm.Blake2b256
-  waitFor?: WaitFor;                   // default: "in_block"
+interface BulletinClientOptions extends Partial<ClientConfig> {
+  providers: () => JsonRpcProvider[]; // REQUIRED for uploads; providers()[0] drives chainHead
+  uploadSigner?: PolkadotSigner;      // omit for an unsigned-only client
+  authorizerSigner?: PolkadotSigner;  // required to call authorize*/refresh*
+  descriptor?: unknown;               // papi descriptor; omit → getUnsafeApi()
 }
 ```
 
@@ -326,203 +52,252 @@ interface StoreOptions {
 
 ```typescript
 interface ClientConfig {
-  defaultChunkSize?: number;           // default: 1 MiB
-  createManifest?: boolean;            // default: true
-  chunkingThreshold?: number;          // default: 2 MiB
-  txTimeout?: number;                  // default: 420_000 (per tx, in ms)
+  defaultChunkSize?: number;          // default 1 MiB (max 2 MiB)
+  chunkingThreshold?: number;         // default 2 MiB
+  createManifest?: boolean;           // default true
+  txTimeout?: number;                 // default 420_000 ms (per tx)
+  providers?: () => JsonRpcProvider[];
+  authorizerSigner?: PolkadotSigner;
+  blockLimits?: BlockLimits;          // chain block weight/length caps
 }
 ```
 
-### ChunkerConfig
+## Builders
+
+### SubmitBuilder
+
+Returned by `submit()`.
 
 ```typescript
-interface ChunkerConfig {
-  chunkSize: number;                   // Size of each chunk in bytes
-  createManifest: boolean;             // Whether to create DAG-PB manifest
+class SubmitBuilder {
+  withWaitFor(waitFor: WaitFor): this;     // 'in_block' (default) | 'finalized'
+  withCallback(cb: UploadCallback): this;  // per-item UploadEvent
+  ensureAuthorized(): this;                // pre-flight authorization check
+  asUnsigned(): this;                      // preimage-authorized, no signer
+  send(): Promise<UploadResult>;
 }
 ```
 
-### StoreResult
+### CallBuilder
+
+Returned by `renew` and the `removeExpired*` methods.
 
 ```typescript
-interface StoreResult {
-  cid?: CID;                           // Primary CID (undefined for chunked without manifest)
-  size: number;                        // Total data size in bytes
-  blockNumber?: number;                // Block where data was stored
-  extrinsicIndex?: number;             // Extrinsic index within block
-  chunks?: ChunkDetails;               // Present only for chunked uploads
+class CallBuilder {
+  withWaitFor(waitFor: WaitFor): this;
+  withCallback(cb: ProgressCallback): this;
+  send(): Promise<TransactionReceipt>;
 }
 ```
 
-### ChunkDetails
+### AuthCallBuilder
+
+Returned by the authorization methods. Extends `CallBuilder` with sudo.
 
 ```typescript
-interface ChunkDetails {
+class AuthCallBuilder extends CallBuilder {
+  withSudo(): this; // wrap the call in Sudo.sudo
+}
+```
+
+```typescript
+// Atomic multi-account grant (all-or-nothing).
+await client.authorizeAccount([
+  { who: aliceAddr, transactions: 100, bytes: 100n * 1024n * 1024n },
+  { who: bobAddr,   transactions: 50,  bytes: 50n  * 1024n * 1024n },
+]).send();
+```
+
+## Byte Sources
+
+`submit()` takes a `SeekableSource`; `estimateUpload()` takes any `BlobSource`. Construct them with:
+
+```typescript
+function blobFromBytes(data: Uint8Array): SeekableSource;          // a single blob
+function blobFromItems(items: { data: Uint8Array }[]): SeekableSource; // discrete items
+function blobFromFactory(open: () => AsyncIterable<Uint8Array>): BlobSource; // re-openable stream
+```
+
+`blobFromBytes` / `blobFromItems` return a `SeekableSource` (random-access `read` + known `size`) and work with both `estimateUpload` and `submit`. `blobFromFactory` returns a forward-only `BlobSource` — fine for `estimateUpload`, but `submit` needs a `SeekableSource` (implement one for file-backed streaming; see [Chunked Uploads](./chunked-uploads.md)). A `BlobSource.open()` must be callable more than once and yield the same bytes — `estimateUpload` streams it to hash, `submit` reads it again to upload.
+
+## MockBulletinClient
+
+Implements `BulletinClientInterface` with no chain — computes real CIDs and records operations.
+
+```typescript
+class MockBulletinClient implements BulletinClientInterface {
+  constructor(config?: Partial<MockClientConfig>);
+  getOperations(): MockOperation[];
+  clearOperations(): void;
+}
+
+interface MockClientConfig extends ClientConfig {
+  simulateAuthFailure?: boolean;
+  simulateStorageFailure?: boolean;
+  simulateInsufficientAuth?: boolean;
+}
+```
+
+## Offline Helpers
+
+### BulletinPreparer
+
+```typescript
+class BulletinPreparer {
+  constructor(config?: ClientConfig);
+  prepareStore(data, options?): Promise<{ data: Uint8Array; cid: CID }>;
+  prepareStoreChunked(data, config?, options?): Promise<{ chunks: Chunk[]; manifest?: { data: Uint8Array; cid: CID } }>;
+  planStream(source: BlobSource, config?, options?): Promise<ChunkPlan>;
+  estimateAuthorization(dataSize: number): { transactions: number; bytes: number };
+}
+```
+
+### UnixFsDagBuilder
+
+```typescript
+class UnixFsDagBuilder {
+  build(chunks: Chunk[], hashAlgorithm?: HashAlgorithm): Promise<DagManifest>;
+  buildFromParts(chunkCids: CID[], chunkSizes: number[], hashAlgorithm?: HashAlgorithm): Promise<DagManifest>;
+  parse(dagBytes: Uint8Array): Promise<{ chunkCids: CID[]; totalSize: number }>;
+}
+```
+
+### FixedSizeChunker
+
+```typescript
+class FixedSizeChunker {
+  constructor(config?: Partial<ChunkerConfig>);
+  chunk(data: Uint8Array): Chunk[];
+  numChunks(dataSize: number): number;
+  get chunkSize(): number;
+}
+```
+
+## BulletinError
+
+```typescript
+class BulletinError extends Error {
+  readonly code: ErrorCode;
+  readonly cause?: unknown;
+  get retryable(): boolean;     // true for TRANSACTION_FAILED, TIMEOUT, STORE_STALLED
+  get recoveryHint(): string;
+}
+```
+
+See [Error Handling](./error-handling.md) for the full `ErrorCode` reference.
+
+## Enums
+
+### CidCodec
+
+| Value | Code | Description |
+|-------|------|-------------|
+| `Raw` | `0x55` | Raw binary (default) |
+| `DagPb` | `0x70` | DAG-PB (UnixFS manifests) |
+| `DagCbor` | `0x71` | DAG-CBOR |
+
+### HashAlgorithm
+
+| Value | Code | Description |
+|-------|------|-------------|
+| `Blake2b256` | `0xb220` | BLAKE2b-256 (default) |
+| `Sha2_256` | `0x12` | SHA2-256 |
+| `Keccak256` | `0x1b` | Keccak-256 |
+
+### UploadStatus
+
+| Value | String |
+|-------|--------|
+| `ItemStarted` | `"item_started"` |
+| `ItemInBlock` | `"item_in_block"` |
+| `ItemFinalized` | `"item_finalized"` |
+| `ItemFailed` | `"item_failed"` |
+
+### WaitFor
+
+| Value | String | Meaning |
+|-------|--------|---------|
+| `InBlock` | `"in_block"` | Best-block inclusion (faster) |
+| `Finalized` | `"finalized"` | Finalization (safer) |
+
+`AuthorizationScope` (`Account` / `Preimage`) and `ErrorCode` are also exported.
+
+## Types
+
+```typescript
+interface UploadItem { data: Uint8Array; codec?: CidCodec; hashAlgo?: HashAlgorithm }
+
+interface UploadResult { cids: CID[] } // one per stored unit, in source order
+
+interface UploadEstimateOptions {
+  skipExisting?: boolean; // query the chain and drop items already stored (default false)
+  dedupInput?: boolean;   // collapse duplicate content hashes in the input (default true)
+}
+
+interface UploadEstimate {
+  total: number;                 // input item count
+  items: UploadEstimateItem[];   // per-item disposition
+  transactions: number;          // store extrinsics that will be submitted
+  bytes: bigint;                 // bytes those txs consume
+  duplicateIndices: number[];    // input duplicates (collapsed)
+  alreadyStored: number[];       // on chain (only if skipExisting)
+  toUpload: number[];            // indices that will be submitted
+}
+
+interface UploadEstimateItem { index: number; cid: CID; bytes: number; skipReason?: 'duplicate_input' | 'already_on_chain' }
+
+// estimateUpload returns this — a UploadEstimate plus the reusable plan.
+interface StreamEstimate extends UploadEstimate { plan: ChunkPlan }
+
+interface ChunkPlan {
   chunkCids: CID[];
-  numChunks: number;
-}
-```
-
-### Chunk
-
-```typescript
-interface Chunk {
-  data: Uint8Array;
-  cid?: CID;
-  index: number;
-  totalChunks: number;
-}
-```
-
-### DagManifest
-
-```typescript
-interface DagManifest {
-  rootCid: CID;
-  chunkCids: CID[];
+  chunkSizes: number[];
+  offsets: number[];      // byte offset of each unit into the source
+  codecs?: CidCodec[];    // per-unit; omitted → all Raw
+  hashAlgos?: HashAlgorithm[]; // per-unit; omitted → all Blake2b-256
   totalSize: number;
-  dagBytes: Uint8Array;
+  chunkSize: number;      // 0 for an items-as-is plan
+  rootCid?: CID;          // manifest root (chunked files only)
+  manifestData?: Uint8Array;
 }
+
+type UploadEvent =
+  | { type: UploadStatus.ItemStarted;   index: number; total: number; cid: CID }
+  | { type: UploadStatus.ItemInBlock;   index: number; total: number; cid: CID; blockHash: string; blockNumber: number; extrinsicIndex?: number }
+  | { type: UploadStatus.ItemFinalized; index: number; total: number; cid: CID; blockHash: string; blockNumber: number; extrinsicIndex?: number }
+  | { type: UploadStatus.ItemFailed;    index: number; total: number; cid: CID; error: Error };
+
+type UploadCallback = (event: UploadEvent) => void;
+
+interface TransactionReceipt { blockHash: string; txHash: string; blockNumber?: number }
+
+interface DagManifest { rootCid: CID; chunkCids: CID[]; totalSize: number; dagBytes: Uint8Array }
+
+interface Chunk { data: Uint8Array; cid?: CID; index: number; totalChunks: number }
 ```
-
-### TransactionReceipt
-
-```typescript
-interface TransactionReceipt {
-  blockHash: string;
-  txHash: string;
-  blockNumber?: number;
-}
-```
-
-### CallOptions
-
-```typescript
-interface CallOptions {
-  onProgress?: ProgressCallback;
-  waitFor?: WaitFor;                   // default: "in_block"
-}
-```
-
-### AuthCallOptions
-
-```typescript
-interface AuthCallOptions extends CallOptions {
-  sudo?: boolean;
-}
-```
-
-### ProgressEvent
-
-Union of all progress events:
-
-```typescript
-type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent;
-type ProgressCallback = (event: ProgressEvent) => void;
-```
-
-### ChunkProgressEvent
-
-```typescript
-type ChunkProgressEvent =
-  | { type: "chunk_started"; index: number; total: number }
-  | { type: "chunk_completed"; index: number; total: number; cid: CID }
-  | { type: "chunk_failed"; index: number; total: number; error: Error }
-  | { type: "manifest_started" }
-  | { type: "manifest_created"; cid: CID }
-  | { type: "completed"; manifestCid?: CID };
-```
-
-### TransactionStatusEvent
-
-```typescript
-type TransactionStatusEvent =
-  | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "validated"; chunkIndex?: number }
-  | { type: "broadcasted"; chunkIndex?: number }
-  | { type: "in_block"; blockHash: string; blockNumber: number; txIndex?: number; chunkIndex?: number }
-  | { type: "finalized"; blockHash: string; blockNumber: number; txIndex?: number; chunkIndex?: number }
-  | { type: "no_longer_in_block"; chunkIndex?: number }
-  | { type: "invalid"; error: string; chunkIndex?: number }
-  | { type: "dropped"; error: string; chunkIndex?: number };
-```
-
----
 
 ## Utility Functions
 
-### CID Functions
-
 ```typescript
-// Calculate a CID from data
-async function calculateCid(
-  data: Uint8Array,
-  cidCodec?: number,           // default: 0x55 (Raw)
-  hashAlgorithm?: HashAlgorithm, // default: Blake2b256
-): Promise<CID>;
-
-// Convert a CID to a different codec
+function calculateCid(data: Uint8Array, cidCodec?: number, hashAlgorithm?: HashAlgorithm): Promise<CID>;
 function convertCid(cid: CID, newCodec: number): CID;
-
-// Parse a CID from its string representation
 function parseCid(cidString: string): CID;
-
-// Decode a CID from raw bytes
 function cidFromBytes(bytes: Uint8Array): CID;
-
-// Encode a CID to raw bytes
 function cidToBytes(cid: CID): Uint8Array;
-```
-
-### Hashing
-
-```typescript
-// Get the raw content hash for a given algorithm
-async function getContentHash(
-  data: Uint8Array,
-  hashAlgorithm: HashAlgorithm,
-): Promise<Uint8Array>;
-```
-
-### Authorization
-
-```typescript
-// Estimate authorization needed for a given data size
-function estimateAuthorization(
-  dataSize: number,
-  chunkSize: number,
-  createManifest: boolean,
-): { transactions: number; bytes: number };
-```
-
-### Data Helpers
-
-```typescript
-// Convert Binary | Uint8Array to Uint8Array
-function toBytes(data: Binary | Uint8Array): Uint8Array;
-
-// Reassemble ordered chunks back into original data
+function getContentHash(data: Uint8Array, hashAlgorithm: HashAlgorithm): Promise<Uint8Array>;
+function estimateAuthorization(dataSize: number, chunkSize: number, createManifest: boolean): { transactions: number; bytes: number };
 function reassembleChunks(chunks: Chunk[]): Uint8Array;
+function validateChunkSize(chunkSize: number): void;
 ```
-
----
 
 ## Constants
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `MAX_CHUNK_SIZE` | `2 * 1024 * 1024` (2 MiB) | Maximum size of a single chunk |
-| `MAX_FILE_SIZE` | `64 * 1024 * 1024` (64 MiB) | Maximum total file size |
-| `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 1048576, createManifest: true }` | Default chunking configuration |
-| `DEFAULT_STORE_OPTIONS` | `{ cidCodec: Raw, hashingAlgorithm: Blake2b256, waitFor: "in_block" }` | Default store options |
-| `VERSION` | `"0.1.0"` | SDK version string |
+| Constant | Value |
+|----------|-------|
+| `MAX_CHUNK_SIZE` | 2 MiB |
+| `MAX_FILE_SIZE` | 64 MiB |
+| `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 1 MiB, createManifest: true }` |
+| `DEFAULT_CLIENT_CONFIG` | chunk 1 MiB, threshold 2 MiB, `txTimeout` 420_000 ms |
+| `DEFAULT_STORE_OPTIONS` | `{ cidCodec: Raw, hashingAlgorithm: Blake2b256, waitFor: 'in_block' }` |
 
----
-
-## Re-exports
-
-The SDK re-exports the `CID` class from `multiformats`:
-
-```typescript
-export { CID } from "multiformats/cid";
-```
+The SDK also re-exports `CID` from `multiformats/cid`.

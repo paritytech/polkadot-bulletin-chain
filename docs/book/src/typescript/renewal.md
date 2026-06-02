@@ -9,55 +9,51 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 Data stored on Bulletin Chain has a **retention period**. After this period, data may be pruned. To keep data available, you must **renew** it before expiration.
 
 The renewal flow:
-1. **Store** data → receive `blockNumber` and `index`
-2. **Track** the block number and index
-3. **Renew** before expiration → receive new `blockNumber` and `index`
+1. **Store** data → capture `blockNumber` and `extrinsicIndex` from the `ItemFinalized` event
+2. **Track** that `(block, index)` reference
+3. **Renew** before expiration with `client.renew(block, index)` → capture the new reference
 4. **Repeat** as needed
 
 ## The Complete Flow
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
-import { bulletin } from "@polkadot-api/descriptors";
+import { blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
 
-// 1. STORE - Submit data and track the result
-const storeTx = api.tx.TransactionStorage.store({
-  data: Binary.fromBytes(myData),
-  cid_config: { codec: 0x55, hashing: "Blake2b256" }
-});
+// 1. STORE - submit and capture the storage reference from the event.
+let blockNumber: number | undefined;
+let index: number | undefined;
+let cid: string | undefined;
 
-const storeResult = await storeTx.signAndSubmit(signer);
+const src = blobFromBytes(myData);
+await client
+  .submit(await client.estimateUpload(src), src)
+  .withWaitFor("finalized")
+  .withCallback((ev) => {
+    if (ev.type === UploadStatus.ItemFinalized) {
+      blockNumber = ev.blockNumber;
+      index = ev.extrinsicIndex; // the storage slot for renew()
+      cid = ev.cid.toString();
+    }
+  })
+  .send();
 
-// 2. EXTRACT - Get block number and index from events
-const storedEvent = storeResult.events.find(
-  e => e.type === "TransactionStorage" && e.value.type === "Stored"
-);
-const blockNumber = storeResult.block.number;
-const index = storedEvent.value.value.index;
+console.log(`Stored ${cid} at block ${blockNumber}, index ${index}`);
 
-console.log(`Stored at block ${blockNumber}, index ${index}`);
+// 2. SAVE these for later renewal.
+saveToDatabase({ blockNumber, index, cid });
 
-// 3. SAVE - Store these for later renewal
-saveToDatabase({ blockNumber, index, cid: myCid });
+// 3. RENEW (later) - when approaching expiration.
+const receipt = await client.renew(blockNumber!, index!).withWaitFor("finalized").send();
 
-// 4. RENEW (later) - When approaching expiration
-const renewTx = api.tx.TransactionStorage.renew({
-  block: savedBlockNumber,
-  index: savedIndex
-});
-
-const renewResult = await renewTx.signAndSubmit(signer);
-
-// 5. UPDATE - Get new block/index for next renewal
-const renewedEvent = renewResult.events.find(
-  e => e.type === "TransactionStorage" && e.value.type === "Renewed"
-);
-const newBlockNumber = renewResult.block.number;
-const newIndex = renewedEvent.value.value.index;
-
-// Save the NEW values for next renewal!
-updateDatabase({ blockNumber: newBlockNumber, index: newIndex });
+// 4. UPDATE the reference for the NEXT renewal. The SDK receipt gives the
+//    renewal's block; read the `Renewed` event for the new slot index.
+const block = await client.api.query.System.Number.getValue(); // or from receipt
+// See "Tracking the renewed index" below.
 ```
+
+### Tracking the renewed index
+
+`client.renew()` resolves with a `TransactionReceipt` (block hash, tx hash, block number) but not the new slot index. To chain renewals, read the `Renewed` event from that block via `client.api`, or query `TransactionByContentHash` for the content's current `(block, index)`.
 
 ## Querying Retention Period
 
@@ -225,90 +221,59 @@ if (!auth || auth.extent.transactions < 1 || auth.extent.bytes < dataSize) {
 ## Complete Example: Store and Schedule Renewal
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { calculateCid, CidCodec, HashAlgorithm } from "@parity/bulletin-sdk";
+import { BulletinClient, blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
+
+const client = new BulletinClient({
+  providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+  uploadSigner: signer,
+  descriptor: bulletin,
+});
 
 async function storeAndTrackRenewal() {
-  const client = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
-  const api = client.getTypedApi(bulletin);
-
-  // 1. Store data
+  // 1. Store and capture the (block, index) reference.
   const data = new TextEncoder().encode("Important data to keep!");
-  const cid = await calculateCid(data, CidCodec.Raw, HashAlgorithm.Blake2b256);
+  const src = blobFromBytes(data);
+  let ref: { blockNumber: number; index?: number; cid: string } | undefined;
+  await client
+    .submit(await client.estimateUpload(src), src)
+    .withWaitFor("finalized")
+    .withCallback((ev) => {
+      if (ev.type === UploadStatus.ItemFinalized) {
+        ref = { blockNumber: ev.blockNumber, index: ev.extrinsicIndex, cid: ev.cid.toString() };
+      }
+    })
+    .send();
 
-  const storeTx = api.tx.TransactionStorage.store({
-    data: Binary.fromBytes(data),
-    cid_config: { codec: 0x55, hashing: "Blake2b256" }
-  });
-
-  const storeResult = await storeTx.signAndSubmit(signer);
-
-  // 2. Extract storage reference
-  const storedEvent = storeResult.events.find(
-    e => e.type === "TransactionStorage" && e.value.type === "Stored"
-  );
-  const blockNumber = storeResult.block.number;
-  const index = storedEvent.value.value.index;
-
-  console.log(`Stored CID ${cid} at block ${blockNumber}, index ${index}`);
-
-  // 3. Calculate when to renew
-  const retentionPeriod = await api.constants.TransactionStorage.RetentionPeriod();
-  const expiresAt = blockNumber + retentionPeriod;
-
-  // Renew with 10% buffer before expiration
+  // 2. Compute when to renew (10% buffer before expiry).
+  const retentionPeriod = await client.api.constants.TransactionStorage.RetentionPeriod();
+  const expiresAt = ref!.blockNumber + retentionPeriod;
   const renewAtBlock = expiresAt - Math.floor(retentionPeriod * 0.1);
 
-  console.log(`Schedule renewal before block ${renewAtBlock}`);
-  console.log(`Data expires at block ${expiresAt}`);
-
-  // 4. Save for later (in your app's database)
-  return {
-    cid: cid.toString(),
-    blockNumber,
-    index,
-    renewAtBlock,
-    expiresAt
-  };
+  // 3. Save for later (in your app's database).
+  return { ...ref!, renewAtBlock, expiresAt };
 }
 
 async function performRenewal(blockNumber: number, index: number) {
-  const renewTx = api.tx.TransactionStorage.renew({
-    block: blockNumber,
-    index: index
-  });
-
-  const result = await renewTx.signAndSubmit(signer);
-
-  const renewedEvent = result.events.find(
-    e => e.type === "TransactionStorage" && e.value.type === "Renewed"
-  );
-
-  const newBlockNumber = result.block.number;
-  const newIndex = renewedEvent.value.value.index;
-
-  console.log(`Renewed! New reference: block ${newBlockNumber}, index ${newIndex}`);
-
-  return { newBlockNumber, newIndex };
+  const receipt = await client.renew(blockNumber, index).withWaitFor("finalized").send();
+  console.log(`Renewed in block ${receipt.blockNumber}`);
+  // Read the Renewed event from that block for the new slot index (see above).
 }
 ```
 
 ## Error Handling
 
-Common renewal errors:
+`client.renew(...).send()` throws a `BulletinError`; inspect `error.code` / `error.message` for the on-chain reason (data pruned/already renewed, insufficient authorization, proofs not yet checked).
 
 ```typescript
+import { BulletinError } from "@parity/bulletin-sdk";
+
 try {
-  const result = await renewTx.signAndSubmit(signer);
+  await client.renew(blockNumber, index).send();
 } catch (error) {
-  if (error.message.includes("RenewedNotFound")) {
-    console.log("Data not found - may have been pruned or already renewed");
-  } else if (error.message.includes("Unauthorized")) {
-    console.log("Insufficient authorization - request more via Faucet");
-  } else if (error.message.includes("ProofNotChecked")) {
-    console.log("Chain hasn't verified storage proofs yet - try next block");
+  if (error instanceof BulletinError) {
+    console.error(error.code, error.message);
   } else {
     throw error;
   }

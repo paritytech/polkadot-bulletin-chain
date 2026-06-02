@@ -26,8 +26,14 @@ thiserror = { version = "2.0", optional = true }
 subxt = { version = "0.44", optional = true }
 subxt-signer = { version = "0.44", features = ["sr25519"], optional = true }
 
+# Async combinators + timers for the wave pipeline (std-only)
+futures = { version = "0.3", optional = true }
+tokio = { version = "1", features = ["time"], optional = true }
+
 [dev-dependencies]
 subxt = "0.44"
+subxt-signer = { version = "0.44", features = ["sr25519"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
 default = ["std"]
@@ -36,10 +42,12 @@ std = [
 	"bulletin-transaction-storage-primitives/std",
 	"cid/std",
 	"codec/std",
+	"futures",
 	"scale-info/std",
 	"subxt",
 	"subxt-signer",
 	"thiserror",
+	"tokio",
 ]
 
 # Runtime benchmarking (no-op for SDK, but required for workspace consistency)
@@ -48,8 +56,8 @@ runtime-benchmarks = []
 # Try-runtime support (no-op for SDK, but required for workspace consistency)
 try-runtime = []
 
-# Note: Examples and integration tests are not included in the repository because they
-# require metadata files from a running Bulletin Chain node and would cause CI failures.
-# Complete example code is available in the SDK book documentation (docs/book/).
-# For reference implementations, see the TypeScript SDK examples which don't require
-# compile-time metadata generation.
+# Live integration tests live in `tests/pipeline_live.rs`. They compile against
+# the committed `../metadata.scale` and are `#[ignore]`d, so CI compiles + lints
+# them (via `cargo test` / `clippy --all-targets`) but does not run them — they
+# need a node at ws://localhost:10000. Run locally with:
+#   cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored --nocapture

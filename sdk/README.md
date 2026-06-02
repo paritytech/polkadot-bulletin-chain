@@ -119,7 +119,7 @@ Both SDKs provide:
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-let client = AsyncBulletinClient::new(api);
+let client = BulletinClient::new(api);
 let result = client.store(data).send().await?;
 ```
 
@@ -128,9 +128,9 @@ See [rust/README.md](rust/README.md) for details.
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer);
+const client = new BulletinClient(api, signer);
 const result = await client.store(data).send();
 ```
 

@@ -71,7 +71,7 @@ console.log("Transactions needed:", estimate.transactions);
 console.log("Bytes needed:", estimate.bytes);
 ```
 
-Or using `AsyncBulletinClient`:
+Or using `BulletinClient`:
 
 ```typescript
 const estimate = client.estimateAuthorization(fileSize);
@@ -84,45 +84,36 @@ The estimation accounts for:
 
 ## Granting Authorization
 
-Authorization can only be granted by privileged accounts (sudo/root on testnets).
+Authorization is granted by an account in the chain's `AllowedAuthorizers` set (or via sudo). Construct the client with that account as `authorizerSigner`, then use the SDK methods — `authorizeAccount` / `authorizePreimage` are signed by `authorizerSigner`, while uploads use `uploadSigner`.
 
 ### Authorize Account
 
 ```typescript
-// Only works with sudo access
-const authTx = api.tx.Sudo.sudo({
-  call: api.tx.TransactionStorage.authorize_account({
-    who: targetAddress,
-    transactions: 100,
-    bytes: BigInt(100 * 1024 * 1024) // 100 MiB
-  })
+const client = new BulletinClient({
+  providers: () => [getWsProvider(url)],
+  uploadSigner,
+  authorizerSigner, // an AllowedAuthorizers account
 });
 
-await authTx.signAndSubmit(sudoSigner);
-console.log("Account authorized!");
+await client
+  .authorizeAccount(targetAddress, 100, BigInt(100 * 1024 * 1024)) // 100 MiB
+  .send();
+
+// If the authorizer is the sudo key rather than an AllowedAuthorizer:
+// await client.authorizeAccount(targetAddress, 100, ...).withSudo().send();
 ```
 
 ### Authorize Preimage (Content Hash)
 
-Pre-authorize a specific content hash. Useful for allowing anyone to store specific data:
+Pre-authorize a specific content hash so anyone can store that exact data (used by the unsigned `.asUnsigned()` upload path):
 
 ```typescript
-import { calculateCid, getContentHash, HashAlgorithm, CidCodec } from "@parity/bulletin-sdk";
+import { getContentHash, HashAlgorithm } from "@parity/bulletin-sdk";
 
-// Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
 const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 
-// Authorize this specific content
-const authTx = api.tx.Sudo.sudo({
-  call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: Binary.fromBytes(contentHash),
-    max_size: BigInt(data.length)
-  })
-});
-
-await authTx.signAndSubmit(sudoSigner);
-console.log("Preimage authorized!");
+await client.authorizePreimage(contentHash, BigInt(data.length)).send();
 ```
 
 ## Using the Faucet (Testnets)
@@ -196,39 +187,37 @@ if (auth?.expiration) {
 ## Complete Example
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws-provider/node";
 import { bulletin } from "@polkadot-api/descriptors";
-import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
+import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
-  // Setup
-  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
-  const api = papiClient.getTypedApi(bulletin);
-  const preparer = new BulletinPreparer();
-
-  // Data to store
-  const data = new TextEncoder().encode("Hello, Bulletin Chain!");
-
-  // 1. Estimate authorization needs
-  const estimate = preparer.estimateAuthorization(data.length);
-  console.log("Need:", estimate.transactions, "txs,", estimate.bytes, "bytes");
-
-  // 2. Check current authorization
-  const auth = await api.query.TransactionStorage.Authorizations.getValue({
-    type: "Account",
-    value: myAddress
+  const client = new BulletinClient({
+    providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+    uploadSigner: signer,
+    descriptor: bulletin,
   });
 
-  if (!auth || auth.extent.bytes < estimate.bytes) {
+  const data = new TextEncoder().encode("Hello, Bulletin Chain!");
+
+  // 1. Estimate the authorization needed.
+  const estimate = client.estimateAuthorization(data.length);
+  console.log("Need:", estimate.transactions, "txs,", estimate.bytes, "bytes");
+
+  // 2. Check current authorization (reuse the client's own connection).
+  const auth = await client.api.query.TransactionStorage.Authorizations.getValue({
+    type: "Account",
+    value: myAddress,
+  });
+  if (!auth || auth.extent.bytes < BigInt(estimate.bytes)) {
     console.log("Insufficient authorization. Please use the Faucet.");
     return;
   }
 
-  // 3. Store via SDK
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
-  const result = await client.store(data).send();
-  console.log("Stored with CID:", result.cid.toString());
+  // 3. Store. `.ensureAuthorized()` also fails fast if auth is missing/expired.
+  const src = blobFromBytes(data);
+  const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+  console.log("Stored with CID:", cids[cids.length - 1].toString());
 }
 ```
 

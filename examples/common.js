@@ -1,6 +1,9 @@
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
+import { getWsProvider } from 'polkadot-api/ws';
+import { getSmProvider } from 'polkadot-api/sm-provider';
+import * as smoldot from 'smoldot';
 import { createCanvas } from "canvas";
 import fs from "fs";
 import assert from "assert";
@@ -9,6 +12,83 @@ import assert from "assert";
 export const DEFAULT_IPFS_GATEWAY_URL = 'http://127.0.0.1:8283'; // IPFS HTTP Gateway (for /ipfs/CID requests)
 export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
 // -----------------
+
+/**
+ * Parse provider-mode CLI flags from `process.argv` (or any string array).
+ *
+ *   --smoldot=<relay-spec>:<para-spec>   enables smoldot light-client mode
+ *   --smoldot-sync-wait=N                seconds to wait for sync (default 30)
+ *
+ * Returns `{ mode: 'ws' | 'smoldot', relaySpecPath?, paraSpecPath?, syncWaitSec? }`.
+ */
+export function parseProviderArgs(argv) {
+  const arr = Array.from(argv);
+  const smoldotArg = arr.find(a => a.startsWith('--smoldot='))?.split('=')[1];
+  if (!smoldotArg) return { mode: 'ws' };
+  const [relaySpecPath, paraSpecPath] = smoldotArg.split(':');
+  if (!relaySpecPath || !paraSpecPath) {
+    throw new Error('--smoldot expects <relay-spec>:<para-spec>');
+  }
+  const syncWaitSec = Number(
+    arr.find(a => a.startsWith('--smoldot-sync-wait='))?.split('=')[1] ?? 30,
+  );
+  return { mode: 'smoldot', relaySpecPath, paraSpecPath, syncWaitSec };
+}
+
+/**
+ * Build a PAPI provider factory for either ws or smoldot mode.
+ *
+ * Returns `{ providers, cleanup, mode }`:
+ *   - `providers()` matches the shape expected by `BulletinClient.providers`
+ *     and `pipelineStore`'s providers factory (returns a fresh array of
+ *     `JsonRpcProvider` instances on every call).
+ *   - `cleanup()` terminates smoldot (no-op in ws mode); call from `finally`.
+ *
+ * Smoldot specifics:
+ *   - `getSmProvider` takes `() => Chain | Promise<Chain>`, NOT a Chain.
+ *     Pass a Chain directly and sm-provider silently no-ops (all PAPI
+ *     requests hang). We pass a function.
+ *   - sm-provider keeps a WeakSet of Chains it's already used and warns
+ *     "Can't re-use Chain" when the same Chain reaches it twice. Since
+ *     the SDK calls `providers()` once per `pipelineStore` invocation,
+ *     we materialize a fresh `sd.addChain()` per call. Smoldot reuses
+ *     peer/sync state across Chain instances bound to the same relay,
+ *     so the duplication cost is low.
+ */
+export async function buildProviders({ mode, wsUrl, relaySpecPath, paraSpecPath, syncWaitSec, smoldotLogLevel = 2 }) {
+  if (mode === 'ws') {
+    return {
+      mode: 'ws',
+      providers: () => [getWsProvider(wsUrl)],
+      cleanup: async () => {},
+    };
+  }
+  const relaySpec = fs.readFileSync(relaySpecPath, 'utf8');
+  const paraSpec = fs.readFileSync(paraSpecPath, 'utf8');
+  const sd = smoldot.start({
+    maxLogLevel: smoldotLogLevel,
+    logCallback: (level, target, message) => {
+      const levelName = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'][level - 1] || 'UNKNOWN';
+      console.log(`[smoldot:${levelName}] ${target}: ${message}`);
+    },
+  });
+  const mainChain = await sd.addChain({ chainSpec: relaySpec });
+  // Warm the parachain handle so the spec is validated and peer discovery
+  // starts before we wait. The actual chains used by PAPI are created
+  // fresh inside the `providers()` factory.
+  await sd.addChain({ chainSpec: paraSpec, potentialRelayChains: [mainChain] });
+  console.log(`⏭️ Waiting ${syncWaitSec} seconds for smoldot to sync...`);
+  await new Promise(resolve => setTimeout(resolve, syncWaitSec * 1000));
+  return {
+    mode: 'smoldot',
+    providers: () => [
+      getSmProvider(() => sd.addChain({ chainSpec: paraSpec, potentialRelayChains: [mainChain] })),
+    ],
+    cleanup: async () => {
+      try { await sd.terminate(); } catch (e) { /* ignore */ }
+    },
+  };
+}
 
 /**
  * Creates a PAPI-compatible signer from a Keyring account
