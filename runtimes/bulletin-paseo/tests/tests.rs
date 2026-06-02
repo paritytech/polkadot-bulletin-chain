@@ -2132,10 +2132,10 @@ mod parameters_tests {
 			dynamic_params::{storage as storage_params, xcm as xcm_params},
 			RuntimeParameters, RuntimeParametersKey, RuntimeParametersValue,
 		},
+		paseo_constants::time::DAYS,
 		xcm_config::{IsAuthorizerParachain, IsGovernanceLocation},
 		Parameters,
 	};
-	use bulletin_paseo_runtime::paseo_constants::time::DAYS;
 	use frame_support::{traits::Contains, BoundedVec};
 
 	const NEW_AUTHORIZER_ID: u32 = 9_999;
@@ -2180,9 +2180,11 @@ mod parameters_tests {
 			));
 			assert_eq!(storage_params::AuthorizationPeriod::get(), new_period);
 			System::assert_has_event(RuntimeEvent::Parameters(pallet_parameters::Event::Updated {
-				key: RuntimeParametersKey::Storage(storage_params::ParametersKey::AuthorizationPeriod(
-					storage_params::AuthorizationPeriod,
-				)),
+				key: RuntimeParametersKey::Storage(
+					storage_params::ParametersKey::AuthorizationPeriod(
+						storage_params::AuthorizationPeriod,
+					),
+				),
 				old_value: None,
 				new_value: Some(RuntimeParametersValue::Storage(
 					storage_params::ParametersValue::AuthorizationPeriod(new_period),
