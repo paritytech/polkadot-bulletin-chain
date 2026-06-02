@@ -2129,12 +2129,13 @@ mod parameters_tests {
 	use super::*;
 	use bulletin_paseo_runtime::{
 		parameters::{
-			dynamic_params::xcm as xcm_params, RuntimeParameters, RuntimeParametersKey,
-			RuntimeParametersValue,
+			dynamic_params::{storage as storage_params, xcm as xcm_params},
+			RuntimeParameters, RuntimeParametersKey, RuntimeParametersValue,
 		},
 		xcm_config::{IsAuthorizerParachain, IsGovernanceLocation},
 		Parameters,
 	};
+	use bulletin_paseo_runtime::paseo_constants::time::DAYS;
 	use frame_support::{traits::Contains, BoundedVec};
 
 	const NEW_AUTHORIZER_ID: u32 = 9_999;
@@ -2151,10 +2152,42 @@ mod parameters_tests {
 	fn defaults_match_pr_561_values() {
 		ExtBuilder::<Runtime>::default().build().execute_with(|| {
 			use frame_support::traits::Get;
-			// Sanity: the dynamic-param defaults reproduce the values introduced by
-			// PR #561, so this conversion is a no-op for any unmigrated chain state.
+			// Sanity: the dynamic-param defaults reproduce the values previously held by
+			// `parameter_types! { pub storage … }`/`pub const`, so this conversion is a
+			// no-op for any unmigrated chain state.
 			assert_eq!(xcm_params::AllowedParachainIds::get().to_vec(), vec![1_502, 5_140]);
 			assert_eq!(xcm_params::GovernanceParachainIds::get().to_vec(), vec![1_500]);
+			assert_eq!(storage_params::AuthorizationPeriod::get(), 14 * DAYS);
+			assert_eq!(
+				storage_params::MaxPermanentStorageSize::get(),
+				17 * 1024 * 1024 * 1024 * 1024 / 10,
+			);
+		});
+	}
+
+	#[test]
+	fn set_parameter_updates_authorization_period() {
+		ExtBuilder::<Runtime>::default().build().execute_with(|| {
+			use frame_support::traits::Get;
+			System::reset_events();
+			let new_period: crate::BlockNumber = 7 * DAYS;
+			assert_ok!(Parameters::set_parameter(
+				RuntimeOrigin::root(),
+				RuntimeParameters::Storage(storage_params::Parameters::AuthorizationPeriod(
+					storage_params::AuthorizationPeriod,
+					Some(new_period),
+				)),
+			));
+			assert_eq!(storage_params::AuthorizationPeriod::get(), new_period);
+			System::assert_has_event(RuntimeEvent::Parameters(pallet_parameters::Event::Updated {
+				key: RuntimeParametersKey::Storage(storage_params::ParametersKey::AuthorizationPeriod(
+					storage_params::AuthorizationPeriod,
+				)),
+				old_value: None,
+				new_value: Some(RuntimeParametersValue::Storage(
+					storage_params::ParametersValue::AuthorizationPeriod(new_period),
+				)),
+			}));
 		});
 	}
 

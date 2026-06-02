@@ -50,6 +50,10 @@ pub mod dynamic_params {
 		/// See [`super::DEFAULT_MAX_PERMANENT_STORAGE_SIZE`].
 		#[codec(index = 0)]
 		pub static MaxPermanentStorageSize: u64 = DEFAULT_MAX_PERMANENT_STORAGE_SIZE;
+
+		/// Validity window of a storage authorization, in blocks. Default 14 days.
+		#[codec(index = 1)]
+		pub static AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	}
 
 	/// XCM origin allowlists.

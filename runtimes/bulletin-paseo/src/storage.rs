@@ -33,7 +33,6 @@ use pallet_xcm::EnsureXcm;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
 	// Priorities and longevities used by the transaction storage pallet extrinsics.
 	//
 	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
@@ -92,7 +91,7 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
 	type MaxPermanentStorageSize =
 		crate::parameters::dynamic_params::storage::MaxPermanentStorageSize;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type AuthorizationPeriod = crate::parameters::dynamic_params::storage::AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
 		EitherOf<
