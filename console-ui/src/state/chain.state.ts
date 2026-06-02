@@ -337,7 +337,6 @@ export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
-export const [useStorageType] = bind(storageTypeSubject);
 
 /**
  * Hook that returns a factory for creating BulletinClient instances.
@@ -354,7 +353,6 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
   const api = useApi();
   const client = useClient();
   const network = useNetwork();
-  const storageType = useStorageType();
   // Memoize so the per-instance pipelineBootstrap cache (metadata + offline
   // API) survives renders. Without this every upload would re-bootstrap.
   return useMemo(() => {
@@ -369,8 +367,7 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
         : undefined;
     // The SDK creates its own internal PAPI client; pick the same
     // descriptor the rest of the app uses for this network.
-    const descriptor =
-      DESCRIPTORS[storageType]?.[network?.id ?? ""] ?? bulletin_westend;
+    const descriptor = DESCRIPTORS[network?.id ?? ""] ?? bulletin_westend;
     const cache = new WeakMap<object, BulletinClient>();
     const NO_SIGNER = {} as object;
     return (signer?: PolkadotSigner) => {
@@ -390,7 +387,7 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
       }
       return bulletin as BulletinClient;
     };
-  }, [api, client, network, storageType]);
+  }, [api, client, network]);
 }
 
 // Direct access to subjects for non-React code
