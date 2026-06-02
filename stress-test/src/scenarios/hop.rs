@@ -794,16 +794,46 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 	// Helper: expect a specific error code from hop_submit
 	macro_rules! expect_submit_error {
 		($name:expr, $code:expr, $data:expr, $recipients:expr) => {{
-			match hop::try_hop_submit(&ws, $data, $recipients, submitter).await {
-				Some(code) if code == $code => {
-					tracing::info!("  PASS: {} (code {})", $name, code);
+			match hop::hop_submit(&ws, $data, $recipients, submitter).await {
+				Err(e) if hop::error_code(&e) == Some($code) => {
+					tracing::info!("  PASS: {} (code {})", $name, $code);
 					passed += 1;
 				},
-				Some(code) => {
-					tracing::error!("  FAIL: {} — expected {}, got {}", $name, $code, code);
+				Err(e) => {
+					tracing::error!(
+						"  FAIL: {} — expected {}, got {:?}",
+						$name,
+						$code,
+						hop::error_code(&e)
+					);
 					failed += 1;
 				},
-				None => {
+				Ok(_) => {
+					tracing::error!("  FAIL: {} — expected error {}, got success", $name, $code);
+					failed += 1;
+				},
+			}
+		}};
+	}
+
+	// Helper: expect a specific error code from hop_claim
+	macro_rules! expect_claim_error {
+		($name:expr, $code:expr, $hash:expr, $kp:expr) => {{
+			match hop::hop_claim(&ws, $hash, $kp).await {
+				Err(e) if hop::error_code(&e) == Some($code) => {
+					tracing::info!("  PASS: {} (code {})", $name, $code);
+					passed += 1;
+				},
+				Err(e) => {
+					tracing::error!(
+						"  FAIL: {} — expected {}, got {:?}",
+						$name,
+						$code,
+						hop::error_code(&e)
+					);
+					failed += 1;
+				},
+				Ok(_) => {
 					tracing::error!("  FAIL: {} — expected error {}, got success", $name, $code);
 					failed += 1;
 				},
@@ -822,20 +852,7 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 	{
 		let fake_hash = [0xABu8; 32];
 		let fake_kp = RecipientKeypair::generate();
-		match hop::try_hop_claim(&ws, &fake_hash, &fake_kp).await {
-			Some(1004) => {
-				tracing::info!("  PASS: NotFound (code 1004)");
-				passed += 1;
-			},
-			Some(code) => {
-				tracing::error!("  FAIL: NotFound — expected 1004, got {code}");
-				failed += 1;
-			},
-			None => {
-				tracing::error!("  FAIL: NotFound — expected error, got success");
-				failed += 1;
-			},
-		}
+		expect_claim_error!("NotFound", 1004, &fake_hash, &fake_kp);
 	}
 
 	// 4. Claim with wrong keypair -> 1010
@@ -846,20 +863,7 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 
 		match hop::hop_submit(&ws, &data, std::slice::from_ref(&valid_kp), submitter).await {
 			Ok((hash, _, _)) => {
-				match hop::try_hop_claim(&ws, &hash, &wrong_kp).await {
-					Some(1010) => {
-						tracing::info!("  PASS: NotRecipient (code 1010)");
-						passed += 1;
-					},
-					Some(code) => {
-						tracing::error!("  FAIL: NotRecipient — expected 1010, got {code}");
-						failed += 1;
-					},
-					None => {
-						tracing::error!("  FAIL: NotRecipient — expected error, got success");
-						failed += 1;
-					},
-				}
+				expect_claim_error!("NotRecipient", 1010, &hash, &wrong_kp);
 				// Clean up
 				let _ = hop::hop_claim(&ws, &hash, &valid_kp).await;
 			},
@@ -892,20 +896,7 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 	{
 		let short_hash = [0xCCu8; 16];
 		let kp = RecipientKeypair::generate();
-		match hop::try_hop_claim(&ws, &short_hash, &kp).await {
-			Some(1008) => {
-				tracing::info!("  PASS: InvalidHashLength (code 1008)");
-				passed += 1;
-			},
-			Some(code) => {
-				tracing::error!("  FAIL: InvalidHashLength — expected 1008, got {code}");
-				failed += 1;
-			},
-			None => {
-				tracing::error!("  FAIL: InvalidHashLength — expected error, got success");
-				failed += 1;
-			},
-		}
+		expect_claim_error!("InvalidHashLength", 1008, &short_hash, &kp);
 	}
 
 	tracing::info!("Results: {passed} passed, {failed} failed");

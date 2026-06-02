@@ -271,28 +271,30 @@ async fn main() -> Result<()> {
 			}
 		},
 		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
-			if let Err(e) =
-				ensure_hop_submitter_authorized(&client, &authorizer_signer, &nonce_tracker).await
-			{
-				tracing::error!("Failed to authorize HOP submitter: {e}");
-				command_error = Some(e);
-			} else if let Err(e) = scenarios::hop::run_hop_sweep(
-				&ws_url_refs,
-				scenario,
-				items,
-				payload_size,
-				concurrency,
-				recipients,
-				duration,
-				&authorizer_signer,
-				&mut all_results,
-				&flush,
-				&cancel,
-			)
-			.await
-			{
-				tracing::error!("HOP command failed: {e}");
-				command_error = Some(e);
+			match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
+				Err(e) => {
+					tracing::error!("Failed to authorize HOP submitter: {e}");
+					command_error = Some(e);
+				},
+				Ok(submitter) =>
+					if let Err(e) = scenarios::hop::run_hop_sweep(
+						&ws_url_refs,
+						scenario,
+						items,
+						payload_size,
+						concurrency,
+						recipients,
+						duration,
+						&submitter,
+						&mut all_results,
+						&flush,
+						&cancel,
+					)
+					.await
+					{
+						tracing::error!("HOP command failed: {e}");
+						command_error = Some(e);
+					},
 			},
 		Commands::Full => {
 			if let Err(e) = run_throughput(
@@ -332,29 +334,30 @@ async fn main() -> Result<()> {
 				}
 			}
 			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
-				if let Err(e) =
-					ensure_hop_submitter_authorized(&client, &authorizer_signer, &nonce_tracker)
+				match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
+					Err(e) => {
+						tracing::error!("Failed to authorize HOP submitter: {e}");
+						command_error = Some(e);
+					},
+					Ok(submitter) =>
+						if let Err(e) = scenarios::hop::run_hop_sweep(
+							&ws_url_refs,
+							"all",
+							100,
+							None,
+							4,
+							10,
+							30,
+							&submitter,
+							&mut all_results,
+							&flush,
+							&cancel,
+						)
 						.await
-				{
-					tracing::error!("Failed to authorize HOP submitter: {e}");
-					command_error = Some(e);
-				} else if let Err(e) = scenarios::hop::run_hop_sweep(
-					&ws_url_refs,
-					"all",
-					100,
-					None,
-					4,
-					10,
-					30,
-					&authorizer_signer,
-					&mut all_results,
-					&flush,
-					&cancel,
-				)
-				.await
-				{
-					tracing::error!("HOP command failed: {e}");
-					command_error = Some(e);
+						{
+							tracing::error!("HOP command failed: {e}");
+							command_error = Some(e);
+						},
 				}
 			}
 		},
@@ -469,19 +472,22 @@ async fn run_bitswap(
 	Ok(())
 }
 
-/// Self-authorize the HOP submitter via the storage pallet.
+/// Authorize a dedicated HOP submitter (distinct from the authorizer) via the storage pallet and
+/// return its keypair.
 ///
 /// HOP's `can_account_promote` reads from
-/// `pallet-bulletin-transaction-storage::AccountAuthorization`. Reusing the authorizer keypair as
-/// the submitter is OK on bulletin-westend/paseo where the authorizer is also in `TestAccounts`.
-/// The numeric extents (`u32::MAX` txs, ~1 GiB) only bound the storage pallet; HOP just needs an
-/// unexpired entry to exist.
-async fn ensure_hop_submitter_authorized(
+/// `pallet-bulletin-transaction-storage::AccountAuthorization`. The numeric extents (`u32::MAX`
+/// txs, ~1 GiB) only bound the storage pallet; HOP just needs an unexpired entry to exist.
+async fn authorize_hop_submitter(
 	client: &subxt::OnlineClient<client::BulletinConfig>,
 	authorizer: &subxt_signer::sr25519::Keypair,
 	nonce_tracker: &accounts::NonceTracker,
-) -> Result<()> {
-	let submitter_id = authorizer.public_key().to_account_id();
+) -> Result<Keypair> {
+	let submitter_uri: subxt_signer::SecretUri =
+		"//HopSubmitter".parse().expect("static submitter seed is valid");
+	let submitter = Keypair::from_uri(&submitter_uri)
+		.map_err(|e| anyhow::anyhow!("Failed to create HOP submitter keypair: {e}"))?;
+	let submitter_id = submitter.public_key().to_account_id();
 	tracing::info!(
 		"Authorizing HOP submitter {submitter_id} via TransactionStorage::authorize_account"
 	);
@@ -493,7 +499,8 @@ async fn ensure_hop_submitter_authorized(
 		u32::MAX,
 		1024 * 1024 * 1024,
 	)
-	.await
+	.await?;
+	Ok(submitter)
 }
 
 /// Resolve the node's P2P multiaddr from CLI args or RPC auto-discovery.

@@ -151,8 +151,7 @@ pub async fn hop_submit(
 			"hop_submit",
 			rpc_params![data_hex, recipient_hexes, signature_hex, signer_hex, submit_timestamp],
 		)
-		.await
-		.map_err(|e| anyhow::anyhow!("hop_submit: {e}"))?;
+		.await?;
 	let latency = start.elapsed();
 
 	let hash = client::blake2b_256(data);
@@ -162,7 +161,7 @@ pub async fn hop_submit(
 /// Claim data from HOP pool. Returns (data, latency).
 pub async fn hop_claim(
 	ws: &WsClient,
-	hash: &[u8; 32],
+	hash: &[u8],
 	recipient: &RecipientKeypair,
 ) -> Result<(Vec<u8>, std::time::Duration)> {
 	let hash_hex = format!("0x{}", hex::encode(hash));
@@ -171,10 +170,7 @@ pub async fn hop_claim(
 	let sig_hex = format!("0x{}", hex::encode(&signature));
 
 	let start = Instant::now();
-	let data_hex: String = ws
-		.request("hop_claim", rpc_params![hash_hex, sig_hex])
-		.await
-		.map_err(|e| anyhow::anyhow!("hop_claim: {e}"))?;
+	let data_hex: String = ws.request("hop_claim", rpc_params![hash_hex, sig_hex]).await?;
 	let latency = start.elapsed();
 
 	let data = hex::decode(data_hex.strip_prefix("0x").unwrap_or(&data_hex))
@@ -191,59 +187,11 @@ pub async fn hop_pool_status(ws: &WsClient) -> Result<PoolStatus> {
 	Ok(status)
 }
 
-/// Try an RPC call that should fail, return the error code (or None if it succeeded).
-pub async fn try_hop_submit(
-	ws: &WsClient,
-	data: &[u8],
-	recipients: &[RecipientKeypair],
-	submitter: &Keypair,
-) -> Option<i32> {
-	let data_hex = format!("0x{}", hex::encode(data));
-	let recipient_hexes: Vec<String> = recipients
-		.iter()
-		.map(|r| format!("0x{}", hex::encode(r.scale_multi_signer())))
-		.collect();
-
-	let submit_timestamp = now_ms();
-	let payload = submit_signing_payload(data, submit_timestamp);
-	let signature_hex =
-		format!("0x{}", hex::encode(submitter_multi_signature(submitter, &payload)));
-	let signer_hex = format!("0x{}", hex::encode(submitter_multi_signer(submitter)));
-
-	let result: Result<SubmitResult, _> = ws
-		.request(
-			"hop_submit",
-			rpc_params![data_hex, recipient_hexes, signature_hex, signer_hex, submit_timestamp],
-		)
-		.await;
-	match result {
-		Err(e) => extract_error_code(&e),
-		Ok(_) => None,
-	}
-}
-
-pub async fn try_hop_claim(
-	ws: &WsClient,
-	hash: &[u8],
-	recipient: &RecipientKeypair,
-) -> Option<i32> {
-	let hash_hex = format!("0x{}", hex::encode(hash));
-	let payload = op_signing_payload(HOP_CLAIM_CONTEXT, hash);
-	let signature = recipient.sign_multi_signature(&payload);
-	let sig_hex = format!("0x{}", hex::encode(&signature));
-
-	let result: Result<String, _> = ws.request("hop_claim", rpc_params![hash_hex, sig_hex]).await;
-	match result {
-		Err(e) => extract_error_code(&e),
-		Ok(_) => None,
-	}
-}
-
-fn extract_error_code(err: &jsonrpsee::core::ClientError) -> Option<i32> {
-	if let jsonrpsee::core::ClientError::Call(obj) = err {
-		Some(obj.code())
-	} else {
-		None
+/// JSON-RPC error code from a failed `hop_submit`/`hop_claim`, if the failure was a call error.
+pub fn error_code(err: &anyhow::Error) -> Option<i32> {
+	match err.downcast_ref::<jsonrpsee::core::ClientError>() {
+		Some(jsonrpsee::core::ClientError::Call(obj)) => Some(obj.code()),
+		_ => None,
 	}
 }
 
