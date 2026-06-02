@@ -14,29 +14,62 @@ High-level async client that handles chain connection, transaction submission, a
 
 ```rust
 impl TransactionClient {
-    // Connect to a Bulletin Chain node
+    // Connect to a single Bulletin Chain node (WS)
     pub async fn new(endpoint: &str) -> Result<Self>;
 
-    // Create from an existing subxt client
-    pub fn from_client(api: OnlineClient<PolkadotConfig>) -> Self;
+    // Connect over multiple WS endpoints — the first is the monitor; every
+    // endpoint is a broadcast target (one dead endpoint can't stall a run)
+    pub async fn from_endpoints(endpoints: &[&str]) -> Result<Self>;
+
+    // The provider abstraction: build the client from pre-made RpcClients.
+    // Each RpcClient is a "provider" — WS (`RpcClient::from_url`) OR a smoldot
+    // light client (`lc.parachain(spec)?.into()`). The SDK is agnostic to which.
+    // First = monitor; all = broadcast targets. Mirrors PAPI's `providers`.
+    pub async fn from_rpc_clients(clients: Vec<RpcClient>) -> Result<Self>;
+
+    // Create from a single existing RpcClient
+    pub async fn from_rpc_client(rpc_client: RpcClient) -> Result<Self>;
 
     // Access the underlying subxt client
     pub fn api(&self) -> &OnlineClient<PolkadotConfig>;
 }
 ```
 
-**Store Operations:**
+**Light client (smoldot).** The SDK doesn't depend on smoldot or know whether a
+provider is a node connection or a light client — it just takes `RpcClient`s.
+To use a light client, enable `subxt`'s `unstable-light-client` feature in *your*
+crate, build the provider, and pass it to `from_rpc_clients` (keep the
+`LightClient` alive for the connection's lifetime):
+
+```rust
+use subxt::lightclient::LightClient;
+let (lc, _relay) = LightClient::relay_chain(RELAY_CHAIN_SPEC)?;   // Bulletin is a parachain
+let bulletin: subxt::backend::rpc::RpcClient = lc.parachain(BULLETIN_SPEC)?.into();
+let client = TransactionClient::from_rpc_clients(vec![bulletin]).await?;
+// hold `lc` for as long as `client` is used
+```
+
+**Upload (the primary path — `estimate_upload` → `submit`):**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data (auto-chunks if > 2 MiB) |
-| `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
+| `estimate_upload(input, options)` | `Result<StreamEstimate>` | Plan an upload (`UploadInput::Items` or `::Source`) and size authorization, skipping units already on chain |
+| `submit(signer, estimate, source, config)` | `Result<UploadResult>` | Upload to finality; bytes fetched lazily from `source` (`blob_from_items(..)` for items, `blob_from_bytes`/`blob_from_factory` for a file). Exactly-once |
+| `submit_unsigned(estimate, source, config)` | `Result<UploadResult>` | As above via the unsigned (preimage-authorized) path — no signer |
+
+**Single-item store (convenience):**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store one payload |
+| `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store one payload with progress tracking |
 
 **Authorization:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `authorize_account(who, transactions, bytes, signer, wait_for)` | `Result<AuthorizationReceipt>` | Authorize an account (requires sudo) |
+| `authorize_account(who, transactions, bytes, signer, wait_for)` | `Result<AuthorizationReceipt>` | Authorize an account (signer must be a registered authorizer) |
+| `authorize_accounts(entries, sudo, signer, wait_for)` | `Result<Vec<AuthorizationReceipt>>` | Authorize many accounts atomically (`Utility.batch_all`); `sudo: true` wraps in `Sudo.sudo` |
 | `authorize_preimage(content_hash, max_size, signer, wait_for)` | `Result<PreimageAuthorizationReceipt>` | Authorize a content hash |
 | `refresh_account_authorization(who, signer, wait_for)` | `Result<()>` | Refresh account authorization expiry |
 | `refresh_preimage_authorization(content_hash, signer, wait_for)` | `Result<()>` | Refresh preimage authorization expiry |

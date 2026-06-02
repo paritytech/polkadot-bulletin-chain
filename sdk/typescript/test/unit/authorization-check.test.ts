@@ -28,17 +28,24 @@ vi.mock("polkadot-api", async (importOriginal) => {
   }
 })
 
+import { blobFromBytes } from "../../src/blob-source"
 import { MockBulletinClient } from "../../src/mock-client"
 import { BulletinError, ErrorCode } from "../../src/types"
 
 describe("ensureAuthorized() pre-flight", () => {
   describe("MockBulletinClient", () => {
+    const hello = () => blobFromBytes(new TextEncoder().encode("hello"))
+
     it("throws INSUFFICIENT_AUTHORIZATION when simulateInsufficientAuth + ensureAuthorized()", async () => {
       const client = new MockBulletinClient({
         simulateInsufficientAuth: true,
       })
+      const src = hello()
       await expect(
-        client.uploadFile(Binary.fromText("hello")).ensureAuthorized().send(),
+        client
+          .submit(await client.estimateUpload(src), src)
+          .ensureAuthorized()
+          .send(),
       ).rejects.toMatchObject({
         code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
       })
@@ -48,17 +55,21 @@ describe("ensureAuthorized() pre-flight", () => {
       const client = new MockBulletinClient({
         simulateInsufficientAuth: true,
       })
-      const result = await client.uploadFile(Binary.fromText("hello")).send()
-      expect(result.cid).toBeDefined()
+      const src = hello()
+      const { cids } = await client
+        .submit(await client.estimateUpload(src), src)
+        .send()
+      expect(cids[cids.length - 1]).toBeDefined()
     })
 
     it("passes when ensureAuthorized() + no simulated failure", async () => {
       const client = new MockBulletinClient()
-      const result = await client
-        .uploadFile(Binary.fromText("hello"))
+      const src = hello()
+      const { cids } = await client
+        .submit(await client.estimateUpload(src), src)
         .ensureAuthorized()
         .send()
-      expect(result.cid).toBeDefined()
+      expect(cids[cids.length - 1]).toBeDefined()
     })
   })
 

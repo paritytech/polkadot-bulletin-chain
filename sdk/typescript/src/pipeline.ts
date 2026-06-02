@@ -102,6 +102,7 @@ import {
 } from "./types.js"
 import {
   calculateCid,
+  cidToContentHashHex,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   normalizeHex,
@@ -142,12 +143,12 @@ export interface PipelineConfig {
   /**
    * Optional mutable bootstrap cache. `pipelineStore` reads from it on entry
    * and writes to it on first init. Sharing the same object across retries
-   * (in `uploadItemsImpl`) skips the `state_getMetadata` + offline-API
+   * (in `runSignedRetry`) skips the `state_getMetadata` + offline-API
    * construction round-trip on every attempt.
    */
   bootstrap?: PipelineBootstrap
   /**
-   * @internal — `uploadItemsImpl`-only. Pre-computed CIDs aligned with
+   * @internal — `runSignedRetry`-only. Pre-computed CIDs aligned with
    * `items[]` so retries skip recomputation. May be a `Promise<CID[]>` so
    * the caller can hand off computation in parallel with `pipelineStore`'s
    * bootstrap RPCs. Length is asserted to match `items.length` once
@@ -157,7 +158,7 @@ export interface PipelineConfig {
   /** Wire-level submission strategy. Defaults to `"nonce-tracking"`. */
   submissionStrategy?: SubmissionStrategyKind
   /**
-   * @internal — `uploadItemsImpl`-only. Per-item nonces carried over from a
+   * @internal — `runSignedRetry`-only. Per-item nonces carried over from a
    * previous stalled `pipelineStore` call. Indices align with `items[]`.
    * An entry of `undefined` means "no carry-over, assign fresh." A defined
    * entry locks the item to that nonce so re-broadcast across the retry
@@ -317,9 +318,28 @@ interface OfflineTransactionStorage {
   }): OfflineTxBuilder
 }
 
+/**
+ * One ready-to-submit unit for the pipeline — exactly one `store` extrinsic.
+ * Carries metadata plus a lazy `getData()` so the submitter fetches bytes on
+ * demand (e.g. a range-read from a SeekableSource for streamed uploads) and
+ * frees them after finalization, keeping resident memory bounded to the
+ * in-flight window. Eager callers just return resident bytes from `getData`.
+ */
+export interface PipelineItem {
+  /** Byte length of this item's data (without loading it). */
+  size: number
+  codec?: CidCodec
+  hashAlgo?: HashAlgorithm
+  /** Fetch the item's bytes. Called on (re-)broadcast; cached while in flight. */
+  getData(): Promise<Uint8Array>
+}
+
 /** Returns true when the item should be sent via the lighter `store` extrinsic. */
 /** @internal — exported for unit tests of the codec-dispatch decision. */
-export function isDefaultCidConfig(item: UploadItem): boolean {
+export function isDefaultCidConfig(item: {
+  codec?: CidCodec
+  hashAlgo?: HashAlgorithm
+}): boolean {
   return !isNonDefaultCidConfig(
     item.codec ?? CidCodec.Raw,
     item.hashAlgo ?? HashAlgorithm.Blake2b256,
@@ -344,7 +364,7 @@ export function isDefaultCidConfig(item: UploadItem): boolean {
 export async function pipelineStore(
   api: BulletinTypedApi,
   signer: PolkadotSigner | undefined,
-  items: UploadItem[],
+  items: PipelineItem[],
   config: PipelineConfig,
 ): Promise<PipelineResult> {
   if (items.length === 0) return emptyResult()
@@ -383,9 +403,9 @@ export async function pipelineStore(
       return resolved
     }
     return Promise.all(
-      items.map((item) =>
+      items.map(async (item) =>
         calculateCid(
-          item.data,
+          await item.getData(),
           item.codec ?? CidCodec.Raw,
           item.hashAlgo ?? HashAlgorithm.Blake2b256,
         ),
@@ -405,7 +425,7 @@ export async function pipelineStore(
     totalItems,
   ).fill(undefined)
   const storedAt: Array<
-    { blockNumber: number; extrinsicIndex: number } | undefined
+    { blockNumber: number; transactionIndex: number } | undefined
   > = new Array(totalItems).fill(undefined)
   // blake2b-256 hex (no 0x) per item — keys for TBCH lookups. Filled in
   // the `initialized` handler from CIDs (avoids double-hashing the data
@@ -432,14 +452,14 @@ export async function pipelineStore(
         // block earlier than the one we're reconciling against.
         const at = storedAt[i] ?? {
           blockNumber: lastBestBlock.number,
-          extrinsicIndex: undefined as number | undefined,
+          transactionIndex: undefined as number | undefined,
         }
         onEvent({
           type: status,
           ...base,
           blockHash: lastBestBlock.hash,
           blockNumber: at.blockNumber,
-          extrinsicIndex: storedAt[i]?.extrinsicIndex,
+          transactionIndex: storedAt[i]?.transactionIndex,
         })
         return
       }
@@ -450,7 +470,7 @@ export async function pipelineStore(
           ...base,
           blockHash: lastFinalizedBlock.hash,
           blockNumber: storedAt[i]?.blockNumber ?? lastFinalizedBlock.number,
-          extrinsicIndex: storedAt[i]?.extrinsicIndex,
+          transactionIndex: storedAt[i]?.transactionIndex,
         })
         return
       }
@@ -500,7 +520,20 @@ export async function pipelineStore(
   // Pre-compute cumulative byte sizes for throughput reporting
   const prefixBytes = new Float64Array(items.length + 1)
   for (let i = 0; i < items.length; i++) {
-    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.data.length ?? 0)
+    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.size ?? 0)
+  }
+
+  // Lazy data: fetch each item's bytes on first (re-)broadcast and cache them;
+  // free on finalization so resident memory tracks the in-flight window, not
+  // the whole upload. For eager callers getData returns resident bytes.
+  const dataCache = new Map<number, Uint8Array>()
+  const loadData = async (i: number): Promise<Uint8Array> => {
+    let d = dataCache.get(i)
+    if (d === undefined) {
+      d = await (items[i] as PipelineItem).getData()
+      dataCache.set(i, d)
+    }
+    return d
   }
   const totalDataBytes = prefixBytes[items.length] ?? 0
 
@@ -508,8 +541,15 @@ export async function pipelineStore(
   // Connections
   // ---------------------------------------------------------------------------
 
-  // Monitor: providers[0] drives chainHead/nonce queries.
-  const monitorClient = createSubstrateClient(providers[0] as JsonRpcProvider)
+  // Monitor: drives chainHead/nonce queries. It needs its OWN provider
+  // instance — a getWsProvider holds a single internal socket + reconnect
+  // state, so sharing one instance across two clients (monitor + submit[0])
+  // makes a reconnect orphan the previous socket, which neither client's
+  // destroy() can close (leaked WS after a long finalized wait). A fresh
+  // factory call yields a distinct instance.
+  const monitorClient = createSubstrateClient(
+    providersFactory()[0] as JsonRpcProvider,
+  )
 
   // Submission: one substrate client per provider (broadcast to all).
   const submitClients = providers.map((p) => createSubstrateClient(p))
@@ -582,6 +622,16 @@ export async function pipelineStore(
     lastProgressAt = Date.now()
   }
 
+  // Keepalive: submit clients only broadcast, then go silent while waiting for
+  // inclusion + finalization. PAPI's ws-provider abandons — without closing —
+  // a socket idle past its ~40s heartbeat and reconnects, orphaning the old
+  // socket; the leak survives client.destroy() (it only closes the current
+  // socket) and keeps the process from exiting. A cheap periodic request holds
+  // these connections under that threshold. The monitor is immune — chainHead
+  // events keep it warm.
+  const KEEPALIVE_INTERVAL_MS = 20_000
+  let keepaliveTimer: ReturnType<typeof setInterval> | undefined
+
   // Substrate transaction-pool error codes from `author_submitExtrinsic`.
   // Codes are stable across substrate versions; see
   // client/rpc-api/src/author/error.rs for the source of truth.
@@ -645,6 +695,9 @@ export async function pipelineStore(
     finalizedEmitted,
     emit,
     strategy,
+    releaseData: (i) => {
+      dataCache.delete(i)
+    },
   }
 
   return new Promise<PipelineResult>((resolve, reject) => {
@@ -703,6 +756,10 @@ export async function pipelineStore(
       if (progressTimer !== undefined) {
         clearInterval(progressTimer)
         progressTimer = undefined
+      }
+      if (keepaliveTimer !== undefined) {
+        clearInterval(keepaliveTimer)
+        keepaliveTimer = undefined
       }
     }
 
@@ -910,9 +967,7 @@ export async function pipelineStore(
                 // That value is exactly the CID's multihash digest, so we
                 // never need to re-hash the data — works uniformly for all
                 // 3 supported algos. PAPI expects H256 args as `0x`-hex.
-                contentHashesHex = cids.map((cid) =>
-                  Binary.toHex(cid.multihash.digest),
-                )
+                contentHashesHex = cids.map(cidToContentHashHex)
                 state.contentHashesHex = contentHashesHex
                 // Diagnostic: log the first 12 hex chars of every content
                 // hash so cross-session collisions (which would cause the
@@ -1029,7 +1084,7 @@ export async function pipelineStore(
                 // Reconcile via TBCH state at this best block — populates
                 // `storedAt[i]` for items confirmed at or before B. Then
                 // `emitInBlockEvents` updates `counters.confirmed` and fires
-                // `ItemInBlock` with the correct `extrinsicIndex`.
+                // `ItemInBlock` with the correct `transactionIndex`.
                 await reconcileAtBlock(api, state, bestBlockHash)
                 recordLatency(state, Date.now(), "in_block")
                 emitInBlockEvents(state)
@@ -1233,6 +1288,7 @@ export async function pipelineStore(
                   api,
                   signer,
                   items,
+                  loadData,
                   indexes: waveIndexes,
                   itemNonce,
                   anchor: eraAnchor,
@@ -1457,7 +1513,7 @@ export async function pipelineStore(
 
                 // Reconcile at the finalized block — populates `storedAt[i]`
                 // for any item whose TBCH entry exists at finalization. Then
-                // emit ItemFinalized (monotonic) with `extrinsicIndex`.
+                // emit ItemFinalized (monotonic) with `transactionIndex`.
                 await reconcileAtBlock(api, state, lastHash)
                 recordLatency(state, Date.now(), "finalized")
                 emitFinalizedEvents(state)
@@ -1535,6 +1591,14 @@ export async function pipelineStore(
       }
     }, 6_000)
     progressTimer.unref?.()
+
+    keepaliveTimer = setInterval(() => {
+      if (done) return
+      for (const c of submitClients) {
+        c.request("system_health", []).catch(() => {})
+      }
+    }, KEEPALIVE_INTERVAL_MS)
+    keepaliveTimer.unref?.()
   })
 }
 
@@ -1555,7 +1619,7 @@ export async function pipelineStore(
  *                          failWithStall
  */
 interface WaveState {
-  items: UploadItem[]
+  items: PipelineItem[]
   totalItems: number
   cids: CID[]
   prefixBytes: Float64Array
@@ -1571,9 +1635,9 @@ interface WaveState {
   /**
    * Where on chain each item landed, populated by the TBCH reconciler.
    * Set when `TBCH[contentHash]` exists and its block ≥ submissionAnchorBlock.
-   * `extrinsicIndex` is surfaced on `ItemInBlock` / `ItemFinalized` events.
+   * `transactionIndex` is surfaced on `ItemInBlock` / `ItemFinalized` events.
    */
-  storedAt: Array<{ blockNumber: number; extrinsicIndex: number } | undefined>
+  storedAt: Array<{ blockNumber: number; transactionIndex: number } | undefined>
   counters: {
     waves: number
     txsBroadcast: number
@@ -1597,6 +1661,8 @@ interface WaveState {
   emit: (status: UploadStatus, i: number) => void
   /** Submission strategy — notified when an item is settled at finality. */
   strategy: SubmissionStrategy
+  /** Release an item's cached bytes once finalized (frees in-flight memory). */
+  releaseData: (i: number) => void
 }
 
 /**
@@ -1636,7 +1702,7 @@ async function reconcileAtBlock(
       if (state.storedAt[i] === undefined) {
         // biome-ignore lint/suspicious/noConsole: stored-set diagnostic
         console.log(
-          `[reconcile] item ${i}: storedAt SET blk=${entry.blockNumber} idx=${entry.extrinsicIndex} (anchor=${anchor}, hash=${hashes[k]?.slice(0, 12)}, queried=${blockHash.slice(0, 10)})`,
+          `[reconcile] item ${i}: storedAt SET blk=${entry.blockNumber} idx=${entry.transactionIndex} (anchor=${anchor}, hash=${hashes[k]?.slice(0, 12)}, queried=${blockHash.slice(0, 10)})`,
         )
       }
       state.storedAt[i] = entry
@@ -1715,6 +1781,7 @@ function emitFinalizedEvents(s: WaveState): void {
         s.emit(UploadStatus.ItemFinalized, i)
         s.finalizedEmitted[i] = true
         s.strategy.onItemSettled(i)
+        s.releaseData(i)
       }
     }
   }
@@ -1759,7 +1826,9 @@ interface SignBatchArgs {
   api: BulletinTypedApi
   /** `undefined` for unsigned (preimage-auth) mode — emits bare extrinsics. */
   signer: PolkadotSigner | undefined
-  items: UploadItem[]
+  items: PipelineItem[]
+  /** Fetch an item's bytes (cache-backed; loads lazily on first use). */
+  loadData: (i: number) => Promise<Uint8Array>
   /** Indexes (into `items`) to sign in this batch. */
   indexes: number[]
   /**
@@ -1777,7 +1846,8 @@ interface SignBatchArgs {
  * lags several blocks behind the captured anchor under concurrent load.
  */
 async function signBatch(args: SignBatchArgs): Promise<string[]> {
-  const { storage, api, signer, items, indexes, itemNonce, anchor } = args
+  const { storage, api, signer, items, loadData, indexes, itemNonce, anchor } =
+    args
   const mortality = signer
     ? {
         mortal: true as const,
@@ -1788,10 +1858,11 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
   const signed: string[] = new Array(indexes.length)
   for (let k = 0; k < indexes.length; k++) {
     const i = indexes[k] as number
-    const item = items[i] as UploadItem
+    const item = items[i] as PipelineItem
+    const data = await loadData(i)
     if (signer) {
       const tx = isDefaultCidConfig(item)
-        ? storage.store({ data: item.data })
+        ? storage.store({ data })
         : storage.store_with_cid_config({
             cid: {
               codec: BigInt(item.codec ?? CidCodec.Raw),
@@ -1799,7 +1870,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
                 item.hashAlgo ?? HashAlgorithm.Blake2b256,
               ),
             },
-            data: item.data,
+            data,
           })
       const nonce = itemNonce[i]
       if (nonce === undefined) {
@@ -1811,7 +1882,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
       // Unsigned (preimage-auth): build bareTx from the online api.
       // Offline storage's tx objects don't support `getBareTx()`.
       const onlineTx = isDefaultCidConfig(item)
-        ? api.tx.TransactionStorage.store({ data: item.data })
+        ? api.tx.TransactionStorage.store({ data })
         : api.tx.TransactionStorage.store_with_cid_config({
             cid: {
               codec: BigInt(item.codec ?? CidCodec.Raw),
@@ -1819,7 +1890,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
                 item.hashAlgo ?? HashAlgorithm.Blake2b256,
               ),
             },
-            data: item.data,
+            data,
           })
       const bytes = await onlineTx.getBareTx()
       signed[k] = Binary.toHex(bytes)
@@ -1839,7 +1910,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
  * contribution, and stops when any block limit would be exceeded.
  */
 function computeBatchEnd(
-  items: UploadItem[],
+  items: PipelineItem[],
   fromIndex: number,
   limits: BlockLimits,
 ): number {
@@ -1848,7 +1919,7 @@ function computeBatchEnd(
   let accLength = 0
 
   while (toIndex < items.length) {
-    const size = items[toIndex]?.data.length ?? 0
+    const size = items[toIndex]?.size ?? 0
     const txWeight =
       limits.storeWeightBase + limits.storeWeightPerByte * BigInt(size)
     const txLength = size + limits.extrinsicOverhead
@@ -1886,7 +1957,7 @@ const WAVE_BUFFER_BLOCKS = 2
  * items 6–10 already finalized).
  */
 function selectWaveBatch(
-  items: UploadItem[],
+  items: PipelineItem[],
   pendingIndexes: number[],
   limits: BlockLimits,
   bufferBlocks: number = WAVE_BUFFER_BLOCKS,
@@ -1898,7 +1969,7 @@ function selectWaveBatch(
   let accWeight = 0n
   let accLength = 0
   for (const idx of pendingIndexes) {
-    const size = items[idx]?.data.length ?? 0
+    const size = items[idx]?.size ?? 0
     const txWeight =
       limits.storeWeightBase + limits.storeWeightPerByte * BigInt(size)
     const txLength = size + limits.extrinsicOverhead
@@ -1942,7 +2013,7 @@ async function readNonceAtBlock(
 
 /**
  * Read the pallet's `TransactionByContentHash[hash]` at a block. Returns
- * `(blockNumber, extrinsicIndex)` if the entry exists at that block, or
+ * `(blockNumber, transactionIndex)` if the entry exists at that block, or
  * `undefined` if not yet stored / pruned / never stored.
  *
  * The pallet decl is `StorageMap<_, Twox64Concat, H256, (BlockNumberFor<T>, u32)>`,
@@ -1953,7 +2024,7 @@ async function readStoredAtBlock(
   api: BulletinTypedApi,
   contentHashHex: string,
   blockHash: string,
-): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
+): Promise<{ blockNumber: number; transactionIndex: number } | undefined> {
   return readStoredAt(api, contentHashHex, blockHash)
 }
 
@@ -1972,7 +2043,7 @@ export async function readStoredAt(
   api: BulletinTypedApi,
   contentHashHex: string,
   at: string = "finalized",
-): Promise<{ blockNumber: number; extrinsicIndex: number } | undefined> {
+): Promise<{ blockNumber: number; transactionIndex: number } | undefined> {
   if (!api.query) return undefined
   const raw =
     await api.query.TransactionStorage.TransactionByContentHash.getValue(
@@ -1981,7 +2052,7 @@ export async function readStoredAt(
     )
   if (raw == null) return undefined
   if (Array.isArray(raw)) {
-    return { blockNumber: Number(raw[0]), extrinsicIndex: Number(raw[1]) }
+    return { blockNumber: Number(raw[0]), transactionIndex: Number(raw[1]) }
   }
   if (typeof raw === "object") {
     const r = raw as {
@@ -1991,10 +2062,10 @@ export async function readStoredAt(
       index?: unknown
     }
     if (r[0] !== undefined && r[1] !== undefined) {
-      return { blockNumber: Number(r[0]), extrinsicIndex: Number(r[1]) }
+      return { blockNumber: Number(r[0]), transactionIndex: Number(r[1]) }
     }
     if (r.block !== undefined && r.index !== undefined) {
-      return { blockNumber: Number(r.block), extrinsicIndex: Number(r.index) }
+      return { blockNumber: Number(r.block), transactionIndex: Number(r.index) }
     }
   }
   return undefined
@@ -2011,8 +2082,11 @@ async function readStoredAtBlockBatch(
   api: BulletinTypedApi,
   contentHashesHex: string[],
   blockHash: string,
-): Promise<Map<string, { blockNumber: number; extrinsicIndex: number }>> {
-  const map = new Map<string, { blockNumber: number; extrinsicIndex: number }>()
+): Promise<Map<string, { blockNumber: number; transactionIndex: number }>> {
+  const map = new Map<
+    string,
+    { blockNumber: number; transactionIndex: number }
+  >()
   if (contentHashesHex.length === 0) return map
   const results = await Promise.all(
     contentHashesHex.map((h) =>

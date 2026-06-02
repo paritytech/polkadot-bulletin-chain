@@ -1,3 +1,5 @@
 node_modules/
 dist/
 *.tsbuildinfo
+bench/memlab/snapshots/
+bench/cpu/profiles/

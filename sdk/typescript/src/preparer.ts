@@ -6,17 +6,20 @@
  */
 
 import type { CID } from "multiformats/cid"
-import { FixedSizeChunker } from "./chunker.js"
+import type { BlobSource } from "./blob-source.js"
+import { chunkStream, FixedSizeChunker } from "./chunker.js"
 import { UnixFsDagBuilder } from "./dag.js"
 import {
   BulletinError,
   type Chunk,
   type ChunkerConfig,
+  type ChunkPlan,
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
   DEFAULT_STORE_OPTIONS,
   ErrorCode,
+  HashAlgorithm,
   type ResolvedClientConfig,
   resolveClientConfig,
   type StoreOptions,
@@ -130,6 +133,66 @@ export class BulletinPreparer {
     }
 
     return { chunks, manifest }
+  }
+
+  /**
+   * Stream a {@link BlobSource} once and produce a {@link ChunkPlan} — chunk
+   * CIDs, sizes, and (optionally) the manifest — without holding the file in
+   * memory. Peak working memory is ~`chunkSize` plus the CID list.
+   */
+  async planStream(
+    source: BlobSource,
+    config?: Partial<ChunkerConfig>,
+    options?: StoreOptions,
+  ): Promise<ChunkPlan> {
+    const chunkSize = config?.chunkSize ?? this.config.defaultChunkSize
+    const createManifest = config?.createManifest ?? this.config.createManifest
+    const hashAlgorithm: HashAlgorithm =
+      options?.hashingAlgorithm ??
+      DEFAULT_STORE_OPTIONS.hashingAlgorithm ??
+      HashAlgorithm.Blake2b256
+
+    const chunkCids: CID[] = []
+    const chunkSizes: number[] = []
+    const offsets: number[] = []
+    let totalSize = 0
+    for await (const { index, data } of chunkStream(source, chunkSize)) {
+      try {
+        chunkCids.push(await calculateCid(data, CidCodec.Raw, hashAlgorithm))
+      } catch (error) {
+        throw new BulletinError(
+          `Chunk ${index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
+          ErrorCode.CHUNK_FAILED,
+          error,
+        )
+      }
+      offsets.push(totalSize)
+      chunkSizes.push(data.length)
+      totalSize += data.length
+    }
+    if (chunkCids.length === 0) {
+      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
+    }
+
+    const plan: ChunkPlan = {
+      chunkCids,
+      chunkSizes,
+      offsets,
+      totalSize,
+      chunkSize,
+    }
+    // A single chunk needs no manifest — its own CID is the retrieval id
+    // (matches the in-memory single-store path and the fromBlob adapter).
+    if (createManifest && chunkCids.length > 1) {
+      const manifest = await new UnixFsDagBuilder().buildFromParts(
+        chunkCids,
+        chunkSizes,
+        hashAlgorithm,
+      )
+      plan.rootCid = manifest.rootCid
+      plan.manifestData = manifest.dagBytes
+    }
+    return plan
   }
 
   /**

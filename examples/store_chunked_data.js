@@ -21,7 +21,7 @@ import { logHeader, logConnection, logConfig, logSuccess, logError, logTestResul
 import { fetchCid } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
+import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -96,7 +96,11 @@ async function storeMetadata(client, chunks) {
     };
     const jsonBytes = Buffer.from(new TextEncoder().encode(JSON.stringify(metadata)));
     console.log(`🧾 Metadata size: ${jsonBytes.length} bytes`);
-    const { cids } = await client.upload([{ data: jsonBytes }]).withWaitFor(WaitFor.Finalized).send();
+    const metaItems = [{ data: jsonBytes }];
+    const { cids } = await client
+        .submit(await client.estimateUpload(metaItems), blobFromItems(metaItems))
+        .withWaitFor(WaitFor.Finalized)
+        .send();
     const metadataCid = cids[0];
     console.log('🧩 Metadata CID:', metadataCid.toString());
     return { metadataCid };
@@ -119,7 +123,10 @@ async function storeChunkedFileViaSdk(client, filePath, chunkSize) {
     console.log(`✂️ Split into ${chunks.length} chunks`);
 
     const items = chunks.map((c) => ({ data: c.bytes }));
-    const { cids } = await client.upload(items).withWaitFor(WaitFor.Finalized).send();
+    const { cids } = await client
+        .submit(await client.estimateUpload(items), blobFromItems(items))
+        .withWaitFor(WaitFor.Finalized)
+        .send();
     for (let i = 0; i < chunks.length; i++) {
         assert.deepStrictEqual(
             cids[i].toString(),
@@ -241,8 +248,9 @@ async function main() {
         // `rootCid` over Bitswap. Bulletin returns the raw-codec CID for the
         // same bytes (`rawDagCid`); `convertCid` re-tags it as dag-pb below
         // to compare against the locally-computed `rootCid`.
+        const dagItems = [{ data: Buffer.from(dagBytes) }];
         const { cids: [rawDagCid] } = await client
-            .upload([{ data: Buffer.from(dagBytes) }])
+            .submit(await client.estimateUpload(dagItems), blobFromItems(dagItems))
             .withWaitFor(WaitFor.Finalized)
             .send();
         if (!SKIP_IPFS_VERIFY) {

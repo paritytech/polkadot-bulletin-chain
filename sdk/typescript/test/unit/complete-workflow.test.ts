@@ -4,13 +4,13 @@
 /**
  * Simulates the examples/complete-workflow.ts flow using MockBulletinClient.
  *
- * Verifies that the SDK's pallet extrinsics + new upload/uploadFile flows
- * can be called with correct argument types and produce expected results.
+ * Verifies that the SDK's pallet extrinsics + the estimateUpload → submit
+ * flow can be called with correct argument types and produce expected results.
  */
 
 import { blake2b } from "@noble/hashes/blake2.js"
-import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
+import { blobFromBytes, blobFromItems } from "../../src/blob-source"
 import { MockBulletinClient, type MockOperation } from "../../src/mock-client"
 import { CidCodec, HashAlgorithm, UploadStatus } from "../../src/types"
 
@@ -35,14 +35,17 @@ describe("Complete workflow (MockBulletinClient)", () => {
     expect(authReceipt.blockHash).toBeDefined()
     expect(authReceipt.txHash).toBeDefined()
 
-    // 2. Upload data via the high-level API
+    // 2. Upload data via estimateUpload → submit
     const message = "Hello from Bob!"
-    const data = Binary.fromText(message)
-    const uploadResult = await client.uploadFile(data).send()
-    expect(uploadResult.cid).toBeDefined()
+    const data = new TextEncoder().encode(message)
+    const src = blobFromBytes(data)
+    const { cids: uploadCids } = await client
+      .submit(await client.estimateUpload(src), src)
+      .send()
+    expect(uploadCids[uploadCids.length - 1]).toBeDefined()
 
     // 3. Authorize preimage
-    const specificData = Binary.fromText("Preimage-authorized content")
+    const specificData = new TextEncoder().encode("Preimage-authorized content")
     const contentHash = blake2b(specificData, { dkLen: 32 })
 
     const preimageReceipt = await client
@@ -109,18 +112,22 @@ describe("Complete workflow (MockBulletinClient)", () => {
     expect(removePreimageOp.contentHash).toEqual(contentHash)
   })
 
-  it("should upload with custom per-item CID config via upload()", async () => {
+  it("should upload with custom per-item CID config via submit()", async () => {
     const client = new MockBulletinClient()
-    const data = Binary.fromText("Custom CID config test")
+    const data = new TextEncoder().encode("Custom CID config test")
 
     // Default codec (Raw + Blake2b-256)
-    const { cids: defaultCids } = await client.upload([{ data }]).send()
+    const def = [{ data }]
+    const { cids: defaultCids } = await client
+      .submit(await client.estimateUpload(def), blobFromItems(def))
+      .send()
 
     // DagPb codec + SHA2-256 → different CID
+    const cust = [
+      { data, codec: CidCodec.DagPb, hashAlgo: HashAlgorithm.Sha2_256 },
+    ]
     const { cids: customCids } = await client
-      .upload([
-        { data, codec: CidCodec.DagPb, hashAlgo: HashAlgorithm.Sha2_256 },
-      ])
+      .submit(await client.estimateUpload(cust), blobFromItems(cust))
       .send()
 
     expect(defaultCids).toHaveLength(1)
@@ -131,23 +138,23 @@ describe("Complete workflow (MockBulletinClient)", () => {
   it("should reject uploads with empty data", async () => {
     const client = new MockBulletinClient()
     await expect(
-      client.uploadFile(new Uint8Array(0)).send(),
+      client.estimateUpload(blobFromBytes(new Uint8Array(0))),
     ).rejects.toMatchObject({ code: "EMPTY_DATA" })
-    await expect(client.upload([]).send()).rejects.toMatchObject({
-      code: "EMPTY_DATA",
-    })
+    // An empty item list is now a no-op estimate (nothing to submit), not an error.
+    const empty = await client.estimateUpload([])
+    expect(empty.total).toBe(0)
   })
 
   it("should emit ItemStarted + ItemFinalized events through the mock", async () => {
     const client = new MockBulletinClient()
     const items = [
-      { data: Binary.fromText("a") },
-      { data: Binary.fromText("b") },
-      { data: Binary.fromText("c") },
+      { data: new TextEncoder().encode("a") },
+      { data: new TextEncoder().encode("b") },
+      { data: new TextEncoder().encode("c") },
     ]
     const events: Array<{ type: UploadStatus; index: number }> = []
     const { cids } = await client
-      .upload(items)
+      .submit(await client.estimateUpload(items), blobFromItems(items))
       .withCallback((ev) => events.push({ type: ev.type, index: ev.index }))
       .send()
     expect(cids).toHaveLength(3)

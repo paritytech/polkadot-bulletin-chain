@@ -20,7 +20,7 @@ import assert from 'assert';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
+import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 import { fetchCid } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
@@ -92,7 +92,10 @@ async function runPreimageStoreTest({ label, client, userAddress, signed, cidCod
     const item = { data: dataBytes };
     if (cidCodec != null) item.codec = cidCodec;
     if (mhCode != null) item.hashAlgo = mhCode;
-    let builder = client.upload([item]).withWaitFor(WaitFor.Finalized);
+    const items = [item];
+    let builder = client
+        .submit(await client.estimateUpload(items), blobFromItems(items))
+        .withWaitFor(WaitFor.Finalized);
     if (!signed) builder = builder.asUnsigned();
     const { cids } = await builder.send();
     const cid = cids[0];

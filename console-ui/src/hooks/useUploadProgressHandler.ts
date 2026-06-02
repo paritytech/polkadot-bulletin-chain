@@ -3,9 +3,9 @@ import type { UploadEvent } from "@parity/bulletin-sdk";
 import { UploadStatus } from "@parity/bulletin-sdk";
 
 /**
- * Progress handler for `client.upload()` / `client.uploadFile()` callbacks.
- * Maps per-item UploadEvent into a human-readable status string. For a
- * single-item upload the `(N/M)` prefix is dropped to keep the line short.
+ * Progress handler for `client.submit()` callbacks. Maps a per-item
+ * UploadEvent into a human-readable status string. For a single-item
+ * upload the `(N/M)` prefix is dropped to keep the line short.
  */
 export function useUploadProgressHandler(
   setTxStatus: (status: string) => void,

@@ -43,6 +43,15 @@
  */
 
 export { CID } from "multiformats/cid"
+// blob-source: re-openable byte source for streamed uploads (input to
+// estimateUpload / submit)
+export {
+  type BlobSource,
+  blobFromBytes,
+  blobFromFactory,
+  blobFromItems,
+  type SeekableSource,
+} from "./blob-source.js"
 // chunker: data splitting and reassembly
 export {
   FixedSizeChunker,
@@ -60,9 +69,8 @@ export {
   CallBuilder,
   type CallOptions,
   type SubmitAndWatchFn,
+  SubmitBuilder,
   type TransactionReceipt,
-  UploadBuilder,
-  UploadFileBuilder,
 } from "./client.js"
 
 // dag: DAG-PB manifest building
@@ -88,6 +96,7 @@ export {
   type ChunkDetails,
   type ChunkedStoreResult,
   type ChunkerConfig,
+  type ChunkPlan,
   CidCodec,
   type ClientConfig,
   DEFAULT_CHUNKER_CONFIG,
@@ -100,6 +109,7 @@ export {
   resolveClientConfig,
   type StoreOptions,
   type StoreResult,
+  type StreamEstimate,
   type TransactionStatusEvent,
   TxStatus,
   type UploadCallback,

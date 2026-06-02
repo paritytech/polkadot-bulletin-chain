@@ -4,7 +4,7 @@
  * TypeScript equivalent of the Rust authorize-and-store example.
  * Demonstrates:
  * 1. Authorizing an account to store data (sudo via BulletinClient)
- * 2. Storing data on chain via BulletinClient.uploadFile().send()
+ * 2. Storing data on chain via client.submit(estimate, source).send()
  * 3. Verifying the returned CID
  *
  * Usage:
@@ -17,7 +17,7 @@ import { getPolkadotSigner } from '@polkadot-api/signer';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { bulletin } from '../.papi/descriptors/dist/index.js';
-import { BulletinClient, WaitFor } from '../../sdk/typescript/dist/index.mjs';
+import { blobFromBytes, BulletinClient, WaitFor } from '../../sdk/typescript/dist/index.mjs';
 
 // Command line arguments
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
@@ -73,7 +73,9 @@ async function main() {
         console.log(`\nStep 2: Storing data: "${dataToStore}"`);
         console.log(`  Size: ${dataBytes.length} bytes`);
 
-        const { cid } = await client.uploadFile(dataBytes).send();
+        const src = blobFromBytes(dataBytes);
+        const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+        const cid = cids[cids.length - 1];
 
         console.log('Data stored successfully!');
         console.log(`  CID: ${cid.toString()}`);

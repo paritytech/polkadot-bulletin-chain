@@ -12,35 +12,34 @@
  */
 
 import type { CID } from "multiformats/cid"
-import { Binary } from "polkadot-api"
+import type { BlobSource, SeekableSource } from "./blob-source.js"
 import {
   AuthCallBuilder,
   type AuthorizeAccountEntry,
   type BulletinClientInterface,
   CallBuilder,
+  SubmitBuilder,
   type TransactionReceipt,
-  UploadBuilder,
-  UploadFileBuilder,
 } from "./client.js"
+import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
-  type ChunkerConfig,
+  type ChunkPlan,
   CidCodec,
   type ClientConfig,
   ErrorCode,
   HashAlgorithm,
   type ResolvedClientConfig,
   resolveClientConfig,
-  type UploadCallback,
+  type StreamEstimate,
   type UploadEstimate,
   type UploadEstimateItem,
-  type UploadFileResult,
+  type UploadEstimateOptions,
   type UploadItem,
   type UploadResult,
   UploadStatus,
-  type WaitFor,
 } from "./types.js"
-import { calculateCid } from "./utils.js"
+import { calculateCid, cidToContentHashHex } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -97,18 +96,17 @@ function mockReceipt(): TransactionReceipt {
  *
  * @example
  * ```typescript
- * import { MockBulletinClient } from '@parity/bulletin-sdk';
+ * import { MockBulletinClient, blobFromItems } from '@parity/bulletin-sdk';
  *
- * // Create mock client
  * const client = new MockBulletinClient();
+ * const items = [{ data }];
+ * const { cids } = await client
+ *   .submit(await client.estimateUpload(items), blobFromItems(items))
+ *   .send();
+ * console.log('Mock CID:', cids[0].toString());
  *
- * // Store data (no blockchain required)
- * const result = await client.store(data).send();
- * console.log('Mock CID:', result.cid.toString());
- *
- * // Check what operations were performed
- * const ops = client.getOperations();
- * expect(ops).toHaveLength(1);
+ * // Inspect the recorded operations.
+ * expect(client.getOperations()).toHaveLength(1);
  * ```
  */
 export class MockBulletinClient implements BulletinClientInterface {
@@ -120,6 +118,8 @@ export class MockBulletinClient implements BulletinClientInterface {
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
+  /** Offline preparer for streaming estimates (chunking + CID, no chain). */
+  private preparer: BulletinPreparer
 
   /**
    * Create a new mock client with optional configuration
@@ -131,6 +131,11 @@ export class MockBulletinClient implements BulletinClientInterface {
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
       simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,
     }
+    this.preparer = new BulletinPreparer({
+      defaultChunkSize: this.config.defaultChunkSize,
+      createManifest: this.config.createManifest,
+      chunkingThreshold: this.config.chunkingThreshold,
+    })
   }
 
   /**
@@ -152,91 +157,49 @@ export class MockBulletinClient implements BulletinClientInterface {
    */
   async destroy(): Promise<void> {}
 
-  uploadFile(data: Uint8Array): UploadFileBuilder {
-    return new UploadFileBuilder(
-      (d, wf, oe, _cc, ca) => this.uploadFileImpl(d, wf, oe, ca),
-      data,
-    )
-  }
-
-  upload(items: UploadItem[]): UploadBuilder {
-    return new UploadBuilder(
-      (its, _wf, oe, ca) => this.uploadItemsImpl(its, oe, ca),
-      (its) => this.estimateUpload(its),
-      items,
-    )
-  }
-
-  private async uploadFileImpl(
-    data: Uint8Array,
-    _waitFor: WaitFor,
-    onEvent: UploadCallback | undefined,
-    checkAuth: boolean,
-  ): Promise<UploadFileResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-    const { cids } = await this.uploadItemsImpl([{ data }], onEvent, checkAuth)
-    return { cid: cids[0]! }
-  }
-
-  private async uploadItemsImpl(
-    items: UploadItem[],
-    onEvent: UploadCallback | undefined,
-    checkAuth: boolean,
-  ): Promise<UploadResult> {
-    if (items.length === 0) {
-      throw new BulletinError(
-        "upload() requires at least one item",
-        ErrorCode.EMPTY_DATA,
-      )
-    }
-    if (checkAuth && this.config.simulateInsufficientAuth) {
-      throw new BulletinError(
-        "Account is not authorized to store data on this chain",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-    if (this.config.simulateStorageFailure) {
-      throw new BulletinError(
-        "Simulated storage failure",
-        ErrorCode.TRANSACTION_FAILED,
-      )
-    }
-    // Compute all CIDs in parallel (matches the real client's behavior).
-    const cids: CID[] = await Promise.all(
-      items.map((item) =>
-        calculateCid(
-          item.data,
-          item.codec ?? CidCodec.Raw,
-          item.hashAlgo ?? HashAlgorithm.Blake2b256,
-        ),
-      ),
-    )
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i] as UploadItem
-      const cid = cids[i]!
-      this.operations.push({
-        type: "store",
-        dataSize: item.data.length,
-        cid: cid.toString(),
-      })
-      onEvent?.({
-        type: UploadStatus.ItemStarted,
-        index: i,
-        total: items.length,
-        cid,
-      })
-      onEvent?.({
-        type: UploadStatus.ItemFinalized,
-        index: i,
-        total: items.length,
-        cid,
-        blockHash: MOCK_BLOCK_HASH,
-        blockNumber: 1,
-      })
-    }
-    return { cids }
+  submit(estimate: StreamEstimate, _source: SeekableSource): SubmitBuilder {
+    return new SubmitBuilder(async (_waitFor, onEvent, checkAuth) => {
+      if (checkAuth && this.config.simulateInsufficientAuth) {
+        throw new BulletinError(
+          "Account is not authorized to store data on this chain",
+          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        )
+      }
+      if (this.config.simulateStorageFailure) {
+        throw new BulletinError(
+          "Simulated storage failure",
+          ErrorCode.TRANSACTION_FAILED,
+        )
+      }
+      const plan = estimate.plan
+      const cids: CID[] = [...plan.chunkCids]
+      const sizes: number[] = [...plan.chunkSizes]
+      if (plan.rootCid && plan.manifestData) {
+        cids.push(plan.rootCid)
+        sizes.push(plan.manifestData.length)
+      }
+      const total = cids.length
+      const skip = new Set(estimate.alreadyStored)
+      for (let i = 0; i < cids.length; i++) {
+        if (skip.has(i)) continue
+        const cid = cids[i] as CID
+        this.operations.push({
+          type: "store",
+          dataSize: sizes[i] ?? 0,
+          cid: cid.toString(),
+        })
+        onEvent?.({ type: UploadStatus.ItemStarted, index: i, total, cid })
+        onEvent?.({
+          type: UploadStatus.ItemFinalized,
+          index: i,
+          total,
+          cid,
+          blockHash: MOCK_BLOCK_HASH,
+          blockNumber: 1,
+        })
+      }
+      return { cids }
+    })
   }
 
   private throwIfAuthFailure(): void {
@@ -348,49 +311,89 @@ export class MockBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Mock implementation of estimateUpload. Doesn't query a chain (no
-   * chain in the mock), so `skipExisting` only ever surfaces input
-   * duplicates. Mirrors the real client's shape so consumers can use the
-   * same code path under both.
+   * Mock implementation of estimateUpload. Doesn't query a chain (no chain in
+   * the mock), so `skipExisting`/`alreadyStored` is always empty; only input
+   * duplicates are surfaced. Mirrors the real client's shape — including the
+   * streaming `estimateUpload(source)` overload, which chunks offline.
    */
-  async estimateUpload(items: UploadItem[]): Promise<UploadEstimate> {
-    const itemCids = await Promise.all(
-      items.map((item) =>
-        calculateCid(
-          item.data,
-          item.codec ?? CidCodec.Raw,
-          item.hashAlgo ?? HashAlgorithm.Blake2b256,
+  async estimateUpload(
+    input: UploadItem[] | BlobSource,
+    options: UploadEstimateOptions = {},
+  ): Promise<StreamEstimate> {
+    if (Array.isArray(input)) {
+      const cids = await Promise.all(
+        input.map((item) =>
+          calculateCid(
+            item.data,
+            item.codec ?? CidCodec.Raw,
+            item.hashAlgo ?? HashAlgorithm.Blake2b256,
+          ),
         ),
-      ),
-    )
-    const hashesHex = itemCids.map((cid) => Binary.toHex(cid.multihash.digest))
+      )
+      const sizes = input.map((i) => i.data.length)
+      const offsets: number[] = []
+      let total = 0
+      for (const s of sizes) {
+        offsets.push(total)
+        total += s
+      }
+      const plan: ChunkPlan = {
+        chunkCids: cids,
+        chunkSizes: sizes,
+        offsets,
+        codecs: input.map((it) => it.codec ?? CidCodec.Raw),
+        hashAlgos: input.map((it) => it.hashAlgo ?? HashAlgorithm.Blake2b256),
+        totalSize: total,
+        chunkSize: 0,
+      }
+      return { ...this.assembleEstimate(cids, sizes, options), plan }
+    }
+    const plan = await this.preparer.planStream(input)
+    const cids: CID[] = [...plan.chunkCids]
+    const sizes: number[] = [...plan.chunkSizes]
+    if (plan.rootCid && plan.manifestData) {
+      cids.push(plan.rootCid)
+      sizes.push(plan.manifestData.length)
+    }
+    return { ...this.assembleEstimate(cids, sizes, options), plan }
+  }
+
+  /** Offline dedup + assembly (no chain → `alreadyStored` always empty). */
+  private assembleEstimate(
+    cids: CID[],
+    sizes: number[],
+    options: UploadEstimateOptions,
+  ): UploadEstimate {
+    const dedupInput = options.dedupInput ?? true
+    const hashesHex = cids.map(cidToContentHashHex)
     const seen = new Map<string, number>()
     const duplicateIndices: number[] = []
-    for (let i = 0; i < items.length; i++) {
-      const h = hashesHex[i] as string
-      if (seen.has(h)) duplicateIndices.push(i)
-      else seen.set(h, i)
+    if (dedupInput) {
+      for (let i = 0; i < cids.length; i++) {
+        const h = hashesHex[i] as string
+        if (seen.has(h)) duplicateIndices.push(i)
+        else seen.set(h, i)
+      }
     }
     const dupSet = new Set(duplicateIndices)
     const toUpload: number[] = []
     let bytes = 0n
-    const itemsOut: UploadEstimateItem[] = new Array(items.length)
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i] as UploadItem
+    const itemsOut: UploadEstimateItem[] = new Array(cids.length)
+    for (let i = 0; i < cids.length; i++) {
       const dup = dupSet.has(i)
       itemsOut[i] = {
         index: i,
-        cid: itemCids[i] as CID,
-        bytes: item.data.length,
+        cid: cids[i] as CID,
+        bytes: sizes[i] as number,
         ...(dup ? { skipReason: "duplicate_input" as const } : {}),
       }
       if (!dup) {
         toUpload.push(i)
-        bytes += BigInt(item.data.length)
+        bytes += BigInt(sizes[i] as number)
       }
     }
     return {
-      total: items.length,
+      total: cids.length,
       items: itemsOut,
       transactions: toUpload.length,
       bytes,

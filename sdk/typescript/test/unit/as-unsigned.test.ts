@@ -11,8 +11,9 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { blobFromBytes, blobFromItems } from "../../src/blob-source"
 import * as pipelineModule from "../../src/pipeline"
-import { ErrorCode } from "../../src/types"
+import { ErrorCode, type UploadItem } from "../../src/types"
 
 // Per-test apiStub is set by the helper below; createClient is mocked at
 // file scope (vi.mock hoists). Each test's helper reassigns `currentApi`.
@@ -92,7 +93,24 @@ async function makeClient(opts: MockClientOpts = {}) {
   } as unknown as ConstructorParameters<typeof BulletinClient>[0])
 }
 
-describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
+// Route items through the sole submission API. Flags select the builder
+// variants (.asUnsigned() / .ensureAuthorized()).
+async function submitItems(
+  // biome-ignore lint/suspicious/noExplicitAny: BulletinClient under test
+  client: any,
+  items: UploadItem[],
+  opts: { unsigned?: boolean; ensureAuth?: boolean } = {},
+) {
+  const builder = client.submit(
+    await client.estimateUpload(items),
+    blobFromItems(items),
+  )
+  if (opts.ensureAuth) builder.ensureAuthorized()
+  if (opts.unsigned) builder.asUnsigned()
+  return builder.send()
+}
+
+describe("submit().asUnsigned() — pipelineStore dispatch", () => {
   beforeEach(() => vi.restoreAllMocks())
 
   it("calls pipelineStore with signer=undefined when asUnsigned()", async () => {
@@ -109,10 +127,11 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
       }))
 
     const client = await makeClient()
-    const { cids } = await client
-      .upload([{ data: new Uint8Array([1]) }])
-      .asUnsigned()
-      .send()
+    const { cids } = await submitItems(
+      client,
+      [{ data: new Uint8Array([1]) }],
+      { unsigned: true },
+    )
 
     expect(spy).toHaveBeenCalledTimes(1)
     // Second arg = signer; for asUnsigned it must be undefined.
@@ -128,7 +147,7 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
         cids: items.map(() => ({ toString: () => "x" }) as never),
       }))
     const client = await makeClient()
-    await client.upload([{ data: new Uint8Array([1]) }]).send()
+    await submitItems(client, [{ data: new Uint8Array([1]) }])
     expect(spy).toHaveBeenCalled()
     expect(spy.mock.calls[0]![1]).not.toBeUndefined()
   })
@@ -149,7 +168,7 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
     const items = Array.from({ length: 5 }, (_, i) => ({
       data: new Uint8Array([i]),
     }))
-    const { cids } = await client.upload(items).asUnsigned().send()
+    const { cids } = await submitItems(client, items, { unsigned: true })
 
     expect(spy).toHaveBeenCalledTimes(1)
     expect(cids).toHaveLength(5)
@@ -157,14 +176,11 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
     expect(spy.mock.calls[0]![2]).toHaveLength(5)
   })
 
-  it("rejects empty data with EMPTY_DATA before reaching pipeline", async () => {
+  it("rejects empty data with EMPTY_DATA at estimate time (before pipeline)", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient()
     await expect(
-      client
-        .upload([{ data: new Uint8Array(0) }])
-        .asUnsigned()
-        .send(),
+      client.estimateUpload([{ data: new Uint8Array(0) }]),
     ).rejects.toMatchObject({ code: ErrorCode.EMPTY_DATA })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -185,51 +201,29 @@ describe("UploadBuilder.asUnsigned() — pipelineStore dispatch", () => {
         cids: items.map(() => ({ toString: () => "x" }) as never),
       }))
     const client = await makeClient({ withSigner: false })
-    const { cids } = await client
-      .upload([{ data: new Uint8Array([1]) }])
-      .asUnsigned()
-      .send()
+    const { cids } = await submitItems(
+      client,
+      [{ data: new Uint8Array([1]) }],
+      { unsigned: true },
+    )
     expect(cids).toHaveLength(1)
     expect(spy.mock.calls[0]![1]).toBeUndefined()
   })
 
-  it("signed upload() on a signer-less client throws UNSUPPORTED_OPERATION", async () => {
+  it("signed submit() on a signer-less client throws UNSUPPORTED_OPERATION", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient({ withSigner: false })
     await expect(
-      client.upload([{ data: new Uint8Array([1]) }]).send(),
+      submitItems(client, [{ data: new Uint8Array([1]) }]),
     ).rejects.toMatchObject({ code: ErrorCode.UNSUPPORTED_OPERATION })
     expect(spy).not.toHaveBeenCalled()
   })
 })
 
-describe("UploadFileBuilder.asUnsigned()", () => {
+describe("submit().asUnsigned() — blob source", () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  it("rejects data > chunkingThreshold with UNSUPPORTED_OPERATION", async () => {
-    const spy = vi.spyOn(pipelineModule, "pipelineStore")
-    const client = await makeClient()
-    const big = new Uint8Array(3 * 1024 * 1024) // > 2 MiB default
-    await expect(
-      client.uploadFile(big).asUnsigned().send(),
-    ).rejects.toMatchObject({ code: ErrorCode.UNSUPPORTED_OPERATION })
-    expect(spy).not.toHaveBeenCalled()
-  })
-
-  it("rejects when withChunkSize() forces chunking", async () => {
-    const spy = vi.spyOn(pipelineModule, "pipelineStore")
-    const client = await makeClient()
-    await expect(
-      client
-        .uploadFile(new Uint8Array(128))
-        .withChunkSize(16)
-        .asUnsigned()
-        .send(),
-    ).rejects.toMatchObject({ code: ErrorCode.UNSUPPORTED_OPERATION })
-    expect(spy).not.toHaveBeenCalled()
-  })
-
-  it("returns single cid when data fits in one tx", async () => {
+  it("stores a single-tx blob unsigned (returns its cid)", async () => {
     vi.spyOn(pipelineModule, "pipelineStore").mockImplementation(
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       async (_api, _signer, items: any) => ({
@@ -237,11 +231,12 @@ describe("UploadFileBuilder.asUnsigned()", () => {
       }),
     )
     const client = await makeClient()
-    const { cid } = await client
-      .uploadFile(new Uint8Array([1, 2, 3]))
+    const src = blobFromBytes(new Uint8Array([1, 2, 3]))
+    const { cids } = await client
+      .submit(await client.estimateUpload(src), src)
       .asUnsigned()
       .send()
-    expect(cid).toBeDefined()
+    expect(cids[cids.length - 1]).toBeDefined()
   })
 })
 
@@ -265,11 +260,11 @@ describe("ensureAuthorized() + asUnsigned()", () => {
         onQuery: (s) => queried.push(s),
       },
     })
-    await client
-      .upload([{ data: new Uint8Array([1]) }, { data: new Uint8Array([2]) }])
-      .ensureAuthorized()
-      .asUnsigned()
-      .send()
+    await submitItems(
+      client,
+      [{ data: new Uint8Array([1]) }, { data: new Uint8Array([2]) }],
+      { unsigned: true, ensureAuth: true },
+    )
     expect(queried).toHaveLength(2)
     // biome-ignore lint/suspicious/noExplicitAny: test stub
     expect((queried[0] as any).type).toBe("Preimage")
@@ -279,11 +274,10 @@ describe("ensureAuthorized() + asUnsigned()", () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient({ withQuery: { auth: undefined } })
     await expect(
-      client
-        .upload([{ data: new Uint8Array([1]) }])
-        .ensureAuthorized()
-        .asUnsigned()
-        .send(),
+      submitItems(client, [{ data: new Uint8Array([1]) }], {
+        unsigned: true,
+        ensureAuth: true,
+      }),
     ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -297,11 +291,10 @@ describe("ensureAuthorized() + asUnsigned()", () => {
       },
     })
     await expect(
-      client
-        .upload([{ data: new Uint8Array([1]) }])
-        .ensureAuthorized()
-        .asUnsigned()
-        .send(),
+      submitItems(client, [{ data: new Uint8Array([1]) }], {
+        unsigned: true,
+        ensureAuth: true,
+      }),
     ).rejects.toMatchObject({
       code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
       message: expect.stringMatching(/expired/i),
@@ -313,12 +306,12 @@ describe("ensureAuthorized() + asUnsigned()", () => {
 describe("Duplicate content guard", () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  it("rejects upload([…]) with two items sharing the same content hash", async () => {
+  it("rejects submit() with two items sharing the same content hash", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
     await expect(
-      client.upload([{ data: sameData }, { data: sameData }]).send(),
+      submitItems(client, [{ data: sameData }, { data: sameData }]),
     ).rejects.toMatchObject({ code: ErrorCode.INVALID_CONFIG })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -328,10 +321,9 @@ describe("Duplicate content guard", () => {
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
     await expect(
-      client
-        .upload([{ data: sameData }, { data: sameData }])
-        .asUnsigned()
-        .send(),
+      submitItems(client, [{ data: sameData }, { data: sameData }], {
+        unsigned: true,
+      }),
     ).rejects.toMatchObject({ code: ErrorCode.INVALID_CONFIG })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -348,20 +340,18 @@ describe("Duplicate content guard", () => {
     const { CidCodec, HashAlgorithm } = await import("../../src/types")
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
-    const { cids } = await client
-      .upload([
-        {
-          data: sameData,
-          codec: CidCodec.Raw,
-          hashAlgo: HashAlgorithm.Blake2b256,
-        },
-        {
-          data: sameData,
-          codec: CidCodec.Raw,
-          hashAlgo: HashAlgorithm.Sha2_256,
-        },
-      ])
-      .send()
+    const { cids } = await submitItems(client, [
+      {
+        data: sameData,
+        codec: CidCodec.Raw,
+        hashAlgo: HashAlgorithm.Blake2b256,
+      },
+      {
+        data: sameData,
+        codec: CidCodec.Raw,
+        hashAlgo: HashAlgorithm.Sha2_256,
+      },
+    ])
     expect(cids).toHaveLength(2)
     expect(spy).toHaveBeenCalledTimes(1)
   })

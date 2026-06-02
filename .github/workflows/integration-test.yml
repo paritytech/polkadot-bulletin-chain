@@ -172,6 +172,18 @@ jobs:
         working-directory: examples
         run: just test-rust-sdk "${{ env.TEST_DIR }}" "$RUNTIME_PACKAGE"
 
+      - name: Test Rust SDK (pipeline_live integration suite)
+        # The `#[ignore]`d live suite drives the full upload pipeline against the
+        # running chain. Run it once, on the westend/ws leg: it uses the committed
+        # westend `metadata.scale` and WS providers. Serial (`--test-threads=1`)
+        # because the tests share the `//Alice` account and would otherwise race.
+        if: matrix.runtime.name == 'bulletin-westend' && matrix.mode == 'ws'
+        timeout-minutes: 25
+        env:
+          BULLETIN_RPC_URL: ws://127.0.0.1:10000
+          BULLETIN_RPC_URL_2: ws://127.0.0.1:12346
+        run: cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored --test-threads=1 --nocapture
+
       - name: Test TypeScript SDK
         working-directory: examples
         run: just test-ts-sdk "${{ env.TEST_DIR }}"

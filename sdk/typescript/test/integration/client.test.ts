@@ -7,8 +7,9 @@
  * Requires a running node (default `ws://localhost:9944`; override with
  * `BULLETIN_RPC_URL`). Run with `npm run test:integration`.
  *
- * Exercises the SDK's `upload([…])` / `uploadFile()` / `asUnsigned()` flows
- * end-to-end against the new pipeline-based submission engine.
+ * Exercises the SDK's sole submission API — `estimateUpload()` →
+ * `submit(estimate, source).send()` (with `.asUnsigned()` for the
+ * preimage-authorized path) — end-to-end against the pipeline engine.
  */
 
 import { randomBytes } from "node:crypto"
@@ -20,10 +21,54 @@ import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   BulletinClient,
+  blobFromBytes,
+  blobFromItems,
   CidCodec,
   HashAlgorithm,
+  type UploadItem,
   UploadStatus,
 } from "../../src"
+
+// The sole submission API: estimate the source, then submit it. A thin
+// wrapper keeps each test focused on its assertion. The returned builder
+// is exposed so callers can chain `.withWaitFor()`, `.withCallback()`,
+// `.asUnsigned()`, etc. before `.send()`.
+async function submitItems(client: BulletinClient, items: UploadItem[]) {
+  return client.submit(await client.estimateUpload(items), blobFromItems(items))
+}
+async function submitBlob(client: BulletinClient, data: Uint8Array) {
+  const src = blobFromBytes(data)
+  return client.submit(await client.estimateUpload(src), src)
+}
+
+// Records the highest block at which any item finalized. The accounting tests
+// upload through their own rival clients but snapshot `Authorizations` through
+// the shared `client` — a separate chainHead subscription that can lag a block
+// behind. Pass this as the upload callback, then barrier on the max block
+// before reading the snapshot so the read reflects every charged store.
+function makeFinalizedTracker() {
+  let maxBlock = 0
+  const onEvent = (ev: { type: UploadStatus; blockNumber?: number }) => {
+    if (
+      ev.type === UploadStatus.ItemFinalized &&
+      typeof ev.blockNumber === "number"
+    ) {
+      maxBlock = Math.max(maxBlock, ev.blockNumber)
+    }
+  }
+  return { onEvent, max: () => maxBlock }
+}
+
+// Block until `client`'s finalized head reaches `target`. `System.Number`
+// read via `query.getValue()` resolves at the latest finalized block.
+async function waitForFinalized(client: BulletinClient, target: number) {
+  for (let i = 0; i < 120; i++) {
+    const head = await client.api.query.System.Number.getValue()
+    if (head >= target) return
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  throw new Error(`finalized head did not reach block ${target} within 120s`)
+}
 
 const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
@@ -79,22 +124,23 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
     if (client) await client.destroy()
   })
 
-  describe("upload() — signed via pipeline", () => {
+  describe("submit(items) — signed via pipeline", () => {
     it("stores a single item", async () => {
       const data = new TextEncoder().encode(
         "Hello, Bulletin — integration test",
       )
-      const { cids } = await client.upload([{ data }]).send()
+      const { cids } = await (await submitItems(client, [{ data }])).send()
       expect(cids).toHaveLength(1)
       expect(cids[0]!.toString()).toMatch(/^[a-z0-9]+$/i)
     })
 
     it("stores with non-default codec + hash", async () => {
       const data = new TextEncoder().encode("custom codec test")
-      const { cids } = await client
-        .upload([
+      const { cids } = await (
+        await submitItems(client, [
           { data, codec: CidCodec.DagPb, hashAlgo: HashAlgorithm.Sha2_256 },
         ])
+      )
         .withWaitFor("finalized")
         .send()
       expect(cids).toHaveLength(1)
@@ -104,7 +150,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const items = Array.from({ length: 4 }, (_, i) => ({
         data: new TextEncoder().encode(`batch item ${i} ${Date.now()}`),
       }))
-      const { cids } = await client.upload(items).send()
+      const { cids } = await (await submitItems(client, items)).send()
       expect(cids).toHaveLength(4)
     })
   })
@@ -128,7 +174,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
     return data
   }
 
-  describe("uploadFile() — chunked file + DAG-PB manifest", () => {
+  describe("submit(blob) — chunked file + DAG-PB manifest", () => {
     it("auto-chunks a 5 MiB file and returns one root CID", async () => {
       const data = makeChunkedTestData(5 * 1024 * 1024)
       const events: Array<{
@@ -137,15 +183,15 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
         total: number
       }> = []
 
-      const { cid } = await client
-        .uploadFile(data)
-        .withChunkSize(1024 * 1024)
+      // Default 1 MiB chunk size → 5 chunks + 1 manifest.
+      const { cids } = await (await submitBlob(client, data))
         .withCallback((ev) =>
           events.push({ type: ev.type, index: ev.index, total: ev.total }),
         )
         .send()
 
-      expect(cid).toBeDefined()
+      // Root CID (the retrieval id) is the last unit — the manifest.
+      expect(cids[cids.length - 1]).toBeDefined()
       // 5 chunks + 1 manifest = 6 items
       const finalized = events.filter(
         (e) => e.type === UploadStatus.ItemFinalized,
@@ -158,9 +204,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const data = makeChunkedTestData(3 * 1024 * 1024) // 3 MiB
       const lastSeenByIndex = new Map<number, UploadStatus>()
 
-      await client
-        .uploadFile(data)
-        .withChunkSize(1024 * 1024)
+      await (await submitBlob(client, data))
         .withCallback((ev) => {
           const prev = lastSeenByIndex.get(ev.index)
           lastSeenByIndex.set(ev.index, ev.type)
@@ -185,15 +229,14 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const data = makeChunkedTestData(2 * 1024 * 1024) // 2 MiB → 2 chunks
       const finalizedCids: string[] = []
 
-      const { cid: rootCid } = await client
-        .uploadFile(data)
-        .withChunkSize(1024 * 1024)
+      const { cids } = await (await submitBlob(client, data))
         .withCallback((ev) => {
           if (ev.type === UploadStatus.ItemFinalized) {
             finalizedCids.push(ev.cid.toString())
           }
         })
         .send()
+      const rootCid = cids[cids.length - 1]!
 
       // 2 chunks + 1 manifest = 3 finalized events
       expect(finalizedCids).toHaveLength(3)
@@ -308,13 +351,15 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // Anonymous submitter — no signer needed for the unsigned path. We
       // reuse the existing signed `client` (its signer field is set but
       // unused on `.asUnsigned()`).
-      const { cids } = await client.upload([{ data }]).asUnsigned().send()
+      const { cids } = await (await submitItems(client, [{ data }]))
+        .asUnsigned()
+        .send()
       expect(cids).toHaveLength(1)
     })
   })
 
   describe("Complete workflow", () => {
-    it("authorizes Bob then stores via uploadFile()", async () => {
+    it("authorizes Bob then stores via submit(blob)", async () => {
       const dataSize = 2 * 1024 * 1024
       const estimate = client.estimateAuthorization(dataSize)
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
@@ -329,8 +374,8 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       // Alice (already authorized in beforeAll) uploads.
       const data = makeChunkedTestData(dataSize)
-      const { cid } = await client.uploadFile(data).send()
-      expect(cid).toBeDefined()
+      const { cids } = await (await submitBlob(client, data)).send()
+      expect(cids[cids.length - 1]).toBeDefined()
     })
   })
 
@@ -369,8 +414,8 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
 
       const [resA, resB] = await Promise.all([
-        clientA.upload([{ data: dataA }]).send(),
-        clientB.upload([{ data: dataB }]).send(),
+        submitItems(clientA, [{ data: dataA }]).then((b) => b.send()),
+        submitItems(clientB, [{ data: dataB }]).then((b) => b.send()),
       ])
 
       expect(resA.cids).toHaveLength(1)
@@ -460,13 +505,14 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
         })
       })
 
+      const tracker = makeFinalizedTracker()
       try {
         // Fire all 3 uploads in parallel; each waits for finalization.
         const results = await Promise.all(
-          rivals.map((c, idx) =>
-            c
-              .upload(sessionItems[idx] as { data: Uint8Array }[])
+          rivals.map(async (c, idx) =>
+            (await submitItems(c, sessionItems[idx] as UploadItem[]))
               .withWaitFor("finalized")
+              .withCallback(tracker.onEvent)
               .send(),
           ),
         )
@@ -474,8 +520,12 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           expect(r.cids).toHaveLength(ITEMS_PER)
         }
 
-        // Snapshot AFTER — same query path so any "finalized lag"
-        // applies symmetrically to both snapshots.
+        // The rival clients may finalize a block ahead of `client`'s own
+        // chainHead subscription; wait for `client` to catch up so the
+        // snapshot below counts every store the uploads finalized.
+        await waitForFinalized(client, tracker.max())
+
+        // Snapshot AFTER — at a finalized head that includes all uploads.
         const after =
           await client.api.query.TransactionStorage.Authorizations.getValue({
             type: "Account",
@@ -571,18 +621,24 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           }),
       )
 
+      const tracker = makeFinalizedTracker()
       try {
         const results = await Promise.all(
-          clients.map((c, idx) =>
-            c
-              .upload(sessionItems[idx] as { data: Uint8Array }[])
+          clients.map(async (c, idx) =>
+            (await submitItems(c, sessionItems[idx] as UploadItem[]))
               .withWaitFor("finalized")
+              .withCallback(tracker.onEvent)
               .send(),
           ),
         )
         for (const r of results) {
           expect(r.cids).toHaveLength(ITEMS_PER)
         }
+
+        // The per-account clients may finalize a block ahead of `client`'s
+        // chainHead; wait for `client` to catch up so each snapshot counts
+        // every store that account finalized.
+        await waitForFinalized(client, tracker.max())
 
         // Snapshot per-account AFTER.
         const after = await Promise.all(

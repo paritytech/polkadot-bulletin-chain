@@ -1,11 +1,11 @@
 /**
  * Store a big file on Bulletin Chain using the TypeScript SDK.
  *
- * Demonstrates the high-level `uploadFile()` API:
+ * Demonstrates the SDK's submission API:
  *   1. Authorize a user account (//Alice as the Authorizer origin).
- *   2. `client.uploadFile(bytes).send()` — the SDK chunks, builds the
- *      manifest, submits everything through the shared upload pipeline,
- *      and returns the single root CID.
+ *   2. `client.submit(await client.estimateUpload(src), src).send()` — the
+ *      SDK chunks, builds the manifest, submits everything through the shared
+ *      upload pipeline, and returns a CID per unit (last = manifest root).
  *   3. Optionally verify via IPFS (root CID download + per-chunk reassembly).
  *
  * Usage:
@@ -31,6 +31,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import {
+    blobFromBytes,
     BulletinClient,
     UploadStatus,
     WaitFor,
@@ -147,8 +148,10 @@ async function main() {
             logSuccess('Account authorized');
         }
 
-        // 4) Upload the file. uploadFile() handles chunking + manifest
-        //    internally and resolves with the single root CID. Per-item
+        // 4) Estimate then submit. estimateUpload() streams the source once
+        //    to build the chunk plan + manifest (O(chunkSize) memory); submit()
+        //    stores everything through the shared pipeline and resolves with a
+        //    CID per unit — the last is the manifest's root CID. Per-item
         //    progress comes through ItemStarted / ItemInBlock / ItemFinalized
         //    events — each event carries the item's CID so callers can
         //    correlate with their own bookkeeping.
@@ -158,8 +161,9 @@ async function main() {
         let lastItemTotal = 0;
         const start = Date.now();
 
-        const { cid: rootCid } = await client
-            .uploadFile(new Uint8Array(fileBytes))
+        const src = blobFromBytes(new Uint8Array(fileBytes));
+        const { cids } = await client
+            .submit(await client.estimateUpload(src), src)
             .ensureAuthorized()  // fail fast if the account has no/expired auth
             .withCallback((ev) => {
                 lastItemTotal = ev.total;
@@ -179,6 +183,7 @@ async function main() {
                 }
             })
             .send();
+        const rootCid = cids[cids.length - 1];
 
         const elapsed = Date.now() - start;
         const numChunks = lastItemTotal > 1 ? lastItemTotal - 1 : 1;

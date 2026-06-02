@@ -8,13 +8,14 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 ## Key Features
 
-- **Direct Transaction Submission**: `TransactionClient` handles all chain interactions out of the box
-- **Offline Preparation**: `BulletinClient` prepares operations (CID calculation, chunking, DAG building) without network access
-- **Builder Pattern**: Fluent API for configuring store operations
-- **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
-- **Structured Errors**: Error codes, retryable detection, and recovery hints consistent with TypeScript SDK
-- **Progress Tracking**: Callback-based progress events for uploads
-- **no_std Compatible**: Core functionality works in no_std environments
+- **Exactly-once upload pipeline**: `estimate_upload` → `submit` drives items to finality with wave batching, content-hash dedup, hijack recovery, watchdogs, and re-subscribe/retry-resume — re-runs never double-pay
+- **Streaming**: upload a file from a `SeekableSource`, range-read lazily (resident memory tracks the in-flight window, not the file)
+- **Provider-agnostic**: `from_rpc_clients` takes any subxt `RpcClient` — WS node or smoldot light client — and fans broadcast out across all of them
+- **Unsigned (preimage) path**: `submit_unsigned` for preimage-authorized bare extrinsics
+- **Offline preparation**: `BulletinClient` prepares operations (CID, chunking, DAG building) without network access
+- **Runtime metadata**: embedded — works out of the box
+- **Structured errors**: error codes, retryable detection, and recovery hints consistent with the TypeScript SDK
+- **no_std compatible**: core (CID/chunking/DAG) works in `no_std`
 
 ## Architecture
 
@@ -107,24 +108,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let signer = Keypair::from_uri(&uri)?;
     let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
-    // Authorize account (requires sudo)
-    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer, WaitFor::InBlock).await?;
+    // Authorize an account. The signer must be a registered authorizer
+    // (e.g. a genesis authorizer such as //Eve in the dev preset).
+    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer, WaitFor::Finalized).await?;
 
-    // Store data with progress tracking
-    let data = b"Hello, Bulletin!".to_vec();
-    let receipt = client.store_with_progress(
-        data,
-        &signer,
-        WaitFor::InBlock,
-        Some(std::sync::Arc::new(|event| {
-            println!("Progress: {:?}", event);
-        })),
-    ).await?;
+    // Upload via the `estimate_upload` -> `submit` pipeline (exactly-once).
+    let items = vec![UploadItem::new(b"Hello, Bulletin!".to_vec())];
+    let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
+    let estimate = client
+        .estimate_upload(UploadInput::Items(items), UploadEstimateOptions::default())
+        .await?;
+    let source: std::sync::Arc<dyn SeekableSource> = std::sync::Arc::new(blob_from_items(datas));
+    let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
 
-    println!("Stored in block: {}", receipt.block_hash);
+    println!("Stored CIDs: {:?}", result.cids);
     Ok(())
 }
 ```
+
+For a large file, pass `UploadInput::Source(source)` (e.g. `blob_from_bytes(..)`)
+to `estimate_upload` and the same `source` to `submit` — it is chunked into a
+DAG-PB file and range-read lazily during upload. Use `submit_unsigned` for the
+preimage-authorized path, and `from_endpoints(&[..])` for multi-provider
+broadcast.
 
 ### Using BulletinClient (Prepare Only)
 

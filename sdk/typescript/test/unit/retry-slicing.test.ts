@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 /**
- * Tests for the retry layer in `BulletinClient.uploadItemsImpl`:
+ * Tests for the retry layer in `BulletinClient.runSignedRetry` (driven via
+ * the `submit(estimate, source)` API):
  *   - on `BulletinError(STORE_STALLED, cause: { finalizedIndices })`, the
  *     retry re-invokes `pipelineStore` skipping those specific original
  *     indices (NOT slicing by count — items can land non-contiguously
@@ -17,6 +18,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { blobFromItems } from "../../src/blob-source"
 import * as pipelineModule from "../../src/pipeline"
 import { BulletinError, ErrorCode, UploadStatus } from "../../src/types"
 
@@ -57,12 +59,30 @@ function fakeCid(label: string): unknown {
   return { toString: () => `cid:${label}`, label }
 }
 
+// Route items through the sole submission API. estimateUpload computes the
+// real per-item plan/CIDs offline (no chain); submit → runSignedRetry hits
+// the mocked pipelineStore, exercising the retry/slicing path in
+// runSignedRetry.
+async function runSubmit(
+  // biome-ignore lint/suspicious/noExplicitAny: BulletinClient under test
+  client: any,
+  items: { data: Uint8Array }[],
+  onEvent?: (ev: { type: string; index: number }) => void,
+) {
+  const builder = client.submit(
+    await client.estimateUpload(items),
+    blobFromItems(items),
+  )
+  if (onEvent) builder.withCallback(onEvent)
+  return builder.send()
+}
+
 interface MockCall {
   itemsLength: number
   precomputedCidsLength?: number
 }
 
-describe("uploadItemsImpl retry slicing", () => {
+describe("submit() retry slicing", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -94,13 +114,7 @@ describe("uploadItemsImpl retry slicing", () => {
     const items = Array.from({ length: 7 }, (_, i) => ({
       data: new Uint8Array([i]),
     }))
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    const result = await (client as any).uploadItemsImpl(
-      items,
-      "finalized",
-      undefined,
-      false,
-    )
+    const result = await runSubmit(client, items)
 
     expect(pipelineSpy).toHaveBeenCalledTimes(2)
     expect(calls).toEqual([
@@ -123,10 +137,9 @@ describe("uploadItemsImpl retry slicing", () => {
     const client = await makeClient()
     const items = [{ data: new Uint8Array([1]) }]
 
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    await expect(
-      (client as any).uploadItemsImpl(items, "finalized", undefined, false),
-    ).rejects.toMatchObject({ code: ErrorCode.STORE_STALLED })
+    await expect(runSubmit(client, items)).rejects.toMatchObject({
+      code: ErrorCode.STORE_STALLED,
+    })
 
     // 1 initial + 3 retries = 4 attempts total
     expect(pipelineSpy).toHaveBeenCalledTimes(4)
@@ -142,10 +155,9 @@ describe("uploadItemsImpl retry slicing", () => {
     const client = await makeClient()
     const items = [{ data: new Uint8Array([1]) }]
 
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    await expect(
-      (client as any).uploadItemsImpl(items, "finalized", undefined, false),
-    ).rejects.toMatchObject({ code: ErrorCode.TRANSACTION_FAILED })
+    await expect(runSubmit(client, items)).rejects.toMatchObject({
+      code: ErrorCode.TRANSACTION_FAILED,
+    })
     expect(pipelineSpy).toHaveBeenCalledTimes(1)
   })
 
@@ -157,10 +169,7 @@ describe("uploadItemsImpl retry slicing", () => {
     const client = await makeClient()
     const items = [{ data: new Uint8Array([1]) }]
 
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    await expect(
-      (client as any).uploadItemsImpl(items, "finalized", undefined, false),
-    ).rejects.toMatchObject({
+    await expect(runSubmit(client, items)).rejects.toMatchObject({
       code: ErrorCode.TRANSACTION_FAILED,
       message: expect.stringContaining("network is on fire"),
     })
@@ -178,7 +187,9 @@ describe("uploadItemsImpl retry slicing", () => {
       .mockImplementationOnce(async (_api, _signer, items) => {
         calls.push({
           itemsLength: items.length,
-          firstDataByte: (items[0] as { data: Uint8Array }).data[0] as number,
+          firstDataByte: (
+            await (items[0] as { getData(): Promise<Uint8Array> }).getData()
+          )[0] as number,
         })
         // Pretend items 8..15 finalized (middle 8 of 16); items 0..7
         // and 15..15 are still pending.
@@ -192,7 +203,9 @@ describe("uploadItemsImpl retry slicing", () => {
       .mockImplementationOnce(async (_api, _signer, items, _config: any) => {
         calls.push({
           itemsLength: items.length,
-          firstDataByte: (items[0] as { data: Uint8Array }).data[0] as number,
+          firstDataByte: (
+            await (items[0] as { getData(): Promise<Uint8Array> }).getData()
+          )[0] as number,
         })
         return { cids: items.map((_, i) => fakeCid(`r${i}`)) } as never
       })
@@ -202,13 +215,7 @@ describe("uploadItemsImpl retry slicing", () => {
     const items = Array.from({ length: 16 }, (_, i) => ({
       data: new Uint8Array([i]),
     }))
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    const result = await (client as any).uploadItemsImpl(
-      items,
-      "finalized",
-      undefined,
-      false,
-    )
+    const result = await runSubmit(client, items)
 
     expect(calls).toHaveLength(2)
     expect(calls[0]).toEqual({ itemsLength: 16, firstDataByte: 0 })
@@ -251,12 +258,8 @@ describe("uploadItemsImpl retry slicing", () => {
     const items = Array.from({ length: 5 }, (_, i) => ({
       data: new Uint8Array([i]),
     }))
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    await (client as any).uploadItemsImpl(
-      items,
-      "finalized",
-      (ev: { index: number }) => events.push({ index: ev.index }),
-      false,
+    await runSubmit(client, items, (ev: { index: number }) =>
+      events.push({ index: ev.index }),
     )
 
     expect(events).toEqual([{ index: 0 }, { index: 2 }])
@@ -277,7 +280,7 @@ describe("uploadItemsImpl retry slicing", () => {
     //     re-broadcasting item 2.
     const calls: Array<{ itemsLength: number }> = []
 
-    // Mock readStoredAt by call order — uploadItemsImpl queries each
+    // Mock readStoredAt by call order — runSignedRetry queries each
     // pending item's TBCH once on retry, in original-index order.
     // Return an entry only for the FIRST call (item 2's hash), undefined
     // for items 3..6.
@@ -287,7 +290,7 @@ describe("uploadItemsImpl retry slicing", () => {
       async (_api: any, contentHashHex: string) => {
         callOrder.push(contentHashHex)
         if (callOrder.length === 1) {
-          return { blockNumber: 100, extrinsicIndex: 7 }
+          return { blockNumber: 100, transactionIndex: 7 }
         }
         return undefined
       },
@@ -311,13 +314,8 @@ describe("uploadItemsImpl retry slicing", () => {
     const items = Array.from({ length: 7 }, (_, i) => ({
       data: new Uint8Array([i]),
     }))
-    // biome-ignore lint/suspicious/noExplicitAny: invoking private method
-    await (client as any).uploadItemsImpl(
-      items,
-      "finalized",
-      (ev: { type: string; index: number }) =>
-        events.push({ type: ev.type, index: ev.index }),
-      false,
+    await runSubmit(client, items, (ev: { type: string; index: number }) =>
+      events.push({ type: ev.type, index: ev.index }),
     )
 
     expect(calls).toEqual([

@@ -9,9 +9,11 @@ import type { JsonRpcProvider } from "@polkadot-api/json-rpc-provider"
 import { ss58Address } from "@polkadot-labs/hdkd-helpers"
 import type { CID } from "multiformats/cid"
 import { Binary, createClient, type PolkadotSigner } from "polkadot-api"
+import type { BlobSource, SeekableSource } from "./blob-source.js"
 import {
   isStallError,
   type PipelineBootstrap,
+  type PipelineItem,
   pipelineStore,
   readStoredAt,
 } from "./pipeline.js"
@@ -19,6 +21,7 @@ import { BulletinPreparer } from "./preparer.js"
 import {
   BulletinError,
   type ChunkerConfig,
+  type ChunkPlan,
   CidCodec,
   type ClientConfig,
   DEFAULT_STORE_OPTIONS,
@@ -29,12 +32,12 @@ import {
   resolveClientConfig,
   type StoreOptions,
   type StoreResult,
+  type StreamEstimate,
   TxStatus,
   type UploadCallback,
   type UploadEstimate,
   type UploadEstimateItem,
   type UploadEstimateOptions,
-  type UploadFileResult,
   type UploadItem,
   type UploadResult,
   UploadStatus,
@@ -42,6 +45,7 @@ import {
 } from "./types.js"
 import {
   calculateCid,
+  cidToContentHashHex,
   getContentHash,
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
@@ -319,8 +323,10 @@ export interface AuthorizeAccountEntry {
 }
 
 export interface BulletinClientInterface {
-  uploadFile(data: Uint8Array): UploadFileBuilder
-  upload(items: UploadItem[]): UploadBuilder
+  /** Lazy submission of a prepared estimate (from `estimateUpload(source)`):
+   *  fetches chunk bytes on demand from the {@link SeekableSource}, freeing
+   *  them on finalization. The single primitive for streamed/file uploads. */
+  submit(estimate: StreamEstimate, source: SeekableSource): SubmitBuilder
   authorizeAccount(
     who: string,
     transactions: number,
@@ -338,40 +344,12 @@ export interface BulletinClientInterface {
     bytes: number
   }
   estimateUpload(
-    items: UploadItem[],
+    input: UploadItem[] | BlobSource,
     options?: UploadEstimateOptions,
-  ): Promise<UploadEstimate>
+  ): Promise<StreamEstimate>
   /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
   destroy(): Promise<void>
 }
-
-/** Dispatch callback for the low-level `upload(items)` execution path. */
-type UploadDispatch = (
-  items: UploadItem[],
-  waitFor: WaitFor,
-  onEvent: UploadCallback | undefined,
-  checkAuth: boolean,
-  unsigned: boolean,
-  skipExisting: boolean,
-) => Promise<UploadResult>
-
-/** Estimate dispatcher: `UploadBuilder.estimate()` forwards builder
- * state (currently just `skipExisting`) to this and returns the chain-
- * accurate `transactions` / `bytes` plan for the configured upload. */
-type UploadEstimateDispatch = (
-  items: UploadItem[],
-  skipExisting: boolean,
-) => Promise<UploadEstimate>
-
-/** Dispatch callback for the high-level `uploadFile(data)` execution path. */
-type UploadFileDispatch = (
-  data: Uint8Array,
-  waitFor: WaitFor,
-  onEvent: UploadCallback | undefined,
-  chunkerConfig: Partial<ChunkerConfig> | undefined,
-  checkAuth: boolean,
-  unsigned: boolean,
-) => Promise<UploadFileResult>
 
 /**
  * Shared base for upload builders. Holds the fluent options every upload
@@ -389,7 +367,6 @@ abstract class BaseUploadBuilder<TResult> {
   protected waitFor: WaitFor = "finalized"
   protected checkAuth = false
   protected unsigned = false
-  protected skipExisting = false
 
   withCallback(callback: UploadCallback): this {
     this.callback = callback
@@ -407,38 +384,20 @@ abstract class BaseUploadBuilder<TResult> {
   }
 
   /**
-   * Skip items whose content_hash is already in the chain's
-   * `TransactionByContentHash` at upload time. Adds one RPC per unique
-   * content but avoids paying for an authorization slot on data the chain
-   * already has. Items dropped this way still appear in the resolved CIDs
-   * (positional) but never produce a `store` extrinsic.
-   *
-   * Pairs with {@link BulletinClient.estimateUpload}({ skipExisting: true })
-   * so callers can preview the exact `transactions` / `bytes` cost.
-   */
-  withSkipExisting(): this {
-    this.skipExisting = true
-    return this
-  }
-
-  /**
    * Submit as unsigned, preimage-authorized extrinsic(s). Requires each
-   * item's `blake2b256(data)` to be preimage-authorized on-chain
-   * beforehand (typically via `authorizePreimage()`).
+   * unit's content hash — its CID's multihash digest, using whatever hash
+   * algorithm that unit was prepared with (Blake2b-256 by default) — to be
+   * preimage-authorized on-chain beforehand (typically via
+   * `authorizePreimage()`). Works for any estimate — a single item, a batch,
+   * or a chunked file (chunks + manifest).
    *
-   * On `UploadBuilder`, all items are submitted in parallel — each is
-   * its own independent unsigned tx that lands when the pool accepts it.
-   * On `UploadFileBuilder`, only single-tx uploads are allowed (the
-   * chunking + DAG-PB manifest pipeline doesn't support unsigned); throws
-   * if `data` exceeds the chunking threshold.
-   *
-   * Progress events (ItemStarted/InBlock/Finalized/Failed) fire per
-   * item with `index` matching its position in the input.
+   * Progress events (ItemStarted/InBlock/Finalized/Failed) fire per unit
+   * with `index` matching its position in the source.
    *
    * When combined with `ensureAuthorized()`, the pre-flight checks each
-   * item's `Authorizations<Preimage(blake2b256(data))>` entry instead of
-   * the signer's account authorization. Duplicate content hashes across
-   * items are deduped before the RPC queries.
+   * unit's `Authorizations<Preimage(content_hash)>` entry instead of the
+   * signer's account authorization. Duplicate content hashes are deduped
+   * before the RPC queries.
    */
   asUnsigned(): this {
     this.unsigned = true
@@ -452,79 +411,29 @@ abstract class BaseUploadBuilder<TResult> {
  * Builder for the low-level `upload(items)` API. Each item becomes one
  * `store` extrinsic; resolves with the per-item CIDs (positional, input order).
  */
-export class UploadBuilder extends BaseUploadBuilder<UploadResult> {
-  constructor(
-    private dispatch: UploadDispatch,
-    private estimateDispatch: UploadEstimateDispatch,
-    private items: UploadItem[],
-  ) {
-    super()
-  }
 
-  /**
-   * Compute the dispatch plan for THIS builder's items + configuration
-   * without submitting. The returned estimate reflects `withSkipExisting`
-   * (if set) so the `transactions` / `bytes` here match exactly what a
-   * subsequent `.send()` would charge to the signer's authorization.
-   * Equivalent to `client.estimateUpload(items, { skipExisting })`.
-   */
-  async estimate(): Promise<UploadEstimate> {
-    return this.estimateDispatch(this.items, this.skipExisting)
+/** Dispatch callback for the `submit(estimate, source)` execution path. */
+type SubmitDispatch = (
+  waitFor: WaitFor,
+  onEvent: UploadCallback | undefined,
+  checkAuth: boolean,
+  unsigned: boolean,
+) => Promise<UploadResult>
+
+/**
+ * Builder for `submit(estimate, source)`. Resolves with the CIDs in unit order
+ * (`cids[i]` ↔ the i-th unit; the last CID is the manifest root when a manifest
+ * is present). `.asUnsigned()` submits preimage-authorized bare extrinsics.
+ */
+export class SubmitBuilder extends BaseUploadBuilder<UploadResult> {
+  constructor(private dispatch: SubmitDispatch) {
+    super()
   }
 
   async send(): Promise<UploadResult> {
     return this.dispatch(
-      this.items,
       this.waitFor,
       this.callback,
-      this.checkAuth,
-      this.unsigned,
-      this.skipExisting,
-    )
-  }
-}
-
-/**
- * Builder for the high-level `uploadFile(data)` API. Auto-chunks the data,
- * builds a DAG-PB manifest, and submits everything through the same
- * pipeline. Resolves with the single root CID.
- *
- * @example
- * ```typescript
- * const { cid } = await client
- *   .uploadFile(bytes)
- *   .withCallback((event) => console.log(event))
- *   .send();
- * ```
- */
-export class UploadFileBuilder extends BaseUploadBuilder<UploadFileResult> {
-  private chunkerConfig?: Partial<ChunkerConfig>
-
-  constructor(
-    private dispatch: UploadFileDispatch,
-    private data: Uint8Array,
-  ) {
-    super()
-  }
-
-  /** Override the chunk size (forces chunked upload path even for small files). */
-  withChunkSize(chunkSize: number): this {
-    this.chunkerConfig = { ...this.chunkerConfig, chunkSize }
-    return this
-  }
-
-  /** Disable manifest creation. Without a manifest, only the last chunk CID is returned. */
-  withManifest(enabled: boolean): this {
-    this.chunkerConfig = { ...this.chunkerConfig, createManifest: enabled }
-    return this
-  }
-
-  async send(): Promise<UploadFileResult> {
-    return this.dispatch(
-      this.data,
-      this.waitFor,
-      this.callback,
-      this.chunkerConfig,
       this.checkAuth,
       this.unsigned,
     )
@@ -607,18 +516,6 @@ export class AuthCallBuilder {
 }
 
 /** Resolve store options with defaults */
-function resolveStoreOptions(options?: StoreOptions): {
-  cidCodec: CidCodec | number
-  hashAlgorithm: HashAlgorithm
-  waitFor: WaitFor
-} {
-  const opts = { ...DEFAULT_STORE_OPTIONS, ...options }
-  return {
-    cidCodec: opts.cidCodec ?? CidCodec.Raw,
-    hashAlgorithm: opts.hashingAlgorithm ?? HashAlgorithm.Blake2b256,
-    waitFor: opts.waitFor ?? "in_block",
-  }
-}
 
 /**
  * Reject uploads whose items have duplicate content hashes. The pipeline's
@@ -629,6 +526,9 @@ function resolveStoreOptions(options?: StoreOptions): {
  *
  * Returns the index of the first duplicate so the caller can act on it.
  */
+/** Wrap an in-memory {@link UploadItem} as a {@link PipelineItem} (resident
+ *  bytes). The lazy path builds PipelineItems whose `getData` range-reads. */
+
 function assertUniqueContentHashes(cids: CID[]): void {
   const seen = new Map<string, number>()
   for (let i = 0; i < cids.length; i++) {
@@ -677,27 +577,23 @@ function extractStoredIndex(
 }
 
 /**
- * Async Bulletin client that submits transactions to the chain
- *
- * This client is tightly coupled to PAPI (Polkadot API) for blockchain interaction.
- * Users must provide a configured PAPI client with appropriate chain metadata.
+ * Bulletin Chain client. Owns its PAPI connection (built from
+ * `providers()[0]`) and submits storage + authorization extrinsics.
  *
  * @example
  * ```typescript
- * import { createClient } from 'polkadot-api';
  * import { getWsProvider } from 'polkadot-api/ws';
- * import { BulletinClient } from '@parity/bulletin-sdk';
+ * import { BulletinClient, blobFromBytes } from '@parity/bulletin-sdk';
  *
- * // User sets up PAPI client
- * const wsProvider = getWsProvider('wss://bulletin-rpc.polkadot.io');
- * const client = createClient(wsProvider);
- * const api = client.getTypedApi(bulletinDescriptor);
+ * const client = new BulletinClient({
+ *   providers: () => [getWsProvider('ws://localhost:9944')],
+ *   uploadSigner: signer,
+ *   descriptor: bulletinDescriptor, // optional; omit to use getUnsafeApi()
+ * });
  *
- * // Create SDK client
- * const bulletinClient = new BulletinClient(api, signer, papiClient.submitAndWatch);
- *
- * // Store data
- * const result = await bulletinClient.store(data).send();
+ * const src = blobFromBytes(data);
+ * const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+ * const rootCid = cids[cids.length - 1]; // manifest root (or the lone chunk's CID)
  * ```
  */
 /**
@@ -860,8 +756,10 @@ export class BulletinClient implements BulletinClientInterface {
 
   /**
    * Opt-in pre-flight for the unsigned (`asUnsigned()`) path: verify that
-   * every item has a non-expired `Authorizations<Preimage(blake2b256(data))>`
-   * entry on chain. Preimage authorization is what the runtime checks for
+   * every item has a non-expired `Authorizations<Preimage(content_hash)>`
+   * entry on chain, where `content_hash` is the CID's multihash digest under
+   * the item's chosen hash algorithm (Blake2b-256 by default). Preimage
+   * authorization is what the runtime checks for
    * an unsigned `store` extrinsic — without it the tx is rejected by
    * `AuthorizeCall`. Throws `INSUFFICIENT_AUTHORIZATION` for the first
    * missing/expired item so the caller can authorize and retry.
@@ -886,7 +784,7 @@ export class BulletinClient implements BulletinClientInterface {
     // algo's digest, which is exactly the CID's `multihash.digest`. Reuse
     // pre-computed CIDs when the caller has them; otherwise hash now.
     const hashHexes = cids
-      ? cids.map((cid) => Binary.toHex(cid.multihash.digest))
+      ? cids.map(cidToContentHashHex)
       : await Promise.all(
           items.map(async (item) => {
             const algo = item.hashAlgo ?? HashAlgorithm.Blake2b256
@@ -973,21 +871,6 @@ export class BulletinClient implements BulletinClientInterface {
    * `store()` extrinsic is sufficient for the common case. We only use the heavier
    * `store_with_cid_config()` extrinsic when the user requests non-default settings.
    */
-  private createStoreTx(
-    data: Uint8Array,
-    cidCodec: CidCodec | number,
-    hashAlgorithm: HashAlgorithm,
-  ): PapiTransaction {
-    return isNonDefaultCidConfig(cidCodec, hashAlgorithm)
-      ? this.api.tx.TransactionStorage.store_with_cid_config({
-          cid: {
-            codec: BigInt(cidCodec),
-            hashing: hashAlgorithmCodecToEnum(hashAlgorithm),
-          },
-          data,
-        })
-      : this.api.tx.TransactionStorage.store({ data })
-  }
 
   /**
    * Sign, submit, and watch a transaction with progress callbacks.
@@ -1159,172 +1042,116 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * High-level upload: chunk (if needed), build a DAG-PB manifest, and submit
-   * everything through the shared submission pipeline. Returns the single
-   * root CID the caller can use to retrieve the file later.
+   * Lazy submission of a prepared {@link StreamEstimate} (from
+   * `estimateUpload(source)`). Stores the estimate's chunks — skipping any it
+   * marked `alreadyStored` — fetching each chunk's bytes on demand via
+   * `source.read(offset, size)` and holding only the in-flight window in memory
+   * (freed on finalization). The manifest, if any, is submitted last.
    *
-   * **Memory.** `uploadFile` retains the full `data` plus every chunk and
-   * every per-wave signed hex string in RAM until the promise resolves. For
-   * a 100 MiB file expect peak RSS of roughly 300 MiB (data + chunks + hex
-   * inflation during broadcast). For larger files or memory-constrained
-   * environments, use {@link upload} with caller-managed chunks so older
-   * buffers can be freed once their `ItemFinalized` event has fired.
-   *
-   * @example
-   * ```typescript
-   * const { cid } = await client
-   *   .uploadFile(bytes)
-   *   .withCallback((event) => console.log(event))
-   *   .send();
-   * ```
+   * Flow: `const est = await client.estimateUpload(source)` → (preview /
+   * authorize from `est.transactions`/`est.bytes`) → `client.submit(est, source)`.
    */
-  uploadFile(data: Uint8Array): UploadFileBuilder {
-    return new UploadFileBuilder(
-      (d, wf, oe, cc, ca, un) => this.uploadFileImpl(d, wf, oe, cc, ca, un),
-      data,
+  submit(estimate: StreamEstimate, source: SeekableSource): SubmitBuilder {
+    return new SubmitBuilder((wf, oe, ca, un) =>
+      this.submitEstimateImpl(estimate, source, wf, oe, ca, un),
     )
+  }
+
+  private async submitEstimateImpl(
+    estimate: StreamEstimate,
+    source: SeekableSource,
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+    checkAuth: boolean,
+    unsigned: boolean,
+  ): Promise<UploadResult> {
+    const plan = estimate.plan
+    // One PipelineItem per unit, honoring per-unit codec/hashAlgo (file chunks
+    // default Raw/Blake2b; items-as-is carry their own). Bytes fetched lazily.
+    const items: PipelineItem[] = plan.chunkCids.map((_, i) => ({
+      size: plan.chunkSizes[i] as number,
+      codec: plan.codecs?.[i] ?? CidCodec.Raw,
+      hashAlgo: plan.hashAlgos?.[i] ?? HashAlgorithm.Blake2b256,
+      getData: () =>
+        source.read(plan.offsets[i] as number, plan.chunkSizes[i] as number),
+    }))
+    const cids: CID[] = [...plan.chunkCids]
+    if (plan.rootCid && plan.manifestData) {
+      const manifestData = plan.manifestData
+      items.push({
+        size: manifestData.length,
+        codec: CidCodec.DagPb,
+        getData: async () => manifestData,
+      })
+      cids.push(plan.rootCid)
+    }
+    assertUniqueContentHashes(cids)
+    const hashes = cids.map(cidToContentHashHex)
+
+    if (unsigned) {
+      return this.runUnsignedSubmit(items, cids, checkAuth, waitFor, onEvent)
+    }
+    this.requireSigner("submit()")
+    if (checkAuth) await this.ensureAuthorizedOnChain()
+    // Honor the estimate's dedup: chunks it found already on chain aren't
+    // re-submitted. runSignedRetry's per-attempt TBCH check covers anything
+    // that landed between estimate and submit.
+    const preSkipped = new Set<number>(estimate.alreadyStored)
+    return this.runSignedRetry(
+      items,
+      cids,
+      hashes,
+      preSkipped,
+      waitFor,
+      onEvent,
+    )
+  }
+
+  /** Unsigned (preimage-authorized) submission of prepared items. */
+  private async runUnsignedSubmit(
+    items: PipelineItem[],
+    cids: CID[],
+    checkAuth: boolean,
+    waitFor: WaitFor,
+    onEvent: UploadCallback | undefined,
+  ): Promise<UploadResult> {
+    const providers = this.requireProviders("submit().asUnsigned()")
+    if (checkAuth) await this.ensurePreimagesAuthorized([], cids)
+    try {
+      const result = await pipelineStore(this.api, undefined, items, {
+        providers,
+        blockLimits: this.config.blockLimits,
+        completeOn: waitFor === "in_block" ? "best" : "finalized",
+        bootstrap: this.pipelineBootstrap,
+        precomputedCids: cids,
+        submissionStrategy: this.config.submissionStrategy,
+        onEvent,
+      })
+      return { cids: result.cids }
+    } catch (error) {
+      if (error instanceof BulletinError) throw error
+      throw new BulletinError(
+        `unsigned upload failed: ${error instanceof Error ? error.message : String(error)}`,
+        ErrorCode.TRANSACTION_FAILED,
+        error,
+      )
+    }
   }
 
   /**
-   * Low-level upload: submit a list of items as one `store` extrinsic each.
-   *
-   * Each item is signed and broadcast through the shared submission pipeline,
-   * regardless of how many items are passed. Per-item CIDs are computed by
-   * the SDK from `(data, codec, hashAlgo)` and surface in every progress
-   * event. Returns the CIDs positionally, matching input order.
+   * Shared signed-submission retry loop over prepared items. Resumes across
+   * transient stalls by original index (skipping landed items) and carries
+   * nonces forward. Drives the `submit(estimate, source)` path — `items`
+   * load their bytes lazily via `source.read`.
    */
-  upload(items: UploadItem[]): UploadBuilder {
-    return new UploadBuilder(
-      (its, wf, oe, ca, un, sk) =>
-        this.uploadItemsImpl(its, wf, oe, ca, un, sk),
-      (its, sk) => this.estimateUpload(its, { skipExisting: sk }),
-      items,
-    )
-  }
-
-  private async uploadFileImpl(
-    data: Uint8Array,
+  private async runSignedRetry(
+    items: PipelineItem[],
+    allItemCids: CID[],
+    allContentHashesHex: string[],
+    preSkipped: Set<number>,
     waitFor: WaitFor,
     onEvent: UploadCallback | undefined,
-    chunkerConfig: Partial<ChunkerConfig> | undefined,
-    checkAuth: boolean,
-    unsigned: boolean,
-  ): Promise<UploadFileResult> {
-    if (data.length === 0) {
-      throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-    const shouldChunk =
-      !!chunkerConfig || data.length > this.config.chunkingThreshold
-    if (unsigned && shouldChunk) {
-      throw new BulletinError(
-        "asUnsigned() does not support chunked uploads (data exceeds chunkingThreshold or chunker config was provided)",
-        ErrorCode.UNSUPPORTED_OPERATION,
-      )
-    }
-    if (!shouldChunk) {
-      const { cids } = await this.uploadItemsImpl(
-        [{ data }],
-        waitFor,
-        onEvent,
-        checkAuth,
-        unsigned,
-        false,
-      )
-      return { cid: cids[0]! }
-    }
-    const prepared = await this.preparer.prepareStoreChunked(
-      data,
-      chunkerConfig,
-    )
-    const items: UploadItem[] = prepared.chunks.map((c) => ({ data: c.data }))
-    if (prepared.manifest) {
-      items.push({
-        data: prepared.manifest.data,
-        codec: CidCodec.DagPb,
-      })
-    }
-    const { cids } = await this.uploadItemsImpl(
-      items,
-      waitFor,
-      onEvent,
-      checkAuth,
-      false,
-      false,
-    )
-    // For chunked uploads the manifest is the last item; without one, the
-    // last chunk's CID is the best identifier we have.
-    return { cid: cids[cids.length - 1]! }
-  }
-
-  private async uploadItemsImpl(
-    items: UploadItem[],
-    waitFor: WaitFor,
-    onEvent: UploadCallback | undefined,
-    checkAuth: boolean,
-    unsigned: boolean,
-    skipExisting: boolean,
   ): Promise<UploadResult> {
-    if (items.length === 0) {
-      throw new BulletinError(
-        "upload() requires at least one item",
-        ErrorCode.EMPTY_DATA,
-      )
-    }
-    if (unsigned) {
-      return this.uploadUnsignedMany(items, waitFor, onEvent, checkAuth)
-    }
-    this.requireSigner("upload()")
-    if (checkAuth) await this.ensureAuthorizedOnChain()
-
-    // Compute per-item CIDs once across all retry attempts.
-    const allItemCids: CID[] = await Promise.all(
-      items.map((item) =>
-        calculateCid(
-          item.data,
-          item.codec ?? CidCodec.Raw,
-          item.hashAlgo ?? HashAlgorithm.Blake2b256,
-        ),
-      ),
-    )
-    assertUniqueContentHashes(allItemCids)
-
-    // Optional pre-flight: query TBCH for each item's content_hash and
-    // skip items already on chain. The CIDs we return still match input
-    // order (skipped items keep their CID); only the on-chain submission
-    // is reduced. ItemFinalized events fire for skipped items so callers
-    // see a complete event stream.
-    const allContentHashesHexUp = allItemCids.map((cid) =>
-      Binary.toHex(cid.multihash.digest),
-    )
-    // All TBCH dedup queries below use the PAPI `"finalized"` sentinel,
-    // which resolves through `chainHead_v1_storage` against PAPI's
-    // currently-tracked finalized block. Finalized never reorgs, so
-    // "stored at finalized" doesn't flip between forks across retries;
-    // staying on the chainHead path avoids the `archive_v1_storage`
-    // fallback that fails with UnknownBlock on non-archive RPCs (the
-    // public Paseo endpoint, e.g.).
-    const preSkipped = new Set<number>()
-    if (skipExisting) {
-      const entries = await Promise.all(
-        allContentHashesHexUp.map((h) =>
-          readStoredAt(this.api, h, "finalized"),
-        ),
-      )
-      for (let i = 0; i < items.length; i++) {
-        const entry = entries[i]
-        if (!entry) continue
-        preSkipped.add(i)
-        onEvent?.({
-          type: UploadStatus.ItemFinalized,
-          index: i,
-          total: items.length,
-          cid: allItemCids[i] as CID,
-          blockHash: "",
-          blockNumber: entry.blockNumber,
-          extrinsicIndex: entry.extrinsicIndex,
-        })
-      }
-    }
     // Shared bootstrap cache (one per client instance, see field decl)
     // is reused across uploads AND across retry attempts within one upload.
     const bootstrap = this.pipelineBootstrap
@@ -1348,7 +1175,6 @@ export class BulletinClient implements BulletinClientInterface {
     // retry loop's slicing and the early-return short-circuit treat them
     // exactly like items that finalized during an earlier attempt.
     const finalizedOriginal = new Set<number>(preSkipped)
-    const allContentHashesHex = allContentHashesHexUp
     // Persisted nonces across retry boundaries, indexed by ORIGINAL item
     // index. Populated from `error.cause.itemNonce` on each stall, mapped
     // back from the prior call's compacted indices via `newToOriginal`.
@@ -1391,18 +1217,18 @@ export class BulletinClient implements BulletinClientInterface {
               cid: allItemCids[i] as CID,
               blockHash: "",
               blockNumber: entry.blockNumber,
-              extrinsicIndex: entry.extrinsicIndex,
+              transactionIndex: entry.transactionIndex,
             })
           }
         }
       }
-      const remaining: UploadItem[] = []
+      const remaining: PipelineItem[] = []
       const remainingCids: CID[] = []
       const newToOriginal: number[] = []
       for (let i = 0; i < items.length; i++) {
         if (finalizedOriginal.has(i)) continue
         newToOriginal.push(i)
-        remaining.push(items[i] as UploadItem)
+        remaining.push(items[i] as PipelineItem)
         remainingCids.push(allItemCids[i] as CID)
       }
       if (remaining.length === 0) break
@@ -1461,67 +1287,6 @@ export class BulletinClient implements BulletinClientInterface {
       }
     }
     return { cids: allItemCids }
-  }
-
-  /**
-   * Submit N unsigned (preimage-authorized) store extrinsics through the
-   * same pipelined engine as signed uploads. Broadcasts each item once
-   * via `author_submitExtrinsic` (no per-tx subscription) and reconciles
-   * via a single shared `chainHead_v1_follow` subscription with the
-   * TBCH-based reconciler. Eliminates the per-tx `submitAndWatch`
-   * subscription cap (~16–64) — N items scale to 1 subscription.
-   *
-   * Per-item events fire through the shared callback. The `index` is
-   * the item's position in the input array.
-   */
-  private async uploadUnsignedMany(
-    items: UploadItem[],
-    waitFor: WaitFor,
-    onEvent: UploadCallback | undefined,
-    checkAuth: boolean,
-  ): Promise<UploadResult> {
-    for (const item of items) {
-      if (item.data.length === 0) {
-        throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-      }
-    }
-    const providers = this.requireProviders("asUnsigned() multi-item upload")
-
-    // Pre-compute CIDs (one per item) — pipelineStore consumes a
-    // resolved CIDs array via the precomputedCids hook. Doing this BEFORE
-    // ensurePreimagesAuthorized lets that helper reuse the multihash
-    // digests as content hashes (avoids re-hashing the data).
-    const allItemCids: CID[] = await Promise.all(
-      items.map((item) =>
-        calculateCid(
-          item.data,
-          item.codec ?? CidCodec.Raw,
-          item.hashAlgo ?? HashAlgorithm.Blake2b256,
-        ),
-      ),
-    )
-    assertUniqueContentHashes(allItemCids)
-    if (checkAuth) await this.ensurePreimagesAuthorized(items, allItemCids)
-
-    try {
-      const result = await pipelineStore(this.api, undefined, items, {
-        providers,
-        blockLimits: this.config.blockLimits,
-        completeOn: waitFor === "in_block" ? "best" : "finalized",
-        bootstrap: this.pipelineBootstrap,
-        precomputedCids: allItemCids,
-        submissionStrategy: this.config.submissionStrategy,
-        onEvent,
-      })
-      return { cids: result.cids }
-    } catch (error) {
-      if (error instanceof BulletinError) throw error
-      throw new BulletinError(
-        `unsigned upload failed: ${error instanceof Error ? error.message : String(error)}`,
-        ErrorCode.TRANSACTION_FAILED,
-        error,
-      )
-    }
   }
 
   /**
@@ -1767,21 +1532,34 @@ export class BulletinClient implements BulletinClientInterface {
    *
    * By default duplicates within the input are collapsed (the chain
    * dedupes by content_hash anyway, so charging twice is wasteful). Pass
-   * `skipExisting: true` to also query the chain's
-   * `TransactionByContentHash` and exclude items already on chain (one
-   * RPC per unique content; pair with `.withSkipExisting()` on the
-   * upload builder to make the upload behavior match).
+   * `skipExisting: true` to also query the chain's `TransactionByContentHash`
+   * and exclude items already on chain (one RPC per unique content). The
+   * returned estimate carries the skip set forward to `submit()`.
    *
    * Use this to size `authorizeAccount` before paying, or to preview the
    * cost of an upload in a UI.
    */
   async estimateUpload(
-    items: UploadItem[],
+    input: UploadItem[] | BlobSource,
     options: UploadEstimateOptions = {},
-  ): Promise<UploadEstimate> {
-    const dedupInput = options.dedupInput ?? true
-    const skipExisting = options.skipExisting ?? false
+  ): Promise<StreamEstimate> {
+    return Array.isArray(input)
+      ? this.estimateUploadItems(input, options)
+      : this.estimateUploadStream(input, options)
+  }
 
+  private async estimateUploadItems(
+    items: UploadItem[],
+    options: UploadEstimateOptions,
+  ): Promise<StreamEstimate> {
+    for (let i = 0; i < items.length; i++) {
+      if (items[i]!.data.length === 0) {
+        throw new BulletinError(
+          `Item ${i} has empty data`,
+          ErrorCode.EMPTY_DATA,
+        )
+      }
+    }
     const itemCids = await Promise.all(
       items.map((item) =>
         calculateCid(
@@ -1791,13 +1569,63 @@ export class BulletinClient implements BulletinClientInterface {
         ),
       ),
     )
-    const hashesHex = itemCids.map((cid) => Binary.toHex(cid.multihash.digest))
+    const sizes = items.map((item) => item.data.length)
+    // Items-as-is plan: one unit per item, per-item codec/hashAlgo, no
+    // manifest. Offsets index into `blobFromItems(items)` at submit time.
+    const offsets: number[] = []
+    let total = 0
+    for (const s of sizes) {
+      offsets.push(total)
+      total += s
+    }
+    const plan: ChunkPlan = {
+      chunkCids: itemCids,
+      chunkSizes: sizes,
+      offsets,
+      codecs: items.map((it) => it.codec ?? CidCodec.Raw),
+      hashAlgos: items.map((it) => it.hashAlgo ?? HashAlgorithm.Blake2b256),
+      totalSize: total,
+      chunkSize: 0,
+    }
+    const estimate = await this.assembleEstimate(itemCids, sizes, options)
+    return { ...estimate, plan }
+  }
+
+  /**
+   * Streamed estimate: plan the source in O(chunkSize) memory (chunk CIDs +
+   * sizes + manifest), then run the same dedup/skip logic over chunks +
+   * manifest. The returned {@link ChunkPlan} can be reused to skip re-hashing.
+   */
+  private async estimateUploadStream(
+    source: BlobSource,
+    options: UploadEstimateOptions,
+  ): Promise<StreamEstimate> {
+    const plan = await this.preparer.planStream(source)
+    const cids: CID[] = [...plan.chunkCids]
+    const sizes: number[] = [...plan.chunkSizes]
+    if (plan.rootCid && plan.manifestData) {
+      cids.push(plan.rootCid)
+      sizes.push(plan.manifestData.length)
+    }
+    const estimate = await this.assembleEstimate(cids, sizes, options)
+    return { ...estimate, plan }
+  }
+
+  /** Shared dedup + chain-skip + assembly over precomputed CIDs and sizes. */
+  private async assembleEstimate(
+    itemCids: CID[],
+    sizes: number[],
+    options: UploadEstimateOptions,
+  ): Promise<UploadEstimate> {
+    const dedupInput = options.dedupInput ?? true
+    const skipExisting = options.skipExisting ?? false
+    const hashesHex = itemCids.map(cidToContentHashHex)
 
     // First-seen wins; later occurrences land in `duplicateIndices`.
     const duplicateIndices: number[] = []
     const firstSeen = new Map<string, number>()
     if (dedupInput) {
-      for (let i = 0; i < items.length; i++) {
+      for (let i = 0; i < itemCids.length; i++) {
         const h = hashesHex[i] as string
         if (firstSeen.has(h)) {
           duplicateIndices.push(i)
@@ -1813,7 +1641,7 @@ export class BulletinClient implements BulletinClientInterface {
       // De-dup hashes before querying to avoid redundant RPCs for input dups.
       const uniqueHashIndexes = dedupInput
         ? Array.from(firstSeen.values())
-        : items.map((_, i) => i)
+        : itemCids.map((_, i) => i)
       const uniqueHashes = uniqueHashIndexes.map((i) => hashesHex[i] as string)
       const entries = await Promise.all(
         uniqueHashes.map((h) => readStoredAt(this.api, h)),
@@ -1822,20 +1650,18 @@ export class BulletinClient implements BulletinClientInterface {
       for (let k = 0; k < uniqueHashes.length; k++) {
         if (entries[k]) onChainHashes.add(uniqueHashes[k] as string)
       }
-      // Mark every input index whose content is on chain — including
-      // duplicates: if a duplicate's content_hash is on chain, the
-      // duplicate also wouldn't be submitted under skipExisting.
-      for (let i = 0; i < items.length; i++) {
+      // Mark every index whose content is on chain — including duplicates: if
+      // a duplicate's content_hash is on chain, it also wouldn't be submitted.
+      for (let i = 0; i < itemCids.length; i++) {
         if (onChainHashes.has(hashesHex[i] as string)) alreadyStored.push(i)
       }
     }
 
     const skippedSet = new Set<number>([...duplicateIndices, ...alreadyStored])
     const toUpload: number[] = []
-    const itemsOut: UploadEstimateItem[] = new Array(items.length)
+    const itemsOut: UploadEstimateItem[] = new Array(itemCids.length)
     let bytes = 0n
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i] as UploadItem
+    for (let i = 0; i < itemCids.length; i++) {
       const dupOf = dedupInput && duplicateIndices.includes(i)
       const onChain = alreadyStored.includes(i)
       let skipReason: UploadEstimateItem["skipReason"]
@@ -1844,17 +1670,17 @@ export class BulletinClient implements BulletinClientInterface {
       itemsOut[i] = {
         index: i,
         cid: itemCids[i] as CID,
-        bytes: item.data.length,
+        bytes: sizes[i] as number,
         ...(skipReason ? { skipReason } : {}),
       }
       if (!skippedSet.has(i)) {
         toUpload.push(i)
-        bytes += BigInt(item.data.length)
+        bytes += BigInt(sizes[i] as number)
       }
     }
 
     return {
-      total: items.length,
+      total: itemCids.length,
       items: itemsOut,
       transactions: toUpload.length,
       bytes,

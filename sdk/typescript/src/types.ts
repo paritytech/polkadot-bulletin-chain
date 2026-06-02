@@ -140,7 +140,7 @@ export interface StoreResult {
   /** Extrinsic index within the block (required for renew operations)
    * This value comes from the `Stored` event's `index` field
    */
-  extrinsicIndex?: number
+  transactionIndex?: number
   /** Chunk details (only present for chunked uploads) */
   chunks?: ChunkDetails
 }
@@ -241,14 +241,39 @@ export interface UploadEstimateOptions {
 }
 
 /**
- * Final result returned by the high-level `uploadFile()`.
- *
- * `cid` is the single identifier the caller uses to retrieve later — the
- * content CID for a single-chunk upload, or the manifest's root CID for a
- * chunked upload.
+ * Cheap (CID+size only) plan produced by streaming a {@link BlobSource} once.
+ * Holds ~36 bytes per chunk — so a multi-GiB file's plan is small even though
+ * the data never lived in memory. Bridges estimation/dedup and submission:
+ * {@link BulletinClient.estimateUpload}(source) returns one, and it can be
+ * reused to avoid re-hashing.
  */
-export interface UploadFileResult {
-  cid: CID
+export interface ChunkPlan {
+  /** Per-unit content CIDs, in source order. Chunks (Raw) for a file plan;
+   *  one entry per item for an items-as-is plan. */
+  chunkCids: CID[]
+  /** Per-unit byte sizes (last chunk may be shorter). */
+  chunkSizes: number[]
+  /** Per-unit byte offset into the source (cumulative `chunkSizes`). Lets a
+   *  {@link SeekableSource} fetch unit `i` lazily via `read(offsets[i], sizes[i])`. */
+  offsets: number[]
+  /** Per-unit CID codec. Omitted → all Raw (the file-chunk case); set per unit
+   *  by the items-as-is plan. */
+  codecs?: CidCodec[]
+  /** Per-unit multihash algorithm. Omitted → all Blake2b-256. */
+  hashAlgos?: HashAlgorithm[]
+  /** Sum of chunkSizes. */
+  totalSize: number
+  /** Chunk size the plan was built with (0 for an items-as-is plan). */
+  chunkSize: number
+  /** UnixFS DAG-PB manifest root — the retrieval id. Undefined if manifestless. */
+  rootCid?: CID
+  /** Encoded manifest bytes (the manifest `store` extrinsic). */
+  manifestData?: Uint8Array
+}
+
+/** {@link UploadEstimate} plus the {@link ChunkPlan} that produced it. */
+export interface StreamEstimate extends UploadEstimate {
+  plan: ChunkPlan
 }
 
 /**
@@ -279,7 +304,7 @@ export type UploadEvent =
       blockHash: string
       blockNumber: number
       /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
-      extrinsicIndex?: number
+      transactionIndex?: number
     }
   | {
       type: UploadStatus.ItemFinalized
@@ -289,7 +314,7 @@ export type UploadEvent =
       blockHash: string
       blockNumber: number
       /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
-      extrinsicIndex?: number
+      transactionIndex?: number
     }
   | {
       type: UploadStatus.ItemFailed

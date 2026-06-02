@@ -2119,11 +2119,13 @@ version = "0.1.0"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "cid",
+ "futures",
  "parity-scale-codec",
  "scale-info",
  "subxt 0.44.2",
  "subxt-signer 0.44.2",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

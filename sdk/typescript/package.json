@@ -29,7 +29,8 @@
     "test:integration": "vitest run test/integration",
     "lint": "tsc --noEmit && biome check src test",
     "format": "biome check --write src test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "size": "size-limit"
   },
   "keywords": [
     "polkadot",
@@ -60,12 +61,14 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.4",
     "@polkadot-labs/hdkd": "^0.0.28",
+    "@size-limit/preset-small-lib": "^12.1.0",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^25.5.2",
     "@vitest/coverage-v8": "^4.1.2",
     "happy-dom": "^20.8.9",
     "multiformats": "^14.0.0",
     "polkadot-api": "^2.1.2",
+    "size-limit": "^12.1.0",
     "tsup": "^8.3.5",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2"

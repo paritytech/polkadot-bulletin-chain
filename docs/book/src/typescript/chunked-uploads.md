@@ -1,275 +1,141 @@
 # Chunked Uploads
 
-The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When you call `store()`, files larger than the threshold (default 2 MiB) are automatically split into chunks of up to **2 MiB** each (matching the Bitswap block size limit for IPFS compatibility).
+When you estimate a `BlobSource`, the SDK streams it once, splits it into chunks of up to **2 MiB** (default **1 MiB**, the Bitswap block-size limit for IPFS compatibility), and builds a DAG-PB manifest linking them. `submit()` then stores each chunk plus the manifest, fetching chunk bytes on demand so the whole file never sits in memory at once.
 
-## Automatic Chunking (Recommended)
+A single chunk needs no manifest — its own CID is the retrieval id.
 
-For most use cases, simply use `store()` - it automatically chunks large files:
+## Uploading a File
 
 ```typescript
-import { BulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient, blobFromBytes, UploadStatus } from '@parity/bulletin-sdk';
+import { getWsProvider } from 'polkadot-api/ws-provider/node';
 
-const client = new BulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient({
+  providers: () => [getWsProvider('ws://localhost:9944')],
+  uploadSigner: signer,
+});
 
-// Load file of any size (up to 64 MiB)
-const data = new Uint8Array(50 * 1024 * 1024); // 50 MB
+const src = blobFromBytes(new Uint8Array(50 * 1024 * 1024)); // 50 MB
 
-// Automatically chunks if > 2 MiB
-const result = await client
-    .store(data)
-    .withCallback((event) => {
-        if (event.type === 'chunk_completed') {
-            console.log(`Chunk ${event.index + 1}/${event.total} uploaded`);
-        } else if (event.type === 'completed') {
-            console.log('Done!');
-        }
-    })
-    .send();
+const { cids } = await client
+  .submit(await client.estimateUpload(src), src)
+  .withCallback((ev) => {
+    if (ev.type === UploadStatus.ItemFinalized) {
+      console.log(`item ${ev.index + 1}/${ev.total} finalized @#${ev.blockNumber}`);
+    }
+  })
+  .send();
 
-console.log('Stored with CID:', result.cid.toString());
-if (result.chunks) {
-    console.log('Chunked into', result.chunks.numChunks, 'pieces');
-}
+// One CID per chunk plus the manifest last; that last CID is the file's root.
+const rootCid = cids[cids.length - 1];
+console.log('Stored', cids.length, 'units, root', rootCid.toString());
 ```
 
-### Configuring Automatic Chunking
+## Reading from a File Without Buffering
 
-You can configure the threshold and chunk size via the client constructor:
+`blobFromBytes` holds the whole buffer in memory. `submit()` instead takes a `SeekableSource` — it fetches each chunk lazily by `read(offset, length)` and frees it on finalization — so a file-backed source keeps only one chunk resident at a time:
 
 ```typescript
-const client = new BulletinClient(api, signer, papiClient.submit, {
-    chunkingThreshold: 5 * 1024 * 1024,   // Chunk files > 5 MiB
-    defaultChunkSize: 1024 * 1024,         // 1 MiB chunks (max: 2 MiB)
-    createManifest: true,                  // Create DAG-PB manifest
+import { open } from 'node:fs/promises';
+import { statSync } from 'node:fs';
+import type { SeekableSource } from '@parity/bulletin-sdk';
+
+function fileSource(path: string): SeekableSource {
+  const size = statSync(path).size;
+  return {
+    size,
+    // Forward read, used by estimateUpload to hash the file.
+    async *open() {
+      const fh = await open(path);
+      try {
+        for await (const chunk of fh.createReadStream()) yield chunk as Uint8Array;
+      } finally {
+        await fh.close();
+      }
+    },
+    // Random access, used by submit to fetch one chunk at a time.
+    async read(offset, length) {
+      const fh = await open(path);
+      try {
+        const buf = new Uint8Array(length);
+        await fh.read(buf, 0, length, offset);
+        return buf;
+      } finally {
+        await fh.close();
+      }
+    },
+  };
+}
+
+const src = fileSource('big.bin');
+const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+```
+
+For estimation-only or offline planning you can also wrap a re-openable forward stream with `blobFromFactory(() => createReadStream(path))`; that yields a plain `BlobSource` (no random access), so it works with `estimateUpload` but not `submit`.
+
+## Chunk Size
+
+The chunk size comes from the client config (`defaultChunkSize`, 1 MiB by default):
+
+```typescript
+const client = new BulletinClient({
+  providers: () => [getWsProvider(url)],
+  uploadSigner: signer,
+  defaultChunkSize: 2 * 1024 * 1024, // 2 MiB (MAX_CHUNK_SIZE)
 });
 ```
 
-## Custom Chunk Size
+Guidelines:
+- Maximum: 2 MiB (`MAX_CHUNK_SIZE`) — the Bitswap block-size limit.
+- Default: 1 MiB — a good balance of efficiency and compatibility.
+- Maximum total file size: 64 MiB (`MAX_FILE_SIZE`).
 
-Use `withChunkSize()` when you want explicit control over the chunk size:
+## Sizing Authorization
+
+A chunked file consumes one transaction per chunk plus one for the manifest. `estimateUpload` reports the exact figures:
 
 ```typescript
-import { BulletinClient } from '@parity/bulletin-sdk';
-
-const client = new BulletinClient(api, signer, papiClient.submit);
-
-const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
-
-// Upload with custom chunk size and progress tracking
-const result = await client
-    .store(largeFile)
-    .withChunkSize(1024 * 1024) // 1 MiB chunks
-    .withCallback((event) => {
-        switch (event.type) {
-            case 'chunk_started':
-                console.log(`Uploading chunk ${event.index + 1}/${event.total}`);
-                break;
-            case 'chunk_completed':
-                console.log(`Chunk ${event.index + 1}/${event.total} complete:`, event.cid.toString());
-                break;
-            case 'chunk_failed':
-                console.error(`Chunk ${event.index + 1}/${event.total} failed:`, event.error);
-                break;
-            case 'manifest_created':
-                console.log('Manifest created:', event.cid.toString());
-                break;
-            case 'completed':
-                if (event.manifestCid) {
-                    console.log('All done! Manifest CID:', event.manifestCid.toString());
-                }
-                break;
-        }
-    })
-    .send();
-
-console.log('Upload Summary:');
-console.log('   CID:', result.cid.toString());
-console.log('   Size:', result.size, 'bytes');
-if (result.chunks) {
-    console.log('   Chunks:', result.chunks.numChunks);
-    console.log('   Chunk CIDs:', result.chunks.chunkCids.length, 'items');
-}
+const estimate = await client.estimateUpload(src);
+console.log('Need', estimate.transactions, 'txs and', estimate.bytes, 'bytes');
 ```
-
-## How It Works
-
-When data exceeds the chunking threshold (or `withChunkSize()` is used), the SDK:
-
-1. **Splits data** into chunks (default 1 MiB)
-2. **Calculates CIDs** for each chunk (using Raw codec)
-3. **Submits chunks** sequentially
-4. **Creates DAG-PB manifest** linking all chunks (using DagPb codec)
-5. **Submits manifest** as final transaction
-6. **Returns result** with all CIDs
-
-### Upload Timing
-
-Bulletin Chain has a **6 second block time**. Multiple chunks can fit into a single block. Sequential upload timing depends on how quickly transactions are included:
 
 | File Size | Chunk Size | Chunks | Transactions |
 |-----------|------------|--------|--------------|
-| 2 MiB | 1 MiB | 2 | 3 (2 data + manifest) |
+| 2 MiB | 1 MiB | 2 | 3 (2 chunks + manifest) |
 | 10 MiB | 1 MiB | 10 | 11 |
 | 50 MiB | 2 MiB | 25 | 26 |
 | 64 MiB | 2 MiB | 32 | 33 |
 
-**Note**: Actual times depend on network conditions and the `waitFor` setting (`"in_block"` vs `"finalized"`).
+## Progress
 
-### When to Use `withChunkSize()`
-
-**Use `store().send()` (default):**
-- For most use cases - automatically chunks files above the threshold
-- For both small and large files
-
-**Use `store().withChunkSize().send()`:**
-- When you want a specific chunk size different from the default
-- When you want to force chunking on small files (e.g. for testing)
-
-## Configuration Options
-
-### Chunk Size
+The callback receives an `UploadEvent` per unit. `index` is the unit's position (chunks first, manifest last); `total` is the unit count.
 
 ```typescript
-const config = {
-    chunkSize: 2 * 1024 * 1024,  // 2 MiB chunks (MAX_CHUNK_SIZE)
-    createManifest: true,
-};
-```
+import { UploadStatus } from '@parity/bulletin-sdk';
 
-**Guidelines:**
-- Minimum: 1 byte (practical minimum: 1 KiB)
-- Maximum: 2 MiB (2,097,152 bytes) - matches Bitswap block size limit for IPFS compatibility
-- Default: 1 MiB - good balance of efficiency and compatibility
-- Maximum file size: 64 MiB (MAX_FILE_SIZE)
-
-### Parallel Uploads
-
-```typescript
-const config = {
-    chunkSize: 1024 * 1024,
-    createManifest: true,
-};
-```
-
-**Note**: Current implementation uploads sequentially. Parallel support is planned for a future release.
-
-### Manifests
-
-A DAG-PB manifest is always created for chunked uploads. The manifest links all chunks together and its CID becomes the primary identifier for the stored data.
-
-## Progress Tracking
-
-Track upload progress with callbacks:
-
-```typescript
-const progress = (event) => {
-    switch (event.type) {
-        case 'chunk_started':
-            console.log(`[${event.index + 1}/${event.total}] Starting chunk...`);
-            break;
-        case 'chunk_completed':
-            console.log(`[${event.index + 1}/${event.total}] ✓ Uploaded:`, event.cid.toString());
-            break;
-        case 'chunk_failed':
-            console.error(`[${event.index + 1}/${event.total}] ✗ Failed:`, event.error.message);
-            break;
-        case 'signed':
-        case 'broadcasted':
-        case 'in_block':
-            // Transaction status events carry chunkIndex to identify which chunk they belong to.
-            // chunkIndex is undefined for manifest and single-store transactions.
-            if (event.chunkIndex !== undefined) {
-                console.log(`  Chunk ${event.chunkIndex + 1}: ${event.type}`);
-            }
-            break;
-        case 'manifest_started':
-            console.log('Creating manifest...');
-            break;
-        case 'manifest_created':
-            console.log('Manifest CID:', event.cid.toString());
-            break;
-        case 'completed':
-            if (event.manifestCid) {
-                console.log('All done! Manifest:', event.manifestCid.toString());
-            }
-            break;
+const chunkCids: string[] = [];
+await client
+  .submit(estimate, src)
+  .withCallback((ev) => {
+    switch (ev.type) {
+      case UploadStatus.ItemStarted:
+        console.log(`[${ev.index + 1}/${ev.total}] started`);
+        break;
+      case UploadStatus.ItemInBlock:
+        console.log(`[${ev.index + 1}/${ev.total}] in block #${ev.blockNumber}`);
+        break;
+      case UploadStatus.ItemFinalized:
+        // The last unit is the manifest; everything before is a chunk.
+        if (ev.index < ev.total - 1) chunkCids.push(ev.cid.toString());
+        break;
+      case UploadStatus.ItemFailed:
+        console.error(`[${ev.index + 1}/${ev.total}] failed:`, ev.error.message);
+        break;
     }
-};
-
-const result = await client
-    .store(largeData)
-    .withCallback(progress)
-    .send();
+  })
+  .send();
 ```
 
-## Authorization Estimation
+## Atomicity
 
-Before uploading, estimate the authorization you'll need:
-
-```typescript
-const largeData = new Uint8Array(50 * 1024 * 1024); // 50 MB
-const estimate = client.estimateAuthorization(largeData.length);
-console.log('Need:', estimate.transactions, 'txs,', estimate.bytes, 'bytes');
-```
-
-### Error Handling
-
-Chunked uploads are **not atomic**. If a chunk fails mid-upload, previously submitted chunks remain on-chain and cannot be rolled back. The error will contain details about which chunk failed.
-
-```typescript
-import { BulletinError } from '@parity/bulletin-sdk';
-
-try {
-    const result = await client.store(largeData).send();
-    console.log('Success!');
-} catch (error) {
-    if (error instanceof BulletinError) {
-        console.error('Error:', error.code, error.message);
-    }
-}
-```
-
-## Complete Example with Authorization
-
-```typescript
-import { BulletinClient, BulletinError } from '@parity/bulletin-sdk';
-
-const client = new BulletinClient(api, signer, papiClient.submit);
-
-// Large file (up to 64 MiB)
-const largeFile = new Uint8Array(50 * 1024 * 1024); // 50 MB
-
-// Estimate authorization needed
-const estimate = client.estimateAuthorization(largeFile.length);
-console.log('Authorization needed:');
-console.log('   Transactions:', estimate.transactions);
-console.log('   Bytes:', estimate.bytes);
-
-// Authorize (if needed - requires sudo)
-const account = 'your-account-address';
-// await client.authorizeAccount(account, estimate.transactions, BigInt(estimate.bytes)).withSudo().send();
-
-try {
-    // Upload with progress tracking
-    const result = await client
-        .store(largeFile)
-        .withCallback((event) => {
-            if (event.type === 'chunk_completed') {
-                console.log(`Chunk ${event.index + 1}/${event.total} done`);
-            }
-        })
-        .send();
-
-    console.log('Upload complete!');
-    console.log('   CID:', result.cid.toString());
-    if (result.chunks) {
-        console.log('   Chunks:', result.chunks.numChunks);
-    }
-} catch (error) {
-    if (error instanceof BulletinError) {
-        console.error('Error:', error.code, error.message);
-    } else {
-        console.error('Error:', error);
-    }
-}
-```
+Chunked uploads are **not atomic**. If submission fails partway, chunks already stored remain on chain. The SDK retries transient stalls and dedupes against what already landed (so it never double-stores), but a hard failure leaves the earlier chunks in place.

@@ -28,7 +28,7 @@ import {
 } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, UploadStatus, WaitFor, type UploadEvent } from "@parity/bulletin-sdk";
+import { getContentHash, blobFromItems, CidCodec, HashAlgorithm, UploadStatus, WaitFor, type UploadEvent } from "@parity/bulletin-sdk";
 import { useUploadProgressHandler } from "@/hooks/useUploadProgressHandler";
 import { bytesToHex } from "@/utils/format";
 
@@ -164,7 +164,7 @@ export function Upload() {
       const contentHash = await getContentHash(data, hashAlgorithm);
       const contentHashHex = bytesToHex(contentHash);
 
-      // Capture final block info + extrinsicIndex directly from the
+      // Capture final block info + transactionIndex directly from the
       // SDK's ItemFinalized event — no separate System.Events lookup
       // needed since the pipeline surfaces them via `TransactionByContentHash`.
       let finalBlockHash: string | undefined;
@@ -174,7 +174,7 @@ export function Upload() {
         if (ev.type === UploadStatus.ItemFinalized) {
           finalBlockHash = ev.blockHash;
           finalBlockNumber = ev.blockNumber;
-          storedIndex = ev.extrinsicIndex;
+          storedIndex = ev.transactionIndex;
         }
         handleUploadProgress(ev);
       };
@@ -184,8 +184,9 @@ export function Upload() {
         // chain validates via the preimage authorization for the item's
         // content hash.
         const bulletinClient = createBulletinClient!();
+        const items = [{ data, codec: cidCodec, hashAlgo: hashAlgorithm }];
         const { cids } = await bulletinClient
-          .upload([{ data, codec: cidCodec, hashAlgo: hashAlgorithm }])
+          .submit(await bulletinClient.estimateUpload(items), blobFromItems(items))
           .asUnsigned()
           .withCallback(captureFinal)
           .send();
@@ -202,8 +203,9 @@ export function Upload() {
         });
       } else {
         const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
+        const items = [{ data, codec: cidCodec, hashAlgo: hashAlgorithm }];
         const { cids } = await bulletinClient
-          .upload([{ data, codec: cidCodec, hashAlgo: hashAlgorithm }])
+          .submit(await bulletinClient.estimateUpload(items), blobFromItems(items))
           .withCallback(captureFinal)
           .withWaitFor(WaitFor.Finalized)
           .send();

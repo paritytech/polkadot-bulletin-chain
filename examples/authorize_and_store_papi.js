@@ -20,7 +20,7 @@ import assert from 'assert';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
+import { blobFromBytes, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 import { fetchCid } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
@@ -102,8 +102,11 @@ async function main() {
             .send();
         logSuccess(`Account ${whoAddress} authorized`);
 
-        // Store data via the SDK pipeline.
-        const { cid } = await client.uploadFile(dataBytes).send();
+        // Store data via the SDK pipeline: estimate, then submit. The root
+        // CID (retrieval id) is the last unit of the upload.
+        const src = blobFromBytes(dataBytes);
+        const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+        const cid = cids[cids.length - 1];
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
         assert.deepStrictEqual(

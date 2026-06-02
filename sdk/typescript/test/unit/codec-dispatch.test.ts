@@ -11,11 +11,11 @@
  * (different codec → different on-chain CID).
  */
 
-import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
+import { blobFromItems } from "../../src/blob-source"
 import { MockBulletinClient } from "../../src/mock-client"
 import { isDefaultCidConfig } from "../../src/pipeline"
-import { CidCodec, HashAlgorithm } from "../../src/types"
+import { CidCodec, HashAlgorithm, type UploadItem } from "../../src/types"
 
 describe("Codec dispatch — isDefaultCidConfig truth table", () => {
   const data = new Uint8Array([1, 2, 3])
@@ -59,18 +59,24 @@ describe("Codec dispatch — isDefaultCidConfig truth table", () => {
   })
 })
 
+// Submit items via the sole submission API (items-as-is plan + items source).
+async function submitItems(client: MockBulletinClient, items: UploadItem[]) {
+  const src = blobFromItems(items)
+  return client.submit(await client.estimateUpload(items), src).send()
+}
+
 describe("Codec dispatch — observable consequence (CIDs differ)", () => {
   it("different codec → different CID for same data", async () => {
     const client = new MockBulletinClient()
-    const data = Binary.fromText("identical data")
+    const data = new TextEncoder().encode("identical data")
 
-    const { cids: rawCids } = await client.upload([{ data }]).send()
-    const { cids: dagPbCids } = await client
-      .upload([{ data, codec: CidCodec.DagPb }])
-      .send()
-    const { cids: dagCborCids } = await client
-      .upload([{ data, codec: CidCodec.DagCbor }])
-      .send()
+    const { cids: rawCids } = await submitItems(client, [{ data }])
+    const { cids: dagPbCids } = await submitItems(client, [
+      { data, codec: CidCodec.DagPb },
+    ])
+    const { cids: dagCborCids } = await submitItems(client, [
+      { data, codec: CidCodec.DagCbor },
+    ])
 
     expect(rawCids[0]!.toString()).not.toBe(dagPbCids[0]!.toString())
     expect(rawCids[0]!.toString()).not.toBe(dagCborCids[0]!.toString())
@@ -79,15 +85,15 @@ describe("Codec dispatch — observable consequence (CIDs differ)", () => {
 
   it("different hashAlgo → different CID for same data + codec", async () => {
     const client = new MockBulletinClient()
-    const data = Binary.fromText("identical data")
+    const data = new TextEncoder().encode("identical data")
 
-    const { cids: b2 } = await client.upload([{ data }]).send()
-    const { cids: sha } = await client
-      .upload([{ data, hashAlgo: HashAlgorithm.Sha2_256 }])
-      .send()
-    const { cids: kec } = await client
-      .upload([{ data, hashAlgo: HashAlgorithm.Keccak256 }])
-      .send()
+    const { cids: b2 } = await submitItems(client, [{ data }])
+    const { cids: sha } = await submitItems(client, [
+      { data, hashAlgo: HashAlgorithm.Sha2_256 },
+    ])
+    const { cids: kec } = await submitItems(client, [
+      { data, hashAlgo: HashAlgorithm.Keccak256 },
+    ])
 
     expect(b2[0]!.toString()).not.toBe(sha[0]!.toString())
     expect(b2[0]!.toString()).not.toBe(kec[0]!.toString())
@@ -96,10 +102,10 @@ describe("Codec dispatch — observable consequence (CIDs differ)", () => {
 
   it("identical config → identical CID", async () => {
     const client = new MockBulletinClient()
-    const data = Binary.fromText("identical data")
+    const data = new TextEncoder().encode("identical data")
 
-    const { cids: a } = await client.upload([{ data }]).send()
-    const { cids: b } = await client.upload([{ data }]).send()
+    const { cids: a } = await submitItems(client, [{ data }])
+    const { cids: b } = await submitItems(client, [{ data }])
     expect(a[0]!.toString()).toBe(b[0]!.toString())
   })
 })

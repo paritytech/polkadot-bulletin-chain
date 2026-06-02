@@ -26,7 +26,7 @@ import {
 } from './common.js';
 import { fetchCid } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
-import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
+import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 import assert from 'assert';
 
 import fs from 'fs';
@@ -92,7 +92,10 @@ async function main() {
         console.log(`✂️ Split into ${chunks.length} chunks`);
 
         const items = chunks.map((c) => ({ data: c.bytes }));
-        const { cids: chunkCids } = await client.upload(items).withWaitFor(WaitFor.Finalized).send();
+        const { cids: chunkCids } = await client
+            .submit(await client.estimateUpload(items), blobFromItems(items))
+            .withWaitFor(WaitFor.Finalized)
+            .send();
         for (let i = 0; i < chunks.length; i++) {
             assert.deepStrictEqual(chunkCids[i].toString(), chunks[i].cid.toString());
         }
@@ -104,8 +107,9 @@ async function main() {
         assert.deepStrictEqual(expectedRootCid.toString(), calculatedRootCid.toString());
 
         // Store the DAG bytes through the SDK with the DAG-PB / SHA2-256 codec.
+        const dagItems = [{ data: dagBytes, codec: 0x70, hashAlgo: 0x12 }];
         const { cids: rootCids } = await client
-            .upload([{ data: dagBytes, codec: 0x70, hashAlgo: 0x12 }])
+            .submit(await client.estimateUpload(dagItems), blobFromItems(dagItems))
             .withWaitFor(WaitFor.Finalized)
             .send();
         const rootCid = rootCids[0];

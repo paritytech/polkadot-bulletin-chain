@@ -10,6 +10,7 @@ import { sha256 } from "@noble/hashes/sha2.js"
 import { keccak_256 } from "@noble/hashes/sha3.js"
 import { CID } from "multiformats/cid"
 import * as digest from "multiformats/hashes/digest"
+import { Binary } from "polkadot-api"
 import { MAX_CHUNK_SIZE } from "./chunker.js"
 import { BulletinError, CidCodec, ErrorCode, HashAlgorithm } from "./types.js"
 
@@ -111,6 +112,15 @@ export function cidFromBytes(bytes: Uint8Array): CID {
  */
 export function cidToBytes(cid: CID): Uint8Array {
   return cid.bytes
+}
+
+/**
+ * A CID's multihash digest as a `0x`-hex string — the content-hash key the
+ * pallet uses to index storage (and the SDK uses for dedup / TBCH lookups).
+ * The digest is exactly the chosen hash algo's output, so this never re-hashes.
+ */
+export function cidToContentHashHex(cid: CID): string {
+  return Binary.toHex(cid.multihash.digest)
 }
 
 /**
