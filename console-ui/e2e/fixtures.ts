@@ -13,7 +13,6 @@ import { test as base, expect, type Page } from "@playwright/test";
 export const test = base.extend<{ localPage: Page }>({
   localPage: async ({ page }, use) => {
     await page.addInitScript(() => {
-      localStorage.setItem("bulletin-storage-type", "bulletin");
       localStorage.setItem("bulletin-network", "local");
     });
     await page.goto("/");
