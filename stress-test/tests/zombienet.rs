@@ -139,20 +139,6 @@ throughput_variant_test!(test_parachain_throughput_10mb, "10MB", 13);
 // Sequential nonce upload test
 // ============================================================================
 
-/// Single-core network (no elastic scaling, no assign_cores).
-static SINGLE_CORE_NETWORK: OnceCell<Arc<zombienet_sdk::Network<LocalFileSystem>>> =
-	OnceCell::const_new();
-
-async fn get_single_core_network() -> Result<Arc<zombienet_sdk::Network<LocalFileSystem>>> {
-	let network = SINGLE_CORE_NETWORK
-		.get_or_try_init(|| async {
-			let n = zombienet_common::spawn_single_core_network().await?;
-			Ok::<_, anyhow::Error>(Arc::new(n))
-		})
-		.await?;
-	Ok(network.clone())
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_parachain_sequential_upload() -> Result<()> {
 	let _ = tracing_subscriber::fmt()
@@ -162,7 +148,7 @@ async fn test_parachain_sequential_upload() -> Result<()> {
 		)
 		.try_init();
 
-	let network = get_single_core_network().await?;
+	let network = get_parachain_network().await?;
 	let rpc1_url = zombienet_common::get_node_ws_url(&network, "rpc-1")?;
 	let rpc2_url = zombienet_common::get_node_ws_url(&network, "rpc-2")?;
 	let ws_urls = format!("{rpc1_url},{rpc2_url}");
@@ -254,7 +240,7 @@ fn validate_bitswap_results(results: &[ScenarioResult], chain: &str) {
 async fn test_parachain_bitswap_read() -> Result<()> {
 	let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
-	let network = get_single_core_network().await?;
+	let network = get_parachain_network().await?;
 	// Bitswap reads go to a collator (has --ipfs-server); store txs go via RPC nodes.
 	let ws_url = zombienet_common::get_node_ws_url(&network, "collator-1")?;
 
@@ -284,7 +270,7 @@ async fn test_parachain_bitswap_bulk_read() -> Result<()> {
 		)
 		.try_init();
 
-	let network = get_single_core_network().await?;
+	let network = get_parachain_network().await?;
 	let rpc1_url = zombienet_common::get_node_ws_url(&network, "rpc-1")?;
 	let collator_url = zombienet_common::get_node_ws_url(&network, "collator-1")?;
 
@@ -386,7 +372,7 @@ async fn test_parachain_renew_stress() -> Result<()> {
 		)
 		.try_init();
 
-	let network = get_single_core_network().await?;
+	let network = get_parachain_network().await?;
 	let rpc1_url = zombienet_common::get_node_ws_url(&network, "rpc-1")?;
 
 	// Upload 520 items (32KB each), then renew for 5 blocks.
