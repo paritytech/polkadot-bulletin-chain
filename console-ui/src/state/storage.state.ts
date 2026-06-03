@@ -2,12 +2,24 @@ import { BehaviorSubject, combineLatest, switchMap, of, from, catchError } from 
 import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
-import { SS58String, Enum, Binary } from "polkadot-api";
+import { SS58String, Enum, Binary, type HexString } from "polkadot-api";
 
 export interface Authorization {
+  // Remaining quota; used by Upload precheck and similar flows.
   transactions: bigint;
   bytes: bigint;
   expiresAt?: number;
+  // Raw consumed values straight from the on-chain extent, for display.
+  used: {
+    transactions: bigint;
+    bytesEphemeral: bigint;
+    bytesPermanent: bigint;
+  };
+  // Raw caps from the extent, for display.
+  allowance: {
+    transactions: bigint;
+    bytes: bigint;
+  };
 }
 
 export interface PreimageAuthorization {
@@ -52,11 +64,36 @@ export function extentAllowanceTransactions(extent: any): bigint {
   return BigInt(allowance ?? extent?.transactions ?? 0);
 }
 
+function buildAuthorization(extent: any, expiration: number | null | undefined): Authorization {
+  return {
+    transactions: extentRemainingTransactions(extent),
+    bytes: extentRemainingBytes(extent),
+    expiresAt: expiration ?? undefined,
+    used: {
+      transactions: BigInt(extent?.transactions ?? 0),
+      bytesEphemeral: BigInt(extent?.bytes ?? 0n),
+      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+    },
+    allowance: {
+      transactions: extentAllowanceTransactions(extent),
+      bytes: extentAllowanceBytes(extent),
+    },
+  };
+}
+
+export type TransactionKind = "Store" | "Renew";
+
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
   contentHash: Uint8Array;
   size: number;
   blockChunks: number;
+}
+
+/** Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we read. */
+export interface RawTransactionInfo {
+  size: number;
+  kind: { type: TransactionKind };
 }
 
 // Account authorization state
@@ -81,11 +118,7 @@ export async function fetchAccountAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: extentRemainingTransactions(auth.extent),
-      bytes: extentRemainingBytes(auth.extent),
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     authorizationSubject.next(authorization);
     return authorization;
@@ -111,7 +144,7 @@ export async function checkPreimageAuthorization(
 
   try {
     const auth = await api.query.TransactionStorage.Authorizations.getValue(
-      Enum("Preimage", Binary.fromBytes(contentHash))
+      Enum("Preimage", Binary.toHex(contentHash))
     );
 
     if (!auth) {
@@ -119,11 +152,7 @@ export async function checkPreimageAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: extentRemainingTransactions(auth.extent),
-      bytes: extentRemainingBytes(auth.extent),
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     preimageAuthSubject.next(authorization);
     return authorization;
@@ -155,17 +184,11 @@ export async function fetchPreimageAuthorizations(
     const preimageAuths: PreimageAuthorization[] = entries
       .filter(({ keyArgs }: any) => keyArgs[0].type === "Preimage")
       .map(({ keyArgs, value }: any) => {
-        // Extract content hash from the preimage key
         const preimageValue = keyArgs[0].value;
-        let contentHash: Uint8Array;
-        if (typeof preimageValue === "object" && preimageValue !== null && "content_hash" in preimageValue) {
-          const ch = (preimageValue as { content_hash: { asBytes: () => Uint8Array } }).content_hash;
-          contentHash = ch.asBytes();
-        } else if (typeof preimageValue === "object" && preimageValue !== null && "asBytes" in preimageValue) {
-          contentHash = (preimageValue as { asBytes: () => Uint8Array }).asBytes();
-        } else {
-          contentHash = new Uint8Array(32);
-        }
+        const contentHash =
+          typeof preimageValue === "string"
+            ? Binary.fromHex(preimageValue as HexString)
+            : new Uint8Array(32);
         return {
           contentHash,
           maxSize: extentAllowanceBytes(value.extent),
@@ -180,74 +203,6 @@ export async function fetchPreimageAuthorizations(
     return [];
   } finally {
     preimageAuthsLoadingSubject.next(false);
-  }
-}
-
-// CID on-chain lookup result
-export interface CidOnChainInfo {
-  /** Block number where the data was stored */
-  blockNumber: number;
-  /** Transaction index within the block */
-  index: number;
-  /** Data size in bytes */
-  size: number;
-  /** Block number when data expires (blockNumber + retentionPeriod) */
-  expiresAtBlock: number;
-  /** Current block number at the time of lookup */
-  currentBlock: number;
-  /** Retention period in blocks */
-  retentionPeriod: number;
-}
-
-/**
- * Look up a CID on-chain by searching all Transactions entries for a matching content hash.
- * Returns the most recent match (highest block number).
- */
-export async function lookupCidOnChain(
-  api: any,
-  contentHashDigest: Uint8Array,
-  currentBlock: number,
-): Promise<CidOnChainInfo | null> {
-  try {
-    const [entries, retentionPeriod] = await Promise.all([
-      api.query.TransactionStorage.Transactions.getEntries(),
-      api.query.TransactionStorage.RetentionPeriod.getValue(),
-    ]);
-
-    const retention = Number(retentionPeriod);
-    let bestMatch: CidOnChainInfo | null = null;
-
-    for (const { keyArgs, value } of entries) {
-      const blockNum = Number(keyArgs[0]);
-      const txInfos: any[] = value;
-
-      for (let idx = 0; idx < txInfos.length; idx++) {
-        const info = txInfos[idx];
-        const onChainHash: Uint8Array = info.content_hash.asBytes();
-
-        if (onChainHash.length === contentHashDigest.length &&
-            onChainHash.every((b: number, i: number) => b === contentHashDigest[i])) {
-          const match: CidOnChainInfo = {
-            blockNumber: blockNum,
-            index: idx,
-            size: info.size,
-            expiresAtBlock: blockNum + retention,
-            currentBlock,
-            retentionPeriod: retention,
-          };
-          // Keep the most recent (highest block number) match — this is the latest
-          // upload or renewal.
-          if (!bestMatch || blockNum > bestMatch.blockNumber) {
-            bestMatch = match;
-          }
-        }
-      }
-    }
-
-    return bestMatch;
-  } catch (err) {
-    console.error("Failed to look up CID on chain:", err);
-    return null;
   }
 }
 
@@ -270,8 +225,8 @@ export async function fetchTransactionInfo(
     }
 
     return {
-      chunkRoot: info.chunk_root.asBytes(),
-      contentHash: info.content_hash.asBytes(),
+      chunkRoot: Binary.fromHex(info.chunk_root as HexString),
+      contentHash: Binary.fromHex(info.content_hash as HexString),
       size: info.size,
       blockChunks: info.block_chunks,
     };

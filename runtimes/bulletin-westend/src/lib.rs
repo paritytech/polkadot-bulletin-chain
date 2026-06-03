@@ -14,8 +14,6 @@
 // limitations under the License.
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
-#![recursion_limit = "256"]
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -40,7 +38,7 @@ use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
-	construct_runtime, derive_impl,
+	derive_impl,
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
@@ -149,8 +147,10 @@ pub mod migrations {
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
+		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -166,7 +166,10 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations = (
+		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+	);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -191,7 +194,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_010,
+	spec_version: 1_000_015,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -275,7 +278,7 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = ConstU32<16>;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
-	type MultiBlockMigrator = migrations::MbmMigrations;
+	type MultiBlockMigrator = MultiBlockMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {
@@ -391,6 +394,25 @@ impl pallet_message_queue::Config for Runtime {
 impl parachain_info::Config for Runtime {}
 
 impl cumulus_pallet_aura_ext::Config for Runtime {}
+
+parameter_types! {
+	pub MbmServiceWeight: Weight =
+		Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_migrations::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = migrations::MbmMigrations;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+	type CursorMaxLen = ConstU32<65_536>;
+	type IdentifierMaxLen = ConstU32<256>;
+	type MigrationStatusHandler = ();
+	type FailedMigrationHandler = frame_support::migrations::FreezeChainOnFailedMigration;
+	type MaxServiceWeight = MbmServiceWeight;
+	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
+}
 
 parameter_types! {
 	/// Fellows pluralistic body.
@@ -512,43 +534,138 @@ impl pallet_utility::Config for Runtime {
 	type WeightInfo = weights::pallet_utility::WeightInfo<Runtime>;
 }
 
-// Create the runtime by composing the FRAME pallets that were previously configured.
-construct_runtime!(
-	pub enum Runtime
-	{
-		// System support stuff.
-		System: frame_system = 0,
-		ParachainSystem: cumulus_pallet_parachain_system = 1,
-		Timestamp: pallet_timestamp = 3,
-		ParachainInfo: parachain_info = 4,
-		WeightReclaim: cumulus_pallet_weight_reclaim = 5,
-		Utility: pallet_utility = 6,
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extrinsic = UncheckedExtrinsic;
+	type RuntimeCall = RuntimeCall;
+}
 
-		// Monetary stuff.
-		Balances: pallet_balances = 10,
-		TransactionPayment: pallet_transaction_payment = 11,
-		SkipFeelessPayment: pallet_skip_feeless_payment = 12,
-
-		// Storage
-		TransactionStorage: pallet_bulletin_transaction_storage = 40,
-
-		// Collator support. The order of these 5 are important and shall not change.
-		Authorship: pallet_authorship = 20,
-		CollatorSelection: pallet_collator_selection = 21,
-		Session: pallet_session = 22,
-		Aura: pallet_aura = 23,
-		AuraExt: cumulus_pallet_aura_ext = 24,
-
-		// XCM & related
-		XcmpQueue: cumulus_pallet_xcmp_queue = 30,
-		PolkadotXcm: pallet_xcm = 31,
-		CumulusXcm: cumulus_pallet_xcm = 32,
-		MessageQueue: pallet_message_queue = 34,
-
-		// Sudo
-		Sudo: pallet_sudo = 100,
+impl<C> frame_system::offchain::CreateBare<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_bare(call: RuntimeCall) -> UncheckedExtrinsic {
+		UncheckedExtrinsic::new_bare(call)
 	}
-);
+}
+
+impl<C> frame_system::offchain::CreateTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	type Extension = TxExtension;
+
+	fn create_transaction(call: RuntimeCall, extension: TxExtension) -> UncheckedExtrinsic {
+		generic::UncheckedExtrinsic::new_transaction(call, extension)
+	}
+}
+
+impl<C> frame_system::offchain::CreateAuthorizedTransaction<C> for Runtime
+where
+	RuntimeCall: From<C>,
+{
+	fn create_extension() -> Self::Extension {
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
+			frame_system::AuthorizeCall::<Runtime>::new(),
+			frame_system::CheckNonZeroSender::<Runtime>::new(),
+			frame_system::CheckSpecVersion::<Runtime>::new(),
+			frame_system::CheckTxVersion::<Runtime>::new(),
+			frame_system::CheckGenesis::<Runtime>::new(),
+			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+			frame_system::CheckNonce::<Runtime>::from(0),
+			frame_system::CheckWeight::<Runtime>::new(),
+			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+			),
+			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+				Runtime,
+				storage::StorageCallInspector,
+			>::default(),
+			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+				Runtime,
+				pallet_bulletin_transaction_storage::extension::FlatBoost,
+			>::default(),
+			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		))
+	}
+}
+
+// Create the runtime by composing the FRAME pallets that were previously configured.
+#[frame_support::runtime(legacy_ordering)]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Runtime;
+
+	// System support stuff.
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+	#[runtime::pallet_index(1)]
+	pub type ParachainSystem = cumulus_pallet_parachain_system;
+	#[runtime::pallet_index(3)]
+	pub type Timestamp = pallet_timestamp;
+	#[runtime::pallet_index(4)]
+	pub type ParachainInfo = parachain_info;
+	#[runtime::pallet_index(5)]
+	pub type WeightReclaim = cumulus_pallet_weight_reclaim;
+	#[runtime::pallet_index(6)]
+	pub type Utility = pallet_utility;
+	#[runtime::pallet_index(7)]
+	pub type MultiBlockMigrations = pallet_migrations;
+
+	// Monetary stuff.
+	#[runtime::pallet_index(10)]
+	pub type Balances = pallet_balances;
+	#[runtime::pallet_index(11)]
+	pub type TransactionPayment = pallet_transaction_payment;
+	#[runtime::pallet_index(12)]
+	pub type SkipFeelessPayment = pallet_skip_feeless_payment;
+
+	// Storage
+	#[runtime::pallet_index(40)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+	#[runtime::pallet_index(41)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
+
+	// Collator support. The order of these 5 are important and shall not change.
+	#[runtime::pallet_index(20)]
+	pub type Authorship = pallet_authorship;
+	#[runtime::pallet_index(21)]
+	pub type CollatorSelection = pallet_collator_selection;
+	#[runtime::pallet_index(22)]
+	pub type Session = pallet_session;
+	#[runtime::pallet_index(23)]
+	pub type Aura = pallet_aura;
+	#[runtime::pallet_index(24)]
+	pub type AuraExt = cumulus_pallet_aura_ext;
+
+	// XCM & related
+	#[runtime::pallet_index(30)]
+	pub type XcmpQueue = cumulus_pallet_xcmp_queue;
+	#[runtime::pallet_index(31)]
+	pub type PolkadotXcm = pallet_xcm;
+	#[runtime::pallet_index(32)]
+	pub type CumulusXcm = cumulus_pallet_xcm;
+	#[runtime::pallet_index(34)]
+	pub type MessageQueue = pallet_message_queue;
+
+	// Sudo
+	#[runtime::pallet_index(100)]
+	pub type Sudo = pallet_sudo;
+}
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
@@ -561,6 +678,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -804,6 +922,80 @@ impl_runtime_apis! {
 	impl sp_transaction_storage_proof::runtime_api::TransactionStorageApi<Block> for Runtime {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
+		}
+
+		fn indexed_transactions(
+			block: NumberFor<Block>,
+		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
+			use sp_transaction_storage_proof::IndexedTransactionInfo;
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.map(|tx| {
+							IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing: tx.hashing.into(),
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							}
+						})
+						.collect()
+				})
+				.unwrap_or_default()
+		}
+	}
+
+	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
+		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+		}
+
+		fn create_promotion_extrinsic(
+			data: alloc::vec::Vec<u8>,
+			signer: sp_runtime::MultiSigner,
+			signature: sp_runtime::MultiSignature,
+			submit_timestamp: u64,
+		) -> <Block as BlockT>::Extrinsic {
+			use frame_system::offchain::CreateAuthorizedTransaction;
+			<Runtime as CreateAuthorizedTransaction<pallet_bulletin_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
+				pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
+					data,
+					signer,
+					signature,
+					submit_timestamp,
+				}
+				.into(),
+			)
+		}
+
+		fn max_promotion_size() -> u32 {
+			use frame_support::traits::Get;
+			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+
+		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
+	}
+
+	impl pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi<Block, AccountId, BlockNumber> for Runtime {
+		fn account_authorization(
+			account: AccountId,
+		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+		}
+
+		fn can_store(account: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+		}
+
+		fn can_renew(
+			account: AccountId,
+			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
+		) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
 		}
 	}
 

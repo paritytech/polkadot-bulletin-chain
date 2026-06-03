@@ -24,8 +24,8 @@ import {
     logTestResult,
 } from "./logger.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { getWsProvider } from "polkadot-api/ws";
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_gateway_url] [image_size]
 // Note: --signer-disc=XX flag is also supported for parallel runs
@@ -33,7 +33,7 @@ import { bulletin } from './.papi/descriptors/dist/index.mjs';
 // Note: --skip-ipfs-verify flag skips IPFS download verification
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 // Image size preset: small, big32, big64, big96
 const IMAGE_SIZE = args[3] || 'big64';
@@ -162,15 +162,11 @@ async function printStatistics(dataSize, typedApi) {
             if (!blockHash) {
                 blockHash = await typedApi.query.System.BlockHash.getValue(blockNum, { at: lastKnownBlockHash });
             }
-            // Convert Binary/Uint8Array to hex string for PAPI's at parameter
-            const blockHashHex = typeof blockHash === 'string'
-                ? blockHash
-                : (blockHash?.asHex?.() || blockHash?.toHex?.() || '0x' + Buffer.from(blockHash).toString('hex'));
             // Skip blocks with zero hash (pruned)
-            if (blockHashHex.match(/^(0x)?0+$/)) {
+            if (blockHash.match(/^(0x)?0+$/)) {
                 continue;
             }
-            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHashHex });
+            const timestamp = await typedApi.query.Timestamp.Now.getValue({ at: blockHash });
             blockTimestamps[blockNum] = timestamp;
         } catch (e) {
             console.error(`Failed to fetch timestamp for block #${blockNum}:`, e.message);

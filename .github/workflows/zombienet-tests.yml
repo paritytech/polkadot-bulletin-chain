@@ -1,0 +1,236 @@
+name: Zombienet SDK Tests
+
+on:
+  workflow_dispatch:
+  # Populate the binaries cache under main's scope so PRs can read it.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    # `labeled` lets the sync suite kick in when its label is added mid-PR.
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    uses: ./.github/workflows/check-changed-files.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
+  set-image:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
+    uses: ./.github/workflows/set-image.yml
+
+  prepare-binaries:
+    if: needs.changes.outputs.should-run == 'true'
+    name: Fetch polkadot binaries + bulletin chain specs
+    needs: [changes, set-image]
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: prepare
+
+      # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
+      - name: Cache bulletin chain specs
+        id: cache-specs
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+
+      - name: Generate chain specs
+        if: steps.cache-specs.outputs.cache-hit != 'true'
+        run: |
+          just chain-spec westend
+          just chain-spec paseo
+
+  zombienet-auto-renew-tests:
+    needs: [set-image, prepare-binaries]
+    name: auto-renew / ${{ matrix.runtime.name }} / ${{ matrix.group }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+        group:
+          - archive
+          - pruning
+          - restart
+          - mixed
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet auto-renew tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        run: just test-zombienet-auto-renew ${{ matrix.runtime.name }} ${{ matrix.group }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
+
+  zombienet-sync-tests:
+    # Sync suite is ~120 min; gate behind dispatch / `zombienet-sync-tests` label.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
+    needs: [set-image, prepare-binaries]
+    name: sync / ${{ matrix.runtime.name }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet sync tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        # parachain_ldb_storage_verification_test needs rocksdb's `ldb` CLI (not in the CI
+        # image) — skipped by the just recipe.
+        run: just test-zombienet-sync ${{ matrix.runtime.name }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
+
+  zombienet-hop-tests:
+    needs: [set-image, prepare-binaries]
+    name: hop / ${{ matrix.runtime.name }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-hop-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet HOP tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        run: just test-zombienet-hop ${{ matrix.runtime.name }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14

@@ -3,22 +3,15 @@ name: Check Runtime Migrations
 # If you modify more jobs, ensure that you add them as required to the job "confirmMigrationsPassed"
 # which is located at the end of this file (more info in the job)
 
-# Controls when the action will run.
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
     branches: [main, "release-*"]
   pull_request:
     branches: [main, "release-*"]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-
   schedule:
     - cron: '0 5 * * *'  # Daily at 5 AM UTC
 
-# Cancel a currently running workflow from the same PR, branch or tag when a new workflow is
-# triggered (ref https://stackoverflow.com/a/72408109)
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -44,19 +37,45 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - id: runtime
         run: |
-          # Filter out runtimes that don't have URIs
-          TASKS=$(jq '[.[] | select(.uris != null and (.uris | length) > 0)]' scripts/runtimes-matrix.json)
-          SKIPPED_TASKS=$(jq '[.[] | select(.uris == null or (.uris | length) == 0)]' scripts/runtimes-matrix.json)
+          # Expand each runtime into one task per try_runtime instance,
+          # overlaying the instance's name (as `instance`) and `uris` onto
+          # the runtime object. Strip the nested `instances` list so each
+          # emitted entry only carries per-(runtime, instance) data.
+          TASKS=$(jq '[
+            .[] as $r
+            | ($r.try_runtime.instances // [])[] as $i
+            | select(($i.uris // []) | length > 0)
+            | $r
+              + { instance: $i.name, uris: $i.uris }
+              + { try_runtime: ($r.try_runtime | del(.instances)) }
+          ]' scripts/runtimes-matrix.json)
+          SKIPPED_TASKS=$(jq '[.[] | select(((.try_runtime.instances // []) | length) == 0)]' scripts/runtimes-matrix.json)
           echo --- Running the following tasks ---
           echo $TASKS
-          echo --- Skipping the following tasks due to not having a uris field ---
+          echo --- Skipping the following runtimes with no try_runtime.instances ---
           echo $SKIPPED_TASKS
           # Strip whitespace from Tasks now that we've logged it
           TASKS=$(echo $TASKS | jq -c .)
           echo "runtime=$TASKS" >> $GITHUB_OUTPUT
 
+  prepare-try-runtime:
+    name: Prepare try-runtime
+    needs: [changes]
+    if: needs.changes.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: prepare
+
   prepare-snapshots:
-    needs: [runtime-matrix]
+    name: prepare-snapshot (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
+    needs: [runtime-matrix, prepare-try-runtime]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -66,6 +85,12 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
+      # Snapshot lookup uses a deliberately-non-matching primary `key:` so
+      # `restore-keys` always falls through to the most recent dated entry.
+      # With `lookup-only` the snapshot isn't restored — we just decide
+      # whether to regenerate. `cache-matched-key` is empty iff nothing was
+      # found, which is also the case on the daily `schedule` (lookup
+      # skipped) so the snapshot is force-refreshed nightly.
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
@@ -73,29 +98,26 @@ jobs:
         with:
           lookup-only: true
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}
           restore-keys: |
-            try-runtime-snapshot-${{ matrix.runtime.name }}-
+            try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: false
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
-
-      - name: Install try-runtime-cli
+      - name: Set up Polkadot binaries
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: consume
 
-      - name: Generate snapshot for ${{ matrix.runtime.name }}
+      - name: Generate snapshot for ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }})
         if: steps.cache-restore.outputs.cache-matched-key == ''
         env:
           RUNTIME_NAME: ${{ matrix.runtime.name }}
+          RUNTIME_INSTANCE: ${{ matrix.runtime.instance }}
           RUNTIME_URIS_JSON: ${{ toJSON(matrix.runtime.uris) }}
         run: |
-          echo "Generating snapshot for $RUNTIME_NAME..."
+          echo "Generating snapshot for $RUNTIME_NAME ($RUNTIME_INSTANCE)..."
 
           URI_ARGS=()
           while IFS= read -r uri; do
@@ -131,11 +153,12 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-${{ steps.get-date.outputs.today }}
 
 
   check-migrations:
-    needs: [runtime-matrix, prepare-snapshots]
+    name: check-migration (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
+    needs: [runtime-matrix, prepare-try-runtime, prepare-snapshots]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
@@ -155,8 +178,11 @@ jobs:
           git remote add upstream "https://github.com/${BASE_REPO}.git"
           git fetch upstream --tags
 
-      - name: Load common environment variables via env file
-        run: cat .github/env >> $GITHUB_ENV
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: try-runtime
+          mode: consume
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
@@ -165,21 +191,14 @@ jobs:
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
-      - name: Install try-runtime-cli
-        run: |
-          curl -fsL "https://github.com/paritytech/try-runtime-cli/releases/download/${TRY_RUNTIME_VERSION}/try-runtime-x86_64-unknown-linux-musl" -o try-runtime
-          echo "${TRY_RUNTIME_SHA256}  try-runtime" | sha256sum -c -
-          chmod +x try-runtime
-          sudo mv try-runtime /usr/local/bin/
-
       - name: Restore snapshot from cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}-
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: true
 
-      - name: Run ${{ matrix.runtime.name }} Runtime Checks
+      - name: Run ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }}) Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
           TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
@@ -210,7 +229,7 @@ jobs:
     runs-on: ubuntu-latest
     name: All migrations passed
     if: always() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-    needs: [changes, check-migrations]
+    needs: [changes, prepare-try-runtime, prepare-snapshots, check-migrations]
     steps:
       - name: Decide outcome
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')

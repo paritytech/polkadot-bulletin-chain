@@ -115,6 +115,5 @@ export {
   estimateAuthorization,
   getContentHash,
   parseCid,
-  toBytes,
   validateChunkSize,
 } from "./utils.js"
