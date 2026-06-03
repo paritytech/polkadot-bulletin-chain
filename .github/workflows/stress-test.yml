@@ -5,13 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "Command: throughput, bitswap, or full"
+        description: "Scenario: throughput (block-capacity) | sequential-upload | bitswap (b2 reads) | bulk-read | renew | full"
         required: true
         default: "throughput"
         type: choice
         options:
           - throughput
+          - sequential-upload
           - bitswap
+          - bulk-read
+          - renew
           - full
       ws_url:
         description: "WebSocket URL(s), comma-separated for multi-node"
@@ -45,6 +48,10 @@ on:
         description: "P2P multiaddr for Bitswap (auto-discovered if empty)"
         required: false
         default: ""
+      extra_args:
+        description: "Extra scenario flags appended verbatim — e.g. sequential-upload '--instances 4 --total-size 52428800'; bulk-read '--read-concurrency 32'; renew '--store-count 1000'. Allowed: alphanumeric, spaces, and . _ , / = -"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +71,7 @@ env:
   ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
   ST_AUTHORIZER_SEED: ${{ inputs.authorizer_seed || '//Alice' }}
   ST_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr || '' }}
+  ST_EXTRA_ARGS: ${{ inputs.extra_args || '' }}
 
 jobs:
   set-image:
@@ -145,6 +153,14 @@ jobs:
             fi
           fi
 
+          # Validate extra args — safe charset only (no shell metacharacters)
+          if [ -n "$ST_EXTRA_ARGS" ]; then
+            if ! [[ "$ST_EXTRA_ARGS" =~ ^[a-zA-Z0-9[:space:]._,/=-]+$ ]]; then
+              echo "::error::Invalid extra args: '$ST_EXTRA_ARGS' (allowed: alphanumeric, spaces, and . _ , / = -)"
+              exit 1
+            fi
+          fi
+
           echo "All inputs validated"
 
       - name: Run stress test
@@ -173,13 +189,29 @@ jobs:
                 ARGS+=(--variants "$ST_VARIANTS")
               fi
               ;;
+            sequential-upload)
+              ARGS+=(throughput sequential-upload)
+              ;;
             bitswap)
               ARGS+=(bitswap --payload-size "$ST_PAYLOAD_SIZE")
+              ;;
+            bulk-read)
+              ARGS+=(bitswap bulk-read)
+              ;;
+            renew)
+              # `renew` has its own (non-global) --target-blocks; pass it after the subcommand.
+              ARGS+=(renew --target-blocks "$ST_TARGET_BLOCKS")
               ;;
             full)
               ARGS+=(full)
               ;;
           esac
+
+          # Append free-form scenario-specific flags (validated charset; split on whitespace).
+          if [ -n "$ST_EXTRA_ARGS" ]; then
+            read -ra EXTRA_ARGS_ARR <<< "$ST_EXTRA_ARGS"
+            ARGS+=("${EXTRA_ARGS_ARR[@]}")
+          fi
 
           # Log command without authorizer seed
           SAFE_ARGS=("${ARGS[@]}")
@@ -215,6 +247,9 @@ jobs:
             echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
             echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
             echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
+            if [ -n "$ST_EXTRA_ARGS" ]; then
+              echo "| Extra args | \`${ST_EXTRA_ARGS}\` |" >> $GITHUB_STEP_SUMMARY
+            fi
             if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
               echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
             fi
