@@ -17,38 +17,76 @@ use crate::{
 	report::{compute_latency_stats, ScenarioResult},
 };
 
-/// Parse a single TransactionInfo from SCALE-encoded bytes.
-/// Field order (from pallet source):
-///   chunk_root:    [u8; 32]  (offset 0)
-///   content_hash:  [u8; 32]  (offset 32)
-///   hashing:       u8 enum   (offset 64)
-///   cid_codec:     u64       (offset 65)
-///   size:          u32       (offset 73)
-///   block_chunks:  u32       (offset 77)
-/// Total: 81 bytes
-const TX_INFO_SIZE: usize = 32 + 32 + 1 + 8 + 4 + 4; // 81
+/// Decode a block's `BoundedVec<TransactionInfo>` storage value into discovered
+/// items. The layout mirrors the pallet's `TransactionInfo`
+/// (`pallets/transaction-storage/src/types.rs`); fields are decoded in
+/// declaration order so the cursor self-aligns regardless of field widths. On a
+/// decode failure we log and stop rather than fabricate CIDs.
+fn decode_transaction_infos(mut data: &[u8], block_number: u64) -> Vec<DiscoveredItem> {
+	use subxt::ext::codec::{Compact, Decode};
 
-fn parse_transaction_info(data: &[u8], block_number: u64) -> Option<DiscoveredItem> {
-	if data.len() < TX_INFO_SIZE {
-		return None;
+	let input = &mut data;
+	let count = match Compact::<u64>::decode(input) {
+		Ok(c) => c.0 as usize,
+		Err(e) => {
+			tracing::warn!("block #{block_number}: bad TransactionInfo vec length: {e}");
+			return Vec::new();
+		},
+	};
+
+	let mut items = Vec::with_capacity(count);
+	for i in 0..count {
+		match decode_one_transaction_info(input, block_number) {
+			Ok(Some(item)) => items.push(item),
+			Ok(None) => {}, // decoded fine, but unsupported hashing — skip just this item
+			Err(e) => {
+				// Once one record fails to decode the rest are misaligned; stop.
+				tracing::warn!("block #{block_number}: TransactionInfo #{i} decode failed: {e}");
+				break;
+			},
+		}
 	}
-	let chunk_root: [u8; 32] = data[0..32].try_into().ok()?;
-	let content_hash: [u8; 32] = data[32..64].try_into().ok()?;
-	let hashing_variant = data[64];
-	let cid_codec = u64::from_le_bytes(data[65..73].try_into().ok()?);
-	let size = u32::from_le_bytes(data[73..77].try_into().ok()?);
-	let block_chunks = u32::from_le_bytes(data[77..81].try_into().ok()?);
+	items
+}
+
+/// Decode one `TransactionInfo`, consuming exactly its bytes from `input`.
+/// Field order MUST match the pallet struct: `chunk_root[32] content_hash[32]
+/// hashing(u8) cid_codec(u64) size(u32) extrinsic_index(u32) block_chunks(u32)
+/// kind(u8)`.
+fn decode_one_transaction_info(
+	input: &mut &[u8],
+	block_number: u64,
+) -> Result<Option<DiscoveredItem>, subxt::ext::codec::Error> {
+	use subxt::ext::codec::Decode;
+
+	let chunk_root = <[u8; 32]>::decode(input)?;
+	let content_hash = <[u8; 32]>::decode(input)?;
+	let hashing_variant = u8::decode(input)?;
+	let cid_codec = u64::decode(input)?;
+	let size = u32::decode(input)?;
+	let _extrinsic_index = u32::decode(input)?;
+	let block_chunks = u32::decode(input)?;
+	let _kind = u8::decode(input)?;
 
 	let mh_code: u64 = match hashing_variant {
 		0 => 0xb220, // Blake2b256
 		1 => 0x12,   // Sha2_256
 		2 => 0x1b,   // Keccak256
-		_ => 0xb220,
+		other => {
+			tracing::warn!("block #{block_number}: unknown hashing variant {other}, skipping item");
+			return Ok(None);
+		},
 	};
-
-	let mh = cid::multihash::Multihash::<64>::wrap(mh_code, &content_hash).ok()?;
+	let mh = match cid::multihash::Multihash::<64>::wrap(mh_code, &content_hash) {
+		Ok(mh) => mh,
+		Err(e) => {
+			tracing::warn!("block #{block_number}: invalid multihash: {e}");
+			return Ok(None);
+		},
+	};
 	let cid = cid::Cid::new_v1(cid_codec, mh);
-	Some(DiscoveredItem {
+
+	Ok(Some(DiscoveredItem {
 		cid,
 		size,
 		chunk_root,
@@ -57,38 +95,7 @@ fn parse_transaction_info(data: &[u8], block_number: u64) -> Option<DiscoveredIt
 		cid_codec,
 		block_chunks,
 		block_number,
-	})
-}
-
-/// Parse a Vec<TransactionInfo> from SCALE-encoded bytes.
-/// SCALE Vec prefix: compact-encoded length.
-fn parse_transaction_infos(mut data: &[u8], block_number: u64) -> Vec<DiscoveredItem> {
-	// Read compact length prefix.
-	let (count, prefix_len) = match data.first() {
-		Some(&b) if b & 0x03 == 0 => ((b >> 2) as usize, 1),
-		Some(&b) if b & 0x03 == 1 && data.len() >= 2 => {
-			let n = u16::from_le_bytes([data[0], data[1]]) >> 2;
-			(n as usize, 2)
-		},
-		Some(&b) if b & 0x03 == 2 && data.len() >= 4 => {
-			let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) >> 2;
-			(n as usize, 4)
-		},
-		_ => return Vec::new(),
-	};
-	data = &data[prefix_len..];
-
-	let mut results = Vec::with_capacity(count);
-	for _ in 0..count {
-		if data.len() < TX_INFO_SIZE {
-			break;
-		}
-		if let Some(item) = parse_transaction_info(data, block_number) {
-			results.push(item);
-		}
-		data = &data[TX_INFO_SIZE..];
-	}
-	results
+	}))
 }
 
 /// A discovered CID with its raw TransactionInfo fields for debugging.
@@ -179,7 +186,7 @@ async fn discover_cids(
 		};
 
 		let encoded = entry.value.encoded();
-		let parsed = parse_transaction_infos(encoded, block_number);
+		let parsed = decode_transaction_infos(encoded, block_number);
 
 		for item in parsed {
 			if item.size >= min_size && item.size <= max_size {
@@ -456,4 +463,71 @@ pub async fn run_bulk_read(
 		data_verified: Some(true),
 		..Default::default()
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use subxt::ext::codec::{Compact, Encode};
+
+	/// Append one SCALE-encoded `TransactionInfo` matching the pallet layout.
+	#[allow(clippy::too_many_arguments)]
+	fn push_tx_info(
+		buf: &mut Vec<u8>,
+		chunk_root: [u8; 32],
+		content_hash: [u8; 32],
+		hashing: u8,
+		cid_codec: u64,
+		size: u32,
+		extrinsic_index: u32,
+		block_chunks: u32,
+		kind: u8,
+	) {
+		buf.extend_from_slice(&chunk_root);
+		buf.extend_from_slice(&content_hash);
+		buf.push(hashing);
+		cid_codec.encode_to(buf);
+		size.encode_to(buf);
+		extrinsic_index.encode_to(buf);
+		block_chunks.encode_to(buf);
+		buf.push(kind);
+	}
+
+	#[test]
+	fn decodes_multiple_transaction_infos_without_drift() {
+		// A BoundedVec<TransactionInfo> with 3 records. The old fixed-81-byte
+		// parser misaligned every record after the first (it omitted
+		// `extrinsic_index` and `kind`, making the real stride 86 bytes).
+		let mut bytes = Vec::new();
+		Compact(3u32).encode_to(&mut bytes);
+		push_tx_info(&mut bytes, [0xAA; 32], [0x11; 32], 0, 0x55, 1024, 0, 1, 0);
+		push_tx_info(&mut bytes, [0xBB; 32], [0x22; 32], 1, 0x70, 2_097_152, 7, 2, 1);
+		push_tx_info(&mut bytes, [0xCC; 32], [0x33; 32], 2, 0x55, 4096, 3, 5, 0);
+
+		let items = decode_transaction_infos(&bytes, 42);
+		assert_eq!(items.len(), 3, "all three records must decode");
+
+		// Record 0 — `block_chunks` is the real value (1), not extrinsic_index (0).
+		assert_eq!(items[0].content_hash, [0x11; 32]);
+		assert_eq!(items[0].cid_codec, 0x55);
+		assert_eq!(items[0].block_chunks, 1);
+		// Records 1 and 2 must be correct too — proves no per-record drift.
+		assert_eq!(items[1].content_hash, [0x22; 32]);
+		assert_eq!(items[1].cid_codec, 0x70);
+		assert_eq!(items[1].hashing_variant, 1);
+		assert_eq!(items[1].size, 2_097_152);
+		assert_eq!(items[1].block_chunks, 2); // not 7 (extrinsic_index)
+		assert_eq!(items[2].content_hash, [0x33; 32]);
+		assert_eq!(items[2].cid_codec, 0x55);
+		assert_eq!(items[2].block_chunks, 5);
+	}
+
+	#[test]
+	fn skips_unknown_hashing_variant() {
+		let mut bytes = Vec::new();
+		Compact(1u32).encode_to(&mut bytes);
+		push_tx_info(&mut bytes, [0; 32], [0; 32], 9, 0x55, 1, 0, 1, 0); // hashing=9 unknown
+		let items = decode_transaction_infos(&bytes, 1);
+		assert!(items.is_empty(), "unknown hashing variant must be skipped, not fabricated");
+	}
 }
