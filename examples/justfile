@@ -879,7 +879,7 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed
 #   just run-live-tests-previewnet      <seed>
 #
 # Ad-hoc usage (any network, supply all endpoints):
-#   just run-live-tests <seed> <rpc_url> <collator_url> <ipfs_gateway> <parachain_chainspec>
+#   just run-live-tests <seed> <rpc_url> <collator_url> <ipfs_gateway> <relay_chainspec> <parachain_chainspec>
 
 # Live RPC endpoints (mirrors scripts/runtimes-matrix.json `try_runtime.instances[].uris`)
 WESTEND_RPC         := "wss://westend-bulletin-rpc.polkadot.io"
@@ -910,51 +910,67 @@ PASEO_PARACHAIN_SPEC            := justfile_directory() + "/../chainspecs/paseo-
 PASEO_NEXT_V2_PARACHAIN_SPEC    := justfile_directory() + "/../chainspecs/paseo-next-v2-chainspec.json"
 PREVIEWNET_PARACHAIN_SPEC       := "TODO-previewnet-bulletin-chainspec.json"
 
+# Relay chainspecs for smoldot parachain sync (arg 1 to the smoldot script; the
+# parachain spec is arg 2). Westend bulletin sits on the Westend relay, the Paseo
+# family on the Paseo relay. Not in the repo yet. TODO(#580): add them.
+WESTEND_RELAY_SPEC          := "TODO-westend-relay-chainspec.json"
+PASEO_RELAY_SPEC            := "TODO-paseo-relay-chainspec.json"
+PASEO_NEXT_V2_RELAY_SPEC    := "TODO-paseo-relay-chainspec.json"
+PREVIEWNET_RELAY_SPEC       := "TODO-paseo-relay-chainspec.json"
+
 # Internal: run all four canonical live tests against the given endpoints.
-_run-live-tests rpc_url collator_url ipfs_gateway parachain_spec seed image_size="small": npm-install
+_run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed image_size="small": npm-install
     #!/usr/bin/env bash
     set -e
     echo "🌐 Running live tests"
     echo "   RPC:           {{ rpc_url }}"
     echo "   HOP collator:  {{ collator_url }}"
     echo "   IPFS gateway:  {{ ipfs_gateway }}"
+    echo "   Relay spec:    {{ relay_spec }}"
     echo "   Parachain spec:{{ parachain_spec }}"
     just papi-generate "{{ rpc_url }}"
 
+    # Run every script even if an earlier one fails, so one blocked endpoint
+    # doesn't mask the rest. Collect failures and exit non-zero if any failed.
+    set +e
+    failed=""
+
     echo "▶️  store_big_data.js"
-    node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}"
+    node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}" || failed="$failed store_big_data.js"
 
     echo "▶️  authorize_and_store_papi_smoldot.js"
-    # TODO(#580): smoldot parachain mode needs the RELAY chainspec as arg 1 and the
-    # bulletin parachain chainspec as arg 2 (see run-test-authorize-and-store). Only
-    # the parachain spec is passed here, so the script runs in solochain mode and
-    # cannot sync — the relay chainspecs are not in the repo yet. The seed is also
-    # not threaded through (the script hardcodes //Eve as authorizer).
-    node authorize_and_store_papi_smoldot.js "{{ parachain_spec }}" "" "{{ ipfs_gateway }}"
+    # Parachain mode: relay spec is arg 1, bulletin parachain spec is arg 2.
+    node authorize_and_store_papi_smoldot.js "{{ relay_spec }}" "{{ parachain_spec }}" "{{ ipfs_gateway }}" "{{ seed }}" || failed="$failed authorize_and_store_papi_smoldot.js"
 
     echo "▶️  hop_round_trip.js"
     # HOP needs the collator's RPC; the public RPC node doesn't host hop_*.
-    node hop_round_trip.js "{{ collator_url }}" "{{ seed }}" "{{ ipfs_gateway }}"
+    node hop_round_trip.js "{{ collator_url }}" "{{ seed }}" "{{ ipfs_gateway }}" || failed="$failed hop_round_trip.js"
 
     echo "▶️  check_chopsticks.js"
-    node check_chopsticks.js "{{ rpc_url }}"
+    node check_chopsticks.js "{{ rpc_url }}" || failed="$failed check_chopsticks.js"
+
+    if [ -n "$failed" ]; then
+        echo "❌ Failed live tests:$failed"
+        exit 1
+    fi
+    echo "✅ All live tests passed"
 
 # Run live tests against Westend Bulletin
 run-live-tests-westend seed image_size="small":
-    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_RELAY_SPEC }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against Paseo Bulletin
 run-live-tests-paseo seed image_size="small":
-    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_RELAY_SPEC }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against Paseo Bulletin next-v2 (staging)
 run-live-tests-paseo-next-v2 seed image_size="small":
-    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_RELAY_SPEC }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against Previewnet Bulletin
 run-live-tests-previewnet seed image_size="small":
-    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against any endpoint set (caller supplies all URLs)
-run-live-tests seed rpc_url collator_url ipfs_gateway parachain_spec image_size="small":
-    just _run-live-tests "{{ rpc_url }}" "{{ collator_url }}" "{{ ipfs_gateway }}" "{{ parachain_spec }}" "{{ seed }}" "{{ image_size }}"
+run-live-tests seed rpc_url collator_url ipfs_gateway relay_spec parachain_spec image_size="small":
+    just _run-live-tests "{{ rpc_url }}" "{{ collator_url }}" "{{ ipfs_gateway }}" "{{ relay_spec }}" "{{ parachain_spec }}" "{{ seed }}" "{{ image_size }}"
