@@ -187,7 +187,8 @@ pub async fn hop_pool_status(ws: &WsClient) -> Result<PoolStatus> {
 	Ok(status)
 }
 
-/// JSON-RPC error code from a failed `hop_submit`/`hop_claim`, if the failure was a call error.
+/// Error-scenario tests assert against the runtime's numeric codes, which only call errors carry;
+/// transport and decode failures have none, hence `None`.
 pub fn error_code(err: &anyhow::Error) -> Option<i32> {
 	match err.downcast_ref::<jsonrpsee::core::ClientError>() {
 		Some(jsonrpsee::core::ClientError::Call(obj)) => Some(obj.code()),

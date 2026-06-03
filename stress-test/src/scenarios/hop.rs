@@ -791,7 +791,6 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 	let mut passed = 0u32;
 	let mut failed = 0u32;
 
-	// Helper: expect a specific error code from hop_submit
 	macro_rules! expect_submit_error {
 		($name:expr, $code:expr, $data:expr, $recipients:expr) => {{
 			match hop::hop_submit(&ws, $data, $recipients, submitter).await {
@@ -816,7 +815,6 @@ pub async fn run_error_tests(ws_urls: &[&str], submitter: &Keypair) -> Result<bo
 		}};
 	}
 
-	// Helper: expect a specific error code from hop_claim
 	macro_rules! expect_claim_error {
 		($name:expr, $code:expr, $hash:expr, $kp:expr) => {{
 			match hop::hop_claim(&ws, $hash, $kp).await {
