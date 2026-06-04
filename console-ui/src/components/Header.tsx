@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Globe, LineChart, BarChart3, ScrollText } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Globe, LineChart, BarChart3, Network, ScrollText } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import {
@@ -242,6 +242,12 @@ function HelpMenu() {
           href: monitoring.grafana,
           icon: Activity,
           description: "Block production, finality, peers",
+        },
+        monitoring.bitswap && {
+          label: "Grafana (Bitswap Insights)",
+          href: monitoring.bitswap,
+          icon: Network,
+          description: "Bitswap serve load and request errors",
         },
         monitoring.collatorLogs && {
           label: "Collator Logs",

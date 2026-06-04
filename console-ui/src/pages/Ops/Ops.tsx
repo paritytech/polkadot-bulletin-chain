@@ -1,4 +1,4 @@
-import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart, ScrollText } from "lucide-react";
+import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart, Network, ScrollText } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { useChainState } from "@/state/chain.state";
@@ -24,6 +24,14 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
       href: monitoring.grafana,
       icon: Activity,
       description: "Block production, finality, peer count.",
+    });
+  }
+  if (monitoring.bitswap) {
+    chainHealth.push({
+      label: "Grafana — Bitswap Insights",
+      href: monitoring.bitswap,
+      icon: Network,
+      description: "Bitswap serve load: wantlist entries, request errors, response bytes.",
     });
   }
   if (monitoring.collatorLogs) {

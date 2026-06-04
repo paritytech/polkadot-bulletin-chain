@@ -1,6 +1,8 @@
 export interface MonitoringLinks {
   /** Parity SRE Grafana dashboard for this chain. */
   grafana?: string;
+  /** Grafana Bitswap server insights dashboard (IPFS/Bitswap serve load). */
+  bitswap?: string;
   /** Sentry dashboard for product-side telemetry on this chain. */
   sentry?: string;
   /** Sentry drill-down: deploy.storage phase (per-deploy Bulletin write). */
@@ -86,6 +88,18 @@ function grafanaLink(chain: string, node?: string): string {
   return `${GRAFANA_OPERATION_HEALTH}?${params.join("&")}`;
 }
 
+const GRAFANA_BITSWAP =
+  "https://grafana.teleport.parity.io/d/bitswap-1/bitswap-server-insights";
+
+// Bitswap insights uses its own `project=thanos` template var; `var-chain`
+// matches operation-health, so the same chain string feeds both dashboards.
+function bitswapLink(chain: string): string {
+  return (
+    `${GRAFANA_BITSWAP}?orgId=1&from=now-6h&to=now&timezone=utc` +
+    `&var-project=thanos&var-chain=${chain}&var-nodename=All`
+  );
+}
+
 function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
 }
@@ -138,6 +152,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     lightClient: false,
     monitoring: {
       grafana: grafanaLink("bulletin-westend"),
+      bitswap: bitswapLink("bulletin-westend"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
@@ -153,6 +168,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     lightClient: false,
     monitoring: {
       grafana: grafanaLink("bulletin-paseo"),
+      bitswap: bitswapLink("bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
@@ -171,6 +187,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
         "next-bulletin-paseo",
         "paseo-bulletin-next-collator-node-0",
       ),
+      bitswap: bitswapLink("next-bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
@@ -196,6 +213,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     lightClient: false,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
+      bitswap: bitswapLink("bulletin-polkadot"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
