@@ -129,8 +129,8 @@ impl std::fmt::Display for DiscoveredItem {
 				_ => "Unknown",
 			},
 			self.cid_codec,
-			hex::encode(&self.content_hash),
-			hex::encode(&self.chunk_root),
+			hex::encode(self.content_hash),
+			hex::encode(self.chunk_root),
 			self.block_chunks,
 		)
 	}
@@ -198,7 +198,7 @@ async fn discover_cids(
 		}
 
 		blocks_scanned += 1;
-		if blocks_scanned % 500 == 0 && !items.is_empty() {
+		if blocks_scanned.is_multiple_of(500) && !items.is_empty() {
 			tracing::info!(
 				"  ...scanned {blocks_scanned} blocks: {} matching CIDs ({} MB), {skipped} skipped",
 				items.len(),
@@ -230,6 +230,7 @@ async fn discover_cids(
 
 /// Run bulk Bitswap read: discover CIDs from chain, then download with
 /// specified concurrency.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_bulk_read(
 	client: &OnlineClient<BulletinConfig>,
 	multiaddrs: &[litep2p::types::multiaddr::Multiaddr],

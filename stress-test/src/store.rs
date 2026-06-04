@@ -1258,6 +1258,7 @@ pub async fn sequential_nonce_upload(
 	let mut end_finalized_block: u64 = 0;
 
 	// Helper: sign and submit a batch.
+	#[allow(clippy::too_many_arguments)]
 	async fn sign_and_submit(
 		client: &OnlineClient<BulletinConfig>,
 		signer: &Keypair,

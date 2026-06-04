@@ -47,7 +47,7 @@ pub async fn run_renew_stress(
 		client,
 		authorizer_signer,
 		nonce_tracker,
-		&[account_id.clone()],
+		std::slice::from_ref(&account_id),
 		total_txs_needed,
 		total_bytes_needed,
 	)
@@ -125,8 +125,7 @@ pub async fn run_renew_stress(
 
 		// Sign renew txs for the same items every block.
 		let mut signed_txs = Vec::with_capacity(items_per_wave);
-		for i in 0..items_per_wave {
-			let (ref_block, ref_index) = &stored[i];
+		for (i, (ref_block, ref_index)) in stored.iter().enumerate().take(items_per_wave) {
 			let nonce = best_nonce + i as u64;
 			let call = subxt::dynamic::tx(
 				"TransactionStorage",
