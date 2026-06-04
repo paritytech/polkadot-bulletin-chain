@@ -927,13 +927,15 @@ PREVIEWNET_RELAY_SPEC       := "TODO-paseo-relay-chainspec.json"
 # TODO(#580): summit-hop-0/1.polkadot.io have no DNS. The 2-replica public RPC
 # can't serve the round-trip because the HOP pool is node-local.
 SUMMIT_RPC              := "wss://summit-bulletin-rpc.polkadot.io"
+SUMMIT_RELAY_RPC        := "wss://summit-rpc.polkadot.io"
 SUMMIT_HOP_POOL_WS      := "wss://summit-hop-0.polkadot.io"
 SUMMIT_IPFS_GATEWAY     := "http://127.0.0.1:8283"   # local kubo; run `just ipfs-kubo-summit` first
-# Summit relay + bulletin parachain raw chainspecs live in paritytech/chainspecs;
-# fetched on demand by `_fetch-summit-chainspecs` (smoldot needs the raw form).
+# Relay spec is fetched from the relay RPC via sync_state_genSyncSpec (carries a
+# lightSyncState checkpoint so smoldot warp-syncs). The bulletin parachain spec
+# doesn't have that RPC, so it's pulled (raw) from paritytech/chainspecs.
 SUMMIT_CHAINSPECS_REF   := "f3b09d1bd656576f3d78eab94a1c0dc3003ebe1e"
 SUMMIT_SPEC_DIR         := justfile_directory() + "/../chainspecs/.summit-cache"
-SUMMIT_RELAY_SPEC       := SUMMIT_SPEC_DIR + "/relay.raw.json"
+SUMMIT_RELAY_SPEC       := SUMMIT_SPEC_DIR + "/relay.json"
 SUMMIT_PARACHAIN_SPEC   := SUMMIT_SPEC_DIR + "/bulletin.raw.json"
 
 # Internal: run all four canonical live tests against the given endpoints.
@@ -991,15 +993,15 @@ run-live-tests-paseo-next-v2 seed image_size="small":
 run-live-tests-previewnet seed image_size="small":
     just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
-# Fetch Summit relay + bulletin parachain raw chainspecs (cached, gitignored).
-_fetch-summit-chainspecs:
+# Fetch Summit chainspecs (cached, gitignored): relay via sync_state_genSyncSpec
+# from the relay RPC, bulletin parachain (raw) from paritytech/chainspecs.
+_fetch-summit-chainspecs: npm-install
     #!/usr/bin/env bash
     set -e
     dir="{{ SUMMIT_SPEC_DIR }}"
-    base="https://raw.githubusercontent.com/paritytech/chainspecs/{{ SUMMIT_CHAINSPECS_REF }}/summit"
     mkdir -p "$dir"
-    [ -s "$dir/relay.raw.json" ]    || curl -fsSL "$base/relaychain/raw.json"        -o "$dir/relay.raw.json"
-    [ -s "$dir/bulletin.raw.json" ] || curl -fsSL "$base/parachain/bulletin/raw.json" -o "$dir/bulletin.raw.json"
+    [ -s "$dir/relay.json" ]        || node fetch_sync_spec.js "{{ SUMMIT_RELAY_RPC }}" > "$dir/relay.json"
+    [ -s "$dir/bulletin.raw.json" ] || curl -fsSL "https://raw.githubusercontent.com/paritytech/chainspecs/{{ SUMMIT_CHAINSPECS_REF }}/summit/parachain/bulletin/raw.json" -o "$dir/bulletin.raw.json"
     echo "✅ Summit chainspecs in $dir"
 
 # Start a local Kubo IPFS node peered to the Summit bulletin collators over Bitswap.
