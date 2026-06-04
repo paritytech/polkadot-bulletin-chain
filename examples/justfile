@@ -897,9 +897,9 @@ PREVIEWNET_HOP_RPC      := "wss://TODO-previewnet-bulletin-collator.polkadot.io"
 
 # Network-specific IPFS gateways. TODO(#580): fill in once published.
 WESTEND_IPFS_GATEWAY        := "http://TODO-westend-bulletin-ipfs"
-PASEO_IPFS_GATEWAY          := "http://TODO-paseo-bulletin-ipfs"
-PASEO_NEXT_V2_IPFS_GATEWAY  := "http://TODO-paseo-bulletin-next-ipfs"
-PREVIEWNET_IPFS_GATEWAY     := "http://TODO-previewnet-bulletin-ipfs"
+PASEO_IPFS_GATEWAY          := "https://paseo-ipfs.polkadot.io"
+PASEO_NEXT_V2_IPFS_GATEWAY  := "https://paseo-bulletin-next-ipfs.polkadot.io"
+PREVIEWNET_IPFS_GATEWAY     := "https://previewnet.substrate.dev"
 
 # Bulletin parachain chainspecs, matched to each network by the spec's `id`:
 #   westend-chainspec.json    -> id bulletin-westend   (relay westend, para 2487)
