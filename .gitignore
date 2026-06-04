@@ -30,6 +30,11 @@ kubo/
 # Chainspecs fetched on demand by `just _fetch-chainspecs`
 chainspecs/.summit-cache/
 chainspecs/.paseo-next-v2-cache/
+
+# Stress test outputs
+stress-test/results/
+stress-test/hop-results.png
+
 # `zombienet-*` (a downloaded binary) lives at the repo root; scoping the glob to `/`
 # prevents it from sweeping in unrelated files like `.github/workflows/zombienet-*.yml`.
 /zombienet-*

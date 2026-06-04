@@ -258,6 +258,45 @@ async fn test_parachain_bitswap_read() -> Result<()> {
 }
 
 // ============================================================================
+// HOP sanity check — small submit + claim round trip (every-PR budget).
+// ============================================================================
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_parachain_hop() -> Result<()> {
+	let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
+
+	let network = get_parachain_network().await?;
+	// hop_ RPCs are served by collators (--enable-hop); submit and claim hit the same node.
+	let ws_url = zombienet_common::get_node_ws_url(&network, "collator-1")?;
+
+	let output = zombienet_common::cli_runner::run_stress_test(
+		&ws_url,
+		&["hop", "full-cycle", "--items", "20"],
+	)
+	.await?;
+
+	assert_eq!(output.exit_code, 0, "CLI should exit successfully");
+	assert!(!output.results.is_empty(), "HOP test returned no results");
+	for r in &output.results {
+		assert!(r.total_submitted > 0, "parachain [{}]: submitted=0", r.name);
+		assert_eq!(
+			r.total_confirmed, r.total_submitted,
+			"parachain [{}]: claimed={}, submitted={}",
+			r.name, r.total_confirmed, r.total_submitted
+		);
+		assert_eq!(r.total_errors, 0, "parachain [{}]: errors={}", r.name, r.total_errors);
+		tracing::info!(
+			"parachain [{}]: PASS — submitted={}, claimed={}",
+			r.name,
+			r.total_submitted,
+			r.total_confirmed,
+		);
+	}
+
+	Ok(())
+}
+
+// ============================================================================
 // Bulk Bitswap read test (upload first, then read)
 // ============================================================================
 
