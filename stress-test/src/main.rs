@@ -27,9 +27,10 @@ struct Cli {
 	#[arg(long, default_value = "ws://127.0.0.1:9944", global = true)]
 	ws_url: String,
 
-	/// Node's P2P multiaddr for Bitswap retrieval (auto-discovered if omitted)
-	#[arg(long, global = true)]
-	p2p_multiaddr: Option<String>,
+	/// Node's P2P multiaddr(s) for Bitswap retrieval (comma-separated for
+	/// multi-peer, auto-discovered if omitted)
+	#[arg(long, global = true, value_delimiter = ',')]
+	p2p_multiaddr: Vec<String>,
 
 	/// Seed for authorizer account (must be in the runtime's Authorizer origin)
 	#[arg(long, default_value = "//Alice", global = true)]
@@ -77,7 +78,7 @@ enum OutputFormat {
 enum Commands {
 	/// Run throughput benchmarks (write capacity)
 	Throughput {
-		/// Which test: block-capacity
+		/// Which test: block-capacity, sequential-upload
 		#[arg(default_value = "block-capacity")]
 		test: String,
 
@@ -85,16 +86,63 @@ enum Commands {
 		/// real-world size mix. Omit to run all fixed sizes (no mixed).
 		#[arg(long)]
 		variants: Option<String>,
+
+		/// Total upload size in bytes (sequential-upload only, default: 20MB)
+		#[arg(long, default_value = "20971520")]
+		total_size: usize,
+
+		/// Per-transaction chunk size in bytes (sequential-upload only, default: 32KB)
+		#[arg(long, default_value = "32768")]
+		chunk_size: usize,
+
+		/// Number of parallel upload instances, each with a different account
+		/// (sequential-upload only, default: 1)
+		#[arg(long, default_value = "1")]
+		instances: usize,
 	},
 	/// Run Bitswap read benchmarks
 	Bitswap {
-		/// Which test: b2
+		/// Which test: b2, bulk-read
 		#[arg(default_value = "b2")]
 		test: String,
 
-		/// Payload size in bytes for each stored item (default: 128KB)
+		/// Payload size in bytes for each stored item (default: 128KB, b2 only)
 		#[arg(long, default_value = "131072")]
 		payload_size: usize,
+
+		/// Target data size to download in bytes (bulk-read only, default: 1GB)
+		#[arg(long, default_value = "1073741824")]
+		read_size: u64,
+
+		/// Number of concurrent Bitswap clients (bulk-read only, default: 16)
+		#[arg(long, default_value = "16")]
+		read_concurrency: usize,
+
+		/// Minimum item size in bytes to include (bulk-read only, default: 0)
+		#[arg(long, default_value = "0")]
+		min_size: u32,
+
+		/// Maximum item size in bytes to include (bulk-read only, default: 16MB)
+		#[arg(long, default_value = "16777216")]
+		max_size: u32,
+
+		/// CIDs per wantlist request (bulk-read only, 1=single, max 16, default: 1)
+		#[arg(long, default_value = "1")]
+		batch_size: usize,
+	},
+	/// Renew stress test — upload data then spam renew calls
+	Renew {
+		/// Number of items to store first (default: 512 + buffer)
+		#[arg(long, default_value = "520")]
+		store_count: usize,
+
+		/// Chunk size per stored item in bytes (default: 32KB)
+		#[arg(long, default_value = "32768")]
+		chunk_size: usize,
+
+		/// Number of blocks to fill with renew calls (default: 10)
+		#[arg(long, default_value = "10")]
+		target_blocks: u32,
 	},
 	/// Run all test suites (block-capacity + bitswap)
 	Full,
@@ -103,6 +151,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
 	tracing_subscriber::fmt()
+		.with_writer(std::io::stderr)
 		.with_env_filter(
 			tracing_subscriber::EnvFilter::try_from_default_env()
 				.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
@@ -206,7 +255,7 @@ async fn main() -> Result<()> {
 	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
 	match cli.command {
-		Commands::Throughput { ref test, ref variants } => {
+		Commands::Throughput { ref test, ref variants, total_size, chunk_size, instances } =>
 			if let Err(e) = run_throughput(
 				&client,
 				&authorizer_signer,
@@ -216,6 +265,9 @@ async fn main() -> Result<()> {
 				variants.as_deref(),
 				&chain_limits,
 				&ws_url_refs,
+				total_size,
+				chunk_size,
+				instances,
 				&mut all_results,
 				&flush,
 				&cancel,
@@ -224,9 +276,16 @@ async fn main() -> Result<()> {
 			{
 				tracing::error!("Throughput command failed: {e}");
 				command_error = Some(e);
-			}
-		},
-		Commands::Bitswap { ref test, payload_size } => {
+			},
+		Commands::Bitswap {
+			ref test,
+			payload_size,
+			read_size,
+			read_concurrency,
+			min_size,
+			max_size,
+			batch_size,
+		} => {
 			if let Err(e) = run_bitswap(
 				&client,
 				&authorizer_signer,
@@ -234,6 +293,11 @@ async fn main() -> Result<()> {
 				&cli,
 				test,
 				payload_size,
+				read_size,
+				read_concurrency,
+				min_size,
+				max_size,
+				batch_size,
 				control_url,
 				&mut all_results,
 				&flush,
@@ -241,6 +305,25 @@ async fn main() -> Result<()> {
 			.await
 			{
 				tracing::error!("Bitswap command failed: {e}");
+				command_error = Some(e);
+			}
+		},
+		Commands::Renew { store_count, chunk_size, target_blocks } => {
+			if let Err(e) = scenarios::renew::run_renew_stress(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				&ws_url_refs,
+				&chain_limits,
+				store_count,
+				chunk_size,
+				target_blocks,
+				&mut all_results,
+				&flush,
+			)
+			.await
+			{
+				tracing::error!("Renew command failed: {e}");
 				command_error = Some(e);
 			}
 		},
@@ -254,6 +337,9 @@ async fn main() -> Result<()> {
 				None,
 				&chain_limits,
 				&ws_url_refs,
+				20 * 1024 * 1024,
+				32 * 1024,
+				1,
 				&mut all_results,
 				&flush,
 				&cancel,
@@ -271,6 +357,11 @@ async fn main() -> Result<()> {
 					&cli,
 					"b2",
 					128 * 1024,
+					1024 * 1024 * 1024,
+					16,
+					0,
+					16 * 1024 * 1024,
+					1,
 					control_url,
 					&mut all_results,
 					&flush,
@@ -322,6 +413,9 @@ async fn run_throughput(
 	variants: Option<&str>,
 	chain_limits: &ChainLimits,
 	ws_urls: &[&str],
+	total_size: usize,
+	chunk_size: usize,
+	instances: usize,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -345,7 +439,24 @@ async fn run_throughput(
 			)
 			.await?;
 		},
-		other => anyhow::bail!("Unknown throughput test: {other} (expected: block-capacity)"),
+		"sequential-upload" => {
+			scenarios::throughput::run_sequential_upload(
+				client,
+				authorizer_signer,
+				nonce_tracker,
+				ws_urls,
+				chain_limits,
+				total_size,
+				chunk_size,
+				instances,
+				results,
+				on_result,
+			)
+			.await?;
+		},
+		other => anyhow::bail!(
+			"Unknown throughput test: {other} (expected: block-capacity, sequential-upload)"
+		),
 	}
 	Ok(())
 }
@@ -358,11 +469,16 @@ async fn run_bitswap(
 	cli: &Cli,
 	test: &str,
 	payload_size: usize,
+	read_size: u64,
+	read_concurrency: usize,
+	min_size: u32,
+	max_size: u32,
+	batch_size: usize,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
 ) -> Result<()> {
-	let multiaddr = match resolve_p2p_multiaddr(cli, control_url).await {
+	let multiaddrs = match resolve_p2p_multiaddrs(cli, control_url).await {
 		Ok(r) => r,
 		Err(e) => {
 			tracing::warn!("Bitswap tests skipped: could not resolve P2P address: {e}");
@@ -376,7 +492,7 @@ async fn run_bitswap(
 				client,
 				authorizer_signer,
 				nonce_tracker,
-				&multiaddr,
+				&multiaddrs[0],
 				cli.iterations,
 				payload_size,
 				control_url,
@@ -387,46 +503,63 @@ async fn run_bitswap(
 				on_result(results);
 			}
 		},
-		other => anyhow::bail!("Unknown bitswap test: {other} (expected: b2)"),
+		"bulk-read" => {
+			let r = scenarios::bitswap_bulk_read::run_bulk_read(
+				client,
+				&multiaddrs,
+				read_size,
+				read_concurrency,
+				min_size,
+				max_size,
+				batch_size.clamp(1, 16),
+				control_url,
+			)
+			.await?;
+			results.push(r);
+			on_result(results);
+		},
+		other => anyhow::bail!("Unknown bitswap test: {other} (expected: b2, bulk-read)"),
 	}
 
 	Ok(())
 }
 
-/// Resolve the node's P2P multiaddr from CLI args or RPC auto-discovery.
-async fn resolve_p2p_multiaddr(
+/// Resolve P2P multiaddrs from CLI args or RPC auto-discovery.
+async fn resolve_p2p_multiaddrs(
 	cli: &Cli,
 	control_url: &str,
-) -> Result<litep2p::types::multiaddr::Multiaddr> {
-	let multiaddr_str = match &cli.p2p_multiaddr {
-		Some(addr) => bitswap::clean_multiaddr(addr),
-		None => {
-			tracing::info!("Auto-discovering P2P address via RPC...");
-			let (peer_id_str, addresses) = client::discover_p2p_info(control_url).await?;
-			tracing::info!("Node peer ID: {peer_id_str}");
-			tracing::info!("Node listen addresses: {addresses:?}");
+) -> Result<Vec<litep2p::types::multiaddr::Multiaddr>> {
+	let addrs = if !cli.p2p_multiaddr.is_empty() {
+		cli.p2p_multiaddr
+			.iter()
+			.map(|addr| {
+				let cleaned = bitswap::clean_multiaddr(addr);
+				let ma: litep2p::types::multiaddr::Multiaddr = cleaned.parse()?;
+				bitswap::BitswapClient::peer_id_from_multiaddr(&ma)?;
+				Ok(ma)
+			})
+			.collect::<Result<Vec<_>>>()?
+	} else {
+		tracing::info!("Auto-discovering P2P address via RPC...");
+		let (peer_id_str, addresses) = client::discover_p2p_info(control_url).await?;
+		tracing::info!("Node peer ID: {peer_id_str}");
+		tracing::info!("Node listen addresses: {addresses:?}");
 
-			let raw =
-				addresses
-					.iter()
-					.find(|a| a.contains("/ws"))
-					.or_else(|| addresses.first())
-					.map(|a| {
-						if a.contains("/p2p/") {
-							a.clone()
-						} else {
-							format!("{a}/p2p/{peer_id_str}")
-						}
-					})
-					.ok_or_else(|| anyhow::anyhow!("No P2P addresses discovered"))?;
-			bitswap::clean_multiaddr(&raw)
-		},
+		let raw = addresses
+			.iter()
+			.find(|a| a.contains("/ws"))
+			.or_else(|| addresses.first())
+			.map(|a| if a.contains("/p2p/") { a.clone() } else { format!("{a}/p2p/{peer_id_str}") })
+			.ok_or_else(|| anyhow::anyhow!("No P2P addresses discovered"))?;
+		let cleaned = bitswap::clean_multiaddr(&raw);
+		let ma: litep2p::types::multiaddr::Multiaddr = cleaned.parse()?;
+		bitswap::BitswapClient::peer_id_from_multiaddr(&ma)?;
+		vec![ma]
 	};
 
-	tracing::info!("Resolved P2P multiaddr: {multiaddr_str}");
-	let multiaddr: litep2p::types::multiaddr::Multiaddr = multiaddr_str.parse()?;
-	// Validate that the multiaddr contains a peer ID
-	bitswap::BitswapClient::peer_id_from_multiaddr(&multiaddr)?;
+	for (i, ma) in addrs.iter().enumerate() {
+		tracing::info!("P2P peer {i}: {ma}");
+	}
 
-	Ok(multiaddr)
+	Ok(addrs)
 }
