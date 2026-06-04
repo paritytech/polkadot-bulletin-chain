@@ -27,6 +27,8 @@ __pycache__
 
 # Local test files
 kubo/
+# Summit chainspecs fetched on demand by `just _fetch-summit-chainspecs`
+chainspecs/.summit-cache/
 # `zombienet-*` (a downloaded binary) lives at the repo root; scoping the glob to `/`
 # prevents it from sweeping in unrelated files like `.github/workflows/zombienet-*.yml`.
 /zombienet-*

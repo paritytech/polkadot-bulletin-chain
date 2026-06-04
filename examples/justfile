@@ -877,6 +877,7 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed
 #   just run-live-tests-paseo           <seed>
 #   just run-live-tests-paseo-next-v2   <seed>
 #   just run-live-tests-previewnet      <seed>
+#   just run-live-tests-summit          <seed>   # needs `just ipfs-kubo-summit` running
 #
 # Ad-hoc usage (any network, supply all endpoints):
 #   just run-live-tests <seed> <rpc_url> <collator_url> <ipfs_gateway> <relay_chainspec> <parachain_chainspec>
@@ -918,6 +919,23 @@ PASEO_RELAY_SPEC            := "TODO-paseo-relay-chainspec.json"
 PASEO_NEXT_V2_RELAY_SPEC    := "TODO-paseo-relay-chainspec.json"
 PREVIEWNET_RELAY_SPEC       := "TODO-paseo-relay-chainspec.json"
 
+# ── Web3 Summit network ───────────────────────────────────────────────────────
+# Bulletin v0.0.18-paseo on the Summit relay (para 1501). Verified end-to-end with
+# `--seed //Eve` + a local kubo peered to the Summit collators (`ipfs-kubo-summit`):
+# store_big_data, smoldot and chopsticks all pass. HOP is wired (chain ops on the
+# public RPC, pool round-trip pinned to a single node) but can't run yet:
+# TODO(#580): summit-hop-0/1.polkadot.io have no DNS. The 2-replica public RPC
+# can't serve the round-trip because the HOP pool is node-local.
+SUMMIT_RPC              := "wss://summit-bulletin-rpc.polkadot.io"
+SUMMIT_HOP_POOL_WS      := "wss://summit-hop-0.polkadot.io"
+SUMMIT_IPFS_GATEWAY     := "http://127.0.0.1:8283"   # local kubo; run `just ipfs-kubo-summit` first
+# Summit relay + bulletin parachain raw chainspecs live in paritytech/chainspecs;
+# fetched on demand by `_fetch-summit-chainspecs` (smoldot needs the raw form).
+SUMMIT_CHAINSPECS_REF   := "f3b09d1bd656576f3d78eab94a1c0dc3003ebe1e"
+SUMMIT_SPEC_DIR         := justfile_directory() + "/../chainspecs/.summit-cache"
+SUMMIT_RELAY_SPEC       := SUMMIT_SPEC_DIR + "/relay.raw.json"
+SUMMIT_PARACHAIN_SPEC   := SUMMIT_SPEC_DIR + "/bulletin.raw.json"
+
 # Internal: run all four canonical live tests against the given endpoints.
 _run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed image_size="small": npm-install
     #!/usr/bin/env bash
@@ -943,8 +961,10 @@ _run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed
     node authorize_and_store_papi_smoldot.js "{{ relay_spec }}" "{{ parachain_spec }}" "{{ ipfs_gateway }}" "{{ seed }}" || failed="$failed authorize_and_store_papi_smoldot.js"
 
     echo "▶️  hop_round_trip.js"
-    # HOP needs the collator's RPC; the public RPC node doesn't host hop_*.
-    node hop_round_trip.js "{{ collator_url }}" "{{ seed }}" "{{ ipfs_gateway }}" || failed="$failed hop_round_trip.js"
+    # Chain/state ops go to rpc_url; the HOP pool is node-local, so the pool
+    # round-trip is pinned to a single node (collator_url). They coincide for a
+    # single-node deployment (collator_url defaults to rpc_url when left blank).
+    node hop_round_trip.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ collator_url }}" || failed="$failed hop_round_trip.js"
 
     echo "▶️  check_chopsticks.js"
     node check_chopsticks.js "{{ rpc_url }}" || failed="$failed check_chopsticks.js"
@@ -970,6 +990,47 @@ run-live-tests-paseo-next-v2 seed image_size="small":
 # Run live tests against Previewnet Bulletin
 run-live-tests-previewnet seed image_size="small":
     just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+
+# Fetch Summit relay + bulletin parachain raw chainspecs (cached, gitignored).
+_fetch-summit-chainspecs:
+    #!/usr/bin/env bash
+    set -e
+    dir="{{ SUMMIT_SPEC_DIR }}"
+    base="https://raw.githubusercontent.com/paritytech/chainspecs/{{ SUMMIT_CHAINSPECS_REF }}/summit"
+    mkdir -p "$dir"
+    [ -s "$dir/relay.raw.json" ]    || curl -fsSL "$base/relaychain/raw.json"        -o "$dir/relay.raw.json"
+    [ -s "$dir/bulletin.raw.json" ] || curl -fsSL "$base/parachain/bulletin/raw.json" -o "$dir/bulletin.raw.json"
+    echo "✅ Summit chainspecs in $dir"
+
+# Start a local Kubo IPFS node peered to the Summit bulletin collators over Bitswap.
+# Run in a separate shell before the IPFS-dependent Summit tests; the gateway serves
+# on {{ IPFS_GATEWAY_PORT }} (matches SUMMIT_IPFS_GATEWAY). Blocks until interrupted.
+ipfs-kubo-summit: ipfs-kubo-install
+    #!/usr/bin/env bash
+    set -e
+    IPFS="{{ KUBO_DIR }}/ipfs"
+    export IPFS_PATH="${IPFS_PATH:-/tmp/summit-ipfs}"
+    rm -rf "$IPFS_PATH"; mkdir -p "$IPFS_PATH"
+    $IPFS init >/dev/null
+    $IPFS config Addresses.Gateway "/ip4/127.0.0.1/tcp/{{ IPFS_GATEWAY_PORT }}"
+    $IPFS config Addresses.API "/ip4/127.0.0.1/tcp/{{ IPFS_API_PORT }}"
+    $IPFS config --json Addresses.Swarm '["/ip4/0.0.0.0/tcp/{{ IPFS_SWARM_PORT }}","/ip4/0.0.0.0/tcp/4012/ws"]'
+    $IPFS config --json Routing.Type '"none"'
+    $IPFS config --json Discovery.MDNS.Enabled false
+    $IPFS bootstrap rm --all >/dev/null
+    # Collator p2p identities from the Web3 Summit Network doc.
+    $IPFS config --json Peering.Peers '[
+      {"ID":"12D3KooWC6q8q3NXscVcpxMbteYrmzjpy7NvYnD4QDRkAQJ9ng8r","Addrs":["/dns4/summit-bulletin-collator-node-0.parity-chains.parity.io/tcp/443/wss"]},
+      {"ID":"12D3KooWRiRRk8EzmENBD6SkP7v2riWa6s74X7wzhnx84SxfD4yr","Addrs":["/dns4/summit-bulletin-collator-node-1.parity-chains.parity.io/tcp/443/wss"]}
+    ]'
+    echo "🛰️  Kubo peered to Summit collators; gateway http://127.0.0.1:{{ IPFS_GATEWAY_PORT }}"
+    exec $IPFS daemon
+
+# Run live tests against Web3 Summit Bulletin.
+# Prereq: `just ipfs-kubo-summit` running in another shell (provides the IPFS gateway).
+# HOP fails until summit-hop-0/1 DNS is published; the other three pass with //Eve.
+run-live-tests-summit seed image_size="small": _fetch-summit-chainspecs
+    just _run-live-tests "{{ SUMMIT_RPC }}" "{{ SUMMIT_HOP_POOL_WS }}" "{{ SUMMIT_IPFS_GATEWAY }}" "{{ SUMMIT_RELAY_SPEC }}" "{{ SUMMIT_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
 
 # Run live tests against any endpoint set (caller supplies all URLs)
 run-live-tests seed rpc_url collator_url ipfs_gateway relay_spec parachain_spec image_size="small":

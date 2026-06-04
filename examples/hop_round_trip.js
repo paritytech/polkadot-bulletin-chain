@@ -39,8 +39,13 @@
  *   --hop-check-interval  10   → maintenance task fires every 10 seconds
  *
  * Usage:
- *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url]
+ *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url] [hop_pool_ws_url]
  *   node examples/hop_round_trip.js ws://localhost:10000 //Eve http://127.0.0.1:8283
+ *
+ * [hop_pool_ws_url] defaults to [ws_url]. Pin it to a single node when the chain
+ * RPC sits behind a multi-replica load balancer: the HOP pool is node-local, so
+ * sender and receiver must reach the same node, while state/runtime reads can use
+ * the load-balanced chain RPC.
  */
 
 import { createClient } from 'polkadot-api';
@@ -74,6 +79,10 @@ const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SUDO_PATH = args[1] || '//Eve';
 const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
+// Pool ops (send/claim/ack/poolStatus) must all hit ONE node — the pool is
+// node-local. State/runtime reads can use the chain RPC. The two coincide for a
+// single-node setup, so this defaults to NODE_WS.
+const HOP_POOL_WS = args[3] || NODE_WS;
 const SENDER_PATH = '//CustomSigner';
 
 // ── Timing constants ─────────────────────────────────────────────────────────
@@ -187,6 +196,8 @@ async function main() {
 	const promotionData = new TextEncoder().encode(promotionMessage);
 	const promotionHash = blake2b256(promotionData);
 
+	logInfo(`Chain RPC      : ${NODE_WS}`);
+	logInfo(`HOP pool node  : ${HOP_POOL_WS}`);
 	logInfo(`Sudo account   : ${SUDO_PATH}`);
 	logInfo(`Sender account : ${senderAddress}`);
 	logInfo(`Round-trip msg : "${roundTripMessage}" (hash ${toHex(roundTripHash)})`);
@@ -194,9 +205,11 @@ async function main() {
 
 	const papiClient = createClient(getWsProvider(NODE_WS));
 	const bulletinAPI = papiClient.getTypedApi(bulletin);
-	const senderHop = HopClient.connectWithAccount(NODE_WS, rawSigner(senderKeyPair), 'sr25519');
+	// Runtime/state reads go to the chain RPC; pool ops are pinned to one node.
+	const hopState = HopClient.connect(NODE_WS);
+	const senderHop = HopClient.connectWithAccount(HOP_POOL_WS, rawSigner(senderKeyPair), 'sr25519');
 	// Anonymous client — claim/ack don't need a signer, only the ticket.
-	const receiverHop = HopClient.connect(NODE_WS);
+	const receiverHop = HopClient.connect(HOP_POOL_WS);
 
 	const recipientCount = 1;
 	let resultCode = 0;
@@ -212,23 +225,23 @@ async function main() {
 
 		// ── Step 2: pre-auth runtime checks ──────────────────────────────────
 		logStep('2️⃣', 'Pre-auth runtime checks (expect can_account_promote = false)…');
-		const preAuthCanRoundTrip = await senderHop.canAccountPromote(senderAddress, roundTripData.length);
-		const preAuthCanPromotion = await senderHop.canAccountPromote(senderAddress, promotionData.length);
+		const preAuthCanRoundTrip = await hopState.canAccountPromote(senderAddress, roundTripData.length);
+		const preAuthCanPromotion = await hopState.canAccountPromote(senderAddress, promotionData.length);
 		if (preAuthCanRoundTrip || preAuthCanPromotion) {
 			throw new Error(
 				`Pre-auth can_account_promote should be false but got `
 				+ `roundTrip=${preAuthCanRoundTrip}, promotion=${preAuthCanPromotion}`,
 			);
 		}
-		const maxSize = await senderHop.maxPromotionSize();
+		const maxSize = await hopState.maxPromotionSize();
 		if (maxSize <= 0) {
 			throw new Error(`max_promotion_size returned non-positive value: ${maxSize}`);
 		}
 		if (roundTripData.length > maxSize || promotionData.length > maxSize) {
 			throw new Error(`Payload exceeds max_promotion_size (${maxSize})`);
 		}
-		const preAuthPromotedRoundTrip = await senderHop.isPromotedOnChain(roundTripHash);
-		const preAuthPromotedPromotion = await senderHop.isPromotedOnChain(promotionHash);
+		const preAuthPromotedRoundTrip = await hopState.isPromotedOnChain(roundTripHash);
+		const preAuthPromotedPromotion = await hopState.isPromotedOnChain(promotionHash);
 		if (preAuthPromotedRoundTrip || preAuthPromotedPromotion) {
 			throw new Error('is_promoted_on_chain returned true before any submission');
 		}
@@ -252,7 +265,7 @@ async function main() {
 			senderAddress,
 			roundTripData.length,
 		);
-		const postAuthCanViaSdk = await senderHop.canAccountPromote(senderAddress, roundTripData.length);
+		const postAuthCanViaSdk = await hopState.canAccountPromote(senderAddress, roundTripData.length);
 		if (!postAuthCanViaPapi || !postAuthCanViaSdk) {
 			throw new Error(
 				`Post-auth can_account_promote should be true but got `
@@ -290,7 +303,7 @@ async function main() {
 		logPoolStatus('after ack', afterAck);
 		assertPoolStatus('after ack', afterAck, 0, 0);
 
-		if (await senderHop.isPromotedOnChain(roundTripHash)) {
+		if (await hopState.isPromotedOnChain(roundTripHash)) {
 			throw new Error('Acked entry must not be promoted on-chain');
 		}
 		logSuccess('Round-trip flow complete: claim+ack consumed the entry, no promotion.');
@@ -310,11 +323,11 @@ async function main() {
 		);
 
 		logInfo('Polling is_promoted_on_chain (no ack — let maintenance task promote)…');
-		await pollPromotion(senderHop, promotionHash);
+		await pollPromotion(hopState, promotionHash);
 		logSuccess('Runtime confirms entry is now on-chain (promoted).');
 
 		// Sanity: the earlier acked entry must still report as not-promoted.
-		if (await senderHop.isPromotedOnChain(roundTripHash)) {
+		if (await hopState.isPromotedOnChain(roundTripHash)) {
 			throw new Error('Round-trip (acked) entry unexpectedly reports as promoted');
 		}
 
@@ -358,6 +371,7 @@ async function main() {
 	} finally {
 		senderHop.destroy();
 		receiverHop.destroy();
+		hopState.destroy();
 		papiClient.destroy();
 		process.exit(resultCode);
 	}
