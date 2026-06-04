@@ -252,8 +252,10 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // Check runtime constants to verify chain is accessible
-            const version = typedApi.constants.System.Version;
+            // Fetch a runtime constant to verify the chain is accessible. This must
+            // be awaited: on a light client it only resolves once the runtime has
+            // synced, which is exactly the readiness we want before signing.
+            const version = await typedApi.constants.System.Version();
             console.log(`✅ Chain is ready! Runtime: ${version.spec_name} v${version.spec_version}`);
             return true;
         } catch (error) {
