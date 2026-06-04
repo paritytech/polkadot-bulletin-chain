@@ -52,6 +52,16 @@ impl BulletinExtrinsicParamsBuilder {
 		self
 	}
 
+	pub fn mortal(mut self, period: u64) -> Self {
+		self.0 = self.0.mortal(period);
+		self
+	}
+
+	pub fn immortal(mut self) -> Self {
+		self.0 = self.0.immortal();
+		self
+	}
+
 	pub fn build(self) -> <BulletinExtrinsicParams as ExtrinsicParams<BulletinConfig>>::Params {
 		self.0.build()
 	}
