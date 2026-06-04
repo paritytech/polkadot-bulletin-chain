@@ -83,7 +83,11 @@ const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 // node-local. State/runtime reads can use the chain RPC. The two coincide for a
 // single-node setup, so this defaults to NODE_WS.
 const HOP_POOL_WS = args[3] || NODE_WS;
-const SENDER_PATH = '//CustomSigner';
+// Fresh sender each run: authorization persists on-chain, so a fixed account
+// would already be authorized on a re-run against a live chain and fail the
+// pre-auth `can_account_promote == false` check. Step 3 authorizes whatever
+// this derives.
+const SENDER_PATH = `//hop-sender-${Date.now()}`;
 
 // ── Timing constants ─────────────────────────────────────────────────────────
 const CLAIM_POLL_INTERVAL_MS = 2_000;
