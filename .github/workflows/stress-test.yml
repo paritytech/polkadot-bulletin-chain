@@ -5,13 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       command:
-        description: "Command: throughput, bitswap, or full"
+        description: "Scenario: throughput (block-capacity) | sequential-upload | bitswap (b2 reads) | bulk-read | renew | full"
         required: true
         default: "throughput"
         type: choice
         options:
           - throughput
+          - sequential-upload
           - bitswap
+          - bulk-read
+          - renew
           - full
       ws_url:
         description: "WebSocket URL(s), comma-separated for multi-node"
@@ -45,6 +48,10 @@ on:
         description: "P2P multiaddr for Bitswap (auto-discovered if empty)"
         required: false
         default: ""
+      extra_args:
+        description: "Extra scenario flags appended verbatim — e.g. sequential-upload '--instances 4 --total-size 52428800'; bulk-read '--read-concurrency 32'; renew '--store-count 1000'. Allowed: alphanumeric, spaces, and . _ , / = -"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -64,6 +71,7 @@ env:
   ST_PAYLOAD_SIZE: ${{ inputs.payload_size || '131072' }}
   ST_AUTHORIZER_SEED: ${{ inputs.authorizer_seed || '//Alice' }}
   ST_P2P_MULTIADDR: ${{ inputs.p2p_multiaddr || '' }}
+  ST_EXTRA_ARGS: ${{ inputs.extra_args || '' }}
 
 jobs:
   set-image:
@@ -145,6 +153,14 @@ jobs:
             fi
           fi
 
+          # Validate extra args — safe charset only (no shell metacharacters)
+          if [ -n "$ST_EXTRA_ARGS" ]; then
+            if ! [[ "$ST_EXTRA_ARGS" =~ ^[a-zA-Z0-9[:space:]._,/=-]+$ ]]; then
+              echo "::error::Invalid extra args: '$ST_EXTRA_ARGS' (allowed: alphanumeric, spaces, and . _ , / = -)"
+              exit 1
+            fi
+          fi
+
           echo "All inputs validated"
 
       - name: Run stress test
@@ -173,13 +189,29 @@ jobs:
                 ARGS+=(--variants "$ST_VARIANTS")
               fi
               ;;
+            sequential-upload)
+              ARGS+=(throughput sequential-upload)
+              ;;
             bitswap)
               ARGS+=(bitswap --payload-size "$ST_PAYLOAD_SIZE")
+              ;;
+            bulk-read)
+              ARGS+=(bitswap bulk-read)
+              ;;
+            renew)
+              # `renew` has its own (non-global) --target-blocks; pass it after the subcommand.
+              ARGS+=(renew --target-blocks "$ST_TARGET_BLOCKS")
               ;;
             full)
               ARGS+=(full)
               ;;
           esac
+
+          # Append free-form scenario-specific flags (validated charset; split on whitespace).
+          if [ -n "$ST_EXTRA_ARGS" ]; then
+            read -ra EXTRA_ARGS_ARR <<< "$ST_EXTRA_ARGS"
+            ARGS+=("${EXTRA_ARGS_ARR[@]}")
+          fi
 
           # Log command without authorizer seed
           SAFE_ARGS=("${ARGS[@]}")
@@ -213,16 +245,19 @@ jobs:
             echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
             echo "| Command | \`${ST_COMMAND}\` |" >> $GITHUB_STEP_SUMMARY
             echo "| Target | \`${ST_WS_URL}\` |" >> $GITHUB_STEP_SUMMARY
-            echo "| Submitters | ${ST_SUBMITTERS} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Target blocks | ${ST_TARGET_BLOCKS} |" >> $GITHUB_STEP_SUMMARY
-            if [ "$ST_COMMAND" = "throughput" ] && [ -n "$ST_VARIANTS" ]; then
-              echo "| Variants | \`${ST_VARIANTS}\` |" >> $GITHUB_STEP_SUMMARY
-            fi
-            if [ "$ST_COMMAND" = "bitswap" ]; then
-              echo "| Iterations | ${ST_ITERATIONS} |" >> $GITHUB_STEP_SUMMARY
-              echo "| Payload size | ${ST_PAYLOAD_SIZE} bytes |" >> $GITHUB_STEP_SUMMARY
+            if [ -n "$ST_EXTRA_ARGS" ]; then
+              echo "| Extra args | \`${ST_EXTRA_ARGS}\` |" >> $GITHUB_STEP_SUMMARY
             fi
             echo "" >> $GITHUB_STEP_SUMMARY
+            # Exact invocation actually run (the binary already redacts the seed).
+            CMDLINE=$(python3 -c "import json; d = json.load(open('results.json')); print((d[0].get('environment') or {}).get('command_line', '') if d else '')" 2>/dev/null || true)
+            if [ -n "$CMDLINE" ]; then
+              echo "**Invocation:**" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "$CMDLINE" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
             echo '```json' >> $GITHUB_STEP_SUMMARY
             python3 -c "
           import json, sys
@@ -232,29 +267,44 @@ jobs:
           except (json.JSONDecodeError, FileNotFoundError) as e:
               print(f'Failed to parse results: {e}', file=sys.stderr)
               sys.exit(0)
+          MB = 1048576
+          def to_ms(d):
+              return round((d.get('secs', 0) + d.get('nanos', 0) / 1e9) * 1000, 1)
           for r in data:
-              summary = {
-                  'name': r.get('name', ''),
-                  'payload_size': r.get('payload_size', 0),
-                  'throughput_tps': round(r.get('throughput_tps', 0), 2),
-                  'throughput_MB_per_sec': round(r.get('throughput_bytes_per_sec', 0) / 1048576, 2),
-                  'total_confirmed': r.get('total_confirmed', 0),
-                  'total_errors': r.get('total_errors', 0),
-                  'avg_tx_per_block': round(r.get('avg_tx_per_block', 0), 1),
-                  'peak_tx_per_block': r.get('peak_tx_per_block', 0),
-                  'duration_secs': r.get('duration', {}).get('secs', 0),
-              }
-              if r.get('avg_block_interval_ms'):
-                  summary['avg_block_interval_ms'] = round(r['avg_block_interval_ms'], 0)
-              if r.get('fork_detections', 0) > 0:
-                  summary['fork_detections'] = r['fork_detections']
-              if r.get('reads_per_sec'):
-                  summary['reads_per_sec'] = round(r['reads_per_sec'], 1)
-              if r.get('successful_reads'):
-                  summary['successful_reads'] = r['successful_reads']
-              if r.get('failed_reads'):
-                  summary['failed_reads'] = r['failed_reads']
-              print(json.dumps(summary, indent=2))
+              s = {'name': r.get('name', ''), 'duration_secs': r.get('duration', {}).get('secs', 0)}
+              if r.get('total_reads') is not None:
+                  # Read scenario (bitswap b2 / bulk-read)
+                  s['total_reads'] = r.get('total_reads')
+                  s['successful_reads'] = r.get('successful_reads')
+                  s['failed_reads'] = r.get('failed_reads')
+                  if r.get('reads_per_sec') is not None:
+                      s['reads_per_sec'] = round(r['reads_per_sec'], 1)
+                  if r.get('read_bytes_per_sec') is not None:
+                      s['read_MB_per_sec'] = round(r['read_bytes_per_sec'] / MB, 1)
+                  if r.get('data_verified') is not None:
+                      s['data_verified'] = r['data_verified']
+                  if r.get('retrieval_latency'):
+                      lat = r['retrieval_latency']
+                      s['retrieval_p50_ms'] = to_ms(lat['p50'])
+                      s['retrieval_p95_ms'] = to_ms(lat['p95'])
+              else:
+                  # Write scenario (throughput / sequential-upload / renew)
+                  s['payload_size'] = r.get('payload_size', 0)
+                  if r.get('throughput_tps'):
+                      s['throughput_tps'] = round(r['throughput_tps'], 2)
+                      s['throughput_MB_per_sec'] = round(r.get('throughput_bytes_per_sec', 0) / MB, 2)
+                  if r.get('total_confirmed') is not None or r.get('total_submitted') is not None:
+                      s['total_submitted'] = r.get('total_submitted', 0)
+                      s['total_confirmed'] = r.get('total_confirmed', 0)
+                      s['total_errors'] = r.get('total_errors', 0)
+                  if r.get('avg_tx_per_block'):
+                      s['avg_tx_per_block'] = round(r['avg_tx_per_block'], 1)
+                      s['peak_tx_per_block'] = r.get('peak_tx_per_block', 0)
+                  if r.get('avg_block_interval_ms'):
+                      s['avg_block_interval_ms'] = round(r['avg_block_interval_ms'], 0)
+                  if r.get('fork_detections', 0) > 0:
+                      s['fork_detections'] = r['fork_detections']
+              print(json.dumps(s, indent=2))
               print()
           " >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
