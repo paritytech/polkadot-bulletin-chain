@@ -46,6 +46,9 @@
  * RPC sits behind a multi-replica load balancer: the HOP pool is node-local, so
  * sender and receiver must reach the same node, while state/runtime reads can use
  * the load-balanced chain RPC.
+ *
+ * --skip-promotion skips steps 6-7 (auto-promotion + retrieving the promoted blob).
+ * Use it on live networks whose HOP retention is too long to wait out (e.g. 24h).
  */
 
 import { createClient } from 'polkadot-api';
@@ -75,7 +78,12 @@ import {
 import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
+// HOP retention is very long on live networks (24h on Summit/Paseo), so the
+// auto-promotion in step 6 never completes within a test run. Skip steps 6-7
+// (promotion + the bitswap retrieval that depends on it) when set; the round-trip
+// (steps 1-5) is the core flow and still runs.
+const SKIP_PROMOTION = process.argv.includes('--skip-promotion');
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SUDO_PATH = args[1] || '//Eve';
 const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
@@ -225,7 +233,11 @@ async function main() {
 		logStep('1️⃣', 'hop_poolStatus (baseline)…');
 		const baselineStatus = await senderHop.poolStatus();
 		logPoolStatus('baseline', baselineStatus);
-		assertPoolStatus('baseline', baselineStatus, 0, 0);
+		// A shared live node may already hold pool entries (earlier runs' submissions
+		// still within the retention window), so assert relative to this baseline
+		// rather than requiring an empty pool.
+		const baseEntries = baselineStatus.entryCount;
+		const baseBytes = BigInt(baselineStatus.totalBytes);
 
 		// ── Step 2: pre-auth runtime checks ──────────────────────────────────
 		logStep('2️⃣', 'Pre-auth runtime checks (expect can_account_promote = false)…');
@@ -288,8 +300,8 @@ async function main() {
 		assertPoolStatus(
 			'after round-trip submit',
 			afterRoundTripSubmit,
-			1,
-			HopClient.calculateEffectiveDataSize(roundTripData.length, recipientCount),
+			baseEntries + 1,
+			baseBytes + BigInt(HopClient.calculateEffectiveDataSize(roundTripData.length, recipientCount)),
 		);
 
 		logInfo('Receiver (anonymous client) polling claim…');
@@ -305,12 +317,18 @@ async function main() {
 
 		const afterAck = await senderHop.poolStatus();
 		logPoolStatus('after ack', afterAck);
-		assertPoolStatus('after ack', afterAck, 0, 0);
+		assertPoolStatus('after ack', afterAck, baseEntries, baseBytes);
 
 		if (await hopState.isPromotedOnChain(roundTripHash)) {
 			throw new Error('Acked entry must not be promoted on-chain');
 		}
 		logSuccess('Round-trip flow complete: claim+ack consumed the entry, no promotion.');
+
+		if (SKIP_PROMOTION) {
+			logInfo('⏭️  Skipping promotion + Bitswap retrieval (--skip-promotion; HOP retention too long to wait for auto-promotion).');
+			logTestResult(true, 'HOP Round-Trip Test (promotion skipped)');
+			return;
+		}
 
 		// ── Step 6: promotion submit + wait ──────────────────────────────────
 		logStep('6️⃣', `Promotion: sender submits ${promotionData.length} bytes…`);

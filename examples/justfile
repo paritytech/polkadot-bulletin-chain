@@ -975,7 +975,9 @@ _run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed
     # Chain/state ops go to rpc_url; the HOP pool is node-local, so the pool
     # round-trip is pinned to a single node (collator_url). They coincide for a
     # single-node deployment (collator_url defaults to rpc_url when left blank).
-    node hop_round_trip.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ collator_url }}" || failed="$failed hop_round_trip.js"
+    # --skip-promotion: live nets use a long HOP retention (24h), so auto-promotion
+    # can't complete within a test run; the round-trip (steps 1-5) is what we check.
+    node hop_round_trip.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ collator_url }}" --skip-promotion || failed="$failed hop_round_trip.js"
 
     echo "▶️  check_chopsticks.js"
     node check_chopsticks.js "{{ rpc_url }}" || failed="$failed check_chopsticks.js"
