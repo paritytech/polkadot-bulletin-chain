@@ -22,6 +22,9 @@ pub struct BlockStats {
 	/// Whether this block has been confirmed finalized.
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub finalized: bool,
+	/// Client-side wall clock (ms since Unix epoch) when the monitor received the block.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub received_at_ms: Option<u64>,
 	/// Interval in milliseconds since the previous block's on-chain timestamp.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub interval_ms: Option<u64>,
@@ -42,6 +45,12 @@ pub struct SubmissionStats {
 	pub nonces_initialized: u64,
 	/// Number of accounts whose nonce pre-init failed.
 	pub nonces_failed: u64,
+	/// Number of gap repairs performed (sequential-upload scenario only).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub gap_repairs: Option<u64>,
+	/// Number of submission waves dispatched (sequential-upload scenario only).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub waves_submitted: Option<u64>,
 }
 
 /// Theoretical block capacity limits derived from runtime constants.
