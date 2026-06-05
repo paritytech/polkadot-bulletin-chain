@@ -948,7 +948,7 @@ PASEO_NEXT_V2_PARA_URL      := "https://raw.githubusercontent.com/paritytech/cha
 PASEO_NEXT_V2_SPEC_DIR      := justfile_directory() + "/../chainspecs/.paseo-next-v2-cache"
 
 # Internal: run all four canonical live tests against the given endpoints.
-_run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed image_size="small": npm-install
+_run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed image_size="small" run_smoldot="true": npm-install
     #!/usr/bin/env bash
     set -e
     echo "🌐 Running live tests"
@@ -968,8 +968,17 @@ _run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed
     node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}" || failed="$failed store_big_data.js"
 
     echo "▶️  authorize_and_store_papi_smoldot.js"
-    # Parachain mode: relay spec is arg 1, bulletin parachain spec is arg 2.
-    node authorize_and_store_papi_smoldot.js "{{ relay_spec }}" "{{ parachain_spec }}" "{{ ipfs_gateway }}" "{{ seed }}" || failed="$failed authorize_and_store_papi_smoldot.js"
+    # Smoldot warp-syncs the relay (its spec has a lightSyncState checkpoint) but
+    # full-syncs the parachain from genesis, since the parachain spec has no
+    # checkpoint. That only reaches the tip on a fresh/low-height chain; on an
+    # established parachain it never catches up and txs sign against a stale view
+    # (BadProof). So gate it: run where it works, skip elsewhere until the
+    # parachain publishes a lightSyncState. Parachain mode: relay spec arg 1, para arg 2.
+    if [ "{{ run_smoldot }}" = "true" ]; then
+        node authorize_and_store_papi_smoldot.js "{{ relay_spec }}" "{{ parachain_spec }}" "{{ ipfs_gateway }}" "{{ seed }}" || failed="$failed authorize_and_store_papi_smoldot.js"
+    else
+        echo "⏭️  Skipping smoldot (parachain has no lightSyncState; light client can't warp-sync an established parachain)."
+    fi
 
     echo "▶️  hop_round_trip.js"
     # Chain/state ops go to rpc_url; the HOP pool is node-local, so the pool
@@ -998,11 +1007,11 @@ run-live-tests-paseo seed image_size="small":
 
 # Run live tests against Paseo Bulletin next-v2 (staging).
 run-live-tests-paseo-next-v2 seed image_size="small": (_fetch-chainspecs PASEO_NEXT_V2_RELAY_RPC PASEO_NEXT_V2_PARA_URL PASEO_NEXT_V2_SPEC_DIR)
-    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_RELAY_SPEC }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_RELAY_SPEC }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
 
 # Run live tests against Previewnet Bulletin
 run-live-tests-previewnet seed image_size="small":
-    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
 
 # Fetch a network's smoldot chainspecs into <dir> (cached, gitignored): the relay
 # spec via sync_state_genSyncSpec from <relay_rpc> (carries a lightSyncState
