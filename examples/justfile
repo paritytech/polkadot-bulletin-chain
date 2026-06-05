@@ -888,15 +888,15 @@ PASEO_RPC           := "wss://paseo-bulletin-rpc.polkadot.io"
 PASEO_NEXT_V2_RPC   := "wss://paseo-bulletin-next-rpc.polkadot.io"
 PREVIEWNET_RPC      := "wss://previewnet.substrate.dev/bulletin"
 
-# HOP collator RPC endpoints (NOT the same as the public RPC node — HOP RPC methods
-# live on the collator's local interface). TODO(#580): fill in once published.
-WESTEND_HOP_RPC         := "wss://TODO-westend-bulletin-collator.polkadot.io"
-PASEO_HOP_RPC           := "wss://TODO-paseo-bulletin-collator.polkadot.io"
-PASEO_NEXT_V2_HOP_RPC   := PASEO_NEXT_V2_RPC   # public RPC carries --enable-hop
-PREVIEWNET_HOP_RPC      := "wss://TODO-previewnet-bulletin-collator.polkadot.io"
+# HOP pool endpoint. The public RPC nodes carry --enable-hop, so the round-trip
+# runs against the same RPC (single node, so sender and receiver share a pool).
+WESTEND_HOP_RPC         := WESTEND_RPC
+PASEO_HOP_RPC           := PASEO_RPC
+PASEO_NEXT_V2_HOP_RPC   := PASEO_NEXT_V2_RPC
+PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC
 
-# Network-specific IPFS gateways. TODO(#580): fill in once published.
-WESTEND_IPFS_GATEWAY        := "http://TODO-westend-bulletin-ipfs"
+# Network-specific IPFS gateways.
+WESTEND_IPFS_GATEWAY        := "https://westend-ipfs.polkadot.io"
 PASEO_IPFS_GATEWAY          := "https://paseo-ipfs.polkadot.io"
 PASEO_NEXT_V2_IPFS_GATEWAY  := "https://paseo-bulletin-next-ipfs.polkadot.io"
 PREVIEWNET_IPFS_GATEWAY     := "https://previewnet.substrate.dev"
@@ -999,11 +999,11 @@ _run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed
 
 # Run live tests against Westend Bulletin
 run-live-tests-westend seed image_size="small":
-    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_RELAY_SPEC }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_RELAY_SPEC }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
 
 # Run live tests against Paseo Bulletin
 run-live-tests-paseo seed image_size="small":
-    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_RELAY_SPEC }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_RELAY_SPEC }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
 
 # Run live tests against Paseo Bulletin next-v2 (staging).
 run-live-tests-paseo-next-v2 seed image_size="small": (_fetch-chainspecs PASEO_NEXT_V2_RELAY_RPC PASEO_NEXT_V2_PARA_URL PASEO_NEXT_V2_SPEC_DIR)
