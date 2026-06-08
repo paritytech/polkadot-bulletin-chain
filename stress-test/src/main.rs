@@ -10,7 +10,7 @@ use std::{
 use subxt_signer::sr25519::Keypair;
 
 use bulletin_stress_test::{
-	accounts, bitswap,
+	accounts, authorize, bitswap,
 	chain_info::{ChainLimits, EnvironmentInfo},
 	client, report, scenarios,
 };
@@ -144,7 +144,33 @@ enum Commands {
 		#[arg(long, default_value = "10")]
 		target_blocks: u32,
 	},
-	/// Run all test suites (block-capacity + bitswap)
+	/// Run HOP (Hand-off Protocol) stress tests
+	Hop {
+		/// Scenario: submit-only, full-cycle, group, pool-fill, mixed, errors, all
+		#[arg(default_value = "all")]
+		scenario: String,
+
+		/// Number of items to submit
+		#[arg(long, default_value = "100")]
+		items: u32,
+
+		/// Payload size in bytes (omit to sweep standard sizes for submit-only)
+		#[arg(long)]
+		payload_size: Option<usize>,
+
+		/// Parallel submit/claim streams
+		#[arg(long, default_value = "4")]
+		concurrency: usize,
+
+		/// Recipients per entry (for group scenario)
+		#[arg(long, default_value = "10")]
+		recipients: usize,
+
+		/// Duration in seconds (for mixed scenario)
+		#[arg(long, default_value = "30")]
+		duration: u64,
+	},
+	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
 }
 
@@ -174,6 +200,8 @@ async fn main() -> Result<()> {
 		ws_urls.len(),
 		if ws_urls.len() > 1 { format!(", submit: {}", ws_urls.join(", ")) } else { String::new() }
 	);
+
+	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
 	let client = client::connect(control_url).await?;
 
@@ -252,8 +280,6 @@ async fn main() -> Result<()> {
 		}
 	};
 
-	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
-
 	match cli.command {
 		Commands::Throughput { ref test, ref variants, total_size, chunk_size, instances } =>
 			if let Err(e) = run_throughput(
@@ -308,6 +334,32 @@ async fn main() -> Result<()> {
 				command_error = Some(e);
 			}
 		},
+		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
+			match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
+				Err(e) => {
+					tracing::error!("Failed to authorize HOP submitter: {e}");
+					command_error = Some(e);
+				},
+				Ok(submitter) =>
+					if let Err(e) = scenarios::hop::run_hop_sweep(
+						&ws_url_refs,
+						scenario,
+						items,
+						payload_size,
+						concurrency,
+						recipients,
+						duration,
+						&submitter,
+						&mut all_results,
+						&flush,
+						&cancel,
+					)
+					.await
+					{
+						tracing::error!("HOP command failed: {e}");
+						command_error = Some(e);
+					},
+			},
 		Commands::Renew { store_count, chunk_size, target_blocks } => {
 			if let Err(e) = scenarios::renew::run_renew_stress(
 				&client,
@@ -370,6 +422,33 @@ async fn main() -> Result<()> {
 				{
 					tracing::error!("Bitswap command failed: {e}");
 					command_error = Some(e);
+				}
+			}
+			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
+				match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
+					Err(e) => {
+						tracing::error!("Failed to authorize HOP submitter: {e}");
+						command_error = Some(e);
+					},
+					Ok(submitter) =>
+						if let Err(e) = scenarios::hop::run_hop_sweep(
+							&ws_url_refs,
+							"all",
+							100,
+							None,
+							4,
+							10,
+							30,
+							&submitter,
+							&mut all_results,
+							&flush,
+							&cancel,
+						)
+						.await
+						{
+							tracing::error!("HOP command failed: {e}");
+							command_error = Some(e);
+						},
 				}
 			}
 		},
@@ -522,6 +601,37 @@ async fn run_bitswap(
 	}
 
 	Ok(())
+}
+
+/// Authorize a dedicated HOP submitter (distinct from the authorizer) via the storage pallet and
+/// return its keypair.
+///
+/// HOP's `can_account_promote` reads from
+/// `pallet-bulletin-transaction-storage::AccountAuthorization`. The numeric extents (`u32::MAX`
+/// txs, ~1 GiB) only bound the storage pallet; HOP just needs an unexpired entry to exist.
+async fn authorize_hop_submitter(
+	client: &subxt::OnlineClient<client::BulletinConfig>,
+	authorizer: &subxt_signer::sr25519::Keypair,
+	nonce_tracker: &accounts::NonceTracker,
+) -> Result<Keypair> {
+	let submitter_uri: subxt_signer::SecretUri =
+		"//HopSubmitter".parse().expect("static submitter seed is valid");
+	let submitter = Keypair::from_uri(&submitter_uri)
+		.map_err(|e| anyhow::anyhow!("Failed to create HOP submitter keypair: {e}"))?;
+	let submitter_id = submitter.public_key().to_account_id();
+	tracing::info!(
+		"Authorizing HOP submitter {submitter_id} via TransactionStorage::authorize_account"
+	);
+	authorize::authorize_account_batch(
+		client,
+		authorizer,
+		nonce_tracker,
+		&[submitter_id],
+		u32::MAX,
+		1024 * 1024 * 1024,
+	)
+	.await?;
+	Ok(submitter)
 }
 
 /// Resolve P2P multiaddrs from CLI args or RPC auto-discovery.
