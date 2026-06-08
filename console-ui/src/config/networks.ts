@@ -108,8 +108,8 @@ const LOKI_DATASOURCE_UID = "P44F328058D1A830B";
 
 /**
  * Grafana Loki Explore deep-link filtered to a chain's collator pods. Chain
- * value matches Loki's `chain=` label, which uses the same value as the
- * Prometheus dashboards (e.g. `next-bulletin-paseo`).
+ * value matches Loki's `chain=` label (e.g. `bulletin-next-paseo`), which is
+ * ordered differently from the Prometheus `var-chain` value (`next-bulletin-paseo`).
  */
 function lokiLogsLink(chain: string): string {
   const panes = {
@@ -125,7 +125,7 @@ function lokiLogsLink(chain: string): string {
           direction: "backward",
         },
       ],
-      range: { from: "now-1h", to: "now" },
+      range: { from: "now-7d", to: "now" },
       compact: false,
     },
   };
@@ -194,7 +194,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_PASEO_NEXT_V2,
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
-      collatorLogs: lokiLogsLink("next-bulletin-paseo"),
+      collatorLogs: lokiLogsLink("bulletin-next-paseo"),
     },
   },
   previewnet: {
