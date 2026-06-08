@@ -51,22 +51,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
   },
 };
 
-export const WEB3_STORAGE_NETWORKS: Record<string, Network> = {
-  local: {
-    id: "local",
-    name: "Local Dev",
-    endpoints: ["ws://localhost:2222"],
-    lightClient: false,
-  },
-  westend: {
-    id: "westend",
-    name: "Web3 Westend (not released yet)",
-    endpoints: [],
-    lightClient: false,
-  },
-};
+export const DEFAULT_NETWORK = "paseo-next-v2";
 
-export const DEFAULT_NETWORKS = {
-  bulletin: "paseo",
-  web3storage: "local",
-} as const;
+// External Web3 Storage console; the in-app mode was removed in favour of this link.
+export const WEB3_STORAGE_URL = "https://paritytech.github.io/web3-storage";

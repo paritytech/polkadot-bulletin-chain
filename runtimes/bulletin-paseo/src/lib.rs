@@ -89,7 +89,8 @@ use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
 use xcm_config::AssetHubLocation;
 use xcm_config::{
-	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
+	FellowshipLocation, IsGovernanceVoiceOfBody, TokenRelayLocation,
+	XcmOriginToTransactDispatchOrigin,
 };
 use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
@@ -156,8 +157,10 @@ pub mod migrations {
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
+		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -201,7 +204,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_013,
+	spec_version: 1_000_018,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -503,10 +506,8 @@ parameter_types! {
 }
 
 /// We allow Root and the `StakingAdmin` to execute privileged collator selection operations.
-pub type CollatorSelectionUpdateOrigin = EitherOfDiverse<
-	EnsureRoot<AccountId>,
-	EnsureXcm<IsVoiceOfBody<GovernanceLocation, StakingAdminBodyId>>,
->;
+pub type CollatorSelectionUpdateOrigin =
+	EitherOfDiverse<EnsureRoot<AccountId>, EnsureXcm<IsGovernanceVoiceOfBody<StakingAdminBodyId>>>;
 
 impl pallet_collator_selection::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
@@ -985,6 +986,25 @@ impl_runtime_apis! {
 
 		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
 			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
+	}
+
+	impl pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi<Block, AccountId, BlockNumber> for Runtime {
+		fn account_authorization(
+			account: AccountId,
+		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+		}
+
+		fn can_store(account: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+		}
+
+		fn can_renew(
+			account: AccountId,
+			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
+		) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
 		}
 	}
 

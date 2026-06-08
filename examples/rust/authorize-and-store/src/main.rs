@@ -11,7 +11,7 @@
 //!
 //! ## Usage
 //!
-//!   cargo run --release -- --ws ws://localhost:10000 --seed "//Alice"
+//!   cargo run --release -- --ws ws://localhost:10000 --seed "//Eve"
 
 use anyhow::{anyhow, Result};
 use bulletin_sdk_rust::prelude::*;
@@ -30,8 +30,8 @@ struct Args {
 	#[arg(long, default_value = "ws://localhost:10000")]
 	ws: String,
 
-	/// Seed phrase or dev seed (e.g., "//Alice" or mnemonic)
-	#[arg(long, default_value = "//Alice")]
+	/// Seed phrase or dev seed (e.g., "//Eve" or mnemonic)
+	#[arg(long, default_value = "//Eve")]
 	seed: String,
 }
 

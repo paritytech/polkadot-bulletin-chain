@@ -48,7 +48,7 @@ cargo build --release
 ### authorize-and-store
 
 ```bash
-# Basic usage (defaults: ws://localhost:10000, //Alice)
+# Basic usage (defaults: ws://localhost:10000, //Eve)
 ./target/release/authorize-and-store
 
 # Custom WebSocket URL
@@ -60,12 +60,12 @@ cargo build --release
 # Full example
 ./target/release/authorize-and-store \
   --ws ws://localhost:10000 \
-  --seed "//Alice"
+  --seed "//Eve"
 ```
 
 **Command-line options:**
 - `--ws <URL>` - WebSocket URL of the Bulletin Chain node
-- `--seed <SEED>` - Seed phrase or dev seed (e.g., `//Alice`)
+- `--seed <SEED>` - Seed phrase or dev seed (e.g., `//Eve`)
 
 ## Requirements
 

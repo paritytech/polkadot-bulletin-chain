@@ -11,7 +11,7 @@ use crate::{
 	chain_info::ChainLimits,
 	client::BulletinConfig,
 	pipeline::{self, IterationPlan, PayloadSizeMix, StorePayloadMode, StressWorkItem},
-	report::{ScenarioResult, SubmissionStats},
+	report::{BlockStats, ScenarioResult, SubmissionStats},
 	store,
 };
 
@@ -156,24 +156,32 @@ fn scenario_result_from_bulk(
 		None
 	};
 
-	let onchain_duration_ms = match (
-		steady.first().and_then(|b| b.timestamp_ms),
-		steady.last().and_then(|b| b.timestamp_ms),
+	// Use client-side wall clock of steady-state blocks for throughput.
+	// On-chain timestamps are unreliable with elastic scaling — multiple blocks
+	// per relay slot share the same pallet_timestamp::Now value.
+	let steady_wall_ms = match (
+		steady.first().and_then(|b| b.received_at_ms),
+		steady.last().and_then(|b| b.received_at_ms),
 	) {
-		(Some(t1), Some(t2)) if t2 > t1 => Some(t2 - t1),
-		_ => None,
+		(Some(first), Some(last)) if last > first => last - first,
+		_ => 0,
 	};
-	let (tps, bps, onchain_timing) = if let Some(ms) = onchain_duration_ms {
-		let secs = ms as f64 / 1000.0;
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, true)
+	// Add one block interval estimate so we don't undercount (N blocks span N-1 gaps).
+	let steady_wall_secs = if steady_wall_ms > 0 && !steady.is_empty() {
+		let per_block_ms = steady_wall_ms as f64 / (steady.len() - 1).max(1) as f64;
+		(steady_wall_ms as f64 + per_block_ms) / 1000.0
 	} else {
-		let secs = result.duration.as_secs_f64();
-		(measured_confirmed as f64 / secs, steady_bytes as f64 / secs, false)
+		result.duration.as_secs_f64()
+	};
+	let (tps, bps) = if steady_wall_secs > 0.0 {
+		(measured_confirmed as f64 / steady_wall_secs, steady_bytes as f64 / steady_wall_secs)
+	} else {
+		(0.0, 0.0)
 	};
 
 	tracing::info!(
 		"block-cap: {} total blocks ({} prefill, {} measured), {} steady-state \
-		 ({} empty), avg={:.1}, peak={}, timing={}",
+		 ({} empty), avg={:.1}, peak={}, steady_wall={:.1}s",
 		all_blocks.len(),
 		prefill_count,
 		measured.len(),
@@ -181,7 +189,7 @@ fn scenario_result_from_bulk(
 		empty_count,
 		avg,
 		peak,
-		if onchain_timing { "on-chain" } else { "client" }
+		steady_wall_secs
 	);
 
 	ScenarioResult {
@@ -209,10 +217,12 @@ fn scenario_result_from_bulk(
 			remaining_in_queue: result.remaining_in_queue,
 			nonces_initialized: result.nonces_initialized,
 			nonces_failed: result.nonces_failed,
+			gap_repairs: None,
+			waves_submitted: None,
 		}),
 		avg_block_interval_ms,
 		fork_detections: result.fork_detections,
-		onchain_timing,
+		onchain_timing: false,
 		total_reads: None,
 		successful_reads: None,
 		failed_reads: None,
@@ -468,5 +478,264 @@ pub async fn run_block_capacity_sweep(
 		}
 	}
 
+	Ok(())
+}
+
+/// Sequential nonce upload: single account uploads `total_bytes` of data
+/// split into `chunk_size`-byte store transactions with wave-based pool feeding.
+///
+/// Measures throughput (MB/s, tx/s) including re-sign overhead.
+/// When `instances > 1`, runs multiple uploads in parallel with different
+/// accounts. The total payload is divided evenly across instances.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_sequential_upload(
+	client: &OnlineClient<BulletinConfig>,
+	authorizer_signer: &Keypair,
+	nonce_tracker: &NonceTracker,
+	ws_urls: &[&str],
+	chain_limits: &ChainLimits,
+	total_bytes: usize,
+	chunk_size: usize,
+	instances: usize,
+	results: &mut Vec<ScenarioResult>,
+	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
+) -> Result<()> {
+	let instances = instances.max(1);
+	let bytes_per_instance = total_bytes / instances;
+	let num_txs_per_instance = bytes_per_instance.div_ceil(chunk_size);
+	let total_txs = num_txs_per_instance * instances;
+
+	tracing::info!(
+		"=== sequential-upload: {instances} instance(s), {total_txs} txs total \
+		 ({num_txs_per_instance}×{} KB per instance = {} MB each, {} MB total) ===",
+		chunk_size / 1024,
+		bytes_per_instance / (1024 * 1024),
+		total_bytes / (1024 * 1024),
+	);
+
+	// Generate a fresh random account per instance.
+	let signers: Vec<subxt_signer::sr25519::Keypair> = (0..instances)
+		.map(|_| {
+			subxt_signer::sr25519::Keypair::from_secret_key(rand::random())
+				.expect("valid keypair from random bytes")
+		})
+		.collect();
+	let account_ids: Vec<subxt::utils::AccountId32> =
+		signers.iter().map(|s| s.public_key().to_account_id()).collect();
+
+	for (i, id) in account_ids.iter().enumerate() {
+		tracing::info!("Instance {i}: account {id}");
+	}
+
+	// Authorize all accounts in one batch.
+	tracing::info!(
+		"Authorizing {instances} accounts for {num_txs_per_instance} txs, {} MB each...",
+		bytes_per_instance / (1024 * 1024)
+	);
+	crate::authorize::authorize_accounts(
+		client,
+		authorizer_signer,
+		nonce_tracker,
+		&account_ids,
+		num_txs_per_instance as u32 + 10,
+		(bytes_per_instance as u64) + 100 * 1024 * 1024,
+	)
+	.await?;
+	tracing::info!("All {instances} accounts authorized");
+
+	// Generate payloads for each instance.
+	let mut all_payloads = Vec::new();
+	for i in 0..instances {
+		tracing::info!(
+			"Instance {i}: generating {num_txs_per_instance} payloads ({chunk_size} bytes each)..."
+		);
+		let payloads: Vec<Vec<u8>> = (0..num_txs_per_instance)
+			.map(|j| {
+				store::generate_indexed_payload(chunk_size, (i * num_txs_per_instance + j) as u32)
+			})
+			.collect();
+		all_payloads.push(payloads);
+	}
+
+	// Launch all instances concurrently (no tokio::spawn — futures run
+	// on the current task, which avoids 'static lifetime requirements).
+	let ws_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
+	let futures: Vec<_> = signers
+		.iter()
+		.zip(all_payloads.into_iter())
+		.enumerate()
+		.map(|(i, (signer, payloads))| {
+			let ws = ws_owned.clone();
+			async move {
+				let result =
+					store::sequential_nonce_upload(client, signer, payloads, ws, chain_limits)
+						.await;
+				(i, result)
+			}
+		})
+		.collect();
+
+	let outcomes = futures::future::join_all(futures).await;
+
+	let mut upload_results = Vec::new();
+	for (i, result) in outcomes {
+		match result {
+			Ok(r) => {
+				tracing::info!(
+					"Instance {i}: confirmed {}/{}",
+					r.total_confirmed,
+					num_txs_per_instance
+				);
+				upload_results.push(r);
+			},
+			Err(e) => {
+				tracing::error!("Instance {i}: failed: {e}");
+				return Err(e);
+			},
+		}
+	}
+
+	// Merge results: combine blocks across instances, sum stats.
+	let result = if upload_results.len() == 1 {
+		upload_results.into_iter().next().unwrap()
+	} else {
+		// Merge: sum stats, combine block lists, take max duration.
+		let total_submitted: u64 = upload_results.iter().map(|r| r.total_submitted).sum();
+		let total_confirmed: u64 = upload_results.iter().map(|r| r.total_confirmed).sum();
+		let total_errors: u64 = upload_results.iter().map(|r| r.total_errors).sum();
+		let waves: u64 = upload_results.iter().map(|r| r.waves_submitted).sum();
+		let duration = upload_results.iter().map(|r| r.duration).max().unwrap_or_default();
+
+		// Merge block stats: group by block number, sum tx counts.
+		let mut block_map: std::collections::BTreeMap<u64, BlockStats> =
+			std::collections::BTreeMap::new();
+		for r in &upload_results {
+			for b in &r.blocks {
+				let entry = block_map.entry(b.number).or_insert_with(|| BlockStats {
+					number: b.number,
+					tx_count: 0,
+					payload_bytes: 0,
+					prefill: false,
+					timestamp_ms: b.timestamp_ms,
+					hash: b.hash.clone(),
+					finalized: b.finalized,
+					received_at_ms: b.received_at_ms,
+					interval_ms: b.interval_ms,
+				});
+				entry.tx_count += b.tx_count;
+				entry.payload_bytes += b.payload_bytes;
+			}
+		}
+
+		store::SequentialUploadResult {
+			total_submitted,
+			total_confirmed,
+			total_errors,
+			gap_repairs: 0,
+			waves_submitted: waves,
+			duration,
+			blocks: block_map.into_values().collect(),
+			fork_detections: 0,
+		}
+	};
+
+	// Compute stats from block data.
+	// No steady-state trimming for sequential upload — all blocks with txs are real data,
+	// not ramp-up/ramp-down artifacts.
+	let all_blocks = &result.blocks;
+	let blocks_with_txs: Vec<_> = all_blocks.iter().filter(|b| b.tx_count > 0).collect();
+
+	let avg = if !blocks_with_txs.is_empty() {
+		blocks_with_txs.iter().map(|b| b.tx_count).sum::<u64>() as f64 /
+			blocks_with_txs.len() as f64
+	} else {
+		0.0
+	};
+	let peak = blocks_with_txs.iter().map(|b| b.tx_count).max().unwrap_or(0);
+	let total_tx_count: u64 = blocks_with_txs.iter().map(|b| b.tx_count).sum();
+	let total_payload_bytes: u64 = blocks_with_txs.iter().map(|b| b.payload_bytes).sum();
+
+	let intervals: Vec<u64> = all_blocks.iter().filter_map(|b| b.interval_ms).collect();
+	let avg_block_interval_ms = if !intervals.is_empty() {
+		Some(intervals.iter().sum::<u64>() as f64 / intervals.len() as f64)
+	} else {
+		None
+	};
+
+	// Duration: first block with txs → last block with txs (including empty blocks in between).
+	let onchain_duration_ms = match (
+		blocks_with_txs.first().and_then(|b| b.timestamp_ms),
+		blocks_with_txs.last().and_then(|b| b.timestamp_ms),
+	) {
+		(Some(first_ts), Some(last_ts)) if last_ts > first_ts => Some(last_ts - first_ts),
+		_ => None,
+	};
+
+	let effective_duration = onchain_duration_ms
+		.map(std::time::Duration::from_millis)
+		.unwrap_or(result.duration);
+	let secs = effective_duration.as_secs_f64().max(0.001);
+	let throughput_tx_s = total_tx_count as f64 / secs;
+	let throughput_bytes_s = total_payload_bytes as f64 / secs;
+
+	let blocks_with_data = blocks_with_txs.len();
+	let total_blocks_observed = all_blocks.len();
+	tracing::info!(
+		"sequential-upload: {total_tx_count} txs in {blocks_with_data} blocks ({total_blocks_observed} total), \
+		 avg={avg:.1} tx/block, peak={peak}, throughput={throughput_tx_s:.1} tx/s, \
+		 {:.2} MB/s, on-chain={:.1}s, wall={:.1}s, repairs={}",
+		throughput_bytes_s / 1048576.0,
+		secs,
+		result.duration.as_secs_f64(),
+		result.gap_repairs,
+	);
+
+	let scenario = ScenarioResult {
+		name: format!(
+			"sequential-upload: {} MB via {}×{}KB ({instances} account{})",
+			total_bytes / (1024 * 1024),
+			total_txs,
+			chunk_size / 1024,
+			if instances > 1 { "s" } else { "" },
+		),
+		duration: result.duration,
+		total_submitted: result.total_submitted,
+		total_confirmed: result.total_confirmed,
+		total_errors: result.total_errors,
+		avg_tx_per_block: avg,
+		peak_tx_per_block: peak,
+		throughput_tps: throughput_tx_s,
+		throughput_bytes_per_sec: throughput_bytes_s,
+		avg_block_interval_ms,
+		payload_size: chunk_size,
+		blocks: all_blocks.clone(),
+		chain_limits: Some(chain_limits.clone()),
+		environment: None,
+		submission_stats: Some(SubmissionStats {
+			stale_nonces: 0,
+			pool_full_retries: 0,
+			errors: result.total_errors,
+			remaining_in_queue: 0,
+			nonces_initialized: 1,
+			nonces_failed: 0,
+			gap_repairs: Some(result.gap_repairs),
+			waves_submitted: Some(result.waves_submitted),
+		}),
+		fork_detections: result.fork_detections,
+		onchain_timing: onchain_duration_ms.is_some(),
+		inclusion_latency: None,
+		finalization_latency: None,
+		retrieval_latency: None,
+		theoretical: None,
+		successful_reads: None,
+		failed_reads: None,
+		total_reads: None,
+		reads_per_sec: None,
+		read_bytes_per_sec: None,
+		data_verified: None,
+	};
+
+	results.push(scenario);
+	on_result(results);
 	Ok(())
 }

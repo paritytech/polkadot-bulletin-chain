@@ -399,19 +399,19 @@ function FaucetAuthorizePreimagePanel() {
     try {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
-      const alice = keyring.addFromUri("//Alice");
-      const aliceSigner = getPolkadotSigner(
-        alice.publicKey,
+      const faucet = keyring.addFromUri("//Eve");
+      const faucetSigner = getPolkadotSigner(
+        faucet.publicKey,
         "Sr25519",
-        (data: Uint8Array) => alice.sign(data)
+        (data: Uint8Array) => faucet.sign(data)
       );
 
       const normalizedHash = preimageHash.startsWith("0x") ? preimageHash.slice(2) : preimageHash;
       const contentHashBytes = hexToBytes(normalizedHash);
       const sizeValue = getSizeValue();
 
-      // Create SDK client with Alice signer
-      const bulletinClient = createBulletinClient!(aliceSigner);
+      // Create SDK client with faucet signer
+      const bulletinClient = createBulletinClient!(faucetSigner);
 
       // Use SDK to authorize preimage with progress callback
       await bulletinClient
@@ -665,18 +665,18 @@ function FaucetAuthorizeAccountPanel() {
     try {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
-      const alice = keyring.addFromUri("//Alice");
-      const aliceSigner = getPolkadotSigner(
-        alice.publicKey,
+      const faucet = keyring.addFromUri("//Eve");
+      const faucetSigner = getPolkadotSigner(
+        faucet.publicKey,
         "Sr25519",
-        (data: Uint8Array) => alice.sign(data)
+        (data: Uint8Array) => faucet.sign(data)
       );
 
       const txCount = parseInt(transactions, 10) || 0;
       const bytesValue = getBytesValue();
 
-      // Create SDK client with Alice signer
-      const bulletinClient = createBulletinClient!(aliceSigner);
+      // Create SDK client with faucet signer
+      const bulletinClient = createBulletinClient!(faucetSigner);
 
       // Use SDK to authorize account with progress callback
       await bulletinClient

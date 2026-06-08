@@ -32,7 +32,7 @@ cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 
 Where:
 - `<WS_URL>`: WebSocket URL of your Bulletin Chain node (default: `ws://localhost:10000`)
-- `<SEED>`: Account seed phrase or dev seed like `//Alice` (default: `//Alice`)
+- `<SEED>`: Account seed phrase or dev seed like `//Eve` (default: `//Eve`)
 
 ### Example
 

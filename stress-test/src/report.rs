@@ -22,6 +22,9 @@ pub struct BlockStats {
 	/// Whether this block has been confirmed finalized.
 	#[serde(default, skip_serializing_if = "std::ops::Not::not")]
 	pub finalized: bool,
+	/// Client-side wall clock (ms since Unix epoch) when the monitor received the block.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub received_at_ms: Option<u64>,
 	/// Interval in milliseconds since the previous block's on-chain timestamp.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub interval_ms: Option<u64>,
@@ -42,6 +45,12 @@ pub struct SubmissionStats {
 	pub nonces_initialized: u64,
 	/// Number of accounts whose nonce pre-init failed.
 	pub nonces_failed: u64,
+	/// Number of gap repairs performed (sequential-upload scenario only).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub gap_repairs: Option<u64>,
+	/// Number of submission waves dispatched (sequential-upload scenario only).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub waves_submitted: Option<u64>,
 }
 
 /// Theoretical block capacity limits derived from runtime constants.
@@ -62,7 +71,8 @@ pub struct TheoreticalLimits {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LatencyStats {
 	pub p50: Duration,
-	pub p95: Duration,
+	#[serde(default)]
+	pub p90: Duration,
 	pub p99: Duration,
 	pub min: Duration,
 	pub max: Duration,
@@ -196,7 +206,7 @@ impl ScenarioResult {
 
 		if let Some(ref lat) = self.inclusion_latency {
 			println!("{}", "-".repeat(72));
-			println!(" LATENCY              p50       p95       p99       min       max");
+			println!(" LATENCY              p50       p90       p99       min       max");
 			print_latency_row(" To inclusion  ", lat);
 		}
 		if let Some(ref lat) = self.finalization_latency {
@@ -314,7 +324,7 @@ fn print_latency_row(label: &str, lat: &LatencyStats) {
 		"{}  {:>8.2}s {:>8.2}s {:>8.2}s {:>8.2}s {:>8.2}s",
 		label,
 		lat.p50.as_secs_f64(),
-		lat.p95.as_secs_f64(),
+		lat.p90.as_secs_f64(),
 		lat.p99.as_secs_f64(),
 		lat.min.as_secs_f64(),
 		lat.max.as_secs_f64(),
@@ -330,7 +340,7 @@ pub fn compute_latency_stats(durations: &mut [Duration]) -> Option<LatencyStats>
 	let sum: Duration = durations.iter().sum();
 	Some(LatencyStats {
 		p50: durations[len * 50 / 100],
-		p95: durations[len * 95 / 100],
+		p90: durations[(len * 90 / 100).min(len - 1)],
 		p99: durations[(len * 99 / 100).min(len - 1)],
 		min: durations[0],
 		max: durations[len - 1],
