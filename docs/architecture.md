@@ -34,7 +34,7 @@ Core storage pallet providing distributed data storage and retrieval with author
 
 **Extrinsics:**
 - `store` / `store_with_cid_config` - Store data (with optional CID codec/hash configuration)
-- `renew` / `force_renew` - Extend retention of stored data (scheduled vs. immediate)
+- `renew` / `force_renew` / `enable_auto_renew` - Extend retention of stored data (scheduled vs. immediate)
 - `authorize_account` - Grant an account permission to store (with transaction/byte limits)
 - `authorize_preimage` - Authorize storage of data with a specific content hash
 - `refresh_account_authorization` / `refresh_preimage_authorization` - Extend authorization expiration
@@ -58,4 +58,3 @@ Shared utilities including `NoCurrency` (a no-op fungible currency for pallets t
 ## Runtimes
 
 Two parachain runtimes (`bulletin-westend`, `bulletin-paseo`) share the same pallet composition with network-specific constants. Both use 24-second slots (4 relay chain slots), 10 MiB max block length, and a ~14 day retention period.
-</content>

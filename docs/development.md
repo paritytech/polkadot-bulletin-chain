@@ -75,4 +75,3 @@ The `examples/` directory contains JavaScript, TypeScript, and Rust scripts demo
 - Runtime upgrades
 
 See [examples/README.md](../examples/README.md) for setup and usage.
-</content>
