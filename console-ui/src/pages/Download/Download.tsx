@@ -58,8 +58,8 @@ const P2P_MULTIADDRS: Record<string, string> = {
   summit: [
     "/dns4/summit-bulletin-collator-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWC6q8q3NXscVcpxMbteYrmzjpy7NvYnD4QDRkAQJ9ng8r",
     "/dns4/summit-bulletin-collator-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWRiRRk8EzmENBD6SkP7v2riWa6s74X7wzhnx84SxfD4yr",
-    "/dns4/summit-people-rpc-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWRXfsY4QfhZ6c9f6zTRj1P2f6C3Ft81AD2ZjoVdmNF8Bc",
-    "/dns4/summit-people-rpc-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWGjN7ME5fXKLzrUcFYb2LnBVbAuBWNxPwqFhDNehGJxnv",
+    "/dns4/summit-bulletin-rpc-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWSCrFvEXpRn9J5VC7TiabNwofVfbg3QPzJK9R5ZoDGjVq",
+    "/dns4/summit-bulletin-rpc-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWHV6qNxpwkbTezwgsDW1xBL4J56o3xZnJXvRzHLdsMQJG",
   ].join("\n"),
 };
 
