@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 # This script is meant to be run on Unix/Linux based systems
 set -e
 

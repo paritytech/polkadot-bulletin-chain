@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bulk Bitswap read scenario: discover CIDs from on-chain TransactionStorage,
 //! then download them as fast as possible with configurable concurrency.
 
@@ -213,9 +216,7 @@ async fn discover_cids(
 
 	if items.is_empty() {
 		anyhow::bail!(
-			"No CIDs found matching size {}..{} bytes ({skipped} skipped)",
-			min_size,
-			max_size,
+			"No CIDs found matching size {min_size}..{max_size} bytes ({skipped} skipped)",
 		);
 	}
 

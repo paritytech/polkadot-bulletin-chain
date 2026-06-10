@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { createHelia, type Helia } from "helia";
 import { CID } from "multiformats/cid";
 import { multiaddr } from "@multiformats/multiaddr";

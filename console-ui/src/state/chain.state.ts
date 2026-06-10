@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
