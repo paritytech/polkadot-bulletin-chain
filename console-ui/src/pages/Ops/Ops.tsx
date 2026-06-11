@@ -67,9 +67,16 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
     });
   }
 
-  // Writes, ordered by relevance: per-chunk SLI source first, then per-deploy
-  // parent, then the full dashboard for context.
+  // Writes, full dashboard first for context, then the per-deploy and per-chunk spans.
   const writes: LinkSpec[] = [];
+  if (monitoring.sentry) {
+    writes.push({
+      label: "Bulletin Deploy Health",
+      href: monitoring.sentry,
+      icon: LineChart,
+      description: "Full deploy dashboard.",
+    });
+  }
   if (monitoring.sentryChunkUploadSpan) {
     writes.push({
       label: "deploy.chunk-upload span",
@@ -84,14 +91,6 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
       href: monitoring.sentryStorageSpan,
       icon: LineChart,
       description: "Per-deploy Bulletin storage phase (wraps all chunks).",
-    });
-  }
-  if (monitoring.sentry) {
-    writes.push({
-      label: "Bulletin Deploy Health",
-      href: monitoring.sentry,
-      icon: LineChart,
-      description: "Full deploy dashboard.",
     });
   }
 
