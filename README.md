@@ -236,6 +236,17 @@ cargo clean
 cargo build --release
 ```
 
+## Security
+
+Before deploying for real use cases, you are responsible for:
+
+- Reviewing the code yourself — we publish a reference implementation, not a hardened production build
+- Checking that the dependencies are up to date and free of known vulnerabilities
+- Securing your own fork or deployment environment (keys, secrets, network configuration)
+- Tracking the latest tagged releases/commits for security fixes; older releases are not backported (exceptions might apply)
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 [GPL-3.0-only](./LICENSE)
