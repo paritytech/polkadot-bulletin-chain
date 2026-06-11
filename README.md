@@ -7,8 +7,8 @@ The Bulletin Chain is a parachain providing distributed data storage and retriev
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Security: unaudited since changes](https://img.shields.io/badge/security-unaudited%20since%20Jan%202026-red.svg)](#)
-[![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](#)
-[![Polkadot SDK](https://img.shields.io/badge/built%20with-Polkadot%20SDK-e6007a.svg)](#)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-green.svg)](#)
+[![Polkadot SDK](https://img.shields.io/badge/built%20with-Polkadot%20SDK-yellow.svg)](#)
 
 
 ## Overview
