@@ -1,6 +1,14 @@
 import { Link, useLocation } from "react-router-dom";
 import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Globe, LineChart, BarChart3, Network, ScrollText } from "lucide-react";
 
+// Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
+const GithubIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+    <path d="M9 18c-4.51 2-5-2-7-2" />
+  </svg>
+);
+
 import { Button } from "@/components/ui/Button";
 import {
   Select,
@@ -235,6 +243,23 @@ function HelpMenu() {
   const { network } = useChainState();
   const monitoring = network?.monitoring;
 
+  const helpLinks = [
+    {
+      label: "User Manual",
+      href: `${import.meta.env.BASE_URL}docs/index.html`,
+      icon: BookOpen,
+      external: true,
+      description: "Guides for storing and retrieving data",
+    },
+    {
+      label: "GitHub Repository",
+      href: "https://github.com/paritytech/polkadot-bulletin-chain",
+      icon: GithubIcon,
+      external: true,
+      description: "View source code and contribute",
+    },
+  ];
+
   const monitoringLinks = monitoring
     ? [
         monitoring.grafana && {
@@ -317,17 +342,17 @@ function HelpMenu() {
         <HelpCircle className="h-4 w-4" />
       </Button>
 
-      {open && monitoringLinks.length > 0 && (
+      {open && (
         <div className="absolute right-0 top-full mt-2 w-80 rounded-md border bg-popover p-2 shadow-lg z-50">
             <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-              Monitoring &amp; Diagnostics
+              Help &amp; Resources
             </div>
-            {monitoringLinks.map((link) => (
+            {helpLinks.map((link) => (
               <a
                 key={link.label}
                 href={link.href}
-                target="_blank"
-                rel="noopener noreferrer"
+                target={link.external ? "_blank" : "_self"}
+                rel={link.external ? "noopener noreferrer" : undefined}
                 className="flex items-start gap-3 rounded-sm px-2 py-2 hover:bg-accent transition-colors"
                 onClick={() => setOpen(false)}
               >
@@ -335,7 +360,7 @@ function HelpMenu() {
                 <div className="flex-1">
                   <div className="flex items-center gap-1 text-sm font-medium">
                     {link.label}
-                    <ExternalLink className="h-3 w-3" />
+                    {link.external && <ExternalLink className="h-3 w-3" />}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {link.description}
@@ -343,6 +368,35 @@ function HelpMenu() {
                 </div>
               </a>
             ))}
+
+            {monitoringLinks.length > 0 && (
+              <>
+                <div className="text-xs font-medium text-muted-foreground px-2 py-1.5 mt-1 border-t">
+                  Monitoring &amp; Diagnostics
+                </div>
+                {monitoringLinks.map((link) => (
+                  <a
+                    key={link.label}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-3 rounded-sm px-2 py-2 hover:bg-accent transition-colors"
+                    onClick={() => setOpen(false)}
+                  >
+                    <link.icon className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-1 text-sm font-medium">
+                        {link.label}
+                        <ExternalLink className="h-3 w-3" />
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {link.description}
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </>
+            )}
           </div>
       )}
     </div>
