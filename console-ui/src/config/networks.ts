@@ -197,6 +197,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       collatorLogs: lokiLogsLink("bulletin-next-paseo"),
     },
   },
+  summit: {
+    id: "summit",
+    name: "Bulletin Summit",
+    endpoints: ["wss://summit-bulletin-rpc.polkadot.io"],
+    lightClient: false,
+  },
   previewnet: {
     id: "previewnet",
     name: "Bulletin Previewnet",
