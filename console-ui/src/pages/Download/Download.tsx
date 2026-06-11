@@ -55,6 +55,12 @@ const P2P_MULTIADDRS: Record<string, string> = {
     "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
     "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
   ].join("\n"),
+  summit: [
+    "/dns4/summit-bulletin-collator-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWC6q8q3NXscVcpxMbteYrmzjpy7NvYnD4QDRkAQJ9ng8r",
+    "/dns4/summit-bulletin-collator-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWRiRRk8EzmENBD6SkP7v2riWa6s74X7wzhnx84SxfD4yr",
+    "/dns4/summit-bulletin-rpc-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWSCrFvEXpRn9J5VC7TiabNwofVfbg3QPzJK9R5ZoDGjVq",
+    "/dns4/summit-bulletin-rpc-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWHV6qNxpwkbTezwgsDW1xBL4J56o3xZnJXvRzHLdsMQJG",
+  ].join("\n"),
 };
 
 interface FetchResult {
