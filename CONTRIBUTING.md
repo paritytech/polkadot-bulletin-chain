@@ -4,7 +4,7 @@ Thank you for your interest in contributing! All contributions are made via pull
 
 ## Getting Started
 
-1. Install the [Polkadot SDK dependencies](https://docs.polkadot.com/develop/parachains/install-polkadot-sdk)
+1. Check (or install) the [Polkadot SDK requirements](https://docs.polkadot.com/develop/parachains/install-polkadot-sdk)
 2. Fork the repository and clone your fork
 3. Build and run tests:
 
