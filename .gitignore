@@ -8,11 +8,23 @@
 # scripts/get_polkadot_binaries.sh
 /.polkadot-binaries/
 
+# OS
 .DS_Store
+Thumbs.db
 
-# direnv files
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
 .envrc
 .direnv
+
+# IDE
 .idea
 .vscode
 
