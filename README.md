@@ -1,6 +1,15 @@
 # Polkadot Bulletin Chain
 
+> [!WARNING]                                                                                                                            
+> This is a reference implementation provided for research, experimentation, and developer education. This code was audited in January 2026, but significant changes have been made since then without subsequent audit. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
 The Bulletin Chain is a parachain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It stores arbitrary data with proof-of-storage guarantees and makes it accessible via IPFS, with data retention managed over a configurable period (default ~14 days). It is run using Polkadot SDK's `polkadot-omni-node`.
+
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Security: unaudited since changes](https://img.shields.io/badge/security-unaudited%20since%20Jan%202026-red.svg)](#)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-orange.svg)](#)
+[![Polkadot SDK](https://img.shields.io/badge/built%20with-Polkadot%20SDK-e6007a.svg)](#)
+
 
 ## Overview
 
