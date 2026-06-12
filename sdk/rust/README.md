@@ -125,4 +125,4 @@ See the [`examples/`](../../examples/) directory for integration examples.
 
 ## License
 
-GPL-3.0-or-later WITH Classpath-exception-2.0
+Apache-2.0
