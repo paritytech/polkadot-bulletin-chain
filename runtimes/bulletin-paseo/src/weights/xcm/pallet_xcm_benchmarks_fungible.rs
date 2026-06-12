@@ -1,4 +1,4 @@
-// Copyright (C) Parity Technologies and the various Polkadot contributors, see Contributions.md
+// Copyright (C) Parity Technologies and the various Polkadot contributors, see CONTRIBUTING.md
 // for a list of specific contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
