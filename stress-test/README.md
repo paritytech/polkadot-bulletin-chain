@@ -1,5 +1,7 @@
 # Bulletin Chain Stress Test
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+
 CLI tool and integration test suite for benchmarking write throughput and Bitswap read performance of the Bulletin Chain.
 
 ## Prerequisites

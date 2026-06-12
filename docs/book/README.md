@@ -1,5 +1,7 @@
 # Polkadot Bulletin SDK Book
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../../README.md) for project status, disclaimers, and security notices.
+
 This directory contains the source for the Polkadot Bulletin SDK documentation book.
 
 ## How to Build & View
@@ -18,7 +20,7 @@ cargo install mdbook
 
 1.  Navigate to this directory:
     ```bash
-    cd docs/sdk-book
+    cd docs/book
     ```
 
 2.  Serve the book locally:
@@ -31,3 +33,7 @@ cargo install mdbook
     mdbook build
     ```
     The output will be in `book/`.
+
+## License
+
+Apache-2.0

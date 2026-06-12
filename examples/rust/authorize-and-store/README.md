@@ -1,5 +1,7 @@
 # Rust Authorize and Store Example
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../../../README.md) for project status, disclaimers, and security notices.
+
 This example demonstrates using the `bulletin-sdk-rust` crate to interact with Bulletin Chain.
 
 ## Features
@@ -13,14 +15,15 @@ This example demonstrates using the `bulletin-sdk-rust` crate to interact with B
 
 1. **Running Bulletin Chain node**: You need a running Bulletin Chain node with WebSocket endpoint available
 
-   Example for local development:
+   Example for local development (see the root README quickstart):
    ```bash
    # From project root
-   cargo build --release
-   ./target/release/polkadot-bulletin-chain --dev --tmp
+   just binaries-polkadot
+   just chain-spec westend
+   $(just binaries-polkadot)/polkadot-omni-node --chain ./zombienet/bulletin-westend-spec.json --dev --ipfs-server
    ```
 
-   This typically runs on `ws://localhost:10000`.
+   This typically runs on `ws://localhost:9944`.
 
 ## Usage
 
@@ -148,3 +151,7 @@ if let Some(manifest_data) = manifest {
 ```
 
 The manifest CID can be used to retrieve the complete file via IPFS/Bitswap.
+
+## License
+
+Apache-2.0

@@ -1,5 +1,7 @@
 # Bulletin SDK for TypeScript
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../../README.md) for project status, disclaimers, and security notices.
+
 Off-chain client SDK for Polkadot Bulletin Chain with PAPI integration.
 
 ## Quick Start
@@ -74,4 +76,4 @@ The SDK book contains:
 
 ## License
 
-GPL-3.0-or-later WITH Classpath-exception-2.0
+Apache-2.0

@@ -1,5 +1,7 @@
 # Zombienet SDK Tests
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+
 Integration tests for Polkadot Bulletin Chain sync modes and transaction storage, using [zombienet-sdk](https://github.com/paritytech/zombienet-sdk) to spawn local networks.
 
 ## Prerequisites

@@ -1,5 +1,7 @@
 # Rust Examples
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../../README.md) for project status, disclaimers, and security notices.
+
 Rust examples for interacting with Polkadot Bulletin Chain using [subxt](https://github.com/paritytech/subxt).
 
 ## Examples
@@ -143,3 +145,7 @@ cargo build --release
 - **Subxt Documentation**: https://docs.rs/subxt
 - **Polkadot Config**: https://docs.rs/subxt/latest/subxt/config/struct.PolkadotConfig.html
 - **Bulletin SDK**: See `../../sdk/rust/` for higher-level abstractions
+
+## License
+
+Apache-2.0

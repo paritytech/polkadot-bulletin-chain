@@ -1,5 +1,7 @@
 # Bulletin SDK for Rust
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../../README.md) for project status, disclaimers, and security notices.
+
 Off-chain client SDK for Polkadot Bulletin Chain with automatic chunking, DAG-PB manifest generation, and authorization management.
 
 ## Quick Start
@@ -125,4 +127,4 @@ See the [`examples/`](../../examples/) directory for integration examples.
 
 ## License
 
-GPL-3.0-or-later WITH Classpath-exception-2.0
+Apache-2.0

@@ -1,5 +1,7 @@
 # Polkadot Bulletin Chain - Examples
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+
 Examples demonstrating how to interact with the Polkadot Bulletin Chain.
 
 ## Directory Structure
@@ -139,7 +141,7 @@ just run-live-tests-paseo <seed> [ipfs_gateway_url] [image_size]
 ## Manually
 
 ```shell
-cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
+cd polkadot-bulletin-chain   # make sure you are inside the project directory for the following steps
 ```
 
 ### Download Zombienet
@@ -198,8 +200,6 @@ mkdir -p ~/local_bridge_testing/bin
 
 # Ensures `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
-# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
-git reset --hard origin/bko-bulletin-para-support
 cd polkadot-sdk
 
 cargo build -p polkadot -r

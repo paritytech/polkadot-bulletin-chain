@@ -1,5 +1,7 @@
 # Bulletin Chain Console UI
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+
 A web-based console for interacting with the Polkadot Bulletin Chain. Upload and download data, manage authorizations, and explore blocks.
 
 ## Features
@@ -150,6 +152,10 @@ This opens the SDK book at http://localhost:3000 with guides on:
 - **polkadot-api** for chain interaction
 - **@parity/bulletin-sdk** for CID calculation and storage operations
 
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
+
 ## License
 
-Apache-2.0
+GPL-3.0-only

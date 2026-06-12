@@ -1,5 +1,7 @@
 # Bulletin Chain SDK
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+
 Multi-language client SDKs for Polkadot Bulletin Chain.
 
 ## Available SDKs
@@ -68,8 +70,9 @@ cd sdk/typescript
 npm run test:unit
 
 # Integration tests (requires running node at ws://localhost:9944)
-# Start node first:
-./target/release/polkadot-bulletin-chain --dev --tmp
+# Start node first (see root README quickstart):
+# just binaries-polkadot && just chain-spec westend
+# $(just binaries-polkadot)/polkadot-omni-node --chain ./zombienet/bulletin-westend-spec.json --dev
 
 # TypeScript integration tests:
 cd sdk/typescript && npm run test:integration
@@ -142,6 +145,10 @@ See [typescript/README.md](typescript/README.md) for details.
 
 Complete automated release pipeline for publishing both SDKs to crates.io, npm, and GitHub Releases with version validation, testing, and automated tagging.
 
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
+
 ## License
 
-GPL-3.0-or-later WITH Classpath-exception-2.0
+Apache-2.0

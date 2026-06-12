@@ -1,5 +1,7 @@
 # pallet-bulletin-transaction-storage
 
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Transaction storage pallet for the Polkadot Bulletin Chain. Indexes transactions and manages storage proofs.
 
 ## Overview
@@ -32,4 +34,6 @@ Stored data is retrievable via the Bitswap protocol using the CID generated at s
 - [`bulletin-transaction-storage-primitives`](primitives/) — CID utilities and shared types
 - `sp-transaction-storage-proof` — Storage proof verification from Polkadot SDK
 
-License: Apache-2.0
+## License
+
+Apache-2.0
