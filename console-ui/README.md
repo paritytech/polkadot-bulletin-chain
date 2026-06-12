@@ -1,6 +1,12 @@
 # Bulletin Chain Console UI
 
-> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain). See the root [README](../README.md) for project status, disclaimers, and security notices.
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
 
 A web-based console for interacting with the Polkadot Bulletin Chain. Upload and download data, manage authorizations, and explore blocks.
 
