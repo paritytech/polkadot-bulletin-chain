@@ -158,6 +158,12 @@ if let Some(manifest_data) = manifest {
 
 The manifest CID can be used to retrieve the complete file via IPFS/Bitswap.
 
+## Security
+
+See the [root README](../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0

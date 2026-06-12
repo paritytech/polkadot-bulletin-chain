@@ -152,6 +152,12 @@ cargo build --release
 - **Polkadot Config**: https://docs.rs/subxt/latest/subxt/config/struct.PolkadotConfig.html
 - **Bulletin SDK**: See `../../sdk/rust/` for higher-level abstractions
 
+## Security
+
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0

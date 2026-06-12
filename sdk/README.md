@@ -155,6 +155,12 @@ Complete automated release pipeline for publishing both SDKs to crates.io, npm, 
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
 
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0

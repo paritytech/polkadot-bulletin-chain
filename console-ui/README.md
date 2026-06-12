@@ -162,6 +162,12 @@ This opens the SDK book at http://localhost:3000 with guides on:
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
 
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 GPL-3.0-only

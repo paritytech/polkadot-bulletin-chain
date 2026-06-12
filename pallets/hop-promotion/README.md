@@ -16,6 +16,12 @@ HOP submissions are short-lived by default. This pallet lets near-expiry data be
 
 The authorize closure verifies the user's submit-time signature and the freshness of the submit timestamp, and rejects promotion for accounts whose Bulletin authorization is missing or expired.
 
+## Security
+
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0

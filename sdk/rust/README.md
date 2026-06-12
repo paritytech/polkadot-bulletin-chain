@@ -131,6 +131,12 @@ let callback: ProgressCallback = Arc::new(move |event| {
 
 See the [`examples/`](../../examples/) directory for integration examples.
 
+## Security
+
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0

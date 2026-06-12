@@ -40,6 +40,12 @@ cargo install mdbook
     ```
     The output will be in `book/`.
 
+## Security
+
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
 Apache-2.0
