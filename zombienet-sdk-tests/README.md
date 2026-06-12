@@ -154,3 +154,7 @@ A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
 as an artifact; both suites download that artifact instead of building locally. Each suite
 invokes the same `just test-zombienet-*` recipes used for local runs.
+
+## License
+
+Apache-2.0

@@ -144,4 +144,4 @@ Complete automated release pipeline for publishing both SDKs to crates.io, npm, 
 
 ## License
 
-GPL-3.0-or-later WITH Classpath-exception-2.0
+Apache-2.0

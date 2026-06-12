@@ -354,3 +354,7 @@ Returns an array of `ScenarioResult` objects. Each contains:
 ## Architecture
 
 See [DESIGN.md](DESIGN.md) for detailed architecture, data flow diagrams, and module dependency graph.
+
+## License
+
+Apache-2.0

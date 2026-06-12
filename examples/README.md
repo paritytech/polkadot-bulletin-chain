@@ -337,3 +337,7 @@ npx papi add -w ws://localhost:10000 bulletin
 cd examples/rust/authorize-and-store
 ./fetch_metadata.sh ws://localhost:10000
 ```
+
+## License
+
+Apache-2.0
