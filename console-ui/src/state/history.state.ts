@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { BehaviorSubject } from "rxjs";
 import { bind } from "@react-rxjs/core";
 

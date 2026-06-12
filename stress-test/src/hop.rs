@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{Context, Result};
 use ed25519_dalek::{Signer, SigningKey};
 use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClient};

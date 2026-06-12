@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Subscribe } from "@react-rxjs/core";
