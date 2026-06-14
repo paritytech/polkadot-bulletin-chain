@@ -34,15 +34,25 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - id: runtime
         run: |
-          # Filter out runtimes that don't have URIs
-          TASKS=$(jq '[.[] | select(.uris != null and (.uris | length) > 0)]' scripts/runtimes-matrix.json)
-          SKIPPED_TASKS=$(jq '[.[] | select(.uris == null or (.uris | length) == 0)]' scripts/runtimes-matrix.json)
+          # Expand each runtime into one task per try_runtime instance,
+          # overlaying the instance's name (as `instance`) and `uris` onto
+          # the runtime object. Strip the nested `instances` list so each
+          # emitted entry only carries per-(runtime, instance) data.
+          TASKS=$(jq '[
+            .[] as $r
+            | ($r.try_runtime.instances // [])[] as $i
+            | select(($i.uris // []) | length > 0)
+            | $r
+              + { instance: $i.name, uris: $i.uris }
+              + { try_runtime: ($r.try_runtime | del(.instances)) }
+          ]' scripts/runtimes-matrix.json)
+          SKIPPED_TASKS=$(jq '[.[] | select(((.try_runtime.instances // []) | length) == 0)]' scripts/runtimes-matrix.json)
           echo --- Running the following tasks ---
           echo $TASKS
-          echo --- Skipping the following tasks due to not having a uris field ---
+          echo --- Skipping the following runtimes with no try_runtime.instances ---
           echo $SKIPPED_TASKS
           # Strip whitespace from Tasks now that we've logged it
           TASKS=$(echo $TASKS | jq -c .)
@@ -55,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -64,6 +74,7 @@ jobs:
           mode: prepare
 
   prepare-snapshots:
+    name: prepare-snapshot (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
     needs: [runtime-matrix, prepare-try-runtime]
     runs-on: ubuntu-latest
     strategy:
@@ -72,7 +83,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       # Snapshot lookup uses a deliberately-non-matching primary `key:` so
       # `restore-keys` always falls through to the most recent dated entry.
@@ -87,9 +98,9 @@ jobs:
         with:
           lookup-only: true
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}
           restore-keys: |
-            try-runtime-snapshot-${{ matrix.runtime.name }}-
+            try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: false
 
       - name: Set up Polkadot binaries
@@ -99,13 +110,14 @@ jobs:
           groups: try-runtime
           mode: consume
 
-      - name: Generate snapshot for ${{ matrix.runtime.name }}
+      - name: Generate snapshot for ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }})
         if: steps.cache-restore.outputs.cache-matched-key == ''
         env:
           RUNTIME_NAME: ${{ matrix.runtime.name }}
+          RUNTIME_INSTANCE: ${{ matrix.runtime.instance }}
           RUNTIME_URIS_JSON: ${{ toJSON(matrix.runtime.uris) }}
         run: |
-          echo "Generating snapshot for $RUNTIME_NAME..."
+          echo "Generating snapshot for $RUNTIME_NAME ($RUNTIME_INSTANCE)..."
 
           URI_ARGS=()
           while IFS= read -r uri; do
@@ -141,10 +153,11 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ steps.get-date.outputs.today }}
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-${{ steps.get-date.outputs.today }}
 
 
   check-migrations:
+    name: check-migration (${{ matrix.runtime.name }} / ${{ matrix.runtime.instance }})
     needs: [runtime-matrix, prepare-try-runtime, prepare-snapshots]
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -155,7 +168,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: "Fetch upstream tags"
         if: github.event_name == 'pull_request'
@@ -182,10 +195,10 @@ jobs:
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: snapshot.raw
-          key: try-runtime-snapshot-${{ matrix.runtime.name }}-
+          key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: true
 
-      - name: Run ${{ matrix.runtime.name }} Runtime Checks
+      - name: Run ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }}) Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
           TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}

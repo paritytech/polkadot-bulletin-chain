@@ -1,4 +1,7 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
+import { Link, useLocation } from "react-router-dom";
 import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
@@ -21,13 +24,11 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import {
   useChainState,
   connectToNetwork,
-  switchStorageType,
-  STORAGE_CONFIGS,
   getCustomNetworkUrl,
   clearCustomNetworkUrl,
   type NetworkId,
-  type StorageType,
 } from "@/state/chain.state";
+import { WEB3_STORAGE_URL } from "@/config/networks";
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization, useAuthorizationLoading } from "@/state/storage.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
@@ -36,12 +37,12 @@ import React, { useState, useEffect } from "react";
 
 // All navigation items
 const navItems = [
-  { path: "/", label: "Dashboard", icon: Database, web3storage: true, requiresAuth: false },
-  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false, requiresAuth: false },
-  { path: "/explorer", label: "Explorer", icon: Search, web3storage: true, requiresAuth: false },
-  { path: "/upload", label: "Upload", icon: Upload, web3storage: false, requiresAuth: true },
-  { path: "/download", label: "Download", icon: Download, web3storage: false, requiresAuth: false },
-  { path: "/renew", label: "Renew", icon: RefreshCw, web3storage: false, requiresAuth: true },
+  { path: "/", label: "Dashboard", icon: Database, requiresAuth: false },
+  { path: "/authorizations", label: "Faucet", icon: Shield, requiresAuth: false },
+  { path: "/explorer", label: "Explorer", icon: Search, requiresAuth: false },
+  { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true },
+  { path: "/download", label: "Download", icon: Download, requiresAuth: false },
+  { path: "/renew", label: "Renew", icon: RefreshCw, requiresAuth: true },
 ] as const;
 
 function ConnectionStatus() {
@@ -70,12 +71,7 @@ function AuthorizationStatus() {
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
   const isLoading = useAuthorizationLoading();
-  const { blockNumber, storageType } = useChainState();
-
-  // Don't show for web3storage mode
-  if (storageType === "web3storage") {
-    return null;
-  }
+  const { blockNumber } = useChainState();
 
   // Not connected - don't show anything (Connect button already visible)
   if (!selectedAccount) {
@@ -331,9 +327,8 @@ function AccountDisplay() {
 
 export function Header() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { status, storageType, network } = useChainState();
+  const { status, network } = useChainState();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
 
@@ -343,14 +338,6 @@ export function Header() {
       connectToNetwork(network.id);
     }
   }, []);
-
-  // Redirect to Dashboard if current route is disabled for the active storage type
-  useEffect(() => {
-    const currentItem = navItems.find((item) => item.path === location.pathname);
-    if (currentItem && storageType === "web3storage" && !currentItem.web3storage) {
-      navigate("/");
-    }
-  }, [storageType, location.pathname, navigate]);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -374,18 +361,17 @@ export function Header() {
             <div className="hidden sm:block">
               <NetworkSwitcher />
             </div>
-            <Select value={storageType} onValueChange={(v) => switchStorageType(v as StorageType)}>
-              <SelectTrigger className="w-[130px] h-8 text-xs hidden sm:flex">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(STORAGE_CONFIGS).map((config) => (
-                  <SelectItem key={config.id} value={config.id}>
-                    {config.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="h-8 text-xs hidden sm:inline-flex"
+            >
+              <a href={WEB3_STORAGE_URL} target="_blank" rel="noopener noreferrer">
+                Web3 Storage
+                <ExternalLink className="h-3 w-3 ml-1.5" />
+              </a>
+            </Button>
             <HelpMenu />
             <AccountDisplay />
 
@@ -404,9 +390,7 @@ export function Header() {
         {/* Bottom Row: Navigation */}
         <nav className="hidden md:flex items-center gap-1 h-10">
           {navItems.map((item) => {
-            const disabledByStorageType = storageType === "web3storage" && !item.web3storage;
-            const disabledByAuth = item.requiresAuth && (!selectedAccount || !authorization);
-            const disabled = disabledByStorageType || disabledByAuth;
+            const disabled = item.requiresAuth && (!selectedAccount || !authorization);
             if (disabled) {
               return (
                 <Button
@@ -441,9 +425,7 @@ export function Header() {
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
               {navItems.map((item) => {
-                const disabledByStorageType = storageType === "web3storage" && !item.web3storage;
-                const disabledByAuth = item.requiresAuth && (!selectedAccount || !authorization);
-                const disabled = disabledByStorageType || disabledByAuth;
+                const disabled = item.requiresAuth && (!selectedAccount || !authorization);
                 if (disabled) {
                   return (
                     <Button

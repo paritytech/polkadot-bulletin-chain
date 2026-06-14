@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import fs from 'fs'
 import os from "os";
@@ -33,7 +36,7 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 // Note: --skip-ipfs-verify flag skips IPFS download verification
 const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const IPFS_GATEWAY_URL = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 // Image size preset: small, big32, big64, big96
 const IMAGE_SIZE = args[3] || 'big64';

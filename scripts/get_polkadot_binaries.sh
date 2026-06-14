@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 # Fetch or build polkadot-sdk-family binaries needed by tests / CI / local dev.
 #
 # Usage:

@@ -321,7 +321,7 @@ node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]
 cd rust/authorize-and-store
 ./fetch_metadata.sh ws://localhost:10000
 cargo build --release
-./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Eve"
 ```
 
 ## Troubleshooting
@@ -337,3 +337,7 @@ npx papi add -w ws://localhost:10000 bulletin
 cd examples/rust/authorize-and-store
 ./fetch_metadata.sh ws://localhost:10000
 ```
+
+## License
+
+Apache-2.0

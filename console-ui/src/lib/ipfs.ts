@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 /**
  * Default IPFS gateway URL for local Bulletin Chain node
  */
@@ -10,6 +13,7 @@ export const IPFS_GATEWAYS: Record<string, string> = {
   local: "http://127.0.0.1:8283",
   paseo: "https://paseo-ipfs.polkadot.io",
   "paseo-next-v2": "https://paseo-bulletin-next-ipfs.polkadot.io",
+  summit: "https://summit-ipfs.polkadot.io",
   previewnet: "https://previewnet.substrate.dev",
 };
 
@@ -23,6 +27,7 @@ export const PREFERRED_DOWNLOAD_METHOD: Record<string, "p2p" | "gateway"> = {
   westend: "p2p",
   paseo: "gateway",
   "paseo-next-v2": "gateway",
+  summit: "gateway",
   previewnet: "gateway",
 };
 

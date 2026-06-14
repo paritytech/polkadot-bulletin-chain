@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -72,34 +75,45 @@ export function AuthorizationCard({ className }: { className?: string }) {
           <PalletUnavailableNotice pallet="TransactionStorage" details={error} />
         ) : authorization ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Transactions
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatNumber(0)}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Bytes
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatBytes(0)}
-                </p>
+            <div>
+              <p className="text-sm font-medium mb-2">Used</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Transactions
+                  </p>
+                  <p className="text-lg font-semibold">
+                    {formatNumber(authorization.used.transactions)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Ephemeral
+                  </p>
+                  <p className="text-lg font-semibold">
+                    {formatBytes(authorization.used.bytesEphemeral)}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    Permanent
+                  </p>
+                  <p className="text-lg font-semibold">
+                    {formatBytes(authorization.used.bytesPermanent)}
+                  </p>
+                </div>
               </div>
             </div>
             <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorization for</p>
+              <p className="text-sm font-medium mb-2">Authorization</p>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">
                     Transactions
                   </p>
                   <p className="text-2xl font-semibold">
-                    {formatNumber(authorization.transactions)}
+                    {formatNumber(authorization.allowance.transactions)}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -107,7 +121,7 @@ export function AuthorizationCard({ className }: { className?: string }) {
                     Bytes
                   </p>
                   <p className="text-2xl font-semibold">
-                    {formatBytes(authorization.bytes)}
+                    {formatBytes(authorization.allowance.bytes)}
                   </p>
                 </div>
               </div>

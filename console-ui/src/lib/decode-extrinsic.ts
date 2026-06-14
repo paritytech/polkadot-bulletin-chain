@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { Tuple, type Codec } from "scale-ts";
 import { decAnyMetadata, unifyMetadata } from "@polkadot-api/substrate-bindings";
 import { getLookupFn, getDynamicBuilder } from "@polkadot-api/metadata-builders";

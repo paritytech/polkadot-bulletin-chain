@@ -1,18 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// This file is part of Cumulus.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 use super::{
 	AccountId, AllPalletsWithSystem, Balance, Balances, BaseDeliveryFee, FeeAssetId, ParachainInfo,
@@ -20,6 +7,7 @@ use super::{
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
 use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+use alloc::{vec, vec::Vec};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -55,7 +43,7 @@ use xcm_builder::{
 use xcm_executor::XcmExecutor;
 
 // Re-export
-pub use crate::paseo_constants::locations::{GovernanceLocation, PeopleLocation};
+pub use crate::paseo_constants::locations::PeopleLocation;
 
 /// The genesis hash of the Paseo testnet relay chain. Used to identify it over XCM.
 ///
@@ -115,8 +103,8 @@ pub type AssetTransactors = FungibleTransactor;
 /// ready for dispatching a transaction with XCM's `Transact`. There is an `OriginKind` that can
 /// bias the kind of local `Origin` it will become.
 pub type XcmOriginToTransactDispatchOrigin = (
-	// Governance location can gain root.
-	LocationAsSuperuser<Equals<GovernanceLocation>, RuntimeOrigin>,
+	// Governance locations can gain root.
+	LocationAsSuperuser<IsGovernanceLocation, RuntimeOrigin>,
 	// Sovereign account converter; this attempts to derive an `AccountId` from the origin location
 	// using `LocationToAccountId` and then turn that into the usual `Signed` origin. Useful for
 	// foreign chains who want to have a local sovereign account on this chain that they control.
@@ -141,11 +129,51 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
-/// Filter that matches any sibling parachain origin.
-pub struct IsSiblingParachain;
-impl Contains<Location> for IsSiblingParachain {
+parameter_types! {
+	/// Sibling parachain IDs authorized to dispatch storage authorizations via
+	/// XCM. Storage-backed so governance (root) can update via
+	/// `system.set_storage` without a runtime upgrade.
+	pub storage AllowedParachainIds: Vec<u32> = vec![1502, 5140];
+	/// Sibling parachain IDs treated as governance origins. Storage-backed so
+	/// governance (root) can update via `system.set_storage` without a runtime
+	/// upgrade.
+	pub storage GovernanceParachainIds: Vec<u32> = vec![1500];
+}
+
+/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`]
+/// — the parachains allowed to dispatch storage authorizations via XCM.
+pub struct IsAuthorizerParachain;
+impl Contains<Location> for IsAuthorizerParachain {
 	fn contains(location: &Location) -> bool {
-		matches!(location.unpack(), (1, [Parachain(_)]))
+		match location.unpack() {
+			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
+			_ => false,
+		}
+	}
+}
+
+/// Filter matching sibling parachain origins listed in [`GovernanceParachainIds`].
+pub struct IsGovernanceLocation;
+impl Contains<Location> for IsGovernanceLocation {
+	fn contains(location: &Location) -> bool {
+		match location.unpack() {
+			(1, [Parachain(id)]) => GovernanceParachainIds::get().contains(id),
+			_ => false,
+		}
+	}
+}
+
+/// Matches the `Voice` of body `B` from any sibling parachain listed in
+/// [`GovernanceParachainIds`] (multi-paraId variant of `IsVoiceOfBody`).
+pub struct IsGovernanceVoiceOfBody<B>(core::marker::PhantomData<B>);
+impl<B: frame_support::traits::Get<BodyId>> Contains<Location> for IsGovernanceVoiceOfBody<B> {
+	fn contains(location: &Location) -> bool {
+		match location.unpack() {
+			(1, [Parachain(id), Plurality { id: body_id, part: BodyPart::Voice }])
+				if *body_id == B::get() =>
+				GovernanceParachainIds::get().contains(id),
+			_ => false,
+		}
 	}
 }
 
@@ -170,14 +198,12 @@ pub type Barrier = TrailingSetTopicAsId<(
 			// allow it.
 			AllowTopLevelPaidExecutionFrom<Everything>,
 			// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
-			// and AssetHub get free execution.
+			// governance parachains, and authorizer parachains get free execution.
 			AllowExplicitUnpaidExecutionFrom<(
 				ParentOrParentsPlurality,
 				FellowsPlurality,
-				Equals<GovernanceLocation>,
-				// Allow any sibling parachain for unpaid execution, since there
-				// are multiple People testnet chains.
-				IsSiblingParachain,
+				IsGovernanceLocation,
+				IsAuthorizerParachain,
 			)>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,

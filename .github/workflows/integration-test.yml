@@ -37,7 +37,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -53,7 +53,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - id: runtime
         run: |
           TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -144,6 +144,10 @@ jobs:
       - name: Test authorize-preimage-and-store
         working-directory: examples
         run: just run-test-authorize-preimage-and-store "$TEST_DIR"
+
+      - name: Test HOP round trip
+        working-directory: examples
+        run: just run-test-hop-round-trip "$TEST_DIR"
 
       - name: Test chopsticks compatibility
         working-directory: examples
