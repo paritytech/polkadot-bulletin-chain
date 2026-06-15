@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { ChopsticksProvider, setup } from "@acala-network/chopsticks-core";
 
 const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod bitswap_bulk_read;
 pub mod bitswap_read;
 pub mod hop;

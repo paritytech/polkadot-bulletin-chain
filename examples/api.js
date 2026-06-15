@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import fs from 'fs';
 import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";

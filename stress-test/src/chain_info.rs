@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use subxt::{
