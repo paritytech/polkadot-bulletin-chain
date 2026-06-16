@@ -152,4 +152,4 @@ This opens the SDK book at http://localhost:3000 with guides on:
 
 ## License
 
-Apache-2.0
+GPL-3.0-only

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Producer / consumer pipeline for block-capacity throughput testing.
 //!
 //! A **generator** ([`generate_block_capacity_work`]) signs store extrinsics and sends
