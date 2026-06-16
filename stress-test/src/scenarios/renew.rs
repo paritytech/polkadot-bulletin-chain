@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Renew stress test: upload 512 items, then renew the same items every block.
 
 use anyhow::Result;
@@ -208,7 +211,7 @@ pub async fn run_renew_stress(
 	);
 
 	results.push(ScenarioResult {
-		name: format!("Renew stress: {} items/block × {} blocks", items_per_wave, confirmed_blocks),
+		name: format!("Renew stress: {items_per_wave} items/block × {confirmed_blocks} blocks"),
 		duration,
 		total_submitted: total_renewed,
 		total_confirmed: total_renewed,

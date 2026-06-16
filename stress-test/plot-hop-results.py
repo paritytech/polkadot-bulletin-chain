@@ -1,3 +1,6 @@
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 #!/usr/bin/env python3
 """
 Render a 2-panel chart from a stress-test --output-file JSON.

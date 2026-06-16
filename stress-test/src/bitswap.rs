@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Bitswap client using litep2p's UserProtocol for fetching blocks from Bulletin nodes.
 //!
 //! Uses the bidirectional substream pattern from the Bitswap 1.2.0 protocol:
