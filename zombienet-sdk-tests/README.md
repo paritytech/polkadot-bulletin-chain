@@ -1,5 +1,13 @@
 # Zombienet SDK Tests
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Integration tests for Polkadot Bulletin Chain sync modes and transaction storage, using [zombienet-sdk](https://github.com/paritytech/zombienet-sdk) to spawn local networks.
 
 ## Prerequisites
@@ -154,6 +162,12 @@ A single workflow (`.github/workflows/zombienet-tests.yml`) hosts both suites:
 A shared `prepare-binaries` job fetches/builds the polkadot binaries once and uploads them
 as an artifact; both suites download that artifact instead of building locally. Each suite
 invokes the same `just test-zombienet-*` recipes used for local runs.
+
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
 
 ## License
 
