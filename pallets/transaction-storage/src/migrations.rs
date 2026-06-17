@@ -524,11 +524,12 @@ pub mod v3 {
 				};
 
 				let Some(block_number) = iter.next() else {
-					// Write this migration's `version_to` explicitly so that when
-					// chained with v3→v4 the on-chain version progresses one step at
-					// a time and the next migration sees the correct starting version.
-					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(3)
-						.put::<Pallet<T>>();
+					// Never downgrade — this MBM can be re-run against state already
+					// at/beyond v3 (e.g. by try-runtime, whose id isn't in `Historic`).
+					use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
+					if Pallet::<T>::on_chain_storage_version() < 3 {
+						StorageVersion::new(3).put::<Pallet<T>>();
+					}
 					cursor = None;
 					break;
 				};
@@ -710,8 +711,12 @@ pub mod v4 {
 				};
 
 				let Some(content_hash) = iter.next() else {
-					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(4)
-						.put::<Pallet<T>>();
+					// Never downgrade — this MBM can be re-run against state already
+					// at/beyond v4 (e.g. by try-runtime, whose id isn't in `Historic`).
+					use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
+					if Pallet::<T>::on_chain_storage_version() < 4 {
+						StorageVersion::new(4).put::<Pallet<T>>();
+					}
 					cursor = None;
 					break;
 				};
@@ -748,14 +753,28 @@ pub mod v4 {
 			let prefix = AutoRenewals::<T>::final_prefix();
 			let mut previous_key = prefix.to_vec();
 			let mut count: u64 = 0;
+			// `step` only converts entries still in the v3 layout; pre-existing v4 entries
+			// (e.g. prepaid `paid=true`) are left untouched, so `post_upgrade` asserts only
+			// on the converted ones.
+			let mut to_migrate: Vec<Vec<u8>> = Vec::new();
 			while let Some(key) =
 				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
 			{
-				previous_key = key;
+				previous_key = key.clone();
 				count += 1;
+				let raw = sp_io::storage::get(&key)
+					.ok_or("v3->v4 pre_upgrade: missing AutoRenewals entry")?;
+				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_err() {
+					to_migrate.push(key);
+				}
 			}
-			tracing::info!(target: LOG_TARGET, count, "v3->v4 pre_upgrade: AutoRenewals entries");
-			Ok(count.encode())
+			tracing::info!(
+				target: LOG_TARGET,
+				count,
+				to_migrate = to_migrate.len(),
+				"v3->v4 pre_upgrade: AutoRenewals entries"
+			);
+			Ok((count, to_migrate).encode())
 		}
 
 		#[cfg(feature = "try-runtime")]
@@ -764,20 +783,15 @@ pub mod v4 {
 		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
 
-			let old_count =
-				u64::decode(&mut &state[..]).map_err(|_| "Failed to decode pre_upgrade state")?;
+			let (old_count, to_migrate) = <(u64, Vec<Vec<u8>>)>::decode(&mut &state[..])
+				.map_err(|_| "Failed to decode pre_upgrade state")?;
 
-			let prefix = AutoRenewals::<T>::final_prefix();
-			let mut previous_key = prefix.to_vec();
-			let mut new_count: u64 = 0;
-			while let Some(key) =
-				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
-			{
-				previous_key = key.clone();
-				let raw = sp_io::storage::get(&key)
-					.ok_or("v3->v4 post_upgrade: missing AutoRenewals entry")?;
+			// Each converted entry must now be v4, recurring, and unpaid.
+			for key in &to_migrate {
+				let raw = sp_io::storage::get(key)
+					.ok_or("v3->v4 post_upgrade: migrated entry missing")?;
 				let decoded = RenewalData::<T::AccountId>::decode(&mut &raw[..])
-					.map_err(|_| "v3->v4 post_upgrade: remaining entry is not v4")?;
+					.map_err(|_| "v3->v4 post_upgrade: migrated entry is not v4")?;
 				polkadot_sdk_frame::prelude::ensure!(
 					decoded.recurring,
 					"v3->v4 post_upgrade: migrated entry must have recurring=true",
@@ -786,6 +800,15 @@ pub mod v4 {
 					!decoded.paid,
 					"v3->v4 post_upgrade: migrated entry must have paid=false",
 				);
+			}
+
+			let prefix = AutoRenewals::<T>::final_prefix();
+			let mut previous_key = prefix.to_vec();
+			let mut new_count: u64 = 0;
+			while let Some(key) =
+				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
+			{
+				previous_key = key;
 				new_count += 1;
 			}
 
@@ -797,6 +820,7 @@ pub mod v4 {
 				target: LOG_TARGET,
 				old_count,
 				new_count,
+				migrated = to_migrate.len(),
 				"v3->v4 post_upgrade: valid"
 			);
 			Ok(())
