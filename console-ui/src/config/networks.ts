@@ -7,6 +7,9 @@ export interface Network {
   endpoints: string[];
   lightClient: boolean;
   chainSpec?: string;
+  // HOP relay nodes for this network, exposing the public `hop_poolStatus`
+  // JSON-RPC method over HTTPS POST. Polled by the HOP dashboard.
+  hopNodes?: string[];
 }
 
 export const BULLETIN_NETWORKS: Record<string, Network> = {
@@ -39,6 +42,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Summit",
     endpoints: ["wss://summit-bulletin-rpc.polkadot.io"],
     lightClient: false,
+    hopNodes: [
+      "https://summit-hop-0.polkadot.io",
+      "https://summit-hop-1.polkadot.io",
+    ],
   },
   previewnet: {
     id: "previewnet",
