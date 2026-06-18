@@ -36,6 +36,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Paseo Next v2",
     endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
     lightClient: false,
+    hopNodes: [
+      "wss://paseo-hop-next-0.polkadot.io",
+      "wss://paseo-hop-next-1.polkadot.io",
+    ],
   },
   summit: {
     id: "summit",
@@ -52,6 +56,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Previewnet",
     endpoints: ["wss://previewnet.substrate.dev/bulletin"],
     lightClient: false,
+    hopNodes: [
+      "wss://previewnet.substrate.dev/bulletin-hop-0",
+      "wss://previewnet.substrate.dev/bulletin-hop-1",
+    ],
   },
   polkadot: {
     id: "polkadot",
