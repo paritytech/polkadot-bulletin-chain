@@ -1,5 +1,8 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { Link, useLocation } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Boxes } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
 const GithubIcon = ({ className }: { className?: string }) => (
@@ -42,6 +45,7 @@ const navItems = [
   { path: "/download", label: "Download", icon: Download, requiresAuth: false },
   { path: "/renew", label: "Renew", icon: RefreshCw, requiresAuth: true },
   { path: "/ops", label: "Ops", icon: Activity, requiresAuth: false },
+  { path: "/hop", label: "HOP", icon: Boxes, requiresAuth: false },
 ] as const;
 
 function ConnectionStatus() {

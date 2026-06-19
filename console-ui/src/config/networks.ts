@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 export interface MonitoringLinks {
   /** Parity SRE Grafana dashboard for this chain. */
   grafana?: string;
@@ -30,6 +33,9 @@ export interface Network {
   lightClient: boolean;
   chainSpec?: string;
   monitoring?: MonitoringLinks;
+  // HOP relay nodes for this network, exposing the public `hop_poolStatus`
+  // JSON-RPC method over HTTPS POST. Polled by the HOP dashboard.
+  hopNodes?: string[];
 }
 
 const GRAFANA_OPERATION_HEALTH =
@@ -196,12 +202,20 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
       collatorLogs: lokiLogsLink("bulletin-next-paseo"),
     },
+    hopNodes: [
+      "wss://paseo-hop-next-0.polkadot.io",
+      "wss://paseo-hop-next-1.polkadot.io",
+    ],
   },
   summit: {
     id: "summit",
     name: "Bulletin Summit",
     endpoints: ["wss://summit-bulletin-rpc.polkadot.io"],
     lightClient: false,
+    hopNodes: [
+      "https://summit-hop-0.polkadot.io",
+      "https://summit-hop-1.polkadot.io",
+    ],
   },
   previewnet: {
     id: "previewnet",
@@ -211,6 +225,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     monitoring: {
       polkadotJs: polkadotJsAppsLink("wss://previewnet.substrate.dev/bulletin"),
     },
+    hopNodes: [
+      "wss://previewnet.substrate.dev/bulletin-hop-0",
+      "wss://previewnet.substrate.dev/bulletin-hop-1",
+    ],
   },
   polkadot: {
     id: "polkadot",

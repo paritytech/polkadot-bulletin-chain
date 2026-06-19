@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useEffect } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Subscribe } from "@react-rxjs/core";
@@ -10,6 +13,7 @@ import { Explorer } from "@/pages/Explorer/Explorer";
 import { Authorizations } from "@/pages/Authorizations/Authorizations";
 import { Accounts } from "@/pages/Accounts/Accounts";
 import { Ops } from "@/pages/Ops/Ops";
+import { Hop } from "@/pages/Hop/Hop";
 import { restoreWalletConnection } from "@/state/wallet.state";
 
 export default function App() {
@@ -30,6 +34,7 @@ export default function App() {
             <Route path="/authorizations" element={<Authorizations />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/ops" element={<Ops />} />
+            <Route path="/hop" element={<Hop />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
