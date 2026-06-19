@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Integration tests for Bulletin SDK
@@ -20,7 +20,7 @@ import {
 } from "@polkadot-labs/hdkd-helpers"
 import { createClient, type PolkadotClient } from "polkadot-api"
 import { getPolkadotSigner } from "polkadot-api/signer"
-import { getWsProvider } from "polkadot-api/ws-provider"
+import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,

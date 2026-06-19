@@ -1,5 +1,8 @@
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink } from "lucide-react";
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
+import { Link, useLocation } from "react-router-dom";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Boxes } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
 const GithubIcon = ({ className }: { className?: string }) => (
@@ -17,14 +20,15 @@ import {
   SelectValue,
 } from "@/components/ui/Select";
 import { Badge } from "@/components/ui/Badge";
+import * as SelectPrimitive from "@radix-ui/react-select";
 import {
   useChainState,
   connectToNetwork,
-  switchStorageType,
-  STORAGE_CONFIGS,
+  getCustomNetworkUrl,
+  clearCustomNetworkUrl,
   type NetworkId,
-  type StorageType,
 } from "@/state/chain.state";
+import { WEB3_STORAGE_URL } from "@/config/networks";
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
 import { useAuthorization, useAuthorizationLoading } from "@/state/storage.state";
 import { formatAddress, formatBlockNumber } from "@/utils/format";
@@ -33,12 +37,13 @@ import React, { useState, useEffect } from "react";
 
 // All navigation items
 const navItems = [
-  { path: "/", label: "Dashboard", icon: Database, web3storage: true, requiresAuth: false },
-  { path: "/authorizations", label: "Faucet", icon: Shield, web3storage: false, requiresAuth: false },
-  { path: "/explorer", label: "Explorer", icon: Search, web3storage: true, requiresAuth: false },
-  { path: "/upload", label: "Upload", icon: Upload, web3storage: false, requiresAuth: true },
-  { path: "/download", label: "Download", icon: Download, web3storage: false, requiresAuth: false },
-  { path: "/renew", label: "Renew", icon: RefreshCw, web3storage: false, requiresAuth: true },
+  { path: "/", label: "Dashboard", icon: Database, requiresAuth: false },
+  { path: "/authorizations", label: "Faucet", icon: Shield, requiresAuth: false },
+  { path: "/explorer", label: "Explorer", icon: Search, requiresAuth: false },
+  { path: "/upload", label: "Upload", icon: Upload, requiresAuth: true },
+  { path: "/download", label: "Download", icon: Download, requiresAuth: false },
+  { path: "/renew", label: "Renew", icon: RefreshCw, requiresAuth: true },
+  { path: "/hop", label: "HOP", icon: Boxes, requiresAuth: false },
 ] as const;
 
 function ConnectionStatus() {
@@ -67,12 +72,7 @@ function AuthorizationStatus() {
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
   const isLoading = useAuthorizationLoading();
-  const { blockNumber, storageType } = useChainState();
-
-  // Don't show for web3storage mode
-  if (storageType === "web3storage") {
-    return null;
-  }
+  const { blockNumber } = useChainState();
 
   // Not connected - don't show anything (Connect button already visible)
   if (!selectedAccount) {
@@ -123,23 +123,103 @@ function AuthorizationStatus() {
 
 function NetworkSwitcher() {
   const { network, networks } = useChainState();
+  const isCustom = network.id === "custom";
+  const activeCustomUrl = isCustom ? network.endpoints[0] : undefined;
+  const [customUrl, setCustomUrl] = useState(() => activeCustomUrl ?? getCustomNetworkUrl());
+
+  useEffect(() => {
+    if (isCustom && activeCustomUrl) setCustomUrl(activeCustomUrl);
+  }, [isCustom, activeCustomUrl]);
 
   const handleNetworkChange = (value: string) => {
+    if (value === "custom") {
+      const saved = getCustomNetworkUrl();
+      connectToNetwork("custom", saved || undefined);
+      if (saved) setCustomUrl(saved);
+      return;
+    }
     connectToNetwork(value as NetworkId);
   };
 
+  const handleCustomConnect = () => {
+    const url = customUrl.trim();
+    if (!url || url === activeCustomUrl) return;
+    connectToNetwork("custom", url);
+  };
+
+  const handleClearCustom = () => {
+    setCustomUrl("");
+    clearCustomNetworkUrl();
+  };
+
+  const selectItems = Object.values(networks).map((net) => (
+    <SelectItem
+      key={net.id}
+      value={net.id}
+      disabled={net.id !== "custom" && net.endpoints.length === 0}
+    >
+      {net.name}
+    </SelectItem>
+  ));
+
+  if (!isCustom) {
+    return (
+      <Select value={network.id} onValueChange={handleNetworkChange}>
+        <SelectTrigger className="w-[260px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>{selectItems}</SelectContent>
+      </Select>
+    );
+  }
+
+  // In custom mode the trigger collapses into a single 260px-wide pill:
+  // [ wss URL input | ✕ | ▾ ]. The chevron is the Radix SelectTrigger so the
+  // dropdown still works to switch back to a preset network.
+  const dirty = customUrl.trim() !== "" && customUrl.trim() !== activeCustomUrl;
   return (
     <Select value={network.id} onValueChange={handleNetworkChange}>
-      <SelectTrigger className="w-[260px]">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {Object.values(networks).map((net) => (
-          <SelectItem key={net.id} value={net.id} disabled={net.endpoints.length === 0}>
-            {net.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
+      <div className="flex h-10 w-[260px] items-center rounded-md border-2 border-primary/60 bg-background pl-2 pr-1 ring-offset-background focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30 focus-within:ring-offset-2">
+        <input
+          value={customUrl}
+          onChange={(e) => setCustomUrl(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleCustomConnect();
+            }
+          }}
+          placeholder="wss://…"
+          className="min-w-0 flex-1 bg-transparent text-sm font-mono placeholder:text-muted-foreground focus:outline-none"
+        />
+        {dirty && (
+          <button
+            type="button"
+            onClick={handleCustomConnect}
+            className="ml-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary hover:bg-primary/10"
+            title="Connect to this URL"
+          >
+            Go
+          </button>
+        )}
+        {(activeCustomUrl || customUrl) && (
+          <button
+            type="button"
+            onClick={handleClearCustom}
+            className="ml-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            title="Remove custom URL"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+        <SelectPrimitive.Trigger
+          className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          title="Pick another network"
+        >
+          <ChevronDown className="h-4 w-4 opacity-70" />
+        </SelectPrimitive.Trigger>
+      </div>
+      <SelectContent>{selectItems}</SelectContent>
     </Select>
   );
 }
@@ -248,9 +328,8 @@ function AccountDisplay() {
 
 export function Header() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { status, storageType, network } = useChainState();
+  const { status, network } = useChainState();
   const selectedAccount = useSelectedAccount();
   const authorization = useAuthorization();
 
@@ -260,14 +339,6 @@ export function Header() {
       connectToNetwork(network.id);
     }
   }, []);
-
-  // Redirect to Dashboard if current route is disabled for the active storage type
-  useEffect(() => {
-    const currentItem = navItems.find((item) => item.path === location.pathname);
-    if (currentItem && storageType === "web3storage" && !currentItem.web3storage) {
-      navigate("/");
-    }
-  }, [storageType, location.pathname, navigate]);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -291,18 +362,17 @@ export function Header() {
             <div className="hidden sm:block">
               <NetworkSwitcher />
             </div>
-            <Select value={storageType} onValueChange={(v) => switchStorageType(v as StorageType)}>
-              <SelectTrigger className="w-[130px] h-8 text-xs hidden sm:flex">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.values(STORAGE_CONFIGS).map((config) => (
-                  <SelectItem key={config.id} value={config.id}>
-                    {config.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="h-8 text-xs hidden sm:inline-flex"
+            >
+              <a href={WEB3_STORAGE_URL} target="_blank" rel="noopener noreferrer">
+                Web3 Storage
+                <ExternalLink className="h-3 w-3 ml-1.5" />
+              </a>
+            </Button>
             <HelpMenu />
             <AccountDisplay />
 
@@ -321,9 +391,7 @@ export function Header() {
         {/* Bottom Row: Navigation */}
         <nav className="hidden md:flex items-center gap-1 h-10">
           {navItems.map((item) => {
-            const disabledByStorageType = storageType === "web3storage" && !item.web3storage;
-            const disabledByAuth = item.requiresAuth && (!selectedAccount || !authorization);
-            const disabled = disabledByStorageType || disabledByAuth;
+            const disabled = item.requiresAuth && (!selectedAccount || !authorization);
             if (disabled) {
               return (
                 <Button
@@ -358,9 +426,7 @@ export function Header() {
           <nav className="md:hidden py-4 border-t">
             <div className="flex flex-col gap-1">
               {navItems.map((item) => {
-                const disabledByStorageType = storageType === "web3storage" && !item.web3storage;
-                const disabledByAuth = item.requiresAuth && (!selectedAccount || !authorization);
-                const disabled = disabledByStorageType || disabledByAuth;
+                const disabled = item.requiresAuth && (!selectedAccount || !authorization);
                 if (disabled) {
                   return (
                     <Button

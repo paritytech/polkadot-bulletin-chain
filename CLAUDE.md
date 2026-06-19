@@ -11,6 +11,12 @@
 - ALWAYS run `/format` before creating any git commit
 - This ensures all code follows project formatting standards (Rust, TOML, feature propagation) and passes clippy
 
+**Documentation style:**
+- When adding or modifying docs (rustdoc, comments, Markdown), keep them minimal, simple, and correct — no fluff
+- Drop field/parameter docs when the name is self-evident in context
+- One short line is usually enough; only add more when the *why* is non-obvious (hidden constraints, surprising invariants, workarounds)
+- Do not narrate the change or restate what the code does; the reader can see that
+
 ## Project Overview
 
 Polkadot Bulletin Chain is a specialized blockchain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It serves as a storage solution primarily for the People/Proof-of-Personhood chain, functioning as a bridge-connected parachain with integrated IPFS support.
@@ -18,6 +24,8 @@ Polkadot Bulletin Chain is a specialized blockchain providing distributed data s
 **Deployment**: Run as a parachain with Polkadot SDK's `polkadot-omni-node`.
 
 **Key Purpose**: Store arbitrary data with proof-of-storage guarantees and make it accessible via IPFS, with data retention managed over a configurable `RetentionPeriod`.
+
+**Note**: The previous solochain version has been removed and is no longer maintained. Only the parachain runtime is supported.
 
 ## Build Commands
 

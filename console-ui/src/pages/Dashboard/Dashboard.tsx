@@ -1,18 +1,21 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, ExternalLink, RefreshCw } from "lucide-react";
+import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
-import { AuthorizationCard } from "@/components/AuthorizationCard";
-import { useChainState, useApi, StorageType } from "@/state/chain.state";
-import { useSelectedAccount } from "@/state/wallet.state";
+import { AccountSummaryCard } from "@/components/AccountSummaryCard";
+import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
+import { useChainState, useApi } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
-  extentAllowanceTransactions,
+  type RawTransactionInfo,
 } from "@/state/storage.state";
-import { formatAddress, formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
+import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
 function QuickActions() {
   return (
@@ -82,9 +85,16 @@ function ChainInfoCard() {
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Network</span>
-            <Badge variant="secondary">{network.name}</Badge>
+          <div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Network</span>
+              <Badge variant="secondary">{network.name}</Badge>
+            </div>
+            {network.endpoints[0] && (
+              <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
+                {network.endpoints[0]}
+              </p>
+            )}
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Status</span>
@@ -130,111 +140,7 @@ function ChainInfoCard() {
   );
 }
 
-function AccountCard() {
-  const selectedAccount = useSelectedAccount();
-
-  if (!selectedAccount) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
-          <CardDescription>Connect a wallet to get started</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Link to="/accounts">
-            <Button className="w-full">Connect Wallet</Button>
-          </Link>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Connected Account</CardTitle>
-        <CardDescription>{selectedAccount.name || "Unknown"}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <p className="font-mono text-sm break-all">
-            {formatAddress(selectedAccount.address, 8)}
-          </p>
-          <Link to="/accounts">
-            <Button variant="outline" size="sm" className="w-full">
-              Manage Accounts
-            </Button>
-          </Link>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function WelcomeCard({ storageType }: { storageType: StorageType }) {
-  if (storageType === "web3storage") {
-    return (
-      <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
-        <CardHeader>
-          <CardTitle className="text-2xl">Welcome to Web3 Storage Console</CardTitle>
-          <CardDescription className="text-base">
-            Decentralized storage powered by Web3 infrastructure
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid sm:grid-cols-3 gap-4 text-sm">
-            <div className="space-y-1">
-              <p className="font-medium">Web3 Native</p>
-              <p className="text-muted-foreground">
-                Built for the decentralized web
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium">Content Addressed</p>
-              <p className="text-muted-foreground">
-                Data identified and verified by content hashes
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium">Permissionless</p>
-              <p className="text-muted-foreground">
-                Open access to store and retrieve data
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 pt-4 border-t border-primary/10 space-y-2 text-sm">
-            <div>
-              <p className="font-medium mb-1">Design by <a href="https://github.com/eskimor" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">eskimor</a></p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <a href="https://github.com/paritytech/polkadot-sdk/pull/10731" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Design PR
-                </a>
-                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Scalable Web3 Storage
-                </a>
-                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage-implementation.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Implementation Details
-                </a>
-              </div>
-            </div>
-            <div>
-              <p className="font-medium mb-1">Proof of Concept</p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <a href="https://github.com/paritytech/web3-storage?tab=readme-ov-file#quick-start" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  web3-storage (see README for local setup)
-                </a>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
+function WelcomeCard() {
   return (
     <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
       <CardHeader>
@@ -270,60 +176,112 @@ function WelcomeCard({ storageType }: { storageType: StorageType }) {
 }
 
 interface UsageStats {
+  ephemeral: { count: number; bytes: bigint };
+  permanent: { count: number; used: bigint; cap: bigint };
   userAuths: { count: number; bytes: bigint };
   preimageAuths: { count: number; bytes: bigint };
-  transactions: { count: number; bytes: bigint };
 }
 
 function UsageCard() {
   const api = useApi();
   const [stats, setStats] = useState<UsageStats | null>(null);
   const [loading, setLoading] = useState(false);
+  const [palletError, setPalletError] = useState<string | null>(null);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue()
+      .then((p: bigint | number) => {
+        if (!cancelled) setRetentionPeriod(Number(p));
+      })
+      .catch(() => {
+        /* surfaced via palletError from the main effect */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api]);
 
   useEffect(() => {
     if (!api) return;
 
     let cancelled = false;
     setLoading(true);
+    setPalletError(null);
+
+    const recordPalletError = (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!cancelled) setPalletError((prev) => prev ?? msg);
+    };
 
     Promise.all([
-      api.query.TransactionStorage.Authorizations.getEntries(),
-      api.query.TransactionStorage.Transactions.getEntries(),
+      api.query.TransactionStorage.Authorizations.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      api.query.TransactionStorage.Transactions.getEntries().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      api.query.TransactionStorage.PermanentStorageUsed.getValue().catch((err: unknown) => {
+        recordPalletError(err);
+        return null;
+      }),
+      Promise.resolve(api.constants.TransactionStorage.MaxPermanentStorageSize()).catch(
+        (err: unknown) => {
+          recordPalletError(err);
+          return null;
+        }
+      ),
     ])
-      .then(([authEntries, txEntries]: [any[], any[]]) => {
+      .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
 
         const userAuths = { count: 0, bytes: 0n };
         const preimageAuths = { count: 0, bytes: 0n };
 
-        for (const { keyArgs, value } of authEntries) {
-          const extent = value.extent;
-          const txAllowance = Number(extentAllowanceTransactions(extent));
-          const bytesAllowance = extentAllowanceBytes(extent);
-          if (keyArgs[0].type === "Account") {
-            userAuths.count += txAllowance;
-            userAuths.bytes += bytesAllowance;
-          } else if (keyArgs[0].type === "Preimage") {
-            preimageAuths.count += txAllowance;
-            preimageAuths.bytes += bytesAllowance;
+        if (authEntries) {
+          for (const { keyArgs, value } of authEntries) {
+            const extent = value.extent;
+            const bytesAllowance = extentAllowanceBytes(extent);
+            if (keyArgs[0].type === "Account") {
+              userAuths.count++;
+              userAuths.bytes += bytesAllowance;
+            } else if (keyArgs[0].type === "Preimage") {
+              preimageAuths.count++;
+              preimageAuths.bytes += bytesAllowance;
+            }
           }
         }
 
-        let txCount = 0;
-        let txBytes = 0n;
-        for (const { value } of txEntries) {
-          if (Array.isArray(value)) {
-            for (const info of value) {
-              txCount++;
-              txBytes += BigInt(info.size);
+        const ephemeral = { count: 0, bytes: 0n };
+        const permanentCount = { count: 0 };
+        if (txEntries) {
+          for (const { value } of txEntries) {
+            if (Array.isArray(value)) {
+              for (const info of value) {
+                if (info?.kind?.type === "Store") {
+                  ephemeral.count++;
+                  ephemeral.bytes += BigInt(info.size);
+                } else if (info?.kind?.type === "Renew") {
+                  permanentCount.count++;
+                }
+              }
             }
           }
         }
 
         setStats({
+          ephemeral,
+          permanent: {
+            count: permanentCount.count,
+            used: permUsed ?? 0n,
+            cap: permCap ?? 0n,
+          },
           userAuths,
           preimageAuths,
-          transactions: { count: txCount, bytes: txBytes },
         });
       })
       .catch((err) => {
@@ -352,66 +310,57 @@ function UsageCard() {
           <div className="flex items-center justify-center py-4">
             <Spinner size="sm" />
           </div>
+        ) : palletError ? (
+          <PalletUnavailableNotice pallet="TransactionStorage" details={palletError} />
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Transactions
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatNumber(stats.transactions.count)}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                  Bytes
-                </p>
-                <p className="text-2xl font-semibold">
-                  {formatBytes(stats.transactions.bytes)}
-                </p>
+            <div>
+              <p className="text-sm font-medium mb-2">
+                Ephemeral
+                {retentionPeriod !== null && (
+                  <span className="text-muted-foreground font-normal">
+                    {" "}(RetentionPeriod: {formatNumber(retentionPeriod)})
+                  </span>
+                )}
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                <TotalsStat label="Transactions" value={formatNumber(stats.ephemeral.count)} />
+                <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
               </div>
             </div>
             <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Users</p>
+              <p className="text-sm font-medium mb-2">Permanent</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.userAuths.count)}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
-                  </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.userAuths.bytes)}
-                  </p>
-                </div>
+                <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
+                <TotalsStat
+                  label="Bytes"
+                  value={formatBytes(stats.permanent.used)}
+                  hint={`of ${formatBytes(stats.permanent.cap)}`}
+                />
               </div>
             </div>
+            <hr />
             <div>
-              <p className="text-sm font-medium mb-2">Authorizations for Preimages</p>
+              <p className="text-sm font-medium mb-2">Authorizations</p>
               <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Transactions
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Users ({formatNumber(stats.userAuths.count)})
                   </p>
-                  <p className="text-2xl font-semibold">
-                    {formatNumber(stats.preimageAuths.count)}
-                  </p>
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.userAuths.bytes)}
+                  />
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                    Bytes
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Preimages ({formatNumber(stats.preimageAuths.count)})
                   </p>
-                  <p className="text-2xl font-semibold">
-                    {formatBytes(stats.preimageAuths.bytes)}
-                  </p>
+                  <TotalsStat
+                    label="Bytes"
+                    value={formatBytes(stats.preimageAuths.bytes)}
+                  />
                 </div>
               </div>
             </div>
@@ -422,122 +371,33 @@ function UsageCard() {
   );
 }
 
-function Web3StorageTotalsCard() {
-  const api = useApi();
-  const [providerCount, setProviderCount] = useState<number | null>(null);
-  const [bucketCount, setBucketCount] = useState<number | null>(null);
-  const [challengeCount, setChallengeCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!api) return;
-
-    let cancelled = false;
-    setLoading(true);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const typedApi = api as any;
-
-    Promise.all([
-      typedApi.query.StorageProvider.Providers.getEntries(),
-      typedApi.query.StorageProvider.Buckets.getEntries(),
-      typedApi.query.StorageProvider.Challenges.getEntries(),
-    ])
-      .then(([providers, buckets, challenges]: [unknown[], unknown[], unknown[]]) => {
-        if (cancelled) return;
-        setProviderCount(providers.length);
-        setBucketCount(buckets.length);
-        setChallengeCount(challenges.length);
-      })
-      .catch((err: unknown) => {
-        console.error("Failed to fetch storage totals:", err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
-
+function TotalsStat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BarChart3 className="h-5 w-5" />
-          Storage Totals
-        </CardTitle>
-        <CardDescription>On-chain storage provider statistics</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading || providerCount === null ? (
-          <div className="flex items-center justify-center py-4">
-            <Spinner size="sm" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Providers
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(providerCount)}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Buckets
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(bucketCount ?? 0)}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Challenges
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(challengeCount ?? 0)}
-              </p>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-semibold">{value}</p>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
   );
 }
 
 export function Dashboard() {
-  const { storageType } = useChainState();
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          {storageType === "web3storage"
-            ? "Overview of your Web3 Storage activity"
-            : "Overview of your Bulletin Chain activity"}
+          Overview of your Bulletin Chain activity
         </p>
       </div>
 
-      {storageType === "web3storage" ? (
-        <div className="grid gap-6 md:grid-cols-2">
-          <WelcomeCard storageType={storageType} />
-          <ChainInfoCard />
-          <Web3StorageTotalsCard />
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <WelcomeCard storageType={storageType} />
-          <ChainInfoCard />
-          <QuickActions />
-          <AccountCard />
-          <UsageCard />
-          <AuthorizationCard className="lg:col-start-3" />
-        </div>
-      )}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <WelcomeCard />
+        <ChainInfoCard />
+        <QuickActions />
+        <AccountSummaryCard />
+        <UsageCard />
+      </div>
     </div>
   );
 }

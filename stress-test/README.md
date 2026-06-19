@@ -1,5 +1,13 @@
 # Bulletin Chain Stress Test
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 CLI tool and integration test suite for benchmarking write throughput and Bitswap read performance of the Bulletin Chain.
 
 ## Prerequisites
@@ -57,19 +65,20 @@ cargo build --release -p polkadot-parachain-bin
 
 The binaries will be at `target/release/polkadot` and `target/release/polkadot-parachain`.
 
-**Automated setup**: A script is provided that clones polkadot-sdk, builds the required binaries, and installs them to `~/local_bulletin_testing/bin/`:
+**Automated setup** (recommended): from the repo root run
 
 ```bash
-./scripts/setup_parachain_prerequisites.sh
+just binaries-polkadot
+just binaries-chain-spec-builder
 ```
 
-This builds `polkadot`, `polkadot-omni-node`, `polkadot-prepare-worker`, `polkadot-execute-worker`, and `chain-spec-builder`. It skips the build if the binaries are already present at the correct revision. On macOS it automatically sets `DYLD_FALLBACK_LIBRARY_PATH` for libclang.
+This fetches `polkadot`, `polkadot-omni-node`, `polkadot-prepare-worker`, `polkadot-execute-worker`, and `chain-spec-builder` into `<repo>/.polkadot-binaries/` (gitignored). When `POLKADOT_NODE_VERSION` is a 40-char commit hash, the script builds from source with `SKIP_WASM_BUILD=1`; macOS arm64 and Linux x86_64 release-tag assets are downloaded directly. See the top-level README for full details.
 
-Then set the env vars:
+Then set the env vars (replace `<dir>` with the path printed by `just binaries-polkadot`):
 
 ```bash
-export POLKADOT_RELAY_BINARY_PATH=~/local_bulletin_testing/bin/polkadot
-export POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni-node
+export POLKADOT_RELAY_BINARY_PATH=<dir>/polkadot
+export POLKADOT_PARACHAIN_BINARY_PATH=<dir>/polkadot-omni-node
 ```
 
 ### Parachain Chain Spec
@@ -77,10 +86,10 @@ export POLKADOT_PARACHAIN_BINARY_PATH=~/local_bulletin_testing/bin/polkadot-omni
 The chain spec at `zombienet/bulletin-westend-spec.json` (Para ID 2487, westend-local relay) embeds the runtime WASM blob. **You must regenerate it after any runtime changes**, otherwise zombienet tests will run with a stale runtime:
 
 ```bash
-./scripts/create_bulletin_westend_spec.sh
+just chain-spec westend
 ```
 
-This builds the `bulletin-westend-runtime` and embeds the fresh WASM into the spec. Requires `chain-spec-builder` on PATH (built by `./scripts/setup_parachain_prerequisites.sh`).
+This builds the `bulletin-westend-runtime` and embeds the fresh WASM into the spec via `chain-spec-builder`.
 
 ### zombienet-sdk
 
@@ -353,3 +362,13 @@ Returns an array of `ScenarioResult` objects. Each contains:
 ## Architecture
 
 See [DESIGN.md](DESIGN.md) for detailed architecture, data flow diagrams, and module dependency graph.
+
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

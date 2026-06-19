@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -11,14 +14,14 @@ import { logHeader, logConnection, logSuccess, logError, logTestResult } from '.
 import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from "polkadot-api/ws-provider";
+import { getWsProvider } from "polkadot-api/ws";
 import { Binary } from '@polkadot-api/substrate-bindings';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const CHUNK_SIZE = 6 * 1024 // 6 KB
 

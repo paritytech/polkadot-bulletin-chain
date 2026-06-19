@@ -1,5 +1,13 @@
 # Polkadot Bulletin Chain - Examples
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Examples demonstrating how to interact with the Polkadot Bulletin Chain.
 
 ## Directory Structure
@@ -139,7 +147,7 @@ just run-live-tests-paseo <seed> [ipfs_gateway_url] [image_size]
 ## Manually
 
 ```shell
-cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
+cd polkadot-bulletin-chain   # make sure you are inside the project directory for the following steps
 ```
 
 ### Download Zombienet
@@ -198,8 +206,6 @@ mkdir -p ~/local_bridge_testing/bin
 
 # Ensures `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
-# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
-git reset --hard origin/bko-bulletin-para-support
 cd polkadot-sdk
 
 cargo build -p polkadot -r
@@ -321,7 +327,7 @@ node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]
 cd rust/authorize-and-store
 ./fetch_metadata.sh ws://localhost:10000
 cargo build --release
-./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Eve"
 ```
 
 ## Troubleshooting
@@ -337,3 +343,13 @@ npx papi add -w ws://localhost:10000 bulletin
 cd examples/rust/authorize-and-store
 ./fetch_metadata.sh ws://localhost:10000
 ```
+
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

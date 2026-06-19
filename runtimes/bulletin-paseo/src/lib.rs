@@ -1,21 +1,7 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg_attr(not(feature = "std"), no_std)]
-// `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
-#![recursion_limit = "256"]
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -50,7 +36,7 @@ use alloc::{vec, vec::Vec};
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
-	construct_runtime, derive_impl,
+	derive_impl,
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
@@ -91,7 +77,8 @@ use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
 use xcm_config::AssetHubLocation;
 use xcm_config::{
-	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
+	FellowshipLocation, IsGovernanceVoiceOfBody, TokenRelayLocation,
+	XcmOriginToTransactDispatchOrigin,
 };
 use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
@@ -148,19 +135,9 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (
-		pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
-		pallet_session::migrations::v1::MigrateV0ToV1<
-			Runtime,
-			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
-		>,
-		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
-	);
+	///
+	/// Paseo is a fresh chain, so the historical version-bump migrations do not apply.
+	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -175,6 +152,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
+	///
+	/// Paseo is a fresh chain, so the historical transaction-storage MBM migrations do not apply.
 	pub type MbmMigrations = ();
 }
 
@@ -200,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_011,
+	spec_version: 1_000_019,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -284,7 +263,7 @@ impl frame_system::Config for Runtime {
 	type MaxConsumers = ConstU32<16>;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
-	type MultiBlockMigrator = migrations::MbmMigrations;
+	type MultiBlockMigrator = MultiBlockMigrations;
 }
 
 impl cumulus_pallet_weight_reclaim::Config for Runtime {
@@ -402,6 +381,25 @@ impl parachain_info::Config for Runtime {}
 impl cumulus_pallet_aura_ext::Config for Runtime {}
 
 parameter_types! {
+	pub MbmServiceWeight: Weight =
+		Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_migrations::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	#[cfg(not(feature = "runtime-benchmarks"))]
+	type Migrations = migrations::MbmMigrations;
+	#[cfg(feature = "runtime-benchmarks")]
+	type Migrations = pallet_migrations::mock_helpers::MockedMigrations;
+	type CursorMaxLen = ConstU32<65_536>;
+	type IdentifierMaxLen = ConstU32<256>;
+	type MigrationStatusHandler = ();
+	type FailedMigrationHandler = frame_support::migrations::FreezeChainOnFailedMigration;
+	type MaxServiceWeight = MbmServiceWeight;
+	type WeightInfo = pallet_migrations::weights::SubstrateWeight<Runtime>;
+}
+
+parameter_types! {
 	/// Fellows pluralistic body.
 	pub const FellowsBodyId: BodyId = BodyId::Technical;
 }
@@ -483,10 +481,8 @@ parameter_types! {
 }
 
 /// We allow Root and the `StakingAdmin` to execute privileged collator selection operations.
-pub type CollatorSelectionUpdateOrigin = EitherOfDiverse<
-	EnsureRoot<AccountId>,
-	EnsureXcm<IsVoiceOfBody<GovernanceLocation, StakingAdminBodyId>>,
->;
+pub type CollatorSelectionUpdateOrigin =
+	EitherOfDiverse<EnsureRoot<AccountId>, EnsureXcm<IsGovernanceVoiceOfBody<StakingAdminBodyId>>>;
 
 impl pallet_collator_selection::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
@@ -580,43 +576,79 @@ where
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
-construct_runtime!(
-	pub enum Runtime
-	{
-		// System support stuff.
-		System: frame_system = 0,
-		ParachainSystem: cumulus_pallet_parachain_system = 1,
-		Timestamp: pallet_timestamp = 3,
-		ParachainInfo: parachain_info = 4,
-		WeightReclaim: cumulus_pallet_weight_reclaim = 5,
-		Utility: pallet_utility = 6,
+#[frame_support::runtime(legacy_ordering)]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Runtime;
 
-		// Monetary stuff.
-		Balances: pallet_balances = 10,
-		TransactionPayment: pallet_transaction_payment = 11,
-		SkipFeelessPayment: pallet_skip_feeless_payment = 12,
+	// System support stuff.
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+	#[runtime::pallet_index(1)]
+	pub type ParachainSystem = cumulus_pallet_parachain_system;
+	#[runtime::pallet_index(3)]
+	pub type Timestamp = pallet_timestamp;
+	#[runtime::pallet_index(4)]
+	pub type ParachainInfo = parachain_info;
+	#[runtime::pallet_index(5)]
+	pub type WeightReclaim = cumulus_pallet_weight_reclaim;
+	#[runtime::pallet_index(6)]
+	pub type Utility = pallet_utility;
+	#[runtime::pallet_index(7)]
+	pub type MultiBlockMigrations = pallet_migrations;
 
-		// Storage
-		TransactionStorage: pallet_bulletin_transaction_storage = 40,
-		HopPromotion: pallet_hop_promotion = 41,
+	// Monetary stuff.
+	#[runtime::pallet_index(10)]
+	pub type Balances = pallet_balances;
+	#[runtime::pallet_index(11)]
+	pub type TransactionPayment = pallet_transaction_payment;
+	#[runtime::pallet_index(12)]
+	pub type SkipFeelessPayment = pallet_skip_feeless_payment;
 
-		// Collator support. The order of these 5 are important and shall not change.
-		Authorship: pallet_authorship = 20,
-		CollatorSelection: pallet_collator_selection = 21,
-		Session: pallet_session = 22,
-		Aura: pallet_aura = 23,
-		AuraExt: cumulus_pallet_aura_ext = 24,
+	// Storage
+	#[runtime::pallet_index(40)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+	#[runtime::pallet_index(41)]
+	pub type HopPromotion = pallet_bulletin_hop_promotion;
 
-		// XCM & related
-		XcmpQueue: cumulus_pallet_xcmp_queue = 30,
-		PolkadotXcm: pallet_xcm = 31,
-		CumulusXcm: cumulus_pallet_xcm = 32,
-		MessageQueue: pallet_message_queue = 34,
+	// Collator support. The order of these 5 are important and shall not change.
+	#[runtime::pallet_index(20)]
+	pub type Authorship = pallet_authorship;
+	#[runtime::pallet_index(21)]
+	pub type CollatorSelection = pallet_collator_selection;
+	#[runtime::pallet_index(22)]
+	pub type Session = pallet_session;
+	#[runtime::pallet_index(23)]
+	pub type Aura = pallet_aura;
+	#[runtime::pallet_index(24)]
+	pub type AuraExt = cumulus_pallet_aura_ext;
 
-		// Sudo
-		Sudo: pallet_sudo = 100,
-	}
-);
+	// XCM & related
+	#[runtime::pallet_index(30)]
+	pub type XcmpQueue = cumulus_pallet_xcmp_queue;
+	#[runtime::pallet_index(31)]
+	pub type PolkadotXcm = pallet_xcm;
+	#[runtime::pallet_index(32)]
+	pub type CumulusXcm = cumulus_pallet_xcm;
+	#[runtime::pallet_index(34)]
+	pub type MessageQueue = pallet_message_queue;
+
+	// Sudo
+	#[runtime::pallet_index(100)]
+	pub type Sudo = pallet_sudo;
+}
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benches {
@@ -630,7 +662,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
-		[pallet_hop_promotion, HopPromotion]
+		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -875,11 +907,33 @@ impl_runtime_apis! {
 		fn retention_period() -> NumberFor<Block> {
 			TransactionStorage::retention_period()
 		}
+
+		fn indexed_transactions(
+			block: NumberFor<Block>,
+		) -> alloc::vec::Vec<sp_transaction_storage_proof::IndexedTransactionInfo> {
+			use sp_transaction_storage_proof::IndexedTransactionInfo;
+
+			TransactionStorage::transactions_at(block)
+				.map(|txs| {
+					txs.into_iter()
+						.map(|tx| {
+							IndexedTransactionInfo {
+								content_hash: tx.content_hash,
+								size: tx.size,
+								hashing: tx.hashing.into(),
+								cid_codec: tx.cid_codec,
+								extrinsic_index: tx.extrinsic_index,
+							}
+						})
+						.collect()
+				})
+				.unwrap_or_default()
+		}
 	}
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
 		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
-			pallet_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
 		}
 
 		fn create_promotion_extrinsic(
@@ -889,8 +943,8 @@ impl_runtime_apis! {
 			submit_timestamp: u64,
 		) -> <Block as BlockT>::Extrinsic {
 			use frame_system::offchain::CreateAuthorizedTransaction;
-			<Runtime as CreateAuthorizedTransaction<pallet_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
-				pallet_hop_promotion::Call::<Runtime>::promote {
+			<Runtime as CreateAuthorizedTransaction<pallet_bulletin_hop_promotion::Call<Runtime>>>::create_authorized_transaction(
+				pallet_bulletin_hop_promotion::Call::<Runtime>::promote {
 					data,
 					signer,
 					signature,
@@ -903,6 +957,29 @@ impl_runtime_apis! {
 		fn max_promotion_size() -> u32 {
 			use frame_support::traits::Get;
 			<Runtime as pallet_bulletin_transaction_storage::Config>::MaxTransactionSize::get()
+		}
+
+		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
+			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+		}
+	}
+
+	impl pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi<Block, AccountId, BlockNumber> for Runtime {
+		fn account_authorization(
+			account: AccountId,
+		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+		}
+
+		fn can_store(account: AccountId, data_len: u32) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+		}
+
+		fn can_renew(
+			account: AccountId,
+			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
+		) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
 		}
 	}
 

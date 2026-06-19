@@ -4,7 +4,7 @@ version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 description = "Westend's Bulletin parachain runtime"
-license = "Apache-2.0"
+license = "GPL-3.0-only"
 repository.workspace = true
 publish = false
 
@@ -32,15 +32,17 @@ pallet-aura = { workspace = true }
 pallet-authorship = { workspace = true }
 pallet-balances = { workspace = true }
 pallet-message-queue = { workspace = true }
+pallet-migrations = { workspace = true }
 pallet-session = { workspace = true }
 pallet-skip-feeless-payment = { workspace = true }
 pallet-sudo = { workspace = true }
 pallet-timestamp = { workspace = true }
 pallet-utility = { workspace = true }
-pallet-hop-promotion = { workspace = true }
+pallet-bulletin-hop-promotion = { workspace = true }
 pallet-transaction-payment = { workspace = true }
 pallet-transaction-payment-rpc-runtime-api = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
+pallet-bulletin-transaction-storage-runtime-api = { workspace = true }
 bulletin-pallets-common = { workspace = true }
 sp-api = { workspace = true }
 sp-block-builder = { workspace = true }
@@ -119,10 +121,12 @@ std = [
 	"pallet-aura/std",
 	"pallet-authorship/std",
 	"pallet-balances/std",
+	"pallet-bulletin-hop-promotion/std",
+	"pallet-bulletin-transaction-storage-runtime-api/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-collator-selection/std",
-	"pallet-hop-promotion/std",
 	"pallet-message-queue/std",
+	"pallet-migrations/std",
 	"pallet-session/std",
 	"pallet-skip-feeless-payment/std",
 	"pallet-sudo/std",
@@ -177,10 +181,11 @@ runtime-benchmarks = [
 	"frame-system-benchmarking/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
 	"pallet-balances/runtime-benchmarks",
+	"pallet-bulletin-hop-promotion/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-collator-selection/runtime-benchmarks",
-	"pallet-hop-promotion/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
+	"pallet-migrations/runtime-benchmarks",
 	"pallet-session/runtime-benchmarks",
 	"pallet-skip-feeless-payment/runtime-benchmarks",
 	"pallet-sudo/runtime-benchmarks",
@@ -213,10 +218,11 @@ try-runtime = [
 	"pallet-aura/try-runtime",
 	"pallet-authorship/try-runtime",
 	"pallet-balances/try-runtime",
+	"pallet-bulletin-hop-promotion/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-collator-selection/try-runtime",
-	"pallet-hop-promotion/try-runtime",
 	"pallet-message-queue/try-runtime",
+	"pallet-migrations/try-runtime",
 	"pallet-session/try-runtime",
 	"pallet-skip-feeless-payment/try-runtime",
 	"pallet-sudo/try-runtime",

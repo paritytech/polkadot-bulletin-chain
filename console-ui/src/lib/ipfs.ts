@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 /**
  * Default IPFS gateway URL for local Bulletin Chain node
  */
@@ -9,6 +12,8 @@ export const DEFAULT_IPFS_GATEWAY = "http://127.0.0.1:8283";
 export const IPFS_GATEWAYS: Record<string, string> = {
   local: "http://127.0.0.1:8283",
   paseo: "https://paseo-ipfs.polkadot.io",
+  "paseo-next-v2": "https://paseo-bulletin-next-ipfs.polkadot.io",
+  summit: "https://summit-ipfs.polkadot.io",
   previewnet: "https://previewnet.substrate.dev",
 };
 
@@ -21,6 +26,8 @@ export const PREFERRED_DOWNLOAD_METHOD: Record<string, "p2p" | "gateway"> = {
   local: "p2p",
   westend: "p2p",
   paseo: "gateway",
+  "paseo-next-v2": "gateway",
+  summit: "gateway",
   previewnet: "gateway",
 };
 
@@ -99,6 +106,30 @@ export async function getIpfsContentInfo(
   } catch {
     return null;
   }
+}
+
+/**
+ * Fetch raw block data from IPFS gateway (using ?format=raw).
+ * Returns the raw encoded block bytes, needed for parsing DAG-PB manifests.
+ */
+export async function fetchRawBlock(
+  cid: string,
+  gateway: string = DEFAULT_IPFS_GATEWAY
+): Promise<Uint8Array> {
+  const url = `${gateway}/ipfs/${cid}?format=raw`;
+
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/vnd.ipld.raw",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`IPFS raw block fetch failed: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
 }
 
 /**

@@ -1,11 +1,13 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
-import { withPolkadotSdkCompat } from "polkadot-api/polkadot-sdk-compat"
+import { bulletin } from './.papi/descriptors/dist/index.js';
 import assert from "assert";
 
 import fs from 'fs'
@@ -16,7 +18,7 @@ import * as dagPB from "@ipld/dag-pb";
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 // ---- CONFIG ----
@@ -34,7 +36,7 @@ async function main() {
         generateTextImage(filePath, "Hello, Bulletin dag - " + new Date().toString());
 
         // Create PAPI client with WebSocket provider
-        client = createClient(withPolkadotSdkCompat(getWsProvider(NODE_WS)));
+        client = createClient(getWsProvider(NODE_WS));
         // Get typed API with generated descriptors
         const typedApi = client.getTypedApi(bulletin);
         await waitForBlockProduction(typedApi);

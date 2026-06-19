@@ -64,7 +64,10 @@ pub mod pallet {
 	use super::signing_payload;
 	use crate::WeightInfo;
 	use alloc::vec::Vec;
-	use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
+	use bulletin_transaction_storage_primitives::{
+		cids::{HashingAlgorithm, RAW_CODEC},
+		ContentHash,
+	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
@@ -103,6 +106,18 @@ pub mod pallet {
 			pallet_bulletin_transaction_storage::Pallet::<T>::account_has_active_authorization(who)
 		}
 
+		/// Whether `content_hash` is currently stored on-chain — i.e. some
+		/// retained transaction in `pallet-bulletin-transaction-storage`
+		/// indexes it.
+		///
+		/// Used by HOP's maintenance task to confirm a previously submitted
+		/// promotion extrinsic landed in a block. Delegates to
+		/// `pallet-bulletin-transaction-storage::contains_transaction`,
+		/// which answers in O(1) via the content-hash index.
+		pub fn is_promoted_on_chain(content_hash: ContentHash) -> bool {
+			pallet_bulletin_transaction_storage::Pallet::<T>::contains_transaction(content_hash)
+		}
+
 		/// Authorizes a [`Call::promote`] dispatch in the tx pool: validates the
 		/// source, data size, block fullness, submit-timestamp freshness, account
 		/// authorization, and the user's sr25519 signature over `(data, ts)`.
@@ -111,10 +126,10 @@ pub mod pallet {
 		#[allow(clippy::ptr_arg)]
 		pub fn authorize_promote(
 			source: TransactionSource,
-			data: &Vec<u8>,
 			signer: &MultiSigner,
 			signature: &MultiSignature,
 			submit_timestamp: &u64,
+			data: &Vec<u8>,
 		) -> Result<(ValidTransaction, Weight), TransactionValidityError> {
 			if matches!(source, TransactionSource::External) {
 				return Err(InvalidTransaction::Call.into());
@@ -173,12 +188,17 @@ pub mod pallet {
 		#[pallet::weight_of_authorize(<T as Config>::WeightInfo::authorize_promote(data.len() as u32))]
 		// `signer`/`signature`/`submit_timestamp` are validated by `authorize_promote`
 		// above; the dispatch body trusts them and only runs after authorization.
+		//
+		// `data` MUST be the last argument — see the FOOTGUN note on
+		// `pallet_bulletin_transaction_storage::Pallet::do_store`: the trailing
+		// `data.len()` bytes of the encoded extrinsic get indexed, so any field
+		// encoded after `data` corrupts the stored blob.
 		pub fn promote(
 			origin: OriginFor<T>,
-			data: Vec<u8>,
 			_signer: MultiSigner,
 			_signature: MultiSignature,
 			_submit_timestamp: u64,
+			data: Vec<u8>,
 		) -> DispatchResult {
 			ensure_authorized(origin)?;
 			pallet_bulletin_transaction_storage::Pallet::<T>::do_store(

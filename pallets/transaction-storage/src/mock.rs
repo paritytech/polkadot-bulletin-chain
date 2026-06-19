@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -18,28 +16,59 @@
 //! Test environment for transaction-storage pallet.
 
 use crate::{
-	self as pallet_bulletin_transaction_storage, TransactionStorageProof,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	self as pallet_bulletin_transaction_storage, AsAuthorizer, EnsureAllowedAuthorizers,
+	TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
-use polkadot_sdk_frame::{prelude::*, runtime::prelude::*, testing_prelude::*};
+use polkadot_sdk_frame::{
+	deps::{frame_support, frame_system},
+	prelude::*,
+	runtime::prelude::*,
+	testing_prelude::*,
+	traits::EitherOf,
+};
 
 type Block = MockBlock<Test>;
 
 // Configure a mock runtime to test the pallet.
-construct_runtime!(
-	pub enum Test
-	{
-		System: frame_system,
-		TransactionStorage: pallet_bulletin_transaction_storage,
-	}
-);
+#[frame_support::runtime]
+mod runtime {
+	#[runtime::runtime]
+	#[runtime::derive(
+		RuntimeCall,
+		RuntimeEvent,
+		RuntimeError,
+		RuntimeOrigin,
+		RuntimeTask,
+		RuntimeFreezeReason,
+		RuntimeHoldReason,
+		RuntimeSlashReason,
+		RuntimeLockId,
+		RuntimeViewFunction
+	)]
+	pub struct Test;
+
+	#[runtime::pallet_index(0)]
+	pub type System = frame_system;
+
+	#[runtime::pallet_index(1)]
+	pub type TransactionStorage = pallet_bulletin_transaction_storage;
+}
+
+parameter_types! {
+	pub const TestDbWeight: polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight =
+		polkadot_sdk_frame::deps::frame_support::weights::RuntimeDbWeight {
+			read: 1_000_000,
+			write: 5_000_000,
+		};
+}
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
 impl frame_system::Config for Test {
 	type Nonce = u64;
 	type Block = Block;
 	type BlockHashCount = ConstU64<250>;
+	type DbWeight = TestDbWeight;
 }
 
 parameter_types! {
@@ -48,6 +77,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -59,8 +89,13 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
-	type Authorizer = EnsureRoot<Self::AccountId>;
+	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
+	type Authorizer = EitherOf<
+		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
+		EnsureAllowedAuthorizers<Self>,
+	>;
 	type StoreRenewPriority = StoreRenewPriority;
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
@@ -78,6 +113,7 @@ pub fn new_test_ext() -> TestExternalities {
 			entry_fee: 200,
 			account_authorizations: vec![],
 			preimage_authorizations: vec![],
+			allowed_authorizers: vec![],
 		},
 	}
 	.build_storage()
@@ -89,9 +125,8 @@ pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 's
 	System::run_to_block_with::<AllPalletsWithSystem>(
 		n,
 		RunToBlockHooks::default().before_finalize(|_| {
-			if let Some(proof) = f() {
-				TransactionStorage::check_proof(RuntimeOrigin::none(), proof).unwrap();
-			}
+			let proof = f();
+			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof).unwrap();
 		}),
 	);
 }

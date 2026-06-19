@@ -1,17 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 //! # Bulletin Paseo Runtime genesis config presets
 
@@ -36,6 +24,7 @@ fn bulletin_paseo_genesis(
 	id: ParaId,
 	sudo_account: Option<AccountId>,
 	account_authorizations: Vec<(AccountId, u32, u64)>,
+	allowed_authorizers: Vec<(AccountId, u32, u64)>,
 ) -> serde_json::Value {
 	build_struct_json_patch!(RuntimeGenesisConfig {
 		balances: BalancesConfig {
@@ -62,6 +51,7 @@ fn bulletin_paseo_genesis(
 		sudo: SudoConfig { key: sudo_account },
 		transaction_storage: TransactionStorageConfig {
 			account_authorizations,
+			allowed_authorizers,
 			..Default::default()
 		},
 	})
@@ -83,6 +73,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			Some(Sr25519Keyring::Alice.to_account_id()),
 			// Account authorizations (account, transactions_allowance, bytes_allowance).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
+			// Additional account authorizers (account, transactions budget, bytes budget).
+			vec![(Sr25519Keyring::Eve.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_paseo_genesis(
 			// initial collators.
@@ -99,6 +91,8 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 			Some(Sr25519Keyring::Alice.to_account_id()),
 			// Account authorizations (account, transactions_allowance, bytes_allowance).
 			vec![(Sr25519Keyring::Alice.to_account_id(), 100, 10 * 1024 * 1024)],
+			// Additional account authorizers (account, transactions budget, bytes budget).
+			vec![(Sr25519Keyring::Eve.to_account_id(), 100_000, 100 * 1024 * 1024 * 1024)],
 		),
 		_ => return None,
 	};
