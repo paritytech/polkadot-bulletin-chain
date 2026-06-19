@@ -33,8 +33,8 @@ export default function App() {
             <Route path="/explorer" element={<Explorer />} />
             <Route path="/authorizations" element={<Authorizations />} />
             <Route path="/accounts" element={<Accounts />} />
-            <Route path="/ops" element={<Ops />} />
-            <Route path="/hop" element={<Hop />} />
+           <Route path="/hop" element={<Hop />} />
+           <Route path="/ops" element={<Ops />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
