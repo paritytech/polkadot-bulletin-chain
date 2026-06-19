@@ -2,7 +2,6 @@
 
 Grafana dashboard models for the Bulletin networks. Edit here, then re-import.
 
-- `bulletin-summit-dashboard.json` — Summit
 - `bulletin-paseo-dashboard.json` — Paseo Next V2
 
 Import: [Grafana](https://grafana.teleport.parity.io/dashboard/new?orgId=1&from=now-6h&to=now&timezone=browser)
