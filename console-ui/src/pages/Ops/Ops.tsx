@@ -67,16 +67,19 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
     });
   }
 
-  // Writes, full dashboard first for context, then the per-deploy and per-chunk spans.
-  const writes: LinkSpec[] = [];
+  // Full deploy dashboard sits at the top of the Sentry group; the Write/Read
+  // subgroups below drill into individual deploy.* spans.
+  const sentryOverview: LinkSpec[] = [];
   if (monitoring.sentry) {
-    writes.push({
+    sentryOverview.push({
       label: "Bulletin Deploy Health",
       href: monitoring.sentry,
       icon: LineChart,
       description: "Full deploy dashboard.",
     });
   }
+
+  const writes: LinkSpec[] = [];
   if (monitoring.sentryChunkUploadSpan) {
     writes.push({
       label: "deploy.chunk-upload span",
@@ -120,7 +123,7 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
 
   const groups: Group[] = [
     { title: "Chain Health", items: chainHealth },
-    { title: "Sentry",       subgroups: sentrySubgroups },
+    { title: "Sentry",       items: sentryOverview, subgroups: sentrySubgroups },
     { title: "Docs",         items: docs },
   ];
   return groups.filter((g) =>
