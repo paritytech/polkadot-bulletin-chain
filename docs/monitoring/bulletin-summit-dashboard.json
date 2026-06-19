@@ -316,13 +316,156 @@
       ]
     },
     {
+      "type": "timeseries",
+      "title": "Gateway latency (p50/p90/p99)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "p50",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(ipfs_http_gw_request_duration_seconds_bucket{job=~\"ipfs-summit-kubo\"}[5m])))"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "p90",
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(ipfs_http_gw_request_duration_seconds_bucket{job=~\"ipfs-summit-kubo\"}[5m])))"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "p99",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(ipfs_http_gw_request_duration_seconds_bucket{job=~\"ipfs-summit-kubo\"}[5m])))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway 5xx by pod",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "{{pod}}",
+          "expr": "sum by (pod) (increase(ipfs_http_gw_responses_total{job=~\"ipfs-summit-kubo\", code=~\"5..\"}[$__rate_interval]))"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "IPFS connected peers (kubo)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "{{pod}}",
+          "expr": "sum by (pod) (ipfs_p2p_peers_total{job=~\"ipfs-summit-kubo\"})"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "IPFS process memory (RSS)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "legendFormat": "{{pod}}",
+          "expr": "process_resident_memory_bytes{job=~\"ipfs-summit-kubo\"}"
+        }
+      ]
+    },
+    {
       "type": "row",
       "title": "Bitswap",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 49
       }
     },
     {
@@ -336,7 +479,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -366,7 +509,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 50
       },
       "fieldConfig": {
         "defaults": {
@@ -392,7 +535,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 58
       }
     },
     {
@@ -406,7 +549,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 43
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -441,7 +584,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 43
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -480,7 +623,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 43
+        "y": 59
       },
       "fieldConfig": {
         "defaults": {
@@ -515,7 +658,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 51
+        "y": 67
       },
       "fieldConfig": {
         "defaults": {
