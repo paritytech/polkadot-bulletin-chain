@@ -136,11 +136,8 @@ pub mod migrations {
 
 	/// Unreleased migrations. Add new ones here:
 	///
-	/// `MigrateV4ToV5` is single-block, so it runs in `on_runtime_upgrade`. On a chain still
-	/// at v3 it is a no-op (its v4 guard); the v3->v4 MBM below bumps to v4, then a following
-	/// runtime upgrade lets this step bump v4->v5. Idempotent on chains already at v5.
-	pub type Unreleased =
-		(pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,);
+	/// Paseo is a fresh chain, so the historical version-bump migrations do not apply.
+	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -156,10 +153,8 @@ pub mod migrations {
 
 	/// MBM migrations to apply on runtime upgrade.
 	///
-	/// `MigrateV3ToV4` walks `AutoRenewals` to the v4 layout. Self-guarded and idempotent, so
-	/// it is a no-op on chains already at/beyond v4.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,);
+	/// Paseo is a fresh chain, so the historical transaction-storage MBM migrations do not apply.
+	pub type MbmMigrations = ();
 }
 
 /// Executive: handles dispatch to the various modules.
