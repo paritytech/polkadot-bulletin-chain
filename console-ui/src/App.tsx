@@ -34,7 +34,7 @@ export default function App() {
             <Route path="/authorizations" element={<Authorizations />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/hop" element={<Hop />} />
-           <Route path="/ops" element={<Ops />} />
+            <Route path="/ops" element={<Ops />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
