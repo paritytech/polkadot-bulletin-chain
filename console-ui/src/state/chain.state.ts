@@ -26,7 +26,6 @@ const DESCRIPTORS: Record<string, any> = {
   westend: bulletin_westend,
   paseo: bulletin_paseo,
   "paseo-next-v2": bulletin_paseo_next_v2,
-  summit: bulletin_paseo_next_v2,
   polkadot: bulletin_polkadot,
   previewnet: bulletin_westend,
 };
