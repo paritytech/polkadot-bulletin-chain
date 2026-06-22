@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { Link, useLocation } from "react-router-dom";
-import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Boxes } from "lucide-react";
+import { Database, Upload, Download, RefreshCw, Search, Shield, Wallet, Menu, AlertTriangle, HelpCircle, BookOpen, ExternalLink, ChevronDown, X, Activity, Boxes } from "lucide-react";
 
 // Brand icons were removed in lucide-react 1.x — inline the Github icon SVG from 0.577.0
 const GithubIcon = ({ className }: { className?: string }) => (
@@ -11,6 +11,7 @@ const GithubIcon = ({ className }: { className?: string }) => (
     <path d="M9 18c-4.51 2-5-2-7-2" />
   </svg>
 );
+
 import { Button } from "@/components/ui/Button";
 import {
   Select,
@@ -44,6 +45,7 @@ const navItems = [
   { path: "/download", label: "Download", icon: Download, requiresAuth: false },
   { path: "/renew", label: "Renew", icon: RefreshCw, requiresAuth: true },
   { path: "/hop", label: "HOP", icon: Boxes, requiresAuth: false },
+  { path: "/ops", label: "Ops", icon: Activity, requiresAuth: false },
 ] as const;
 
 function ConnectionStatus() {
