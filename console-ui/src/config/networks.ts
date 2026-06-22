@@ -207,16 +207,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       "wss://paseo-hop-next-1.polkadot.io",
     ],
   },
-  summit: {
-    id: "summit",
-    name: "Bulletin Summit",
-    endpoints: ["wss://summit-bulletin-rpc.polkadot.io"],
-    lightClient: false,
-    hopNodes: [
-      "https://summit-hop-0.polkadot.io",
-      "https://summit-hop-1.polkadot.io",
-    ],
-  },
   previewnet: {
     id: "previewnet",
     name: "Bulletin Previewnet",
