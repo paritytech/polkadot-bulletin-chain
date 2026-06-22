@@ -275,7 +275,7 @@ function HelpMenu() {
       {open && (
         <div className="absolute right-0 top-full mt-2 w-64 rounded-md border bg-popover p-2 shadow-lg z-50">
             <div className="text-xs font-medium text-muted-foreground px-2 py-1.5">
-              Help &amp; Resources
+              Help & Resources
             </div>
             {helpLinks.map((link) => (
               <a
