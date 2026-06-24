@@ -1,7 +1,7 @@
+#!/usr/bin/env node
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-#!/usr/bin/env node
 /**
  * Runtime Upgrade Script for Bulletin Chain Networks
  *
