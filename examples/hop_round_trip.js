@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * End-to-end HOP demo: authorization, round-trip claim/ack, and promotion.
  *

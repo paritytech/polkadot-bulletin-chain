@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 set -euo pipefail
 
 # Path to your keystore (adjust as needed)
