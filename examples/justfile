@@ -888,12 +888,14 @@ PASEO_RPC           := "wss://paseo-bulletin-rpc.polkadot.io"
 PASEO_NEXT_V2_RPC   := "wss://paseo-bulletin-next-rpc.polkadot.io"
 PREVIEWNET_RPC      := "wss://previewnet.substrate.dev/bulletin"
 
-# HOP pool endpoint. The public RPC nodes carry --enable-hop, so the round-trip
-# runs against the same RPC (single node, so sender and receiver share a pool).
-WESTEND_HOP_RPC         := WESTEND_RPC
-PASEO_HOP_RPC           := PASEO_RPC
-PASEO_NEXT_V2_HOP_RPC   := PASEO_NEXT_V2_RPC
-PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC
+# HOP pool endpoint. The pool is node-local, so the round-trip must pin sender and
+# receiver to a single node. The public RPC is multi-replica, so a HOP call there
+# can land on two different nodes and break the round-trip; use a dedicated
+# single-node HOP endpoint where one exists.
+WESTEND_HOP_RPC         := WESTEND_RPC          # TODO(#580): no dedicated westend HOP DNS yet
+PASEO_HOP_RPC           := "wss://paseo-hop-0.polkadot.io"
+PASEO_NEXT_V2_HOP_RPC   := "wss://paseo-hop-next-0.polkadot.io"
+PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC       # TODO(#580): no dedicated previewnet HOP DNS yet
 
 # Network-specific IPFS gateways.
 WESTEND_IPFS_GATEWAY        := "https://westend-ipfs.polkadot.io"
@@ -922,10 +924,9 @@ PREVIEWNET_RELAY_SPEC       := "TODO-paseo-relay-chainspec.json"
 # ── Web3 Summit network ───────────────────────────────────────────────────────
 # Bulletin v0.0.18-paseo on the Summit relay (para 1501). Verified end-to-end with
 # `--seed //Eve` + a local kubo peered to the Summit collators (`ipfs-kubo-summit`):
-# store_big_data, smoldot and chopsticks all pass. HOP is wired (chain ops on the
-# public RPC, pool round-trip pinned to a single node) but can't run yet:
-# TODO(#580): summit-hop-0/1.polkadot.io have no DNS. The 2-replica public RPC
-# can't serve the round-trip because the HOP pool is node-local.
+# store_big_data, smoldot and chopsticks all pass. HOP runs with chain ops on the
+# public RPC and the pool round-trip pinned to a single node (summit-hop-0), since
+# the pool is node-local and the public RPC is multi-replica.
 SUMMIT_RPC              := "wss://summit-bulletin-rpc.polkadot.io"
 SUMMIT_RELAY_RPC        := "wss://summit-rpc.polkadot.io"
 SUMMIT_HOP_POOL_WS      := "wss://summit-hop-0.polkadot.io"
