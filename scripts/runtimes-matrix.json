@@ -24,26 +24,9 @@
       "spec_name_check": "--disable-spec-name-check",
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
-        { "name": "paseo",       "uris": ["wss://paseo-bulletin-rpc.polkadot.io"] },
+        { "name": "paseo",      "uris": ["wss://paseo-bulletin-rpc.polkadot.io"] },
         { "name": "next-v2",    "uris": ["wss://paseo-bulletin-next-rpc.polkadot.io"] },
         { "name": "previewnet", "uris": ["wss://previewnet.substrate.dev/bulletin"] }
-      ]
-    },
-    "benchmarks_templates": {
-      "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
-      "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
-    }
-  },
-  {
-    "name": "bulletin-summit",
-    "package": "bulletin-paseo-runtime",
-    "path": "runtimes/bulletin-paseo",
-    "integration_tests": true,
-    "try_runtime": {
-      "spec_name_check": "--disable-spec-name-check",
-      "extra_flags": "--blocktime 24000 --disable-spec-version-check",
-      "instances": [
-        { "name": "summit",     "uris": ["wss://summit-bulletin-rpc.polkadot.io"] }
       ]
     },
     "benchmarks_templates": {

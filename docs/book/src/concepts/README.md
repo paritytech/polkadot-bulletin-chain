@@ -1,5 +1,13 @@
 # Core Concepts
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 This section covers the fundamental concepts you need to understand when working with Bulletin Chain.
 
 ## Data Lifecycle
@@ -78,3 +86,13 @@ Files larger than the transaction limit must be chunked. The SDKs handle this au
 - [Data Retrieval](./retrieval.md) - Fetching data from validator nodes
 - [Data Renewal](./renewal.md) - Extending storage retention
 - [DAG-PB Manifests](./manifests.md) - Manifest format for chunked data
+
+## Security
+
+See the [root README](../../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

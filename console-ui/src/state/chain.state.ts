@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
@@ -23,7 +26,6 @@ const DESCRIPTORS: Record<string, any> = {
   westend: bulletin_westend,
   paseo: bulletin_paseo,
   "paseo-next-v2": bulletin_paseo_next_v2,
-  summit: bulletin_paseo_next_v2,
   polkadot: bulletin_polkadot,
   previewnet: bulletin_westend,
 };

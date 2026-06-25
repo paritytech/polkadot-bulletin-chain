@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import fs from 'fs'
 import os from "os";
