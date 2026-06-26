@@ -892,10 +892,10 @@ PREVIEWNET_RPC      := "wss://previewnet.substrate.dev/bulletin"
 # receiver to a single node. The public RPC is multi-replica, so a HOP call there
 # can land on two different nodes and break the round-trip; use a dedicated
 # single-node HOP endpoint where one exists.
-WESTEND_HOP_RPC         := WESTEND_RPC          # TODO(#580): no dedicated westend HOP DNS yet
+WESTEND_HOP_RPC         := WESTEND_RPC          # TODO(#639): no dedicated westend HOP DNS yet
 PASEO_HOP_RPC           := "wss://paseo-hop-0.polkadot.io"
 PASEO_NEXT_V2_HOP_RPC   := "wss://paseo-hop-next-0.polkadot.io"
-PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC       # TODO(#580): no dedicated previewnet HOP DNS yet
+PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC       # TODO(#639): no dedicated previewnet HOP DNS yet
 
 # Network-specific IPFS gateways.
 WESTEND_IPFS_GATEWAY        := "https://westend-ipfs.polkadot.io"
