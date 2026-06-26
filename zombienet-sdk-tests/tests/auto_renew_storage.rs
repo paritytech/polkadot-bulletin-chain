@@ -45,8 +45,9 @@ const BITSWAP_TIMEOUT_SECS: u64 = 30;
 const BITSWAP_VERIFY_CONCURRENCY: usize = 16;
 /// `--blocks-pruning` deletion + col11 refcount-zero cleanup runs asynchronously after the
 /// finalized-height metric crosses; under CI load that lag can be tens of seconds (paseo runs
-/// observed >180s before eviction). 300s gives margin without making fast-cleanup runs slow.
-const BITSWAP_EVICTION_TIMEOUT_SECS: u64 = 300;
+/// observed >180s, and westend/mixed has exceeded 300s). 450s gives margin without making
+/// fast-cleanup runs slow.
+const BITSWAP_EVICTION_TIMEOUT_SECS: u64 = 450;
 
 const NUM_RENEWAL_CYCLES: u64 = 2;
 const TOPUP_TX_COUNT: u32 = 5;
