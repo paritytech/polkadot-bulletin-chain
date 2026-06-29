@@ -210,16 +210,14 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
 	/// Storage: `System::ParentHash` (r:1 w:0)
 	/// Proof: `System::ParentHash` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	/// The range of component `n` is `[0, 512]`.
-	fn apply_block_inherents(n: u32, ) -> Weight {
+	// Placeholder folded at the worst case `n = 512`; re-run benchmarks to refresh.
+	fn apply_block_inherents() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `44334`
 		//  Estimated: `47519`
 		// Minimum execution time: 71_194_000 picoseconds.
-		Weight::from_parts(78_951_977, 0)
+		Weight::from_parts(80_661_033, 0)
 			.saturating_add(Weight::from_parts(0, 47519))
-			// Standard Error: 1_014
-			.saturating_add(Weight::from_parts(3_338, 0).saturating_mul(n.into()))
 			.saturating_add(T::DbWeight::get().reads(4))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}

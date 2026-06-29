@@ -19,7 +19,7 @@
 
 #![allow(deprecated)]
 
-use crate::{mock::*, AutoRenewals, PendingAutoRenewals, RenewalData};
+use crate::{mock::*, PendingAutoRenewals, RenewalData, Renewals};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use pallet_bulletin_transaction_storage::{
@@ -44,7 +44,7 @@ use sp_transaction_storage_proof::{num_chunks, registration::build_proof};
 #[test]
 fn pallet_compiles_and_storage_is_separate_from_transaction_storage() {
 	new_test_ext().execute_with(|| {
-		assert!(AutoRenewals::<Test>::iter().next().is_none());
+		assert!(Renewals::<Test>::iter().next().is_none());
 		assert!(PendingAutoRenewals::<Test>::get().is_empty());
 		use polkadot_sdk_frame::deps::frame_support::traits::GetStorageVersion;
 		assert_eq!(
@@ -63,7 +63,7 @@ fn on_obsolete_callback_queues_pending_renewals_for_is_latest_entries_with_regis
 	new_test_ext().execute_with(|| {
 		let acct: u64 = 7;
 		let content_hash: ContentHash = BlakeTwo256::hash(b"smoke-hash").into();
-		AutoRenewals::<Test>::insert(
+		Renewals::<Test>::insert(
 			content_hash,
 			RenewalData { account: acct, recurring: true, paid: false },
 		);
@@ -95,7 +95,7 @@ fn on_obsolete_callback_skips_stale_shadow_entries() {
 	new_test_ext().execute_with(|| {
 		let acct: u64 = 7;
 		let content_hash: ContentHash = BlakeTwo256::hash(b"stale-hash").into();
-		AutoRenewals::<Test>::insert(
+		Renewals::<Test>::insert(
 			content_hash,
 			RenewalData { account: acct, recurring: true, paid: false },
 		);
@@ -131,7 +131,7 @@ fn relocation_migration_moves_legacy_entries_under_new_prefix() {
 		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
 
 		assert!(sp_io::storage::get(&key).is_none());
-		assert_eq!(AutoRenewals::<Test>::iter().count(), 1);
+		assert_eq!(Renewals::<Test>::iter().count(), 1);
 		let weight =
 			crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
 		assert_eq!(weight, polkadot_sdk_frame::deps::frame_support::weights::Weight::zero());
@@ -158,8 +158,8 @@ fn relocation_migration_reshapes_legacy_v3_layout() {
 		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
 
 		assert!(sp_io::storage::get(&key).is_none(), "old-prefix entry must be removed");
-		assert_eq!(AutoRenewals::<Test>::iter().count(), 1);
-		let entry = AutoRenewals::<Test>::get(hash).expect("entry relocated under new prefix");
+		assert_eq!(Renewals::<Test>::iter().count(), 1);
+		let entry = Renewals::<Test>::get(hash).expect("entry relocated under new prefix");
 		assert_eq!(
 			entry,
 			RenewalData::<u64> { account, recurring: true, paid: false },
@@ -186,7 +186,7 @@ fn enable_auto_renew_works() {
 
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		let renewal_data = AutoRenewals::<Test>::get(content_hash).unwrap();
+		let renewal_data = Renewals::<Test>::get(content_hash).unwrap();
 		assert_eq!(renewal_data.account, who);
 		assert!(renewal_data.recurring);
 		assert!(renewal_data.paid);
@@ -230,7 +230,7 @@ fn disable_auto_renew_validate_signed_gates_on_ownership() {
 
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
 		// Owner can't disable while still in the prepaid window.
-		AutoRenewals::<Test>::mutate(content_hash, |entry| {
+		Renewals::<Test>::mutate(content_hash, |entry| {
 			entry.as_mut().unwrap().paid = false;
 		});
 
@@ -241,7 +241,7 @@ fn disable_auto_renew_validate_signed_gates_on_ownership() {
 		);
 		// Owner can disable.
 		assert_ok!(disable_auto_renew_via_extension(owner, content_hash));
-		assert!(AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(Renewals::<Test>::get(content_hash).is_none());
 	});
 }
 
@@ -266,7 +266,7 @@ fn disable_auto_renew_root_override() {
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
 		// `paid = true` would block signed disable, but root bypasses it.
 		assert_ok!(DataRenewal::disable_auto_renew(RuntimeOrigin::root(), content_hash));
-		assert!(AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(Renewals::<Test>::get(content_hash).is_none());
 	});
 }
 
@@ -323,7 +323,7 @@ fn pending_auto_renewals_populated_only_for_registered_items() {
 		let hash_b: ContentHash = BlakeTwo256::hash(b"b").into();
 
 		// Only `hash_a` registers for auto-renew.
-		AutoRenewals::<Test>::insert(
+		Renewals::<Test>::insert(
 			hash_a,
 			RenewalData { account: alice, recurring: true, paid: false },
 		);
@@ -402,7 +402,7 @@ fn renew_schedules_one_shot() {
 			pallet_bulletin_transaction_storage::TransactionRef::ContentHash(content_hash),
 		));
 
-		let r = AutoRenewals::<Test>::get(content_hash).unwrap();
+		let r = Renewals::<Test>::get(content_hash).unwrap();
 		assert!(!r.recurring);
 		assert!(r.paid);
 	});
@@ -473,7 +473,7 @@ fn renew_by_content_hash_schedules_one_shot() {
 
 		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
 
-		let entry = crate::AutoRenewals::<Test>::get(content_hash).unwrap();
+		let entry = crate::Renewals::<Test>::get(content_hash).unwrap();
 		assert_eq!(entry.account, who);
 		assert!(!entry.recurring, "renew should register a one-shot entry");
 		assert!(entry.paid, "one-shot is prepaid at registration");
@@ -810,7 +810,7 @@ fn try_state_passes_during_paid_auto_renewal_prepayment_window() {
 
 		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
 		assert_eq!(pallet_bulletin_transaction_storage::PermanentStorageUsed::<Test>::get(), 2000);
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 
 		run_to_block(4, || None);
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
@@ -833,7 +833,7 @@ fn try_state_passes_during_enable_auto_renew_prepayment_window() {
 
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 		assert_eq!(pallet_bulletin_transaction_storage::PermanentStorageUsed::<Test>::get(), 2000);
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 
 		run_to_block(4, || None);
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
@@ -910,7 +910,7 @@ fn disable_auto_renew_works() {
 		));
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(
-			!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid,
+			!crate::Renewals::<Test>::get(content_hash).unwrap().paid,
 			"cycle should consume prepayment"
 		);
 
@@ -923,7 +923,7 @@ fn disable_auto_renew_works() {
 		// Owner can now disable.
 		assert_ok!(disable_auto_renew_via_extension(owner, content_hash));
 
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalDisabled {
 			content_hash,
 			who: owner,
@@ -1030,7 +1030,7 @@ fn auto_renewal_lifecycle() {
 		assert!(pallet_bulletin_transaction_storage::Transactions::<Test>::get(1).is_none());
 
 		// Recurring registration should still exist
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_some());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_some());
 	});
 }
 
@@ -1084,7 +1084,7 @@ fn auto_renewal_consumes_authorization() {
 			},
 		);
 		// Prepayment is consumed; subsequent cycles charge per-cycle.
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 
 		// Cycle 2: carry `BlockTransactions[12]` → `Transactions[12]` so the
 		// block-12 renew can age out at block 23.
@@ -1132,7 +1132,7 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 100_000));
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(
-			!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid,
+			!crate::Renewals::<Test>::get(content_hash).unwrap().paid,
 			"cycle should consume prepayment"
 		);
 
@@ -1157,7 +1157,7 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 			account: who,
 		}));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).is_none(),
+			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"Auto-renewal should be removed"
 		);
 	});
@@ -1188,7 +1188,7 @@ fn auto_renew_permissionless_transfer() {
 
 		// Alice enables auto-renew (prepays the first cycle).
 		assert_ok!(enable_auto_renew_via_extension(alice, content_hash));
-		let renewal = crate::AutoRenewals::<Test>::get(content_hash).unwrap();
+		let renewal = crate::Renewals::<Test>::get(content_hash).unwrap();
 		assert_eq!(renewal.account, alice);
 		assert!(renewal.paid);
 
@@ -1207,7 +1207,7 @@ fn auto_renew_permissionless_transfer() {
 			100_000,
 		));
 		assert_ok!(apply_block_inherents_full(None));
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		// Carry the cycle-12 renew out of `BlockTransactions` so the next
 		// `enable_auto_renew` can resolve the `(12, 0)` index against
 		// `Transactions[12]` (mirrors what `on_finalize` does in a live chain).
@@ -1218,7 +1218,7 @@ fn auto_renew_permissionless_transfer() {
 
 		// Alice can now disable.
 		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 
 		// Bob authorizes and enables auto-renew for the same content. The renew
 		// at block 12 made `(12, 0)` the latest `TransactionByContentHash` entry,
@@ -1226,7 +1226,7 @@ fn auto_renew_permissionless_transfer() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000));
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 
-		let renewal = crate::AutoRenewals::<Test>::get(content_hash).unwrap();
+		let renewal = crate::Renewals::<Test>::get(content_hash).unwrap();
 		assert_eq!(renewal.account, bob, "Bob should now own the auto-renewal");
 		assert!(renewal.paid, "Bob's registration prepays his first cycle");
 
@@ -1328,8 +1328,8 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		}));
 
 		// Auto-renewal registrations should be removed for failed items
-		assert!(crate::AutoRenewals::<Test>::get(hashes[1]).is_none());
-		assert!(crate::AutoRenewals::<Test>::get(hashes[2]).is_none());
+		assert!(crate::Renewals::<Test>::get(hashes[1]).is_none());
+		assert!(crate::Renewals::<Test>::get(hashes[2]).is_none());
 	});
 }
 
@@ -1386,7 +1386,7 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 			content_hash,
 			account: who,
 		}));
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 
 		assert_eq!(pallet_bulletin_transaction_storage::PermanentStorageUsed::<Test>::get(), 0);
 		let auth = pallet_bulletin_transaction_storage::Authorizations::<Test>::get(
@@ -1427,7 +1427,7 @@ fn one_shot_fires_once_then_unregisters() {
 			account: who,
 		}));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).is_none(),
+			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"one-shot registration must be removed after firing"
 		);
 	});
@@ -2001,7 +2001,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(apply_block_inherents_full(None));
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		let block_txs = pallet_bulletin_transaction_storage::BlockTransactions::<Test>::take();
 		if !block_txs.is_empty() {
 			pallet_bulletin_transaction_storage::Transactions::<Test>::insert(12u64, &block_txs);
@@ -2017,7 +2017,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		// Disable in the normal section — after on_initialize, before the inherent.
 		assert_ok!(disable_auto_renew_via_extension(who, content_hash));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).is_none(),
+			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"disable cleared the registration"
 		);
 
@@ -2029,7 +2029,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 			account: who,
 		}));
 		// AutoRenewals stays gone after the block — no further cycles.
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 	});
 }
 
@@ -2051,7 +2051,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid,
+			crate::Renewals::<Test>::get(content_hash).unwrap().paid,
 			"registration starts prepaid"
 		);
 
@@ -2063,7 +2063,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 		// prepaid-window check.
 		assert_ok!(DataRenewal::disable_auto_renew(RuntimeOrigin::root(), content_hash));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).is_none(),
+			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"Root disable cleared the entry"
 		);
 
@@ -2076,7 +2076,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 			account: who,
 		}));
 		assert!(
-			crate::AutoRenewals::<Test>::get(content_hash).is_none(),
+			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"Root's disable must survive the cycle — no silent re-arming via the paid-flip path",
 		);
 	});
@@ -2118,7 +2118,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 			1_000_000,
 		));
 		assert_ok!(apply_block_inherents_full(None));
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		let block_txs = pallet_bulletin_transaction_storage::BlockTransactions::<Test>::take();
 		if !block_txs.is_empty() {
 			pallet_bulletin_transaction_storage::Transactions::<Test>::insert(12u64, &block_txs);
@@ -2140,7 +2140,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 			content_hash,
 			account: who,
 		}));
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 		// Per-account counters untouched — failure happened before consume.
 		assert_eq!(TransactionStorage::account_authorization_extent(who).bytes_permanent, 0,);
 	});
@@ -2217,7 +2217,7 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 
 		// Bob — not Alice — enables auto-renew. The prepayment lands on Bob.
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
-		assert_eq!(crate::AutoRenewals::<Test>::get(content_hash).unwrap().account, bob);
+		assert_eq!(crate::Renewals::<Test>::get(content_hash).unwrap().account, bob);
 		assert_eq!(TransactionStorage::account_authorization_extent(alice).bytes_permanent, 0);
 		assert_eq!(TransactionStorage::account_authorization_extent(bob).bytes_permanent, 2000);
 
@@ -2232,7 +2232,7 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		));
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
 		assert_ok!(apply_block_inherents_full(None));
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		let block_txs = pallet_bulletin_transaction_storage::BlockTransactions::<Test>::take();
 		if !block_txs.is_empty() {
 			pallet_bulletin_transaction_storage::Transactions::<Test>::insert(12u64, &block_txs);
@@ -2299,7 +2299,7 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		// `Transactions[12]` so it can age out for cycle 2.
 		init_block(12);
 		assert_ok!(apply_block_inherents_full(None));
-		assert!(!crate::AutoRenewals::<Test>::get(content_hash).unwrap().paid);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who).bytes_permanent,
 			2000,
@@ -2328,7 +2328,7 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 			content_hash,
 			account: who,
 		}));
-		assert!(crate::AutoRenewals::<Test>::get(content_hash).is_none());
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 	});
 }
 

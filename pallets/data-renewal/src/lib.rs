@@ -25,7 +25,7 @@
 //! - **Dispatchables:** `force_renew` (synchronous), `renew` (one-shot scheduler),
 //!   `enable_auto_renew` / `disable_auto_renew` (recurring), `process_pending_renewals` (mandatory
 //!   drain inherent).
-//! - **Storage:** [`AutoRenewals`] (per-content-hash registration) and [`PendingAutoRenewals`]
+//! - **Storage:** [`Renewals`] (per-content-hash registration) and [`PendingAutoRenewals`]
 //!   (per-block scratch queue, drained by the inherent).
 //!
 //! ## Cross-pallet contract
@@ -35,8 +35,8 @@
 //!   `pallet_bulletin_transaction_storage`'s public API.
 //! - **Up ← storage:** [`OnObsoleteTransactions::handle_obsolete`] is called by the storage
 //!   pallet's `on_initialize` when entries age out at the `RetentionPeriod` boundary; entries with
-//!   an `AutoRenewals` registration are pushed to [`PendingAutoRenewals`] for the same block's
-//!   inherent to drain.
+//!   an `Renewals` registration are pushed to [`PendingAutoRenewals`] for the same block's inherent
+//!   to drain.
 //! - **Per-cycle accounting** (per-account `bytes_permanent` and the chain-wide
 //!   `PermanentStorageUsed`) is charged by the storage pallet's `check_authorization` with
 //!   `is_renew = true`.
@@ -201,11 +201,11 @@ pub mod pallet {
 			let content_hash = info.content_hash;
 
 			ensure!(
-				!AutoRenewals::<T>::contains_key(content_hash),
+				!Renewals::<T>::contains_key(content_hash),
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
-			AutoRenewals::<T>::insert(
+			Renewals::<T>::insert(
 				content_hash,
 				RenewalData { account: who.clone(), recurring: false, paid: true },
 			);
@@ -258,7 +258,7 @@ pub mod pallet {
 			};
 
 			ensure!(
-				!AutoRenewals::<T>::contains_key(content_hash),
+				!Renewals::<T>::contains_key(content_hash),
 				Error::<T>::AutoRenewalAlreadyEnabled
 			);
 
@@ -275,7 +275,7 @@ pub mod pallet {
 			pallet_bulletin_transaction_storage::Pallet::<T>::transaction_info(block, index)
 				.ok_or(Error::<T>::RenewedNotFound)?;
 
-			AutoRenewals::<T>::insert(
+			Renewals::<T>::insert(
 				content_hash,
 				RenewalData { account: who.clone(), recurring: true, paid: true },
 			);
@@ -297,7 +297,7 @@ pub mod pallet {
 			let caller =
 				pallet_bulletin_transaction_storage::Pallet::<T>::ensure_authorized(origin)?;
 			let renewal_data =
-				AutoRenewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
+				Renewals::<T>::get(content_hash).ok_or(Error::<T>::AutoRenewalNotEnabled)?;
 			match caller {
 				AuthorizedCaller::Signed { who, .. } => {
 					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
@@ -307,7 +307,7 @@ pub mod pallet {
 				AuthorizedCaller::Unsigned => return Err(DispatchError::BadOrigin),
 			}
 
-			AutoRenewals::<T>::remove(content_hash);
+			Renewals::<T>::remove(content_hash);
 			Self::deposit_event(Event::AutoRenewalDisabled {
 				content_hash,
 				who: renewal_data.account,
@@ -463,7 +463,7 @@ impl<T: Config> Pallet<T> {
 			// rather than silently skip.
 			None => {
 				for (content_hash, _, renewal_data) in pending.into_iter() {
-					AutoRenewals::<T>::remove(content_hash);
+					Renewals::<T>::remove(content_hash);
 					Self::deposit_event(Event::AutoRenewalFailed {
 						content_hash,
 						account: renewal_data.account,
@@ -496,12 +496,12 @@ impl<T: Config> Pallet<T> {
 				if let Some(new_index) = new_index {
 					if !renewal_data.recurring {
 						// One-shot: registration is consumed.
-						AutoRenewals::<T>::remove(content_hash);
+						Renewals::<T>::remove(content_hash);
 					} else if was_paid {
 						// Recurring: consume the prepayment so subsequent cycles
 						// charge per-cycle, and unblock `disable_auto_renew` for the
 						// owner now that the prepaid renewal has been delivered.
-						AutoRenewals::<T>::mutate(content_hash, |entry| {
+						Renewals::<T>::mutate(content_hash, |entry| {
 							if let Some(data) = entry {
 								data.paid = false;
 							}
@@ -524,7 +524,7 @@ impl<T: Config> Pallet<T> {
 							|used| used.saturating_sub(size_u64),
 						);
 					}
-					AutoRenewals::<T>::remove(content_hash);
+					Renewals::<T>::remove(content_hash);
 					Self::deposit_event(Event::AutoRenewalFailed {
 						content_hash,
 						account: renewal_data.account,
@@ -538,7 +538,7 @@ impl<T: Config> Pallet<T> {
 
 /// Upward callback fired by `pallet_bulletin_transaction_storage::on_initialize`
 /// with the obsolete-block sweep result. For each `is_latest` entry with a
-/// matching [`AutoRenewals`] registration, queue it into [`PendingAutoRenewals`]
+/// matching [`Renewals`] registration, queue it into [`PendingAutoRenewals`]
 /// for the same block's `process_pending_renewals` inherent to drain.
 impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>> for Pallet<T> {
 	fn handle_obsolete(_obsolete: BlockNumberFor<T>, items: &[(TransactionInfo, bool)]) {
@@ -551,7 +551,7 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>> for Pallet<T> {
 				continue;
 			}
 			let hash = tx_info.content_hash;
-			if let Some(renewal_data) = AutoRenewals::<T>::get(hash) {
+			if let Some(renewal_data) = Renewals::<T>::get(hash) {
 				let _ = pending.try_push((hash, tx_info.clone(), renewal_data));
 			}
 		}
