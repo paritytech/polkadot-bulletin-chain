@@ -1,61 +1,33 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot, web3_storage } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
-  WEB3_STORAGE_NETWORKS,
-  DEFAULT_NETWORKS,
+  DEFAULT_NETWORK,
   type Network,
 } from "../config/networks";
 import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-
-export type StorageType = "bulletin" | "web3storage";
 
 export type NetworkId = string;
 
 // Re-export Network type for convenience
 export type { Network };
 
-export interface StorageConfig {
-  id: StorageType;
-  name: string;
-  networks: Record<string, Network>;
-  defaultNetwork: string;
-}
-
-export const STORAGE_CONFIGS: Record<StorageType, StorageConfig> = {
-  bulletin: {
-    id: "bulletin",
-    name: "Bulletin",
-    defaultNetwork: DEFAULT_NETWORKS.bulletin,
-    networks: BULLETIN_NETWORKS,
-  },
-  web3storage: {
-    id: "web3storage",
-    name: "Web3 Storage",
-    defaultNetwork: DEFAULT_NETWORKS.web3storage,
-    networks: WEB3_STORAGE_NETWORKS,
-  },
-};
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DESCRIPTORS: Record<string, Record<string, any>> = {
-  bulletin: {
-    local: bulletin_westend,
-    westend: bulletin_westend,
-    paseo: bulletin_paseo,
-    "paseo-next-v2": bulletin_paseo_next_v2,
-    polkadot: bulletin_polkadot,
-    previewnet: bulletin_westend,
-  },
-  web3storage: {
-    local: web3_storage,
-    westend: web3_storage,
-  },
+const DESCRIPTORS: Record<string, any> = {
+  local: bulletin_westend,
+  westend: bulletin_westend,
+  paseo: bulletin_paseo,
+  "paseo-next-v2": bulletin_paseo_next_v2,
+  polkadot: bulletin_polkadot,
+  previewnet: bulletin_westend,
 };
 
 // No-op WebSocket that never connects. Used to silence the PAPI provider's
@@ -102,7 +74,6 @@ function createKillableWsProvider(endpoint: string) {
 }
 
 export interface ChainState {
-  storageType: StorageType;
   network: Network;
   networks: Record<string, Network>;
   status: "disconnected" | "connecting" | "connected" | "error";
@@ -118,7 +89,6 @@ export interface ChainState {
   ss58Format?: number;
 }
 
-const STORAGE_KEY_STORAGE_TYPE = "bulletin-storage-type";
 const STORAGE_KEY_NETWORK = "bulletin-network";
 const STORAGE_KEY_CUSTOM_URL = "bulletin-network-custom-url";
 
@@ -130,37 +100,28 @@ export function clearCustomNetworkUrl(): void {
   localStorage.removeItem(STORAGE_KEY_CUSTOM_URL);
   const current = networkSubject.getValue();
   if (current.id === "custom") {
-    const config = STORAGE_CONFIGS[storageTypeSubject.getValue()];
-    connectToNetwork(config.defaultNetwork);
+    connectToNetwork(DEFAULT_NETWORK);
   }
 }
 
-function loadInitialSelection(): { storageType: StorageType; network: Network } {
-  const savedType = localStorage.getItem(STORAGE_KEY_STORAGE_TYPE) as StorageType | null;
-  const storageType = savedType && STORAGE_CONFIGS[savedType] ? savedType : "bulletin";
-  const config = STORAGE_CONFIGS[storageType];
-
+function loadInitialSelection(): Network {
   const savedNetwork = localStorage.getItem(STORAGE_KEY_NETWORK);
-  const networkId = savedNetwork && config.networks[savedNetwork] ? savedNetwork : config.defaultNetwork;
-  const baseNetwork = config.networks[networkId]!;
+  const networkId = savedNetwork && BULLETIN_NETWORKS[savedNetwork] ? savedNetwork : DEFAULT_NETWORK;
+  const baseNetwork = BULLETIN_NETWORKS[networkId]!;
 
   if (networkId === "custom") {
     const customUrl = localStorage.getItem(STORAGE_KEY_CUSTOM_URL);
     if (customUrl) {
-      return { storageType, network: { ...baseNetwork, endpoints: [customUrl] } };
+      return { ...baseNetwork, endpoints: [customUrl] };
     }
   }
 
-  return { storageType, network: baseNetwork };
+  return baseNetwork;
 }
 
-const initial = loadInitialSelection();
-const initialStorageType = initial.storageType;
-const initialConfig = STORAGE_CONFIGS[initialStorageType];
-const initialNetwork = initial.network;
+const initialNetwork = loadInitialSelection();
 
-const storageTypeSubject = new BehaviorSubject<StorageType>(initialStorageType);
-const networksSubject = new BehaviorSubject<Record<string, Network>>(initialConfig.networks);
+const networksSubject = new BehaviorSubject<Record<string, Network>>(BULLETIN_NETWORKS);
 const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
@@ -190,14 +151,6 @@ async function createSmoldotProvider(network: Network) {
   const chainSpec = await fetch(`/chain-specs/${network.id}.json`).then(r => r.text());
 
   return getSmProvider(() => smoldot.addChain({ chainSpec }));
-}
-
-export function switchStorageType(type: StorageType): void {
-  const config = STORAGE_CONFIGS[type];
-  localStorage.setItem(STORAGE_KEY_STORAGE_TYPE, type);
-  storageTypeSubject.next(type);
-  networksSubject.next(config.networks);
-  connectToNetwork(config.defaultNetwork);
 }
 
 export async function connectToNetwork(
@@ -267,7 +220,7 @@ export async function connectToNetwork(
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const descriptor = DESCRIPTORS[storageTypeSubject.getValue()]?.[networkId] ?? bulletin_westend;
+    const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
     const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 
@@ -342,7 +295,6 @@ export function disconnect(): void {
 
 // Combined chain state observable
 const chainState$ = combineLatest([
-  storageTypeSubject,
   networksSubject,
   networkSubject,
   statusSubject,
@@ -352,8 +304,7 @@ const chainState$ = combineLatest([
   blockNumberSubject,
   chainInfoSubject,
 ]).pipe(
-  map(([storageType, networks, network, status, error, client, api, blockNumber, chainInfo]) => ({
-    storageType,
+  map(([networks, network, status, error, client, api, blockNumber, chainInfo]) => ({
     networks,
     network,
     status,
@@ -368,8 +319,7 @@ const chainState$ = combineLatest([
 
 // React hooks
 export const [useChainState] = bind(chainState$, {
-  storageType: initialStorageType,
-  networks: initialConfig.networks,
+  networks: BULLETIN_NETWORKS,
   network: initialNetwork,
   status: "disconnected" as const,
   error: undefined,

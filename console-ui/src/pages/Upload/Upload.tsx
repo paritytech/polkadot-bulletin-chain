@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Upload as UploadIcon, Copy, Check, ExternalLink, AlertCircle, RefreshCw, Info, X, Shield } from "lucide-react";

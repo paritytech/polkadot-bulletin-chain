@@ -524,11 +524,12 @@ pub mod v3 {
 				};
 
 				let Some(block_number) = iter.next() else {
-					// Write this migration's `version_to` explicitly so that when
-					// chained with v3→v4 the on-chain version progresses one step at
-					// a time and the next migration sees the correct starting version.
-					polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(3)
-						.put::<Pallet<T>>();
+					// Never downgrade — this MBM can be re-run against state already
+					// at/beyond v3 (e.g. by try-runtime, whose id isn't in `Historic`).
+					use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
+					if Pallet::<T>::on_chain_storage_version() < 3 {
+						StorageVersion::new(3).put::<Pallet<T>>();
+					}
 					cursor = None;
 					break;
 				};

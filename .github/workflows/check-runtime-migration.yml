@@ -34,7 +34,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - id: runtime
         run: |
           # Expand each runtime into one task per try_runtime instance,
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -83,7 +83,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # Snapshot lookup uses a deliberately-non-matching primary `key:` so
       # `restore-keys` always falls through to the most recent dated entry.
@@ -94,7 +94,7 @@ jobs:
       - name: Check if snapshot exists in cache
         id: cache-restore
         if: github.event_name != 'schedule'
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           lookup-only: true
           path: snapshot.raw
@@ -150,7 +150,7 @@ jobs:
 
       - name: Save snapshot to cache
         if: steps.cache-restore.outputs.cache-matched-key == ''
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-${{ steps.get-date.outputs.today }}
@@ -168,7 +168,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: "Fetch upstream tags"
         if: github.event_name == 'pull_request'
@@ -185,14 +185,14 @@ jobs:
           mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
           toolchain: "${{ env.RUST_STABLE_VERSION }}"
 
       - name: Restore snapshot from cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: snapshot.raw
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
