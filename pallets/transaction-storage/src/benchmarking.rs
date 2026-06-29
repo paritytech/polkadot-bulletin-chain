@@ -359,14 +359,11 @@ mod benchmarks {
 		Ok(())
 	}
 
-	/// Worst-case benchmark for the storage-proof inherent (drain has moved to
-	/// `pallet-bulletin-data-renewal`; the linear component `n` is now unused but
-	/// kept for ABI compatibility with the existing `WeightInfo::apply_block_inherents(n)`
-	/// declaration).
+	/// Worst-case benchmark for the storage-proof inherent: verify the proof for a block
+	/// holding `MaxBlockTransactions` entries. Constant weight — the renewal drain (the old
+	/// linear `n` component) moved to `pallet-bulletin-data-renewal`.
 	#[benchmark]
-	fn apply_block_inherents(
-		n: Linear<0, { T::MaxBlockTransactions::get() }>,
-	) -> Result<(), BenchmarkError> {
+	fn apply_block_inherents() -> Result<(), BenchmarkError> {
 		// Override the default retention period (DEFAULT_RETENTION_PERIOD = ~14 days
 		// of blocks) with a tiny value so `run_to_block` only iterates ~10 blocks of
 		// `on_initialize`/`on_finalize` per benchmark step. The cost of the inherent

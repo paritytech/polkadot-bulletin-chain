@@ -19,7 +19,7 @@
 
 use codec::{Decode, Encode, MaxEncodedLen};
 
-/// Auto-renewal registration value stored in [`crate::AutoRenewals`].
+/// Auto-renewal registration value stored in [`crate::Renewals`].
 ///
 /// `recurring` distinguishes a forever-renewing entry (`enable_auto_renew`)
 /// from a one-shot (`renew`). `paid` marks the prepaid first cycle: both

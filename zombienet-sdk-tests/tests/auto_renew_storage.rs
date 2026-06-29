@@ -3426,7 +3426,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// lags ~10s behind best on cumulus).
 	let auto_renewals_addr = subxt::dynamic::storage(
 		"DataRenewal",
-		"AutoRenewals",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r3_hash).fetch(&auto_renewals_addr).await?;
@@ -3609,7 +3609,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	let auto_renewals_addr = subxt::dynamic::storage(
 		"DataRenewal",
-		"AutoRenewals",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r2_hash).fetch(&auto_renewals_addr).await?;

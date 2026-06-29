@@ -63,7 +63,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// reshape. The Blake2_128Concat key suffix (the content hash) is identical
 		// across prefixes, so only the prefix is rewritten.
 		let old_auto_prefix = storage_prefix(OLD_PALLET, b"AutoRenewals");
-		let new_auto_prefix = storage_prefix(NEW_PALLET, b"AutoRenewals");
+		let new_auto_prefix = storage_prefix(NEW_PALLET, b"Renewals");
 		let mut moved: u64 = 0;
 		let mut previous = old_auto_prefix.to_vec();
 		while let Some(key) =
@@ -140,7 +140,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 
 		// Every relocated entry must live under the new prefix and decode as the
 		// current `RenewalData` layout (catches a pre-v4 entry that wasn't reshaped).
-		let new_auto_prefix = storage_prefix(NEW_PALLET, b"AutoRenewals");
+		let new_auto_prefix = storage_prefix(NEW_PALLET, b"Renewals");
 		let mut previous = new_auto_prefix.to_vec();
 		let mut post: u64 = 0;
 		while let Some(key) =
