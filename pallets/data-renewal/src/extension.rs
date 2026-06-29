@@ -277,7 +277,7 @@ impl<T: Config> Pallet<T> {
 			Call::renew { entry } => {
 				let info = txs::Pallet::<T>::resolve_transaction_ref(entry)
 					.map_err(|_| txs::RENEWED_NOT_FOUND)?;
-				if crate::AutoRenewals::<T>::contains_key(info.content_hash) {
+				if crate::Renewals::<T>::contains_key(info.content_hash) {
 					return Err(txs::AUTO_RENEWAL_ALREADY_ENABLED.into());
 				}
 				txs::Pallet::<T>::check_authorization(
@@ -326,7 +326,7 @@ impl<T: Config> Pallet<T> {
 				Ok((valid, Some(scope)))
 			},
 			Call::enable_auto_renew { content_hash } => {
-				if crate::AutoRenewals::<T>::contains_key(*content_hash) {
+				if crate::Renewals::<T>::contains_key(*content_hash) {
 					return Err(txs::AUTO_RENEWAL_ALREADY_ENABLED.into());
 				}
 				let (block, index) = txs::Pallet::<T>::lookup_by_content_hash(*content_hash)
@@ -354,8 +354,8 @@ impl<T: Config> Pallet<T> {
 				Ok((valid, Some(scope)))
 			},
 			Call::disable_auto_renew { content_hash } => {
-				let renewal_data = crate::AutoRenewals::<T>::get(content_hash)
-					.ok_or(txs::AUTO_RENEWAL_NOT_ENABLED)?;
+				let renewal_data =
+					crate::Renewals::<T>::get(content_hash).ok_or(txs::AUTO_RENEWAL_NOT_ENABLED)?;
 				if &renewal_data.account != who {
 					return Err(txs::NOT_AUTO_RENEWAL_OWNER.into());
 				}

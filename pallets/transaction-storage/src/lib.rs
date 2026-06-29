@@ -666,19 +666,16 @@ pub mod pallet {
 		/// proof step is skipped (early or empty blocks). The companion drain of pending
 		/// auto-renewals lives in `pallet-bulletin-data-renewal`'s own inherent.
 		#[pallet::call_index(14)]
-		#[pallet::weight((
-			T::WeightInfo::apply_block_inherents(T::MaxBlockTransactions::get()),
-			DispatchClass::Mandatory,
-		))]
+		#[pallet::weight((T::WeightInfo::apply_block_inherents(), DispatchClass::Mandatory))]
 		pub fn apply_block_inherents(
 			origin: OriginFor<T>,
 			proof: Option<TransactionStorageProof>,
-		) -> DispatchResultWithPostInfo {
+		) -> DispatchResult {
 			ensure_none(origin)?;
 			if let Some(proof) = proof {
 				Self::do_check_proof(proof)?;
 			}
-			Ok(Some(T::WeightInfo::apply_block_inherents(0)).into())
+			Ok(())
 		}
 
 		/// Add an account to the set of allowed authorizers. Allowed authorizers can call
@@ -968,14 +965,14 @@ pub mod pallet {
 		const INHERENT_IDENTIFIER: InherentIdentifier = INHERENT_IDENTIFIER;
 
 		fn create_inherent(data: &InherentData) -> Option<Self::Call> {
-			// Emit the proof inherent whenever the inherent data provider supplied one.
-			// The companion drain of pending auto-renewals lives in
-			// `pallet-bulletin-data-renewal`'s own `ProvideInherent`.
+			// Emit the proof inherent only when the inherent data provider supplied a proof;
+			// otherwise no inherent is needed (early/empty blocks). The companion drain of
+			// pending auto-renewals lives in `pallet-bulletin-data-renewal`'s own
+			// `ProvideInherent`.
 			let proof = data
 				.get_data::<TransactionStorageProof>(&Self::INHERENT_IDENTIFIER)
-				.unwrap_or(None);
-			proof.as_ref()?;
-			Some(Call::apply_block_inherents { proof })
+				.unwrap_or(None)?;
+			Some(Call::apply_block_inherents { proof: Some(proof) })
 		}
 
 		fn check_inherent(_call: &Self::Call, _data: &InherentData) -> Result<(), Self::Error> {
@@ -2254,9 +2251,8 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	//    `ensure_weight_sanity` since the renew dispatchables live there now.
 
 	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
-	// in max block at worst case (proof check + draining MaxBlockTransactions
-	// auto-renewals).
-	let apply_inherents_weight = T::WeightInfo::apply_block_inherents(max_block_txs);
+	// in max block at worst case (proof check over a full `MaxBlockTransactions` block).
+	let apply_inherents_weight = T::WeightInfo::apply_block_inherents();
 	assert!(
 		apply_inherents_weight.all_lte(block_weights.max_block),
 		"apply_block_inherents weight {apply_inherents_weight:?} exceeds max block {:?}",
@@ -2273,7 +2269,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	let mandatory_floor = on_init_with_expiry_weight.saturating_add(apply_inherents_weight);
 	assert!(
 		mandatory_floor.all_lte(block_weights.max_block),
-		"on_initialize_with_expiry({max_block_txs}) + apply_block_inherents({max_block_txs}) \
+		"on_initialize_with_expiry({max_block_txs}) + apply_block_inherents() \
 		 = {mandatory_floor:?} exceeds max block {:?}",
 		block_weights.max_block,
 	);

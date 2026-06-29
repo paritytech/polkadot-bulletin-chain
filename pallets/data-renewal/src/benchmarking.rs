@@ -167,7 +167,7 @@ mod benchmarks {
 		// `enable_auto_renew` leaves the entry `paid: true`, which blocks signed
 		// `disable_auto_renew`. Flip to the post-first-cycle state so the benchmark
 		// measures the path real owners actually hit.
-		AutoRenewals::<T>::mutate(content_hash, |entry| {
+		Renewals::<T>::mutate(content_hash, |entry| {
 			if let Some(data) = entry {
 				data.paid = false;
 			}
