@@ -118,9 +118,9 @@ pub mod pallet {
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
-	/// Maps content hash to the account that registered it for auto-renewal.
+	/// Maps content hash to the account that registered it for renewal.
 	#[pallet::storage]
-	pub type AutoRenewals<T: Config> =
+	pub type Renewals<T: Config> =
 		StorageMap<_, Blake2_128Concat, ContentHash, RenewalData<T::AccountId>, OptionQuery>;
 
 	/// Transactions that must be auto-renewed in the current block.
