@@ -369,7 +369,6 @@ mod benchmarks {
 	fn apply_block_inherents(
 		n: Linear<0, { T::MaxBlockTransactions::get() }>,
 	) -> Result<(), BenchmarkError> {
-		let _ = n;
 		// Override the default retention period (DEFAULT_RETENTION_PERIOD = ~14 days
 		// of blocks) with a tiny value so `run_to_block` only iterates ~10 blocks of
 		// `on_initialize`/`on_finalize` per benchmark step. The cost of the inherent
