@@ -670,12 +670,12 @@ pub mod pallet {
 		pub fn apply_block_inherents(
 			origin: OriginFor<T>,
 			proof: Option<TransactionStorageProof>,
-		) -> DispatchResult {
+		) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
 			if let Some(proof) = proof {
 				Self::do_check_proof(proof)?;
 			}
-			Ok(())
+			Ok(().into())
 		}
 
 		/// Add an account to the set of allowed authorizers. Allowed authorizers can call
