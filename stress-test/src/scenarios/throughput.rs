@@ -565,7 +565,7 @@ pub async fn run_sequential_upload(
 	let ws_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 	let futures: Vec<_> = signers
 		.iter()
-		.zip(all_payloads.into_iter())
+		.zip(all_payloads)
 		.enumerate()
 		.map(|(i, (signer, payloads))| {
 			let ws = ws_owned.clone();
