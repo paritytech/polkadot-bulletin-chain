@@ -103,7 +103,9 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		// Single extension that walks the call tree once and dispatches each leaf
+		// to either pallet's validator.
+		pallet_bulletin_data_renewal::extension::ValidateBulletinCalls<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
@@ -138,7 +140,9 @@ pub mod migrations {
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -154,10 +158,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = (
-		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-	);
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -567,7 +569,7 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+			pallet_bulletin_data_renewal::extension::ValidateBulletinCalls::<
 				Runtime,
 				storage::StorageCallInspector,
 			>::default(),
@@ -627,6 +629,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -666,6 +670,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_data_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]

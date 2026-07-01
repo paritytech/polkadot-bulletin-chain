@@ -431,7 +431,7 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
 
-		// Get store priority.
+		// Get store priority via the storage pallet's signed-call validation.
 		let store_call =
 			pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
 		let (store_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
@@ -449,13 +449,15 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		// Advance so the stored transaction is available for renew.
 		run_to_block(3);
 
-		let renew_call = pallet_bulletin_transaction_storage::Call::<Test>::renew {
+		// Renew now lives in `pallet-bulletin-data-renewal`; validate through that
+		// pallet's own extension entry point to get the renew priority.
+		let renew_call = pallet_bulletin_data_renewal::Call::<Test>::renew {
 			entry: pallet_bulletin_transaction_storage::TransactionRef::Position {
 				block: 1,
 				index: 0,
 			},
 		};
-		let (renew_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
+		let (renew_tx, _) = pallet_bulletin_data_renewal::Pallet::<Test>::validate_renewal_signed(
 			&alice,
 			&renew_call,
 		)

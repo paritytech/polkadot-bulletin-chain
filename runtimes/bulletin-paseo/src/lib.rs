@@ -113,7 +113,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		pallet_bulletin_data_renewal::extension::ValidateBulletinCalls<
 			Runtime,
 			storage::StorageCallInspector,
 		>,
@@ -134,13 +134,15 @@ pub type UncheckedExtrinsic =
 pub mod migrations {
 	use super::*;
 
-	/// Unreleased migrations. Add new ones here:
 	///
-	/// `MigrateV4ToV5` is single-block, so it runs in `on_runtime_upgrade`. On a chain still
-	/// at v3 it is a no-op (its v4 guard); the v3->v4 MBM below bumps to v4, then a following
-	/// runtime upgrade lets this step bump v4->v5. Idempotent on chains already at v5.
-	pub type Unreleased =
-		(pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,);
+	/// `MigrateV3ToV4` is now a no-op single-block bump (the renewal split moved the
+	/// `AutoRenewals` reshape into `RelocateFromTransactionStorage`); it runs first to take
+	/// a v3 chain to v4 so the v4-gated `MigrateV4ToV5` can then bump v4->v5. Idempotent.
+	pub type Unreleased = (
+		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -154,12 +156,10 @@ pub mod migrations {
 	/// All single block migrations that will run on the next runtime upgrade.
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
-	/// MBM migrations to apply on runtime upgrade.
 	///
-	/// `MigrateV3ToV4` walks `AutoRenewals` to the v4 layout. Self-guarded and idempotent, so
-	/// it is a no-op on chains already at/beyond v4.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,);
+	/// Paseo has already released the v2->v3 MBM, and the renewal split turned v3->v4 into a
+	/// single-block no-op (above), so no multi-block migrations remain.
+	pub type MbmMigrations = ();
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -567,7 +567,7 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+			pallet_bulletin_data_renewal::extension::ValidateBulletinCalls::<
 				Runtime,
 				storage::StorageCallInspector,
 			>::default(),
@@ -627,6 +627,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -667,6 +669,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_data_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]

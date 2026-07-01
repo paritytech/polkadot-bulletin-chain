@@ -102,9 +102,15 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+impl pallet_bulletin_data_renewal::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
 }
 
 parameter_types! {
