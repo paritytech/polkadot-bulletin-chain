@@ -36,13 +36,13 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install Rust toolchains
-        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: nightly
           components: rustfmt
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -50,7 +50,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check
 
       - name: Cache taplo
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-taplo
         with:
           path: ~/.cargo/bin/taplo
@@ -61,7 +61,7 @@ jobs:
         run: cargo install taplo-cli --version ${{ env.TAPLO_VERSION }}
 
       - name: Cache zepter
-        uses: actions/cache@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache-zepter
         with:
           path: ~/.cargo/bin/zepter
