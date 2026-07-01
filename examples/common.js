@@ -220,12 +220,20 @@ export class NonceManager {
  */
 export async function waitForBlockProduction(typedApi, timeoutSec = 300) {
     const pollIntervalMs = 2000;
+    const queryTimeoutMs = 10000;
     const deadline = Date.now() + timeoutSec * 1000;
 
     console.log(`⏳ Waiting for block production (timeout: ${timeoutSec}s)...`);
     while (Date.now() < deadline) {
         try {
-            const blockNumber = await typedApi.query.System.Number.getValue();
+            // Cap each query: against an unreachable endpoint the query promise can
+            // never settle, which would otherwise pin the loop so the outer deadline
+            // is never re-checked.
+            const blockNumber = await Promise.race([
+                typedApi.query.System.Number.getValue(),
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error(`query timed out after ${queryTimeoutMs / 1000}s`)), queryTimeoutMs)),
+            ]);
             if (blockNumber > 0) {
                 console.log(`✅ Chain is producing blocks (current block: #${blockNumber})`);
                 return;
@@ -247,8 +255,10 @@ export async function waitForChainReady(typedApi, maxRetries = 10, retryDelayMs 
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-            // Check runtime constants to verify chain is accessible
-            const version = typedApi.constants.System.Version;
+            // Fetch a runtime constant to verify the chain is accessible. This must
+            // be awaited: on a light client it only resolves once the runtime has
+            // synced, which is exactly the readiness we want before signing.
+            const version = await typedApi.constants.System.Version();
             console.log(`✅ Chain is ready! Runtime: ${version.spec_name} v${version.spec_version}`);
             return true;
         } catch (error) {

@@ -42,8 +42,16 @@
  *   --hop-check-interval  10   → maintenance task fires every 10 seconds
  *
  * Usage:
- *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url]
+ *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url] [hop_pool_ws_url]
  *   node examples/hop_round_trip.js ws://localhost:10000 //Eve http://127.0.0.1:8283
+ *
+ * [hop_pool_ws_url] defaults to [ws_url]. Pin it to a single node when the chain
+ * RPC sits behind a multi-replica load balancer: the HOP pool is node-local, so
+ * sender and receiver must reach the same node, while state/runtime reads can use
+ * the load-balanced chain RPC.
+ *
+ * --skip-promotion skips steps 6-7 (auto-promotion + retrieving the promoted blob).
+ * Use it on live networks whose HOP retention is too long to wait out (e.g. 24h).
  */
 
 import { createClient } from 'polkadot-api';
@@ -73,11 +81,24 @@ import {
 import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
+// HOP retention is very long on live networks (24h on Summit/Paseo), so the
+// auto-promotion in step 6 never completes within a test run. Skip steps 6-7
+// (promotion + the bitswap retrieval that depends on it) when set; the round-trip
+// (steps 1-5) is the core flow and still runs.
+const SKIP_PROMOTION = process.argv.includes('--skip-promotion');
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SUDO_PATH = args[1] || '//Eve';
 const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
-const SENDER_PATH = '//CustomSigner';
+// Pool ops (send/claim/ack/poolStatus) must all hit ONE node — the pool is
+// node-local. State/runtime reads can use the chain RPC. The two coincide for a
+// single-node setup, so this defaults to NODE_WS.
+const HOP_POOL_WS = args[3] || NODE_WS;
+// Fresh sender each run: authorization persists on-chain, so a fixed account
+// would already be authorized on a re-run against a live chain and fail the
+// pre-auth `can_account_promote == false` check. Step 3 authorizes whatever
+// this derives.
+const SENDER_PATH = `//hop-sender-${Date.now()}`;
 
 // ── Timing constants ─────────────────────────────────────────────────────────
 const CLAIM_POLL_INTERVAL_MS = 2_000;
@@ -190,6 +211,8 @@ async function main() {
 	const promotionData = new TextEncoder().encode(promotionMessage);
 	const promotionHash = blake2b256(promotionData);
 
+	logInfo(`Chain RPC      : ${NODE_WS}`);
+	logInfo(`HOP pool node  : ${HOP_POOL_WS}`);
 	logInfo(`Sudo account   : ${SUDO_PATH}`);
 	logInfo(`Sender account : ${senderAddress}`);
 	logInfo(`Round-trip msg : "${roundTripMessage}" (hash ${toHex(roundTripHash)})`);
@@ -197,9 +220,11 @@ async function main() {
 
 	const papiClient = createClient(getWsProvider(NODE_WS));
 	const bulletinAPI = papiClient.getTypedApi(bulletin);
-	const senderHop = HopClient.connectWithAccount(NODE_WS, rawSigner(senderKeyPair), 'sr25519');
+	// Runtime/state reads go to the chain RPC; pool ops are pinned to one node.
+	const hopState = HopClient.connect(NODE_WS);
+	const senderHop = HopClient.connectWithAccount(HOP_POOL_WS, rawSigner(senderKeyPair), 'sr25519');
 	// Anonymous client — claim/ack don't need a signer, only the ticket.
-	const receiverHop = HopClient.connect(NODE_WS);
+	const receiverHop = HopClient.connect(HOP_POOL_WS);
 
 	const recipientCount = 1;
 	let resultCode = 0;
@@ -211,27 +236,31 @@ async function main() {
 		logStep('1️⃣', 'hop_poolStatus (baseline)…');
 		const baselineStatus = await senderHop.poolStatus();
 		logPoolStatus('baseline', baselineStatus);
-		assertPoolStatus('baseline', baselineStatus, 0, 0);
+		// A shared live node may already hold pool entries (earlier runs' submissions
+		// still within the retention window), so assert relative to this baseline
+		// rather than requiring an empty pool.
+		const baseEntries = baselineStatus.entryCount;
+		const baseBytes = BigInt(baselineStatus.totalBytes);
 
 		// ── Step 2: pre-auth runtime checks ──────────────────────────────────
 		logStep('2️⃣', 'Pre-auth runtime checks (expect can_account_promote = false)…');
-		const preAuthCanRoundTrip = await senderHop.canAccountPromote(senderAddress, roundTripData.length);
-		const preAuthCanPromotion = await senderHop.canAccountPromote(senderAddress, promotionData.length);
+		const preAuthCanRoundTrip = await hopState.canAccountPromote(senderAddress, roundTripData.length);
+		const preAuthCanPromotion = await hopState.canAccountPromote(senderAddress, promotionData.length);
 		if (preAuthCanRoundTrip || preAuthCanPromotion) {
 			throw new Error(
 				`Pre-auth can_account_promote should be false but got `
 				+ `roundTrip=${preAuthCanRoundTrip}, promotion=${preAuthCanPromotion}`,
 			);
 		}
-		const maxSize = await senderHop.maxPromotionSize();
+		const maxSize = await hopState.maxPromotionSize();
 		if (maxSize <= 0) {
 			throw new Error(`max_promotion_size returned non-positive value: ${maxSize}`);
 		}
 		if (roundTripData.length > maxSize || promotionData.length > maxSize) {
 			throw new Error(`Payload exceeds max_promotion_size (${maxSize})`);
 		}
-		const preAuthPromotedRoundTrip = await senderHop.isPromotedOnChain(roundTripHash);
-		const preAuthPromotedPromotion = await senderHop.isPromotedOnChain(promotionHash);
+		const preAuthPromotedRoundTrip = await hopState.isPromotedOnChain(roundTripHash);
+		const preAuthPromotedPromotion = await hopState.isPromotedOnChain(promotionHash);
 		if (preAuthPromotedRoundTrip || preAuthPromotedPromotion) {
 			throw new Error('is_promoted_on_chain returned true before any submission');
 		}
@@ -255,7 +284,7 @@ async function main() {
 			senderAddress,
 			roundTripData.length,
 		);
-		const postAuthCanViaSdk = await senderHop.canAccountPromote(senderAddress, roundTripData.length);
+		const postAuthCanViaSdk = await hopState.canAccountPromote(senderAddress, roundTripData.length);
 		if (!postAuthCanViaPapi || !postAuthCanViaSdk) {
 			throw new Error(
 				`Post-auth can_account_promote should be true but got `
@@ -274,8 +303,8 @@ async function main() {
 		assertPoolStatus(
 			'after round-trip submit',
 			afterRoundTripSubmit,
-			1,
-			HopClient.calculateEffectiveDataSize(roundTripData.length, recipientCount),
+			baseEntries + 1,
+			baseBytes + BigInt(HopClient.calculateEffectiveDataSize(roundTripData.length, recipientCount)),
 		);
 
 		logInfo('Receiver (anonymous client) polling claim…');
@@ -291,12 +320,18 @@ async function main() {
 
 		const afterAck = await senderHop.poolStatus();
 		logPoolStatus('after ack', afterAck);
-		assertPoolStatus('after ack', afterAck, 0, 0);
+		assertPoolStatus('after ack', afterAck, baseEntries, baseBytes);
 
-		if (await senderHop.isPromotedOnChain(roundTripHash)) {
+		if (await hopState.isPromotedOnChain(roundTripHash)) {
 			throw new Error('Acked entry must not be promoted on-chain');
 		}
 		logSuccess('Round-trip flow complete: claim+ack consumed the entry, no promotion.');
+
+		if (SKIP_PROMOTION) {
+			logInfo('⏭️  Skipping promotion + Bitswap retrieval (--skip-promotion; HOP retention too long to wait for auto-promotion).');
+			logTestResult(true, 'HOP Round-Trip Test (promotion skipped)');
+			return;
+		}
 
 		// ── Step 6: promotion submit + wait ──────────────────────────────────
 		logStep('6️⃣', `Promotion: sender submits ${promotionData.length} bytes…`);
@@ -313,11 +348,11 @@ async function main() {
 		);
 
 		logInfo('Polling is_promoted_on_chain (no ack — let maintenance task promote)…');
-		await pollPromotion(senderHop, promotionHash);
+		await pollPromotion(hopState, promotionHash);
 		logSuccess('Runtime confirms entry is now on-chain (promoted).');
 
 		// Sanity: the earlier acked entry must still report as not-promoted.
-		if (await senderHop.isPromotedOnChain(roundTripHash)) {
+		if (await hopState.isPromotedOnChain(roundTripHash)) {
 			throw new Error('Round-trip (acked) entry unexpectedly reports as promoted');
 		}
 
@@ -361,6 +396,7 @@ async function main() {
 	} finally {
 		senderHop.destroy();
 		receiverHop.destroy();
+		hopState.destroy();
 		papiClient.destroy();
 		process.exit(resultCode);
 	}
