@@ -3,8 +3,8 @@
 Answers: does a Bulletin node need NVMe, or does a cheaper tier (SSD / HDD) meet block
 deadlines at scale? Full plan and verdict logic: `docs/storage-benchmark.md`.
 
-Not runnable on a laptop - it compares storage tiers under a real node. Run on the Summit k8s
-setup (two pools with different `storageClassName`) or a Linux box with the volumes attached.
+Not runnable on a laptop - it compares storage tiers under a real node. Run on a cluster with
+two node pools on different `storageClassName`, or a Linux box with the volumes attached.
 
 ## Steps
 
@@ -12,7 +12,7 @@ setup (two pools with different `storageClassName`) or a Linux box with the volu
    ```bash
    sudo TARGET=/mnt/data/bench SIZE=1700g fio fio-block-critical.fio
    ```
-   If p99 latencies fit well inside the slot (24 s now, 2 s future), proceed; if a tier
+   If p99 latencies fit well inside the slot (6 s now, 500 ms target), proceed; if a tier
    saturates, it already fails.
 
 2. **Node under load** - point the node's data volume at each tier (real gp3/SATA volume, or
@@ -24,11 +24,11 @@ setup (two pools with different `storageClassName`) or a Linux box with the volu
 
 3. **Capture metrics** during the load window:
    ```bash
-   PROM=http://prometheus:9090 CHAIN=bulletin-summit scripts/storage-bench/collect-metrics.sh gp3-24s
+   PROM=http://prometheus:9090 CHAIN=<chain> scripts/storage-bench/collect-metrics.sh gp3-6s
    ```
 
 4. **Verdict** - compare each arm x block-time against the budgets in the plan doc. PASS on
    gp3/SATA -> config change (update hardware rec). FAIL -> the per-column split is justified.
 
 Repeat for arms: nvme (baseline), gp3, sata (+ optional hdd for the blob tier) x block-time
-(24 s, 2 s).
+(6 s, 500 ms).

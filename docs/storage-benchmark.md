@@ -4,8 +4,8 @@ Answers one question: does a Bulletin node meet block deadlines with the bulk da
 (`columns::TRANSACTION`) on a cheaper tier (SSD, ideally HDD) instead of NVMe? The cheapest
 tier that passes sets the storage floor and decides how far the NVMe requirement can drop.
 
-Not runnable on a laptop. Needs the real tiers under a real node: the Summit setup (node pools
-with different storage classes) or a Linux box with the volumes attached.
+Not runnable on a laptop. Needs the real tiers under a real node: a cluster with node pools on
+different storage classes, or a Linux box with the volumes attached.
 
 ## Arms
 

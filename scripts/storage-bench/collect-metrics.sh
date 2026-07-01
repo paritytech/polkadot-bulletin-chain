@@ -3,14 +3,14 @@
 # Queries a Prometheus/Thanos endpoint (same metrics the ops stack already scrapes).
 #
 # Usage:
-#   PROM=http://prometheus:9090 CHAIN=bulletin-summit WINDOW=10m \
+#   PROM=http://prometheus:9090 CHAIN=<chain> WINDOW=10m \
 #     scripts/storage-bench/collect-metrics.sh <arm-label>
 # Writes <arm-label>.metrics.txt. Run once per arm (nvme / gp3 / sata) x block-time.
 set -euo pipefail
 
 PROM="${PROM:?set PROM to the Prometheus base URL}"
 ARM="${1:?arm label, e.g. gp3-24s}"
-CHAIN="${CHAIN:-bulletin-summit}"
+CHAIN="${CHAIN:-bulletin}"
 WINDOW="${WINDOW:-10m}"
 OUT="${ARM}.metrics.txt"
 
