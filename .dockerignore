@@ -1,0 +1,10 @@
+target/
+.git/
+node_modules/
+docs/
+examples/
+zombienet/
+*.log
+*.json
+!Cargo.lock
+!package.json
