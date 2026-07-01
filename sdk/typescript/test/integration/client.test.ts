@@ -53,13 +53,10 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
-    // Create client directly with api, signer, and submit function
-    // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
-    // finalization regularly takes >60s under CI load, causing flaky
-    // "Transaction timed out" failures on chunked store tests.
-    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-      txTimeout: 120_000,
-    })
+    // Use the production default txTimeout (420s). The JS examples use
+    // 180s and don't see flakiness; 120s was too tight (failures at ~126s).
+    // Rather than guess another value, use the same default real users get.
+    client = new AsyncBulletinClient(api, signer, papiClient.submit)
 
     // Authorize Alice's account for storage operations
     // The bulletin chain requires account authorization before storing data
