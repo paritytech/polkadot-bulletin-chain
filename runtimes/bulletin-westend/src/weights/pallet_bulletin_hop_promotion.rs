@@ -57,4 +57,12 @@ impl<T: frame_system::Config> pallet_bulletin_hop_promotion::WeightInfo for Weig
 			.saturating_add(Weight::from_parts(1_413, 0).saturating_mul(d.into()))
 			.saturating_add(T::DbWeight::get().reads(3))
 	}
+	/// Placeholder until benches are re-run: copy of `authorize_promote` plus a
+	/// conservative per-recipient term covering the extra `blake2_256` over the
+	/// SCALE-encoded recipients list. Real weights will replace this on the next
+	/// `frame-omni-bencher` run.
+	fn authorize_promote_v2(d: u32, r: u32) -> Weight {
+		Self::authorize_promote(d)
+			.saturating_add(Weight::from_parts(1_413u64.saturating_mul(40), 0).saturating_mul(r.into()))
+	}
 }

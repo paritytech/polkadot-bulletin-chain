@@ -15,9 +15,9 @@
 
 //! Tests for hop-promotion pallet.
 
-use crate::{mock::*, signing_payload};
+use crate::{mock::*, signing_payload, signing_payload_v2, RecipientsBound};
 use codec::Encode;
-use frame_support::{assert_noop, assert_ok, traits::Authorize};
+use frame_support::{assert_noop, assert_ok, traits::Authorize, BoundedVec};
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -69,6 +69,47 @@ fn make_promote_call(
 	submit_timestamp: u64,
 ) -> RuntimeCall {
 	RuntimeCall::HopPromotion(crate::Call::promote { data, signer, signature, submit_timestamp })
+}
+
+/// V2 counterpart of [`signed_by`]: signs the V2 payload that additionally
+/// binds the genesis hash and the SCALE-encoded recipients list.
+fn signed_by_v2(
+	keyring: Sr25519Keyring,
+	data: &[u8],
+	submit_timestamp: u64,
+	recipients: &BoundedVec<MultiSigner, RecipientsBound>,
+	genesis_hash: &[u8; 32],
+) -> (MultiSigner, MultiSignature) {
+	let recipients_hash = blake2_256(&recipients.encode());
+	let payload =
+		signing_payload_v2(&blake2_256(data), submit_timestamp, genesis_hash, &recipients_hash);
+	let sig = keyring.sign(&payload);
+	(MultiSigner::Sr25519(keyring.public()), MultiSignature::Sr25519(sig))
+}
+
+fn make_promote_v2_call(
+	data: Vec<u8>,
+	signer: MultiSigner,
+	signature: MultiSignature,
+	submit_timestamp: u64,
+	recipients: BoundedVec<MultiSigner, RecipientsBound>,
+) -> RuntimeCall {
+	RuntimeCall::HopPromotion(crate::Call::promote_v2 {
+		signer,
+		signature,
+		submit_timestamp,
+		recipients,
+		data,
+	})
+}
+
+fn current_genesis_hash() -> [u8; 32] {
+	*frame_system::Pallet::<Test>::block_hash(0u64).as_fixed_bytes()
+}
+
+fn recipients_from(keys: &[Sr25519Keyring]) -> BoundedVec<MultiSigner, RecipientsBound> {
+	let raw: Vec<MultiSigner> = keys.iter().map(|k| MultiSigner::Sr25519(k.public())).collect();
+	BoundedVec::try_from(raw).expect("recipient list within MaxRecipients")
 }
 
 // ---- Dispatch tests ----
@@ -473,5 +514,205 @@ fn promote_has_lower_priority_than_store_and_renew() {
 			promote_tx.priority,
 			renew_tx.priority,
 		);
+	});
+}
+
+// ---- V2 authorize closure ----
+
+#[test]
+fn authorize_v2_accepts_valid_signature_with_recipients_and_genesis_hash() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let recipients = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let genesis = current_genesis_hash();
+		let (signer, sig) =
+			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+	});
+}
+
+#[test]
+fn authorize_v2_accepts_empty_recipients() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let recipients = recipients_from(&[]);
+		let genesis = current_genesis_hash();
+		let (signer, sig) =
+			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_wrong_genesis_hash() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		// Sign against a fake genesis (simulating a different chain), submit on this chain.
+		let fake_genesis = [0xAB; 32];
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&recipients,
+			&fake_genesis,
+		);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_tampered_recipients_added() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let genesis = current_genesis_hash();
+		let signed_recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&signed_recipients,
+			&genesis,
+		);
+		// Submit with an extra recipient appended.
+		let tampered = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, tampered);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_tampered_recipients_reordered() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let genesis = current_genesis_hash();
+		let signed_recipients = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&signed_recipients,
+			&genesis,
+		);
+		// Swap order on submission — same set, different SCALE encoding.
+		let tampered = recipients_from(&[Sr25519Keyring::Charlie, Sr25519Keyring::Bob]);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, tampered);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_v1_payload_format() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		// Sign V1 payload (no genesis/recipients), then submit as V2 — verify must fail.
+		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_bad_signature() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
+
+		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let genesis = current_genesis_hash();
+		// Sign for different data, submit with the canonical data — same V2 pattern as the V1 case.
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&[7u8; 50],
+			TEST_TIMESTAMP_MS,
+			&recipients,
+			&genesis,
+		);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadProof.into())),
+		);
+	});
+}
+
+#[test]
+fn authorize_v2_rejects_unauthorized_account() {
+	new_test_ext().execute_with(|| {
+		set_now(TEST_TIMESTAMP_MS);
+		System::run_to_block::<AllPalletsWithSystem>(1);
+
+		let data = vec![1u8; 100];
+		// No `authorize_account` — must fail with BadSigner before signature verify.
+		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let genesis = current_genesis_hash();
+		let (signer, sig) =
+			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(InvalidTransaction::BadSigner.into())),
+		);
+	});
+}
+
+#[test]
+fn promote_v2_succeeds_with_authorized_origin() {
+	new_test_ext().execute_with(|| {
+		System::run_to_block::<AllPalletsWithSystem>(1);
+		frame_system::Pallet::<Test>::set_extrinsic_index(0);
+		let data = vec![42u8; 100];
+		let (signer, sig) = dummy_signer_and_sig();
+		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		assert_ok!(HopPromotion::promote_v2(authorized_origin(), signer, sig, 0, recipients, data));
 	});
 }
