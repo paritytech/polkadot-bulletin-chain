@@ -33,7 +33,7 @@ use crate::paseo_constants::{
 	time::*,
 };
 use alloc::{vec, vec::Vec};
-use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
+use cumulus_pallet_parachain_system::AnyRelayNumber;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
 	derive_impl,
@@ -135,12 +135,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	///
-	/// `MigrateV4ToV5` is single-block, so it runs in `on_runtime_upgrade`. On a chain still
-	/// at v3 it is a no-op (its v4 guard); the v3->v4 MBM below bumps to v4, then a following
-	/// runtime upgrade lets this step bump v4->v5. Idempotent on chains already at v5.
-	pub type Unreleased =
-		(pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,);
+	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -155,11 +150,7 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	///
-	/// `MigrateV3ToV4` walks `AutoRenewals` to the v4 layout. Self-guarded and idempotent, so
-	/// it is a no-op on chains already at/beyond v4.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,);
+	pub type MbmMigrations = ();
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -184,7 +175,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_019,
+	spec_version: 1_000_020,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -342,7 +333,9 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type ReservedDmpWeight = ReservedDmpWeight;
 	type XcmpMessageHandler = XcmpQueue;
 	type ReservedXcmpWeight = ReservedXcmpWeight;
-	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
+	// Temporary for the Paseo relay chain replacement (new relay genesis restarts block
+	// numbers). Revert to `RelayNumberMonotonicallyIncreases` once stable on the new relay.
+	type CheckAssociatedRelayNumber = AnyRelayNumber;
 	type ConsensusHook = ConsensusHook;
 	type RelayParentOffset = ConstU32<0>;
 }
