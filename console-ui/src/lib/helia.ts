@@ -1,7 +1,9 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { createHelia, type Helia } from "helia";
+import { createHeliaLight } from "helia";
+import { withBitswap } from "@helia/bitswap";
+import { withLibp2p, type HeliaWithLibp2p } from "@helia/libp2p";
 import { CID } from "multiformats/cid";
 import { multiaddr } from "@multiformats/multiaddr";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
@@ -34,7 +36,7 @@ export interface FetchResult {
 
 export class HeliaClient {
   private config: HeliaClientConfig;
-  private helia?: Helia;
+  private helia?: HeliaWithLibp2p<Record<string, unknown>>;
   private connectedPeers: ConnectionInfo[] = [];
 
   constructor(config: HeliaClientConfig) {
@@ -66,21 +68,26 @@ export class HeliaClient {
     this.log("info", `Connection gater: allowing ${allowedPeerIds.size} whitelisted peer(s)`);
 
     // Create Helia node with blake2b256 hasher for Polkadot/Substrate CID compatibility
-    this.helia = await createHelia({
-      hashers: [blake2b256, sha256, keccak256Hasher],
-      libp2p: {
-        connectionGater: {
-          denyDialMultiaddr: async (maAddr) => {
-            const addr = maAddr.toString();
-            const match = addr.match(/\/p2p\/([^/]+)/);
-            if (match && match[1] && allowedPeerIds.has(match[1])) {
-              return false; // Allow whitelisted peers
-            }
-            return true; // Deny all others
+    this.helia = withBitswap(
+      withLibp2p(
+        createHeliaLight({
+          hashers: [blake2b256, sha256, keccak256Hasher],
+        }),
+        {
+          connectionGater: {
+            denyDialMultiaddr: async (maAddr) => {
+              const addr = maAddr.toString();
+              const match = addr.match(/\/p2p\/([^/]+)/);
+              if (match && match[1] && allowedPeerIds.has(match[1])) {
+                return false; // Allow whitelisted peers
+              }
+              return true; // Deny all others
+            },
           },
         },
-      },
-    });
+      ),
+    );
+    await this.helia.start();
 
     const peerId = this.helia.libp2p.peerId.toString();
     this.log("success", `Helia node created with peer ID: ${peerId}`);
