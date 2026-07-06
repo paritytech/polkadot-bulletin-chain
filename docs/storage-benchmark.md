@@ -9,12 +9,13 @@ different storage classes, or a Linux box with the volumes attached.
 
 ## Arms
 
-NVMe (baseline), SSD, HDD, at 8 / 24 / 100 TB, at 6 s (current) and 500 ms (target) blocks.
+NVMe (baseline), SSD, HDD, at 8 / 24 / 100 TB, at 6 s (current) and 2 s / 500 ms (target)
+blocks.
 Pre-grow the DB so proof reads hit a cold random location in the full set, not a cached one.
 
 ## Method
 
-1. fio pre-screen (no node): per-slot IO = small random state read/write + ~9 MiB sequential
+1. fio pre-screen (no node): per-block IO = small random state read/write + ~9 MiB sequential
    blob write + one random cold read. `fio scripts/storage-bench/fio-block-critical.fio`.
 2. Node under load: point the data volume at each tier (real, or emulate on bare metal with
    `scripts/storage-bench/throttle.sh`), then `bulletin-stress-test ... throughput --variants
@@ -23,7 +24,7 @@ Pre-grow the DB so proof reads hit a cold random location in the full set, not a
 
 ## Pass criteria
 
-Block import p99 + authoring p99 well inside the slot; no growing import lag; proof-read p99
+Block import p99 + authoring p99 well inside the block time; no growing import lag; proof-read p99
 low-ms; Bitswap >= 95% within 2 s. Metrics: `substrate_block_verification_and_import_time`,
 `substrate_proposer_block_constructed`, `substrate_block_height{status="best"}`,
 `kubelet_volume_stats_*`, Bitswap p95.

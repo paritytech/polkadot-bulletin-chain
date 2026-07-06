@@ -3,14 +3,15 @@
 # Queries a Prometheus/Thanos endpoint (same metrics the ops stack already scrapes).
 #
 # Usage:
-#   PROM=http://prometheus:9090 CHAIN=<chain> WINDOW=10m \
+#   PROM=http://prometheus:9090 CHAIN=<chain> NS=<namespace> WINDOW=10m \
 #     scripts/storage-bench/collect-metrics.sh <arm-label>
 # Writes <arm-label>.metrics.txt. Run once per arm (nvme / gp3 / sata) x block-time.
 set -euo pipefail
 
 PROM="${PROM:?set PROM to the Prometheus base URL}"
-ARM="${1:?arm label, e.g. gp3-24s}"
+ARM="${1:?arm label, e.g. gp3-6s}"
 CHAIN="${CHAIN:-bulletin}"
+NS="${NS:-bulletin}"
 WINDOW="${WINDOW:-10m}"
 OUT="${ARM}.metrics.txt"
 
@@ -24,6 +25,6 @@ SEL="chain=~\"$CHAIN\""
   echo "block import p99 (s):    $(q "histogram_quantile(0.99, sum(rate(substrate_block_verification_and_import_time_bucket{$SEL}[$WINDOW])) by (le))")"
   echo "authoring p99 (s):       $(q "histogram_quantile(0.99, sum(rate(substrate_proposer_block_constructed_bucket{$SEL}[$WINDOW])) by (le))")"
   echo "best-block rate (1/s):   $(q "sum(rate(substrate_block_height{status=\"best\",$SEL}[$WINDOW]))")"
-  echo "disk free ratio:         $(q "min(kubelet_volume_stats_available_bytes{namespace=\"bulletin\"} / kubelet_volume_stats_capacity_bytes{namespace=\"bulletin\"})")"
+  echo "disk free ratio:         $(q "min(kubelet_volume_stats_available_bytes{namespace=\"$NS\"} / kubelet_volume_stats_capacity_bytes{namespace=\"$NS\"})")"
   echo "permanent storage ratio: $(q "max(bulletin_permanent_storage_used_ratio{$SEL})")"
 } | tee "$OUT"

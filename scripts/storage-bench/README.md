@@ -1,4 +1,4 @@
-# Storage-tier benchmark (Phase -1)
+# Storage-tier benchmark (Phase 1)
 
 Answers: does a Bulletin node need NVMe, or does a cheaper tier (SSD / HDD) meet block
 deadlines at scale? Full plan and verdict logic: `docs/storage-benchmark.md`.
@@ -12,8 +12,8 @@ two node pools on different `storageClassName`, or a Linux box with the volumes 
    ```bash
    sudo TARGET=/mnt/data/bench SIZE=1700g fio fio-block-critical.fio
    ```
-   If p99 latencies fit well inside the slot (6 s now, 500 ms target), proceed; if a tier
-   saturates, it already fails.
+   If p99 latencies fit well inside the block time (6 s now, 2 s / 500 ms targets), proceed;
+   if a tier saturates, it already fails. Needs SIZE + ~100g free on the target volume.
 
 2. **Node under load** - point the node's data volume at each tier (real gp3/SATA volume, or
    emulate on bare metal with `throttle.sh`), sync or pre-grow the DB to ~1.7 TiB, then:
@@ -31,4 +31,4 @@ two node pools on different `storageClassName`, or a Linux box with the volumes 
    gp3/SATA -> config change (update hardware rec). FAIL -> the per-column split is justified.
 
 Repeat for arms: nvme (baseline), gp3, sata (+ optional hdd for the blob tier) x block-time
-(6 s, 500 ms).
+(6 s, 2 s, 500 ms).
