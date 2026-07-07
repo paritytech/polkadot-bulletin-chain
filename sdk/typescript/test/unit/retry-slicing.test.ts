@@ -107,7 +107,10 @@ describe("submit() retry slicing", () => {
           itemsLength: items.length,
           precomputedCidsLength: config.precomputedCids?.length,
         })
-        return { cids: items.map((_, i) => fakeCid(`r${i}`)) } as never
+        return {
+          cids: items.map((_, i) => fakeCid(`r${i}`)),
+          failed: [],
+        } as never
       })
 
     const client = await makeClient()
@@ -144,6 +147,31 @@ describe("submit() retry slicing", () => {
     // 1 initial + 3 retries = 4 attempts total
     expect(pipelineSpy).toHaveBeenCalledTimes(4)
   }, 20_000) // 1s + 2s + 4s = 7s minimum of backoff
+
+  it("throws UPLOAD_INCOMPLETE when the pipeline completes with failed items", async () => {
+    // The pipeline resolves (it completed the rest) but reports items 1 and 3
+    // as permanently failed — submit() must surface that, not return all cids.
+    const pipelineSpy = vi
+      .spyOn(pipelineModule, "pipelineStore")
+      .mockImplementationOnce(async (_api, _signer, items) => {
+        return {
+          cids: items.map((_, i) => fakeCid(`r${i}`)),
+          failed: [1, 3],
+        } as never
+      })
+
+    const client = await makeClient()
+    const items = Array.from({ length: 5 }, (_, i) => ({
+      data: new Uint8Array([i]),
+    }))
+
+    await expect(runSubmit(client, items)).rejects.toMatchObject({
+      code: ErrorCode.UPLOAD_INCOMPLETE,
+      cause: { failedIndices: [1, 3] },
+    })
+    // Completed-with-failures is not a stall — no retry.
+    expect(pipelineSpy).toHaveBeenCalledTimes(1)
+  })
 
   it("non-stall BulletinError propagates without retry", async () => {
     const pipelineSpy = vi
@@ -207,7 +235,10 @@ describe("submit() retry slicing", () => {
             await (items[0] as { getData(): Promise<Uint8Array> }).getData()
           )[0] as number,
         })
-        return { cids: items.map((_, i) => fakeCid(`r${i}`)) } as never
+        return {
+          cids: items.map((_, i) => fakeCid(`r${i}`)),
+          failed: [],
+        } as never
       })
 
     const client = await makeClient()
@@ -250,7 +281,10 @@ describe("submit() retry slicing", () => {
           total: items.length,
           cid: fakeCid("b") as never,
         })
-        return { cids: items.map((_, i) => fakeCid(`x${i}`)) } as never
+        return {
+          cids: items.map((_, i) => fakeCid(`x${i}`)),
+          failed: [],
+        } as never
       })
 
     const events: Array<{ index: number }> = []
@@ -306,7 +340,10 @@ describe("submit() retry slicing", () => {
       })
       .mockImplementationOnce(async (_api, _signer, items, _config: any) => {
         calls.push({ itemsLength: items.length })
-        return { cids: items.map((_, i) => fakeCid(`r${i}`)) } as never
+        return {
+          cids: items.map((_, i) => fakeCid(`r${i}`)),
+          failed: [],
+        } as never
       })
 
     const events: Array<{ type: string; index: number }> = []

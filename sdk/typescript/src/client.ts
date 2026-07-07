@@ -529,19 +529,44 @@ export class AuthCallBuilder {
 /** Wrap an in-memory {@link UploadItem} as a {@link PipelineItem} (resident
  *  bytes). The lazy path builds PipelineItems whose `getData` range-reads. */
 
-function assertUniqueContentHashes(cids: CID[]): void {
+function assertUniqueContentHashes(cids: CID[], skip?: Set<number>): void {
   const seen = new Map<string, number>()
   for (let i = 0; i < cids.length; i++) {
+    if (skip?.has(i)) continue
     const hex = normalizeHex(Binary.toHex(cids[i]!.multihash.digest))
     const prior = seen.get(hex)
     if (prior !== undefined) {
       throw new BulletinError(
-        `upload(): item ${i} has the same content hash as item ${prior} — the SDK identifies items by content hash and can't distinguish duplicates. If you need to store the same data multiple times, submit them in separate upload() calls.`,
+        `submit(): item ${i} has the same content hash as item ${prior} — the SDK identifies items by content hash and can't distinguish duplicates. Pass the default dedupInput estimate (which skips duplicates), or store the same data in separate submit() calls.`,
         ErrorCode.INVALID_CONFIG,
       )
     }
     seen.set(hex, i)
   }
+}
+
+/**
+ * Completed-with-failures guard. The pipeline resolves even when some items
+ * exhausted their retry budget (it completes the rest), so a resolved run is
+ * not necessarily a full success — a failed index's cid is NOT on chain.
+ * Surface that as `UPLOAD_INCOMPLETE` (with the caller's original indices in
+ * `cause.failedIndices`) rather than returning a silent full-cids success.
+ * `newToOriginal` maps pipeline (compacted) indices back to caller indices.
+ */
+function assertNoFailedItems(
+  failed: number[],
+  newToOriginal: number[],
+  total: number,
+): void {
+  if (failed.length === 0) return
+  const failedOriginal = failed
+    .map((i) => newToOriginal[i])
+    .filter((v): v is number => v !== undefined)
+  throw new BulletinError(
+    `upload incomplete: ${failedOriginal.length} of ${total} items failed permanently (indices ${failedOriginal.join(", ")}); see ItemFailed events for per-item causes`,
+    ErrorCode.UPLOAD_INCOMPLETE,
+    { failedIndices: failedOriginal },
+  )
 }
 
 /**
@@ -1066,6 +1091,17 @@ export class BulletinClient implements BulletinClientInterface {
     unsigned: boolean,
   ): Promise<UploadResult> {
     const plan = estimate.plan
+    // The plan's CIDs were hashed from the estimate-pass bytes; submit reads
+    // bytes from `source` and reconciles against those CIDs. A size mismatch
+    // means the source changed or differs from the one estimated — the chain
+    // would store one payload while the pipeline reconciles another hash (a
+    // silent stall, or wrong content paid for). Fail fast on the cheap check.
+    if (source.size !== plan.totalSize) {
+      throw new BulletinError(
+        `submit(): source size ${source.size} does not match the estimate (${plan.totalSize} bytes) — the source changed or differs from the one passed to estimateUpload(). Re-run estimateUpload(source) with the current source.`,
+        ErrorCode.INVALID_CONFIG,
+      )
+    }
     // One PipelineItem per unit, honoring per-unit codec/hashAlgo (file chunks
     // default Raw/Blake2b; items-as-is carry their own). Bytes fetched lazily.
     const items: PipelineItem[] = plan.chunkCids.map((_, i) => ({
@@ -1085,18 +1121,34 @@ export class BulletinClient implements BulletinClientInterface {
       })
       cids.push(plan.rootCid)
     }
-    assertUniqueContentHashes(cids)
+    // Honor the estimate's dedup: skip units it collapsed as within-input
+    // duplicates (the first occurrence carries that content) and units already
+    // on chain. Skipping — rather than rejecting — is what makes the estimate a
+    // valid submission plan: the same content is still stored exactly once.
+    const preSkipped = new Set<number>([
+      ...estimate.alreadyStored,
+      ...estimate.duplicateIndices,
+    ])
+    // Guard the SUBMITTED (non-skipped) set: two live items sharing a content
+    // hash collide in the TBCH reconciler. Estimate-collapsed dups are skipped
+    // above, so this only fires when dedup was disabled and genuine dups remain.
+    assertUniqueContentHashes(cids, preSkipped)
     const hashes = cids.map(cidToContentHashHex)
 
     if (unsigned) {
-      return this.runUnsignedSubmit(items, cids, checkAuth, waitFor, onEvent)
+      return this.runUnsignedSubmit(
+        items,
+        cids,
+        preSkipped,
+        checkAuth,
+        waitFor,
+        onEvent,
+      )
     }
     this.requireSigner("submit()")
     if (checkAuth) await this.ensureAuthorizedOnChain()
-    // Honor the estimate's dedup: chunks it found already on chain aren't
-    // re-submitted. runSignedRetry's per-attempt TBCH check covers anything
-    // that landed between estimate and submit.
-    const preSkipped = new Set<number>(estimate.alreadyStored)
+    // runSignedRetry's per-attempt TBCH check covers anything that landed
+    // between estimate and submit.
     return this.runSignedRetry(
       items,
       cids,
@@ -1110,24 +1162,52 @@ export class BulletinClient implements BulletinClientInterface {
   /** Unsigned (preimage-authorized) submission of prepared items. */
   private async runUnsignedSubmit(
     items: PipelineItem[],
-    cids: CID[],
+    allItemCids: CID[],
+    preSkipped: Set<number>,
     checkAuth: boolean,
     waitFor: WaitFor,
     onEvent: UploadCallback | undefined,
   ): Promise<UploadResult> {
     const providers = this.requireProviders("submit().asUnsigned()")
-    if (checkAuth) await this.ensurePreimagesAuthorized([], cids)
+    // Drop skipped units (estimate-collapsed duplicates, or already on chain)
+    // and remap pipeline event indices back to the caller's original indices.
+    // The unsigned path has no retry loop, so a one-shot filter suffices (cf.
+    // runSignedRetry's newToOriginal).
+    const submitItems: PipelineItem[] = []
+    const submitCids: CID[] = []
+    const newToOriginal: number[] = []
+    for (let i = 0; i < items.length; i++) {
+      if (preSkipped.has(i)) continue
+      submitItems.push(items[i] as PipelineItem)
+      submitCids.push(allItemCids[i] as CID)
+      newToOriginal.push(i)
+    }
+    if (checkAuth) await this.ensurePreimagesAuthorized([], submitCids)
+    const remapEvent: UploadCallback | undefined = onEvent
+      ? (ev) =>
+          onEvent({
+            ...ev,
+            index: newToOriginal[ev.index] ?? ev.index,
+            total: items.length,
+          })
+      : undefined
     try {
-      const result = await pipelineStore(this.api, undefined, items, {
+      const result = await pipelineStore(this.api, undefined, submitItems, {
         providers,
         blockLimits: this.config.blockLimits,
         completeOn: waitFor === "in_block" ? "best" : "finalized",
         bootstrap: this.pipelineBootstrap,
-        precomputedCids: cids,
+        precomputedCids: submitCids,
         submissionStrategy: this.config.submissionStrategy,
-        onEvent,
+        onEvent: remapEvent,
       })
-      return { cids: result.cids }
+      // Unsigned items carry no per-item retry budget today (`failed` stays
+      // empty; a stuck item stalls instead) — same guard as the signed path
+      // so the contract holds if that changes.
+      assertNoFailedItems(result.failed, newToOriginal, items.length)
+      // Return the full CID set (matches the signed path); skipped units share
+      // content with a submitted unit or are already stored.
+      return { cids: allItemCids }
     } catch (error) {
       if (error instanceof BulletinError) throw error
       throw new BulletinError(
@@ -1205,6 +1285,17 @@ export class BulletinClient implements BulletinClientInterface {
           const entries = await Promise.all(
             pendingHashes.map((h) => readStoredAt(this.api, h, "finalized")),
           )
+          // Synthesized events carry the finalized tip's hash — best-effort
+          // observation context; the authoritative renewal slot is
+          // `(blockNumber, transactionIndex)` from TBCH.
+          let tipHash = ""
+          if (onEvent && entries.some(Boolean)) {
+            try {
+              tipHash = (await this.papiClient.getFinalizedBlock()).hash ?? ""
+            } catch {
+              /* keep "" — context only, never worth failing the retry */
+            }
+          }
           for (let k = 0; k < pendingIndexes.length; k++) {
             const entry = entries[k]
             if (!entry) continue
@@ -1215,7 +1306,7 @@ export class BulletinClient implements BulletinClientInterface {
               index: i,
               total: items.length,
               cid: allItemCids[i] as CID,
-              blockHash: "",
+              blockHash: tipHash,
               blockNumber: entry.blockNumber,
               transactionIndex: entry.transactionIndex,
             })
@@ -1242,7 +1333,7 @@ export class BulletinClient implements BulletinClientInterface {
         (origIdx) => originalItemNonces[origIdx],
       )
       try {
-        await pipelineStore(this.api, this.signer!, remaining, {
+        const result = await pipelineStore(this.api, this.signer!, remaining, {
           providers: this.requireProviders("upload()"),
           blockLimits: this.config.blockLimits,
           completeOn: waitFor === "in_block" ? "best" : "finalized",
@@ -1252,9 +1343,16 @@ export class BulletinClient implements BulletinClientInterface {
           seedItemNonces,
           onEvent: onEvent
             ? (ev) =>
-                onEvent({ ...ev, index: newToOriginal[ev.index] as number })
+                onEvent({
+                  ...ev,
+                  index: newToOriginal[ev.index] as number,
+                  // Pipeline events carry the compacted attempt-local total;
+                  // callers see the caller-space total (cf. runUnsignedSubmit).
+                  total: items.length,
+                })
             : undefined,
         })
+        assertNoFailedItems(result.failed, newToOriginal, items.length)
         break
       } catch (error) {
         if (isStallError(error) && attempt < maxRetries) {
@@ -1657,13 +1755,15 @@ export class BulletinClient implements BulletinClientInterface {
       }
     }
 
+    const dupSet = new Set(duplicateIndices)
+    const onChainSet = new Set(alreadyStored)
     const skippedSet = new Set<number>([...duplicateIndices, ...alreadyStored])
     const toUpload: number[] = []
     const itemsOut: UploadEstimateItem[] = new Array(itemCids.length)
     let bytes = 0n
     for (let i = 0; i < itemCids.length; i++) {
-      const dupOf = dedupInput && duplicateIndices.includes(i)
-      const onChain = alreadyStored.includes(i)
+      const dupOf = dedupInput && dupSet.has(i)
+      const onChain = onChainSet.has(i)
       let skipReason: UploadEstimateItem["skipReason"]
       if (dupOf) skipReason = "duplicate_input"
       else if (onChain) skipReason = "already_on_chain"

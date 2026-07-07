@@ -363,7 +363,9 @@ pub async fn plan_stream<S: BlobSource + ?Sized>(
 		root_cid: None,
 		manifest_data: None,
 	};
-	if config.create_manifest {
+	// A single chunk needs no manifest — its own CID is the retrieval id
+	// (matches the TS preparer and the in-memory single-store path).
+	if config.create_manifest && plan.chunk_cids.len() > 1 {
 		let manifest = UnixFsDagBuilder::new().build_from_parts(
 			&plan.chunk_cids,
 			&plan.chunk_sizes,
@@ -467,6 +469,18 @@ mod tests {
 			assert_eq!(a.content_hash, b.content_hash);
 		}
 		assert_eq!(plan.root_cid.unwrap().content_hash, manifest.root_cid.content_hash);
+	}
+
+	#[tokio::test]
+	async fn plan_stream_single_chunk_skips_manifest() {
+		let cfg = ChunkerConfig { chunk_size: 4096, max_parallel: 8, create_manifest: true };
+		let plan = plan_stream(&blob_from_bytes(make_data(1000)), &cfg, &StoreOptions::default())
+			.await
+			.unwrap();
+		assert_eq!(plan.chunk_cids.len(), 1);
+		// A single chunk needs no manifest — its own CID is the retrieval id.
+		assert!(plan.root_cid.is_none());
+		assert!(plan.manifest_data.is_none());
 	}
 
 	#[tokio::test]

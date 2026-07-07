@@ -89,8 +89,7 @@ just run-test-rust authorize-and-store <test_dir> <runtime>
 
 | File | Description |
 |------|-------------|
-| `authorize_and_store_papi.js` | Basic authorization and storage via WebSocket RPC |
-| `authorize_and_store_papi_smoldot.js` | Same workflow using Smoldot light client |
+| `authorize_and_store_papi.js` | Basic authorization and storage (WebSocket RPC, or Smoldot light client via `--smoldot=<relay-spec>:<para-spec>`) |
 | `authorize_preimage_and_store_papi.js` | Content-addressed authorization using preimage hashes |
 | `store_chunked_data.js` | Large file storage with DAG-PB chunking |
 | `store_big_data.js` | Very large file handling with parallel chunk uploads |

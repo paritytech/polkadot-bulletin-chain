@@ -119,11 +119,12 @@ export type { BlockLimits } from "./types.js"
 /** Configuration for {@link pipelineStore}. */
 export interface PipelineConfig {
   /**
-   * Provider factory. Called once per `pipelineStore()` invocation so each
-   * outer retry gets fresh transport (dead WS connections from a failed
-   * attempt are replaced). The first provider in the returned array drives
-   * the chainHead monitor; every provider is used as a broadcast target
-   * (pass multiple for ws-RPC redundancy).
+   * Provider factory. Called twice per `pipelineStore()` invocation — once
+   * for the broadcast clients and once for the monitor's own instance — so
+   * each outer retry gets fresh transport (dead WS connections from a
+   * failed attempt are replaced). The first provider drives the chainHead
+   * monitor; every provider is used as a broadcast target (pass multiple
+   * for ws-RPC redundancy).
    */
   providers: () => JsonRpcProvider[]
   /** Block capacity limits for batch computation. */
@@ -186,6 +187,10 @@ export interface PipelineStats {
   txsBroadcast: number
   /** Number of broadcast errors (all non-fatal). */
   broadcastErrors: number
+  /** Errors caught while draining queued chainHead handlers (reconcile, block
+   *  lookup, bootstrap, emit). Non-fatal — logged, not rethrown — but a nonzero
+   *  count means progress relied on retries/watchdogs rather than clean runs. */
+  handlerErrors: number
   /** Confirmed items at best block (`bestNonce - startNonce`; may decrease on reorg). */
   confirmed: number
   /** Finalized items (monotonically increasing, irreversible). */
@@ -215,6 +220,13 @@ export interface LatencyStats {
 export interface PipelineResult extends PipelineStats {
   /** CIDs per item, computed from `(data, codec, hashAlgo)`. Matches input order. */
   cids: CID[]
+  /**
+   * Indices of items that failed permanently (retry budget exhausted) and
+   * were NOT stored, in ascending order. The pipeline completes the rest and
+   * resolves, so callers MUST check this — an entry here means the matching
+   * `cids[i]` is not on chain.
+   */
+  failed: number[]
   /** Total data bytes across all items. */
   totalBytes: number
   /** Duration in milliseconds. */
@@ -425,7 +437,8 @@ export async function pipelineStore(
     totalItems,
   ).fill(undefined)
   const storedAt: Array<
-    { blockNumber: number; transactionIndex: number } | undefined
+    | { blockNumber: number; transactionIndex: number; blockHash: string }
+    | undefined
   > = new Array(totalItems).fill(undefined)
   // blake2b-256 hex (no 0x) per item — keys for TBCH lookups. Filled in
   // the `initialized` handler from CIDs (avoids double-hashing the data
@@ -447,30 +460,30 @@ export async function pipelineStore(
         return
       case UploadStatus.ItemInBlock: {
         if (!lastBestBlock) return
-        // Prefer the block where the item *actually* landed (from TBCH)
-        // over the current best block — important when items confirm in a
-        // block earlier than the one we're reconciling against.
-        const at = storedAt[i] ?? {
-          blockNumber: lastBestBlock.number,
-          transactionIndex: undefined as number | undefined,
-        }
+        // Emit the block where the item *actually* landed (from TBCH) as one
+        // consistent location — its own hash, number, and tx index, not the
+        // current best tip's hash with the inclusion block's number/index.
+        const at = storedAt[i]
         onEvent({
           type: status,
           ...base,
-          blockHash: lastBestBlock.hash,
-          blockNumber: at.blockNumber,
-          transactionIndex: storedAt[i]?.transactionIndex,
+          blockHash: at?.blockHash ?? lastBestBlock.hash,
+          blockNumber: at?.blockNumber ?? lastBestBlock.number,
+          transactionIndex: at?.transactionIndex,
         })
         return
       }
       case UploadStatus.ItemFinalized: {
         if (!lastFinalizedBlock) return
+        // Same: the inclusion block's own (hash, number, index). It is final
+        // and an ancestor of the finalized tip, so its hash never reorgs.
+        const at = storedAt[i]
         onEvent({
           type: status,
           ...base,
-          blockHash: lastFinalizedBlock.hash,
-          blockNumber: storedAt[i]?.blockNumber ?? lastFinalizedBlock.number,
-          transactionIndex: storedAt[i]?.transactionIndex,
+          blockHash: at?.blockHash ?? lastFinalizedBlock.hash,
+          blockNumber: at?.blockNumber ?? lastFinalizedBlock.number,
+          transactionIndex: at?.transactionIndex,
         })
         return
       }
@@ -503,6 +516,33 @@ export async function pipelineStore(
     }
     return num
   }
+  // Canonical hash for a block number. TBCH stores only `(blockNumber,
+  // transactionIndex)`, so the reconciler resolves the inclusion block's hash
+  // here to keep emitted events' `(blockHash, blockNumber, transactionIndex)`
+  // a single consistent location — otherwise `blockHash` would be the current
+  // best/finalized tip while the number/index point at an earlier block.
+  // Returns `undefined` on RPC error or a null answer (e.g. a light client
+  // that can't serve `chain_getBlockHash` by number) — the caller falls back
+  // to the reconciled block's hash, mirroring the Rust pipeline's
+  // `unwrap_or`; a failed lookup must never abort a reconcile pass.
+  const blockHashByNumber = new Map<number, string>()
+  const resolveBlockHash = async (
+    blockNumber: number,
+  ): Promise<string | undefined> => {
+    const hit = blockHashByNumber.get(blockNumber)
+    if (hit !== undefined) return hit
+    const hash = await monitorClient
+      .request<string | null>("chain_getBlockHash", [blockNumber])
+      .catch(() => undefined)
+    // Don't cache misses — the block may become resolvable later.
+    if (typeof hash !== "string") return undefined
+    blockHashByNumber.set(blockNumber, hash)
+    if (blockHashByNumber.size > MAX_BLOCK_NUMBER_CACHE) {
+      const firstKey = blockHashByNumber.keys().next().value
+      if (firstKey !== undefined) blockHashByNumber.delete(firstKey)
+    }
+    return hash
+  }
   // signerHex is used for SCALE state_call (the chain doesn't care about
   // SS58 prefix). signerSs58 is filled at `initialized` time from the chain's
   // `system_properties.ss58Format` — its only use is the
@@ -511,17 +551,6 @@ export async function pipelineStore(
   // Both empty in unsigned mode (no signer, no nonce tracking).
   const signerHex = signer ? Binary.toHex(signer.publicKey) : ""
   let signerSs58 = ""
-
-  // Per-item broadcast tracking — used only in unsigned mode where there
-  // are no nonces to dedupe against. Set after first successful broadcast;
-  // wave dispatcher skips items already broadcast to avoid spamming the pool.
-  const broadcastedItems = new Set<number>()
-
-  // Pre-compute cumulative byte sizes for throughput reporting
-  const prefixBytes = new Float64Array(items.length + 1)
-  for (let i = 0; i < items.length; i++) {
-    prefixBytes[i + 1] = (prefixBytes[i] ?? 0) + (items[i]?.size ?? 0)
-  }
 
   // Lazy data: fetch each item's bytes on first (re-)broadcast and cache them;
   // free on finalization so resident memory tracks the in-flight window, not
@@ -535,7 +564,7 @@ export async function pipelineStore(
     }
     return d
   }
-  const totalDataBytes = prefixBytes[items.length] ?? 0
+  const totalDataBytes = items.reduce((acc, it) => acc + (it?.size ?? 0), 0)
 
   // ---------------------------------------------------------------------------
   // Connections
@@ -588,9 +617,7 @@ export async function pipelineStore(
 
   // Submission strategy: today only nonce-tracking is implemented. The
   // `SubmissionStrategyKind` union and `config.submissionStrategy` field
-  // exist so future strategies can be added without rewriting the pipeline
-  // (see `docs/watch-strategy-design.md` for the watch strategy we
-  // prototyped and removed).
+  // exist so future strategies can be added without rewriting the pipeline.
   const _strategyKind: SubmissionStrategyKind =
     config.submissionStrategy ?? "nonce-tracking"
   const strategy: SubmissionStrategy = createNonceTrackingStrategy({
@@ -646,6 +673,7 @@ export async function pipelineStore(
     waves: 0,
     txsBroadcast: 0,
     broadcastErrors: 0,
+    handlerErrors: 0,
     confirmed: 0,
     finalized: 0,
   }
@@ -682,10 +710,10 @@ export async function pipelineStore(
     items,
     totalItems,
     cids,
-    prefixBytes,
     contentHashesHex,
     submissionAnchorBlock,
     storedAt,
+    resolveBlockHash,
     counters,
     tracking,
     inclusionLatenciesMs,
@@ -719,8 +747,16 @@ export async function pipelineStore(
         if (!fn) break
         try {
           await fn()
-        } catch {
-          /* swallow — surfaced via counters.broadcastErrors */
+        } catch (err) {
+          // Handlers run reconcile, block lookup, bootstrap, and emit — not
+          // just broadcast. Don't rethrow (that would kill the queue and the
+          // run), but surface the cause: silent swallow turns a real bug into
+          // an opaque stall/timeout. The watchdogs still drive recovery.
+          counters.handlerErrors++
+          // biome-ignore lint/suspicious/noConsole: handler-error visibility
+          console.warn(
+            `[pipelineStore] queued handler error (#${counters.handlerErrors}, non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+          )
         }
       }
       draining = false
@@ -788,12 +824,19 @@ export async function pipelineStore(
 
       const durationMs = Date.now() - startTime
       const sec = durationMs / 1000
-      const finalizedBytes = prefixBytes[counters.finalized] ?? 0
+      // Sum the actually-finalized items' sizes — under failures or
+      // out-of-order finalization the finalized set is not a prefix.
+      let finalizedBytes = 0
+      for (let i = 0; i < totalItems; i++) {
+        if (finalizedEmitted[i]) finalizedBytes += items[i]?.size ?? 0
+      }
       resolve({
         cids,
+        failed: [...failedItems].sort((a, b) => a - b),
         waves: counters.waves,
         txsBroadcast: counters.txsBroadcast,
         broadcastErrors: counters.broadcastErrors,
+        handlerErrors: counters.handlerErrors,
         confirmed: counters.confirmed,
         finalized: counters.finalized,
         totalItems: items.length,
@@ -864,15 +907,15 @@ export async function pipelineStore(
                     if (!lastBestBlock || lastBestBlock.number < newTipNumber) {
                       lastBestBlock = { hash: lastHash, number: newTipNumber }
                     }
-                    await reconcileAtBlock(api, state, lastHash)
+                    await reconcileAtBlock(api, state, lastHash, newTipNumber)
                     recordLatency(state, Date.now(), "in_block")
-                    recordLatency(state, Date.now(), "finalized")
+                    recordLatency(state, Date.now(), "finalized", newTipNumber)
                     // Newly-confirmed items emit ItemInBlock + ItemFinalized
                     // so callers see the standard Started → InBlock →
                     // Finalized progression even when the in-block event
                     // happened during the disconnect window.
                     emitInBlockEvents(state)
-                    emitFinalizedEvents(state)
+                    emitFinalizedEvents(state, newTipNumber)
                   } catch (err) {
                     // biome-ignore lint/suspicious/noConsole: ops visibility
                     console.warn(
@@ -1047,19 +1090,19 @@ export async function pipelineStore(
                 if (!initialized || done) return
 
                 // Early-out once every item is stored (or permanently
-                // failed). We're just waiting on `finalized` events — no
+                // failed) and we're just waiting on `finalized` events — no
                 // need to fetch nonces or rerun the reconciler each best
-                // block until then.
-                if (counters.confirmed + failedItems.size >= totalItems) {
-                  if (
-                    completeOn === "best" &&
-                    counters.confirmed >= totalItems - failedItems.size
-                  ) {
-                    tracking.bestAtTargetStreak += 1
-                    if (tracking.bestAtTargetStreak >= 2) {
-                      finish() // [TERMINATE-OK] completeOn:"best" 2-block streak
-                    }
-                  }
+                // block until then. Only in "finalized" mode: the finalized
+                // handler's own reconcile + emitInBlockEvents keeps
+                // `counters.confirmed` fresh, so an item reorged out after
+                // this gate closes reopens it and re-enters verification.
+                // "best" mode must NOT skip — its 2-block completion streak
+                // (after the reconcile below) has to re-observe TBCH on
+                // every tick or it would finish on stale confirmations.
+                if (
+                  completeOn === "finalized" &&
+                  counters.confirmed + failedItems.size >= totalItems
+                ) {
                   return
                 }
 
@@ -1085,7 +1128,12 @@ export async function pipelineStore(
                 // `storedAt[i]` for items confirmed at or before B. Then
                 // `emitInBlockEvents` updates `counters.confirmed` and fires
                 // `ItemInBlock` with the correct `transactionIndex`.
-                await reconcileAtBlock(api, state, bestBlockHash)
+                await reconcileAtBlock(
+                  api,
+                  state,
+                  bestBlockHash,
+                  bestBlockNumber,
+                )
                 recordLatency(state, Date.now(), "in_block")
                 emitInBlockEvents(state)
 
@@ -1393,11 +1441,8 @@ export async function pipelineStore(
                   // Unsigned: same intent, but no nonces. Just re-enqueue
                   // anything not accepted by the pool.
                   for (let k = 0; k < waveIndexes.length; k++) {
-                    const i = waveIndexes[k] as number
-                    if (itemResults[k]?.accepted) {
-                      broadcastedItems.add(i)
-                    } else {
-                      reRejected.push(i)
+                    if (!itemResults[k]?.accepted) {
+                      reRejected.push(waveIndexes[k] as number)
                     }
                   }
                 }
@@ -1514,9 +1559,18 @@ export async function pipelineStore(
                 // Reconcile at the finalized block — populates `storedAt[i]`
                 // for any item whose TBCH entry exists at finalization. Then
                 // emit ItemFinalized (monotonic) with `transactionIndex`.
-                await reconcileAtBlock(api, state, lastHash)
-                recordLatency(state, Date.now(), "finalized")
-                emitFinalizedEvents(state)
+                await reconcileAtBlock(api, state, lastHash, finBlockNumber)
+                recordLatency(state, Date.now(), "in_block")
+                recordLatency(state, Date.now(), "finalized", finBlockNumber)
+                // Refresh `counters.confirmed` (and the reorg-aware
+                // inBlockEmitted flags) from this reconcile. The best
+                // handler's early-out gate reads `counters.confirmed`, and
+                // this is the only reconcile that runs while that gate is
+                // closed — without the refresh, an item reorged out after
+                // full best-confirmation would never reopen the gate and the
+                // run would hang instead of re-verifying and re-broadcasting.
+                emitInBlockEvents(state)
+                emitFinalizedEvents(state, finBlockNumber)
 
                 // Completion: every input item is either stored or
                 // permanently failed (hijack budget exceeded). The
@@ -1622,7 +1676,6 @@ interface WaveState {
   items: PipelineItem[]
   totalItems: number
   cids: CID[]
-  prefixBytes: Float64Array
   /** blake2b-256 hex (no 0x) per item — keys for TBCH reads. */
   contentHashesHex: string[]
   /**
@@ -1635,9 +1688,17 @@ interface WaveState {
   /**
    * Where on chain each item landed, populated by the TBCH reconciler.
    * Set when `TBCH[contentHash]` exists and its block ≥ submissionAnchorBlock.
-   * `transactionIndex` is surfaced on `ItemInBlock` / `ItemFinalized` events.
+   * `(blockHash, blockNumber, transactionIndex)` is one consistent location —
+   * `blockHash` is the canonical hash of `blockNumber` (the inclusion block),
+   * not the current tip — surfaced on `ItemInBlock` / `ItemFinalized` events.
    */
-  storedAt: Array<{ blockNumber: number; transactionIndex: number } | undefined>
+  storedAt: Array<
+    | { blockNumber: number; transactionIndex: number; blockHash: string }
+    | undefined
+  >
+  /** Canonical hash for a block number; resolves the inclusion block's hash.
+   *  `undefined` when the monitor can't answer — caller picks a fallback. */
+  resolveBlockHash: (blockNumber: number) => Promise<string | undefined>
   counters: {
     waves: number
     txsBroadcast: number
@@ -1681,14 +1742,23 @@ async function reconcileAtBlock(
   api: BulletinTypedApi,
   state: WaveState,
   blockHash: string,
+  blockNumber: number,
 ): Promise<void> {
-  // Re-check every signed/broadcast item — items whose `storedAt` was set
-  // at a previous best block may have been reorged out at this block.
-  // The reconciler is the only source of truth for storedAt; if TBCH no
-  // longer shows our entry, clear it so emitInBlockEvents can retract.
+  // Re-check every broadcast-but-unfinalized item — items whose `storedAt`
+  // was set at a previous best block may have been reorged out at this
+  // block. The reconciler is the only source of truth for storedAt; if TBCH
+  // no longer shows our entry at/after the recorded height, clear it so
+  // emitInBlockEvents can retract. Finalized items are irreversible — skip
+  // their reads entirely so steady-state reconcile cost tracks the
+  // in-flight window, not the whole upload.
   const considered: number[] = []
   for (let i = 0; i < state.totalItems; i++) {
-    if (state.submissionAnchorBlock[i] !== undefined) considered.push(i)
+    if (
+      state.submissionAnchorBlock[i] !== undefined &&
+      !state.finalizedEmitted[i]
+    ) {
+      considered.push(i)
+    }
   }
   if (considered.length === 0) return
   const hashes = considered.map((i) => state.contentHashesHex[i] as string)
@@ -1698,23 +1768,39 @@ async function reconcileAtBlock(
     const entry = tbch.get(normalizeHex(hashes[k] as string))
     const anchor = state.submissionAnchorBlock[i]!
     if (entry && entry.blockNumber >= anchor) {
+      const prev = state.storedAt[i]
       // Log only first-time set, to keep logs tractable
-      if (state.storedAt[i] === undefined) {
+      if (prev === undefined) {
         // biome-ignore lint/suspicious/noConsole: stored-set diagnostic
         console.log(
           `[reconcile] item ${i}: storedAt SET blk=${entry.blockNumber} idx=${entry.transactionIndex} (anchor=${anchor}, hash=${hashes[k]?.slice(0, 12)}, queried=${blockHash.slice(0, 10)})`,
         )
       }
-      state.storedAt[i] = entry
+      // Resolve the inclusion block's canonical hash so the emitted location
+      // is consistent; reuse it when the block number is unchanged to avoid
+      // re-querying on every reconcile. Fall back to the reconciled block's
+      // hash when the lookup can't answer.
+      const inclusionHash =
+        prev && prev.blockNumber === entry.blockNumber
+          ? prev.blockHash
+          : ((await state.resolveBlockHash(entry.blockNumber)) ?? blockHash)
+      state.storedAt[i] = { ...entry, blockHash: inclusionHash }
     } else if (state.storedAt[i] !== undefined) {
-      // Was stored, no longer present at this block — reorg or
-      // out-of-retention removal. Caller handles re-emission via the
-      // `inBlockEmitted` flag.
-      // biome-ignore lint/suspicious/noConsole: reorg-out visibility
-      console.warn(
-        `[reconcile] item ${i}: storedAt cleared at block ${blockHash.slice(0, 10)} (previous=blk${state.storedAt[i]?.blockNumber}, anchor=${anchor}, tbch=${entry?.blockNumber ?? "missing"})`,
-      )
-      state.storedAt[i] = undefined
+      // Absent (or pre-anchor) at this block. Retract a prior inclusion
+      // only if this block is at/after where the item was recorded — then
+      // absence means it was reorged out, and `inBlockEmitted` re-fires on
+      // re-inclusion. Below the recorded height absence is expected (e.g. a
+      // finalized reconcile lagging behind the best block we landed in), so
+      // it must not retract. Finalized items are irreversible — never
+      // retract those. Mirrors the Rust reconciler's guard.
+      const prev = state.storedAt[i]!
+      if (!state.finalizedEmitted[i] && blockNumber >= prev.blockNumber) {
+        // biome-ignore lint/suspicious/noConsole: reorg-out visibility
+        console.warn(
+          `[reconcile] item ${i}: storedAt cleared at block #${blockNumber} ${blockHash.slice(0, 10)} (previous=blk${prev.blockNumber}, anchor=${anchor}, tbch=${entry?.blockNumber ?? "missing"})`,
+        )
+        state.storedAt[i] = undefined
+      }
     }
   }
 }
@@ -1728,12 +1814,20 @@ function recordLatency(
   s: WaveState,
   observedAt: number,
   kind: "in_block" | "finalized",
+  finalizedNumber?: number,
 ): void {
   const emitted = kind === "in_block" ? s.inBlockEmitted : s.finalizedEmitted
   const latencies =
     kind === "in_block" ? s.inclusionLatenciesMs : s.finalizationLatenciesMs
   for (let i = 0; i < s.totalItems; i++) {
-    if (s.storedAt[i] === undefined || emitted[i]) continue
+    const at = s.storedAt[i]
+    if (at === undefined || emitted[i]) continue
+    // Finalization: only items whose inclusion height is covered by the
+    // finalized tip are verified-final (same rule as emitFinalizedEvents) —
+    // without this, an item kept through a lagging finalized reconcile
+    // would record a latency entry on every pass until it finalizes.
+    if (finalizedNumber !== undefined && at.blockNumber > finalizedNumber)
+      continue
     const broadcast = s.broadcastAtMs[i]
     if (broadcast !== undefined) latencies.push(observedAt - broadcast)
   }
@@ -1771,11 +1865,18 @@ function emitInBlockEvents(s: WaveState): void {
  * Monotonic ItemFinalized emission. An item emits once when its TBCH
  * entry is observed at a finalized block hash (finalization is
  * irreversible, so this flag never clears).
+ *
+ * Only items whose inclusion height is at/below `finalizedNumber` count:
+ * the reconciler's retraction guard keeps entries recorded ABOVE the
+ * finalized height through a lagging finalized reconcile (absence there is
+ * expected, not a reorg), so those are still best-block-only and must not
+ * emit ItemFinalized yet.
  */
-function emitFinalizedEvents(s: WaveState): void {
+function emitFinalizedEvents(s: WaveState, finalizedNumber: number): void {
   let finalized = 0
   for (let i = 0; i < s.totalItems; i++) {
-    if (s.storedAt[i] !== undefined) {
+    const at = s.storedAt[i]
+    if (at !== undefined && at.blockNumber <= finalizedNumber) {
       finalized++
       if (!s.finalizedEmitted[i]) {
         s.emit(UploadStatus.ItemFinalized, i)
@@ -2103,23 +2204,27 @@ async function readStoredAtBlockBatch(
 // Helpers
 // ---------------------------------------------------------------------------
 
+// No Buffer — it doesn't exist in browsers (the console UI bundles this).
 function decodeU32LE(hex: string): number {
-  return Buffer.from(
-    hex.startsWith("0x") ? hex.slice(2) : hex,
-    "hex",
-  ).readUInt32LE(0)
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value))
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex
+  if (h.length < 8) {
+    throw new Error(`decodeU32LE: expected at least 4 bytes, got "${hex}"`)
+  }
+  let value = 0
+  for (let byte = 0; byte < 4; byte++) {
+    value += parseInt(h.slice(byte * 2, byte * 2 + 2), 16) * 2 ** (8 * byte)
+  }
+  return value
 }
 
 function emptyResult(): PipelineResult {
   return {
     cids: [],
+    failed: [],
     waves: 0,
     txsBroadcast: 0,
     broadcastErrors: 0,
+    handlerErrors: 0,
     confirmed: 0,
     finalized: 0,
     totalItems: 0,

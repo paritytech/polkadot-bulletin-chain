@@ -3,7 +3,7 @@ import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { bind } from "@react-rxjs/core";
 import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
 import {
@@ -353,6 +353,21 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
   const api = useApi();
   const client = useClient();
   const network = useNetwork();
+  // Each BulletinClient owns a PAPI ws connection; keep them in a real Map (not
+  // a WeakMap) so the effect below can iterate and `destroy()` them. Keyed by
+  // signer — one client per signer. The ref keeps the Map stable across renders.
+  const cacheRef = useRef<Map<object, BulletinClient>>(new Map());
+  // Tear down SDK-owned clients when the connection target changes or the
+  // component unmounts — a WeakMap would let them be GC'd eventually but never
+  // calls destroy(), leaking ws sockets. `.clear()` (not reassign) keeps the
+  // Map identity the memoized factory below captured.
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => {
+      for (const c of cache.values()) void c.destroy();
+      cache.clear();
+    };
+  }, [api, client, network]);
   // Memoize so the per-instance pipelineBootstrap cache (metadata + offline
   // API) survives renders. Without this every upload would re-bootstrap.
   return useMemo(() => {
@@ -368,7 +383,7 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
     // The SDK creates its own internal PAPI client; pick the same
     // descriptor the rest of the app uses for this network.
     const descriptor = DESCRIPTORS[network?.id ?? ""] ?? bulletin_westend;
-    const cache = new WeakMap<object, BulletinClient>();
+    const cache = cacheRef.current;
     const NO_SIGNER = {} as object;
     return (signer?: PolkadotSigner) => {
       const key = (signer as unknown as object | undefined) ?? NO_SIGNER;

@@ -17,12 +17,14 @@
 //! - **Reconcile-driven inclusion**: inclusion/finalization is read from the on-chain
 //!   `TransactionByContentHash` map at each best/finalized block (not from per-tx watches), with
 //!   clear-on-absence reorg handling.
-//! - **Exactly-once**: a content-hash pre-check skips already-stored items, and each item owns one
-//!   nonce slot — re-broadcast replaces it, never double-pays.
+//! - **Exactly-once**: each item owns one nonce slot — re-broadcast replaces it, never double-pays
+//!   — and every resume attempt starts with a content-hash pre-check that skips items that already
+//!   landed. (First attempts deliberately re-store content already on chain — that pays and
+//!   refreshes retention; opt out via the estimate's `skip_existing`.)
 //! - **Hijack recovery**: if our assigned nonces execute (chain nonce reaches the expected final
 //!   nonce) but an item never lands, its slot was taken by another transaction from the same
 //!   signer; the slot is released, the item re-queued with a fresh nonce, and after
-//!   [`MAX_RETRY_ATTEMPTS`] it fails with [`Error::HijackBudgetExceeded`].
+//!   [`MAX_RETRY_ATTEMPTS`] it emits `ItemFailed` and the run ends in [`Error::UploadIncomplete`].
 //! - **Watchdogs**: a chainHead-silence timeout and a no-progress best-block counter detect a stuck
 //!   connection.
 //! - **Retry-resume**: on a stall/disconnect the run re-subscribes and re-broadcasts
@@ -35,8 +37,7 @@
 //!
 //! Broadcast is multi-provider: each wave fans out to every configured endpoint
 //! (accepted-if-any), so one dead endpoint can't stall it. The *monitor*
-//! (reconcile/nonce) stream is still single-endpoint — hot-standby failover for
-//! it is the remaining item in `TODOS.md`.
+//! (reconcile/nonce) stream is still single-endpoint.
 
 use crate::{
 	blob_source::{GetData, ItemData},
@@ -61,7 +62,7 @@ use subxt_signer::sr25519::Keypair;
 const ERA_PERIOD: u64 = 64;
 /// A wave may span this many blocks' worth of capacity (TS `WAVE_BUFFER_BLOCKS`).
 const WAVE_BUFFER_BLOCKS: u128 = 2;
-/// Per-item nonce-slot retry budget before `HijackBudgetExceeded`.
+/// Per-item nonce-slot retry budget before the item fails permanently.
 const MAX_RETRY_ATTEMPTS: u32 = 10;
 /// No chainHead event within this window ⇒ `StoreStalled`.
 const STALL_TIMEOUT: Duration = Duration::from_secs(18);
@@ -177,8 +178,8 @@ pub struct UploadResult {
 /// Wire-level submission strategy — how signed extrinsics reach the chain.
 /// Mirrors the TypeScript SDK's `SubmissionStrategyKind`. Today only
 /// [`SubmissionStrategyKind::NonceTracking`] is implemented; the enum is the
-/// seam through which alternatives (e.g. a `transactionWatch`-based strategy —
-/// see `TODOS.md`) plug in without changing the pipeline.
+/// seam through which alternatives (e.g. a `transactionWatch`-based strategy)
+/// plug in without changing the pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SubmissionStrategyKind {
 	/// `author_submitExtrinsic` fan-out; inclusion and hijack detection are
@@ -431,11 +432,20 @@ struct State {
 	in_block_emitted: Vec<bool>,
 	finalized_emitted: Vec<bool>,
 	failed_items: BTreeSet<usize>,
+	// Estimate-excluded units (within-input duplicates + `skip_existing`
+	// matches): never broadcast, excluded from completion, but still returned
+	// in `cids`. Mirrors the TS client's `preSkipped`.
+	skipped: BTreeSet<usize>,
 
 	// in-flight item bytes, fetched lazily via `ResolvedItem::get_data`. Holds
 	// only items currently being (re-)broadcast; freed on finalization/failure
 	// so resident memory tracks the in-flight window, not the whole upload.
 	data_cache: BTreeMap<usize, ItemData>,
+
+	// Canonical hash per block number. TBCH stores only `(block_number,
+	// transaction_index)`, so events resolve the inclusion block's hash here to
+	// stay a single consistent location instead of the tip hash + earlier number.
+	block_hash_cache: BTreeMap<u32, H256>,
 
 	// mortality anchor (finalized)
 	anchor: (u64, H256),
@@ -456,7 +466,7 @@ impl State {
 	fn pending(&self) -> usize {
 		(0..self.total)
 			.filter(|&i| {
-				if self.failed_items.contains(&i) {
+				if self.failed_items.contains(&i) || self.skipped.contains(&i) {
 					return false;
 				}
 				match self.complete_on {
@@ -472,10 +482,11 @@ impl State {
 	}
 }
 
-/// Core reconcile-driven wave pipeline over already-resolved (lazy) items.
-/// Shared by the eager [`run_pipeline`] and the streamed
-/// [`crate::transaction::TransactionClient::submit`] path. Drives all items to
-/// `complete_on` and returns their CIDs in input order. `signer: None` runs the
+/// Core reconcile-driven wave pipeline over already-resolved (lazy) items —
+/// the engine behind [`crate::transaction::TransactionClient::submit`] /
+/// `submit_unsigned`. Drives all items to `complete_on` and returns their CIDs
+/// in input order; `pre_skipped` units (estimate-collapsed duplicates,
+/// `skip_existing` matches) are never broadcast. `signer: None` runs the
 /// unsigned (preimage-authorized) path: no nonce, no hijack detection, no
 /// signing — each item broadcasts a bare extrinsic and is confirmed via TBCH.
 ///
@@ -485,7 +496,7 @@ impl State {
 /// re-broadcasts not-yet-confirmed items at their carried nonce, up to
 /// [`MAX_STALL_RETRIES`] with exponential backoff. One `State` persists across
 /// attempts, so nonces and already-emitted events carry forward — combined with
-/// the per-attempt `TransactionByContentHash` dedup, retries are exactly-once.
+/// the per-resume `TransactionByContentHash` dedup, retries are exactly-once.
 /// Mirrors the TS pipeline's outer retry + disconnect recovery.
 pub(crate) async fn run_resolved(
 	api: OnlineClient<PolkadotConfig>,
@@ -493,6 +504,7 @@ pub(crate) async fn run_resolved(
 	submit_rpcs: Vec<LegacyRpcMethods<PolkadotConfig>>,
 	signer: Option<&Keypair>,
 	resolved: Vec<ResolvedItem>,
+	pre_skipped: BTreeSet<usize>,
 	config: UploadConfig,
 ) -> Result<UploadResult> {
 	let total = resolved.len();
@@ -507,6 +519,15 @@ pub(crate) async fn run_resolved(
 	// Bootstrap the initial mortality anchor + (signed) executed start nonce.
 	let (anchor, start_nonce) = bootstrap_anchor(&api, &account).await?;
 
+	// Units the estimate excluded — within-input duplicates (the first
+	// occurrence carries that content, so a second store would double-pay)
+	// and, with `skip_existing`, units already on chain. Never broadcast, no
+	// nonce, no events, excluded from completion; their cids are still
+	// returned. Mirrors the TS client's `preSkipped`.
+	let skipped = pre_skipped;
+	// Only the units we actually broadcast advance the account nonce.
+	let broadcast_total = (total - skipped.len()) as u64;
+
 	let mut st = State {
 		total,
 		complete_on: config.complete_on,
@@ -514,7 +535,7 @@ pub(crate) async fn run_resolved(
 		limits: config.block_limits,
 		item_nonce: alloc::vec![None; total],
 		next_free_nonce: start_nonce,
-		expected_final_nonce: start_nonce + total as u64,
+		expected_final_nonce: start_nonce + broadcast_total,
 		send_queue: VecDeque::with_capacity(total),
 		in_queue: BTreeSet::new(),
 		submission_anchor_block: alloc::vec![None; total],
@@ -523,15 +544,20 @@ pub(crate) async fn run_resolved(
 		in_block_emitted: alloc::vec![false; total],
 		finalized_emitted: alloc::vec![false; total],
 		failed_items: BTreeSet::new(),
+		skipped,
 		data_cache: BTreeMap::new(),
+		block_hash_cache: BTreeMap::new(),
 		anchor,
 		max_confirmed_ever: 0,
 		no_progress_best_blocks: 0,
 	};
 
-	// ItemStarted is emitted once per item here; the dedup pre-check + queueing
-	// runs per attempt inside `drive_streams`.
+	// ItemStarted is emitted once per (non-skipped) item here; the dedup
+	// pre-check + queueing runs per attempt inside `drive_streams`.
 	for (i, item) in resolved.iter().enumerate() {
+		if st.skipped.contains(&i) {
+			continue;
+		}
 		st.emit(UploadEvent::ItemStarted { index: i, total, cid: item.cid_bytes.clone() });
 	}
 
@@ -540,8 +566,11 @@ pub(crate) async fn run_resolved(
 	// Outer retry-resume loop.
 	let mut attempt = 0u32;
 	loop {
-		match drive_streams(&api, &rpc, &strategy, signer, &account, unsigned, &resolved, &mut st)
-			.await
+		let is_resume = attempt > 0;
+		match drive_streams(
+			&api, &rpc, &strategy, signer, &account, unsigned, is_resume, &resolved, &mut st,
+		)
+		.await
 		{
 			Ok(()) => break,
 			Err(e) => {
@@ -556,6 +585,19 @@ pub(crate) async fn run_resolved(
 					.await;
 			},
 		}
+	}
+
+	// The run completes even when items exhausted their retry budget (the rest
+	// are driven to `complete_on`) — surface those as an error rather than a
+	// silent success: a failed index's cid is NOT on chain. Per-item causes
+	// were emitted as `ItemFailed` events.
+	if !st.failed_items.is_empty() {
+		let failed: Vec<usize> = st.failed_items.iter().copied().collect();
+		return Err(Error::UploadIncomplete(format!(
+			"{} of {} items failed permanently (indices {failed:?}); see ItemFailed events for per-item causes",
+			failed.len(),
+			st.total
+		)));
 	}
 
 	Ok(UploadResult { cids: resolved.into_iter().map(|r| r.cid_bytes).collect() })
@@ -585,9 +627,11 @@ async fn bootstrap_anchor(
 	Ok((anchor, start_nonce))
 }
 
-/// One streaming attempt: (re-)subscribe, re-anchor, dedup-and-(re-)queue every
-/// not-yet-confirmed item, then drive the wave loop. Returns `Err(StoreStalled)`
-/// / `Err(NetworkError)` on a stall or disconnect so the caller can retry-resume;
+/// One streaming attempt: (re-)subscribe, re-anchor, (re-)queue every
+/// not-yet-confirmed item, then drive the wave loop. On a resume (`is_resume`)
+/// a `TransactionByContentHash` pre-check first skips items that landed before
+/// the stall (exactly-once across attempts). Returns `Err(StoreStalled)` /
+/// `Err(NetworkError)` on a stall or disconnect so the caller can retry-resume;
 /// `Ok(())` once every item reached `complete_on`.
 // `i` indexes the parallel `st.*` and `resolved` arrays in the pre-check loop.
 #[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
@@ -598,6 +642,7 @@ async fn drive_streams(
 	signer: Option<&Keypair>,
 	account: &Option<AccountId32>,
 	unsigned: bool,
+	is_resume: bool,
 	resolved: &[ResolvedItem],
 	st: &mut State,
 ) -> Result<()> {
@@ -616,29 +661,41 @@ async fn drive_streams(
 	// Fresh no-progress window for this attempt.
 	st.no_progress_best_blocks = 0;
 
-	// Dedup pre-check + (re-)queue. Items already on chain are reported finalized
-	// and skipped; the rest are queued for (re-)broadcast at their carried nonce
-	// (resetting the submission anchor so reconcile re-accepts a fresh inclusion).
-	// Emits are guarded by `finalized_emitted`, so no duplicate events across
-	// attempts.
+	// (Re-)queue every outstanding item for (re-)broadcast at its carried nonce
+	// (resetting the submission anchor so reconcile re-accepts a fresh
+	// inclusion). Only on a RESUME does a TBCH pre-check first report items
+	// that landed before the stall as finalized — re-broadcasting those would
+	// double-pay. On the first attempt content already on chain from an
+	// earlier upload is re-stored on purpose (pays, refreshes retention);
+	// opting out is the estimate's `skip_existing`. Mirrors the TS retry
+	// layer. Emits are guarded by `finalized_emitted`, so no duplicate events
+	// across attempts.
 	for i in 0..st.total {
-		if st.failed_items.contains(&i) || st.finalized_emitted[i] {
+		if st.failed_items.contains(&i) || st.skipped.contains(&i) || st.finalized_emitted[i] {
 			continue;
 		}
-		if let Some(loc) = tbch_lookup(api, st.anchor.1, resolved[i].content_hash).await {
-			st.stored_at[i] = Some(loc);
-			st.in_block_emitted[i] = true;
-			st.finalized_emitted[i] = true;
-			st.data_cache.remove(&i);
-			st.emit(UploadEvent::ItemFinalized {
-				index: i,
-				total: st.total,
-				cid: resolved[i].cid_bytes.clone(),
-				block_hash: h256_hex(st.anchor.1),
-				block_number: Some(loc.block_number),
-				transaction_index: Some(loc.transaction_index),
-			});
-		} else if st.in_queue.insert(i) {
+		if is_resume {
+			if let Some(loc) = tbch_lookup(api, st.anchor.1, resolved[i].content_hash).await {
+				st.stored_at[i] = Some(loc);
+				st.in_block_emitted[i] = true;
+				st.finalized_emitted[i] = true;
+				st.data_cache.remove(&i);
+				let anchor_hash = st.anchor.1;
+				let at_hash = resolve_block_hash(rpc, &mut st.block_hash_cache, loc.block_number)
+					.await
+					.unwrap_or(anchor_hash);
+				st.emit(UploadEvent::ItemFinalized {
+					index: i,
+					total: st.total,
+					cid: resolved[i].cid_bytes.clone(),
+					block_hash: h256_hex(at_hash),
+					block_number: Some(loc.block_number),
+					transaction_index: Some(loc.transaction_index),
+				});
+				continue;
+			}
+		}
+		if st.in_queue.insert(i) {
 			st.submission_anchor_block[i] = None;
 			st.send_queue.push_back(i);
 		}
@@ -682,10 +739,10 @@ async fn drive_streams(
 		match kind {
 			Kind::Finalized => {
 				st.anchor = (u64::from(block.number()), block_hash);
-				reconcile(api, st, resolved, block_hash, block_number, true).await;
+				reconcile(api, rpc, st, resolved, block_hash, block_number, true).await;
 			},
 			Kind::Best => {
-				reconcile(api, st, resolved, block_hash, block_number, false).await;
+				reconcile(api, rpc, st, resolved, block_hash, block_number, false).await;
 
 				// No-progress watchdog.
 				let confirmed = st.stored_at.iter().filter(|s| s.is_some()).count();
@@ -735,20 +792,42 @@ async fn drive_streams(
 	Ok(())
 }
 
+/// Canonical hash for a block number (cached). TBCH stores only the inclusion
+/// block number, so events resolve its hash here to stay a single consistent
+/// `(block_hash, block_number, transaction_index)` location instead of pairing
+/// the current tip's hash with an earlier block's number/index.
+async fn resolve_block_hash(
+	rpc: &LegacyRpcMethods<PolkadotConfig>,
+	cache: &mut BTreeMap<u32, H256>,
+	block_number: u32,
+) -> Option<H256> {
+	if let Some(h) = cache.get(&block_number) {
+		return Some(*h);
+	}
+	let h = rpc.chain_get_block_hash(Some(block_number.into())).await.ok().flatten()?;
+	cache.insert(block_number, h);
+	Some(h)
+}
+
 /// Read `TransactionByContentHash` for every broadcast-but-unfinalized item at
 /// `block_hash`; set/clear `stored_at` with reorg-aware clear-on-absence and
 /// emit `ItemInBlock` / `ItemFinalized`.
 async fn reconcile(
 	api: &OnlineClient<PolkadotConfig>,
+	rpc: &LegacyRpcMethods<PolkadotConfig>,
 	st: &mut State,
 	resolved: &[ResolvedItem],
 	block_hash: H256,
 	block_number: u32,
 	finalized: bool,
 ) {
+	// Finalized items are irreversible — skip their reads entirely so
+	// steady-state reconcile cost tracks the in-flight window, not the
+	// whole upload.
 	let considered: Vec<usize> = (0..st.total)
 		.filter(|&i| {
 			!st.failed_items.contains(&i) &&
+				!st.finalized_emitted[i] &&
 				(st.submission_anchor_block[i].is_some() || st.stored_at[i].is_some())
 		})
 		.collect();
@@ -772,11 +851,16 @@ async fn reconcile(
 				st.stored_at[i] = Some(l);
 				if !st.in_block_emitted[i] {
 					st.in_block_emitted[i] = true;
+					// Resolve the inclusion block's own hash so the event is one
+					// consistent location; fall back to the reconcile block.
+					let at_hash = resolve_block_hash(rpc, &mut st.block_hash_cache, l.block_number)
+						.await
+						.unwrap_or(block_hash);
 					st.emit(UploadEvent::ItemInBlock {
 						index: i,
 						total: st.total,
 						cid: resolved[i].cid_bytes.clone(),
-						block_hash: h256_hex(block_hash),
+						block_hash: h256_hex(at_hash),
 						block_number: Some(l.block_number),
 						transaction_index: Some(l.transaction_index),
 					});
@@ -785,11 +869,14 @@ async fn reconcile(
 					st.finalized_emitted[i] = true;
 					// Item is durably stored — release its in-flight bytes.
 					st.data_cache.remove(&i);
+					let at_hash = resolve_block_hash(rpc, &mut st.block_hash_cache, l.block_number)
+						.await
+						.unwrap_or(block_hash);
 					st.emit(UploadEvent::ItemFinalized {
 						index: i,
 						total: st.total,
 						cid: resolved[i].cid_bytes.clone(),
-						block_hash: h256_hex(block_hash),
+						block_hash: h256_hex(at_hash),
 						block_number: Some(l.block_number),
 						transaction_index: Some(l.transaction_index),
 					});

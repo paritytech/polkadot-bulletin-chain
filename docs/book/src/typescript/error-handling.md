@@ -54,6 +54,7 @@ try {
 | `CHUNK_FAILED` | No | A chunk failed to prepare |
 | `MISSING_CHUNK` | No | A chunk was missing during reassembly |
 | `HIJACK_BUDGET_EXCEEDED` | No | Too many nonce reassignments under concurrent same-account submission |
+| `UPLOAD_INCOMPLETE` | No | Some items failed permanently and are not on chain; `cause.failedIndices` lists them |
 
 `error.retryable` is true for `TRANSACTION_FAILED`, `TIMEOUT`, and `STORE_STALLED`. Note that `submit()` already retries stalls internally before surfacing one.
 

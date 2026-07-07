@@ -735,39 +735,20 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
-        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
-    elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
-        SCRIPT_NAME="authorize_and_store_papi.js"
-    else
+    if [ "{{ mode }}" != "ws" ] && [ "{{ mode }}" != "smoldot" ]; then
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
+    echo "🚀 Starting authorize and store workflow test (mode: {{ mode }}, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
 
     TEST_DIR="$(just compute-test-dir)"
     just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
-    # Run the script with parameters
-    if [ "{{ mode }}" = "smoldot" ]; then
-        # Parachain: relay chain (required) + parachain spec (optional).
-        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
-        # and the containing directory by the collator name used in each toml.
-        RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
-        elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
-        else
-            echo "❌ Unhandled runtime: {{ runtime }}"
-            exit 1
-        fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
-    else
-        node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283"
-    fi
+    # One SDK example for both modes — smoldot rides the shared provider flag
+    # (same path as run-test-authorize-and-store / CI).
+    FLAG=$(just _provider-flag "{{ mode }}" "$TEST_DIR" "{{ runtime }}")
+    node authorize_and_store_papi.js "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283" $FLAG
     EXAMPLE_EXIT=$?
 
     echo ""

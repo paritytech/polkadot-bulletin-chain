@@ -16,7 +16,7 @@ use crate::{
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
 use std::{
-	collections::{HashMap, HashSet},
+	collections::{BTreeSet, HashMap, HashSet},
 	sync::Arc,
 };
 use subxt::{
@@ -300,9 +300,11 @@ impl TransactionClient {
 	/// Submit a streamed upload from a prepared [`StreamEstimate`], fetching each
 	/// chunk's bytes lazily via `source.read(offset, size)` so resident memory
 	/// tracks the in-flight window, not the whole file. The manifest, if any, is
-	/// submitted last. Items already on chain are skipped (exactly-once) by the
-	/// pipeline's own reconcile pre-check. Returns the CIDs in plan order, with
-	/// the manifest root last when present.
+	/// submitted last. Units the estimate excluded — within-input duplicates
+	/// (`dedup_input`) and, with `skip_existing`, units already on chain — are
+	/// not submitted; their cids are still returned. Content already on chain is
+	/// otherwise re-stored on purpose (pays, refreshes retention). Returns the
+	/// CIDs in plan order, with the manifest root last when present.
 	pub async fn submit(
 		&self,
 		signer: &Keypair,
@@ -310,6 +312,8 @@ impl TransactionClient {
 		source: Arc<dyn SeekableSource>,
 		config: UploadConfig,
 	) -> Result<UploadResult> {
+		let pre_skipped = Self::pre_skipped(&estimate);
+		Self::assert_unique_content_hashes(&estimate.plan, &pre_skipped)?;
 		let resolved = Self::resolve_plan(estimate.plan, source)?;
 		run_resolved(
 			self.api.clone(),
@@ -317,6 +321,7 @@ impl TransactionClient {
 			self.submit_rpcs.clone(),
 			Some(signer),
 			resolved,
+			pre_skipped,
 			config,
 		)
 		.await
@@ -335,6 +340,8 @@ impl TransactionClient {
 		source: Arc<dyn SeekableSource>,
 		config: UploadConfig,
 	) -> Result<UploadResult> {
+		let pre_skipped = Self::pre_skipped(&estimate);
+		Self::assert_unique_content_hashes(&estimate.plan, &pre_skipped)?;
 		let resolved = Self::resolve_plan(estimate.plan, source)?;
 		run_resolved(
 			self.api.clone(),
@@ -342,23 +349,42 @@ impl TransactionClient {
 			self.submit_rpcs.clone(),
 			None,
 			resolved,
+			pre_skipped,
 			config,
 		)
 		.await
 	}
 
-	/// Reject a plan whose units don't all have distinct content hashes — the
-	/// reconciler identifies units by content hash and can't tell duplicates
-	/// apart (store the same data in separate uploads instead). Mirrors TS
-	/// `assertUniqueContentHashes`.
-	fn assert_unique_content_hashes(plan: &ChunkPlan) -> Result<()> {
+	/// Units the estimate excluded from submission: within-input duplicates
+	/// (`dedup_input`) and units already on chain (`skip_existing`). Mirrors
+	/// the TS client's `preSkipped`.
+	fn pre_skipped(estimate: &StreamEstimate) -> BTreeSet<usize> {
+		estimate
+			.base
+			.duplicate_indices
+			.iter()
+			.chain(estimate.base.already_stored.iter())
+			.copied()
+			.collect()
+	}
+
+	/// Reject a plan whose SUBMITTED (non-skipped) units share a content hash —
+	/// the reconciler identifies units by content hash and can't tell
+	/// duplicates apart. Estimate-collapsed duplicates are in `skip`, so this
+	/// only fires when `dedup_input` was disabled and genuine duplicates
+	/// remain. Mirrors TS `assertUniqueContentHashes`.
+	fn assert_unique_content_hashes(plan: &ChunkPlan, skip: &BTreeSet<usize>) -> Result<()> {
 		let mut seen: HashMap<ContentHash, usize> = HashMap::new();
 		for (i, c) in plan.chunk_cids.iter().chain(plan.root_cid.iter()).enumerate() {
+			if skip.contains(&i) {
+				continue;
+			}
 			if let Some(prior) = seen.insert(c.content_hash, i) {
 				return Err(Error::InvalidConfig(format!(
 					"submit(): unit {i} has the same content hash as unit {prior} — the SDK \
-					 identifies units by content hash and can't distinguish duplicates; store \
-					 the same data in separate uploads"
+					 identifies units by content hash and can't distinguish duplicates; use the \
+					 default dedup_input estimate (which skips duplicates), or store the same \
+					 data in separate submits"
 				)));
 			}
 		}
@@ -368,7 +394,19 @@ impl TransactionClient {
 	/// Turn a [`ChunkPlan`] + seekable source into lazy pipeline items: one per
 	/// chunk (bytes range-read on demand) plus the manifest last (resident).
 	fn resolve_plan(plan: ChunkPlan, source: Arc<dyn SeekableSource>) -> Result<Vec<ResolvedItem>> {
-		Self::assert_unique_content_hashes(&plan)?;
+		// The plan's CIDs were hashed from the estimate-pass bytes; submit reads
+		// from `source` and reconciles against those CIDs. A size mismatch means
+		// the source changed or differs from the one estimated — the chain would
+		// store one payload while the pipeline reconciles another hash. Fail fast.
+		if source.total_size() != plan.total_size {
+			return Err(Error::InvalidConfig(format!(
+				"submit(): source size {} does not match the estimate ({} bytes) — the source \
+				 changed or differs from the one passed to estimate_upload(); re-run \
+				 estimate_upload(source) with the current source",
+				source.total_size(),
+				plan.total_size
+			)));
+		}
 		let mut resolved: Vec<ResolvedItem> = Vec::with_capacity(plan.chunk_cids.len() + 1);
 
 		// The manifest (if any) is hashed with the same algorithm as the chunks.
@@ -985,4 +1023,46 @@ pub struct RenewReceipt {
 	pub original_block: u32,
 	pub transaction_index: u32,
 	pub block_hash: String,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn plan_of(datas: &[&[u8]]) -> ChunkPlan {
+		let mut chunk_cids = Vec::new();
+		let mut chunk_sizes = Vec::new();
+		let mut offsets = Vec::new();
+		let mut total = 0u64;
+		for d in datas {
+			chunk_cids.push(
+				calculate_cid_with_config(d, CidCodec::Raw, HashingAlgorithm::Blake2b256).unwrap(),
+			);
+			offsets.push(total);
+			chunk_sizes.push(d.len() as u64);
+			total += d.len() as u64;
+		}
+		ChunkPlan {
+			chunk_cids,
+			chunk_sizes,
+			offsets,
+			codecs: vec![CidCodec::Raw; datas.len()],
+			hash_algos: vec![HashingAlgorithm::Blake2b256; datas.len()],
+			total_size: total,
+			root_cid: None,
+			manifest_data: None,
+		}
+	}
+
+	/// Leftover duplicates (dedup disabled) are rejected; estimate-collapsed
+	/// duplicates in `skip` pass. Mirrors the TS duplicate-content guard.
+	#[test]
+	fn duplicate_content_rejected_unless_skipped() {
+		let plan = plan_of(&[b"a", b"b", b"a"]);
+		let err = TransactionClient::assert_unique_content_hashes(&plan, &BTreeSet::new())
+			.expect_err("dup content with empty skip set must be rejected");
+		assert_eq!(err.code(), "INVALID_CONFIG");
+		let skip: BTreeSet<usize> = [2usize].into_iter().collect();
+		assert!(TransactionClient::assert_unique_content_hashes(&plan, &skip).is_ok());
+	}
 }

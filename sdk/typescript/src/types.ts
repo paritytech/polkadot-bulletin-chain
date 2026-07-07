@@ -399,6 +399,7 @@ export enum ErrorCode {
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
   STORE_STALLED = "STORE_STALLED",
   HIJACK_BUDGET_EXCEEDED = "HIJACK_BUDGET_EXCEEDED",
+  UPLOAD_INCOMPLETE = "UPLOAD_INCOMPLETE",
 }
 
 /** Error codes that are retryable */
@@ -437,6 +438,8 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Store received no chainHead events from the RPC; the connection may be unhealthy. Retry on a fresh client",
   [ErrorCode.HIJACK_BUDGET_EXCEEDED]:
     "An item's nonce slot was repeatedly hijacked by other transactions from the same signer. Check for concurrent transactions on this account.",
+  [ErrorCode.UPLOAD_INCOMPLETE]:
+    "Some items exhausted their retry budget and were not stored (see ItemFailed events and `cause.failedIndices`). Re-run estimateUpload with skipExisting: true, then submit() to retry only the missing items.",
 }
 
 /**
@@ -515,11 +518,12 @@ export interface ClientConfig {
   txTimeout?: number
   /**
    * Factory that returns the JsonRpcProvider instances the SDK should use
-   * for the upload pipeline. Called once per `pipelineStore()` invocation
-   * — including each outer retry — so dead WS connections from a failed
-   * attempt get replaced with fresh ones. `providers[0]` is used for the
-   * chainHead monitor; every provider is used as a broadcast target
-   * (pass multiple for ws-RPC redundancy across endpoints).
+   * for the upload pipeline. Called twice per `pipelineStore()` invocation
+   * (broadcast clients + a dedicated monitor instance) — including on each
+   * outer retry — so dead WS connections from a failed attempt get replaced
+   * with fresh ones. `providers[0]` is used for the chainHead monitor;
+   * every provider is used as a broadcast target (pass multiple for ws-RPC
+   * redundancy across endpoints).
    *
    * - ws-RPC, single node: `() => [getWsProvider(url)]`
    * - ws-RPC, multi-node:  `() => urls.map(getWsProvider)`
@@ -548,8 +552,7 @@ export interface ClientConfig {
   /**
    * Wire-level submission strategy. Today only `"nonce-tracking"` is
    * implemented; the field exists so additional strategies can be added
-   * without changing this shape. See `docs/watch-strategy-design.md` for
-   * a watch-based design that was prototyped and removed.
+   * without changing this shape.
    */
   submissionStrategy?: "nonce-tracking"
 }
@@ -562,8 +565,8 @@ export interface ClientConfig {
  */
 /**
  * Resolved client config — everything from `ClientConfig` is required
- * except `createProvider`, which falls back to the default WebSocket
- * provider in `client.ts` when omitted.
+ * except `providers` and `authorizerSigner`, which stay optional; the
+ * paths that need them throw `UNSUPPORTED_OPERATION` when unset.
  */
 export type ResolvedClientConfig = Required<
   Omit<ClientConfig, "providers" | "authorizerSigner">

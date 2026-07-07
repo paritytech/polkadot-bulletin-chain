@@ -80,8 +80,8 @@ async fn pipeline_uploads_a_wave() {
 	let client = TransactionClient::new(&ws()).await.expect("connect");
 	let alice = dev::alice();
 
-	// Unique per run so the items actually submit (a repeat run would be
-	// skipped as already-stored — which is the exactly-once behaviour).
+	// Unique per run so the first upload submits fresh content and the
+	// skip_existing re-run below is meaningful.
 	let nonce_seed = std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
 		.unwrap()
@@ -134,9 +134,24 @@ async fn pipeline_uploads_a_wave() {
 		assert_eq!(with_slot, 3, "TBCH lookup populated the renew transaction_index");
 	}
 
-	// Re-upload the same (now-finalized) items: every one is already on chain,
-	// so the pipeline skips submission and returns the same CIDs (exactly-once).
-	let result2 = upload_items(&client, &alice, items, UploadConfig::default())
+	// Re-upload the same (now-finalized) items with `skip_existing`: the
+	// estimate marks every unit already-on-chain, submit skips them all (no
+	// re-store, no payment) and still returns the same CIDs. Without
+	// `skip_existing` a re-run would re-store on purpose (pays, refreshes
+	// retention).
+	let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
+	let est2 = client
+		.estimate_upload(
+			UploadInput::Items(items),
+			UploadEstimateOptions { skip_existing: true, ..Default::default() },
+		)
+		.await
+		.expect("re-estimate");
+	assert_eq!(est2.base.already_stored.len(), 3, "all three units found on chain");
+	assert_eq!(est2.base.transactions, 0, "nothing left to submit");
+	let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(datas));
+	let result2 = client
+		.submit(&alice, est2, source, UploadConfig::default())
 		.await
 		.expect("re-upload");
 	assert_eq!(result2.cids, result.cids, "re-run returns identical CIDs (exactly-once)");
@@ -850,11 +865,11 @@ async fn authorize_accounts_batched() {
 	);
 }
 
-/// Estimate dedup/skip-existing (#2/#3) + the duplicate-content submit guard
-/// (#1). Builds `[a, b, a]` (item 2 duplicates item 0):
+/// Estimate dedup/skip-existing + duplicate-content submit. Builds `[a, b, a]`
+/// (item 2 duplicates item 0):
 /// - `estimate_upload` (dedup_input default) marks index 2 as DuplicateInput, excludes it from
 ///   `transactions`/`to_upload`.
-/// - `submit` of the duplicate-content plan is rejected (INVALID_CONFIG).
+/// - `submit` of that plan succeeds: the duplicate is skipped (stored exactly once), not rejected.
 /// - a stored item re-estimated with `skip_existing` shows AlreadyOnChain.
 #[tokio::test]
 #[ignore]
@@ -883,14 +898,29 @@ async fn estimate_dedup_skip_existing_and_guard() {
 	assert!(matches!(est.base.items[2].skip_reason, Some(SkipReason::DuplicateInput)));
 	assert!(est.base.items[0].skip_reason.is_none());
 
-	// #1: submitting a duplicate-content plan is rejected before any network I/O.
+	// A within-input duplicate is SKIPPED, not rejected — submit stores the
+	// unique content exactly once and returns every cid (the dup included).
 	let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
 	let src: Arc<dyn SeekableSource> = Arc::new(blob_from_items(datas));
-	let err = client
-		.submit(&alice, est, src, UploadConfig::default())
+	let res = client
+		.submit(
+			&alice,
+			est,
+			src,
+			UploadConfig { complete_on: WaitFor::Finalized, ..Default::default() },
+		)
 		.await
-		.expect_err("duplicate-content batch must be rejected");
-	assert_eq!(err.code(), "INVALID_CONFIG", "duplicate content rejected at submit");
+		.expect("within-input duplicate is skipped, not rejected");
+	assert_eq!(res.cids.len(), 3, "all three cids returned (the dup at index 2 included)");
+	// Both unique contents are on chain; the duplicate added nothing to store.
+	let verify = client
+		.estimate_upload(
+			UploadInput::Items(vec![UploadItem::new(a.clone()), UploadItem::new(b.clone())]),
+			UploadEstimateOptions { skip_existing: true, ..Default::default() },
+		)
+		.await
+		.expect("verify estimate");
+	assert_eq!(verify.base.already_stored, vec![0, 1], "both unique contents stored exactly once");
 
 	// #3: store a unique item, then re-estimate it with skip_existing.
 	let uniq = format!("dedup-uniq {seed}").into_bytes();

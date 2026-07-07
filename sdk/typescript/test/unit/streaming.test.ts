@@ -135,6 +135,18 @@ describe("planStream", () => {
     expect(plan.chunkSizes.reduce((a, b) => a + b, 0)).toBe(data.length)
   })
 
+  it("skips the manifest for a single-chunk plan", async () => {
+    const preparer = new BulletinPreparer({
+      defaultChunkSize: MiB,
+      createManifest: true,
+    })
+    const plan = await preparer.planStream(blobFromBytes(makeData(1000)))
+    expect(plan.chunkCids).toHaveLength(1)
+    // A single chunk needs no manifest — its own CID is the retrieval id.
+    expect(plan.rootCid).toBeUndefined()
+    expect(plan.manifestData).toBeUndefined()
+  })
+
   it("throws on an empty source", async () => {
     const preparer = new BulletinPreparer()
     await expect(

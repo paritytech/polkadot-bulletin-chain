@@ -108,6 +108,11 @@ pub enum Error {
 	/// same signer; the per-item retry budget was exhausted.
 	#[cfg_attr(feature = "std", error("Hijack budget exceeded: {0}"))]
 	HijackBudgetExceeded(String),
+
+	/// The upload run completed, but some items exhausted their retry budget
+	/// and were NOT stored (their `ItemFailed` events carry the per-item cause).
+	#[cfg_attr(feature = "std", error("Upload incomplete: {0}"))]
+	UploadIncomplete(String),
 }
 
 impl Error {
@@ -134,6 +139,7 @@ impl Error {
 			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
 			Error::StoreStalled(_) => "STORE_STALLED",
 			Error::HijackBudgetExceeded(_) => "HIJACK_BUDGET_EXCEEDED",
+			Error::UploadIncomplete(_) => "UPLOAD_INCOMPLETE",
 		}
 	}
 
@@ -179,6 +185,8 @@ impl Error {
 				"The RPC connection sent no chainHead progress; retry on a fresh client",
 			Error::HijackBudgetExceeded(_) =>
 				"Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account",
+			Error::UploadIncomplete(_) =>
+				"Some items were not stored; re-run estimate_upload with skip_existing, then submit to retry only the missing items",
 		}
 	}
 }
@@ -560,6 +568,7 @@ mod tests {
 			Error::InvalidChunkSize("zero".into()),
 			Error::StoreStalled("no events".into()),
 			Error::HijackBudgetExceeded("slot taken".into()),
+			Error::UploadIncomplete("1 of 3 items failed".into()),
 		]
 	}
 
@@ -586,6 +595,7 @@ mod tests {
 			"INVALID_CHUNK_SIZE",
 			"STORE_STALLED",
 			"HIJACK_BUDGET_EXCEEDED",
+			"UPLOAD_INCOMPLETE",
 		];
 
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {

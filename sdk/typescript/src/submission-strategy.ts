@@ -11,9 +11,6 @@
  * detection via per-item nonce + TBCH lookup. The abstraction is kept so
  * alternative strategies (e.g. `transactionWatch_v1`-based) can be
  * plugged in without touching the pipeline.
- *
- * See `docs/watch-strategy-design.md` for the design notes on a future
- * watch strategy that was prototyped and removed.
  */
 
 import type { SubstrateClient } from "@polkadot-api/substrate-client"

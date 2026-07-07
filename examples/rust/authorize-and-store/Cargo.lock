@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "bulletin-sdk-rust"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "cid",
@@ -809,6 +809,7 @@ dependencies = [
  "subxt",
  "subxt-signer",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

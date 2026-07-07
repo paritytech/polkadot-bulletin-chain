@@ -124,6 +124,7 @@ describe("submit().asUnsigned() — pipelineStore dispatch", () => {
               toString: () => `cid:${i}`,
             }) as never,
         ),
+        failed: [],
       }))
 
     const client = await makeClient()
@@ -145,6 +146,7 @@ describe("submit().asUnsigned() — pipelineStore dispatch", () => {
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       .mockImplementation(async (_api, _signer, items: any) => ({
         cids: items.map(() => ({ toString: () => "x" }) as never),
+        failed: [],
       }))
     const client = await makeClient()
     await submitItems(client, [{ data: new Uint8Array([1]) }])
@@ -163,6 +165,7 @@ describe("submit().asUnsigned() — pipelineStore dispatch", () => {
               toString: () => `cid:${i}`,
             }) as never,
         ),
+        failed: [],
       }))
     const client = await makeClient()
     const items = Array.from({ length: 5 }, (_, i) => ({
@@ -199,6 +202,7 @@ describe("submit().asUnsigned() — pipelineStore dispatch", () => {
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       .mockImplementation(async (_api, _signer, items: any) => ({
         cids: items.map(() => ({ toString: () => "x" }) as never),
+        failed: [],
       }))
     const client = await makeClient({ withSigner: false })
     const { cids } = await submitItems(
@@ -228,6 +232,7 @@ describe("submit().asUnsigned() — blob source", () => {
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       async (_api, _signer, items: any) => ({
         cids: items.map(() => ({ toString: () => "x" }) as never),
+        failed: [],
       }),
     )
     const client = await makeClient()
@@ -248,6 +253,7 @@ describe("ensureAuthorized() + asUnsigned()", () => {
       // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
       async (_api, _signer, items: any) => ({
         cids: items.map(() => ({ toString: () => "x" }) as never),
+        failed: [],
       }),
     )
     const queried: unknown[] = []
@@ -303,27 +309,65 @@ describe("ensureAuthorized() + asUnsigned()", () => {
   })
 })
 
-describe("Duplicate content guard", () => {
+describe("Within-input duplicate handling", () => {
   beforeEach(() => vi.restoreAllMocks())
 
-  it("rejects submit() with two items sharing the same content hash", async () => {
-    const spy = vi.spyOn(pipelineModule, "pipelineStore")
+  it("skips a within-input duplicate instead of rejecting submit()", async () => {
+    const spy = vi
+      .spyOn(pipelineModule, "pipelineStore")
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
+      .mockImplementation(async (_api, _signer, items: any) => ({
+        cids: items.map(
+          (_: unknown, i: number) => ({ toString: () => `cid:${i}` }) as never,
+        ),
+        failed: [],
+      }))
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
-    await expect(
-      submitItems(client, [{ data: sameData }, { data: sameData }]),
-    ).rejects.toMatchObject({ code: ErrorCode.INVALID_CONFIG })
-    expect(spy).not.toHaveBeenCalled()
+    const { cids } = await submitItems(client, [
+      { data: sameData },
+      { data: sameData },
+    ])
+    // The duplicate is dropped before broadcast — one item reaches pipelineStore
+    // (stored exactly once)...
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0]![2]).toHaveLength(1)
+    // ...but both CIDs are still returned (they're identical).
+    expect(cids).toHaveLength(2)
   })
 
-  it("rejects .asUnsigned() with duplicate content too", async () => {
+  it("skips duplicate content on the .asUnsigned() path too", async () => {
+    const spy = vi
+      .spyOn(pipelineModule, "pipelineStore")
+      // biome-ignore lint/suspicious/noExplicitAny: minimal mock surface
+      .mockImplementation(async (_api, _signer, items: any) => ({
+        cids: items.map(
+          (_: unknown, i: number) => ({ toString: () => `cid:${i}` }) as never,
+        ),
+        failed: [],
+      }))
+    const client = await makeClient()
+    const sameData = new Uint8Array([1, 2, 3])
+    const { cids } = await submitItems(
+      client,
+      [{ data: sameData }, { data: sameData }],
+      { unsigned: true },
+    )
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(spy.mock.calls[0]![2]).toHaveLength(1)
+    expect(cids).toHaveLength(2)
+  })
+
+  it("rejects submit() when dedupInput: false leaves duplicate content", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient()
     const sameData = new Uint8Array([1, 2, 3])
+    const items = [{ data: sameData }, { data: sameData }]
+    // With dedup disabled the estimate collapses nothing, so submit's
+    // unique-content guard fires instead of silently storing once.
+    const est = await client.estimateUpload(items, { dedupInput: false })
     await expect(
-      submitItems(client, [{ data: sameData }, { data: sameData }], {
-        unsigned: true,
-      }),
+      client.submit(est, blobFromItems(items)).send(),
     ).rejects.toMatchObject({ code: ErrorCode.INVALID_CONFIG })
     expect(spy).not.toHaveBeenCalled()
   })
@@ -336,6 +380,7 @@ describe("Duplicate content guard", () => {
         cids: items.map(
           (_: unknown, i: number) => ({ toString: () => `cid:${i}` }) as never,
         ),
+        failed: [],
       }))
     const { CidCodec, HashAlgorithm } = await import("../../src/types")
     const client = await makeClient()
