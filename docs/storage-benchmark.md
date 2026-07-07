@@ -15,7 +15,7 @@ Pre-grow the DB so proof reads hit a cold random location in the full set, not a
 
 ## Method
 
-1. fio pre-screen (no node): per-block IO = small random state read/write + ~9 MiB sequential
+1. fio pre-screen (no node): per-block IO = small random state read/write + ~8 MiB sequential
    blob write + one random cold read. `fio scripts/storage-bench/fio-block-critical.fio`.
 2. Node under load: point the data volume at each tier (real, or emulate on bare metal with
    `scripts/storage-bench/throttle.sh`), then `bulletin-stress-test ... throughput --variants

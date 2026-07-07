@@ -28,16 +28,16 @@ iodepth=4
 numjobs=2
 size=50g
 
-# New blob data written to columns::TRANSACTION: ~9 MiB per block, sequential.
-# 9 MiB / 6 s ~= 1.5 MiB/s sustained; the burst is what matters, so write in 9 MiB chunks.
+# New blob data written to columns::TRANSACTION: ~8 MiB per block, sequential.
+# 8 MiB / 6 s ~= 1.33 MiB/s sustained; the burst is what matters, so write in 8 MiB chunks.
 [blob-write]
 filename=blob-set
 rw=write
 bs=1m
 iodepth=8
 numjobs=1
-rate=1572864
-# ^ 9 MiB per 6 s in bytes/s; 2 s blocks = 4718592, 500 ms = 18874368.
+rate=1398101
+# ^ 8 MiB per 6 s in bytes/s; 2 s blocks = 4194304, 500 ms = 16777216.
 
 # Proof challenge: one random read of a few KB from anywhere in the retention set, per block
 # (rate_iops=1 is ~6x the 6 s block rate, deliberately conservative). This is the cold
