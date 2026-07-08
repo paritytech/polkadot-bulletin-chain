@@ -864,34 +864,197 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed
 # Live network tests (external endpoints - Westend, Paseo, etc.)
 # ============================================================================
 #
-# Run store-big-data test against live Bulletin chain deployments.
-# These require pre-authorized accounts.
+# Runs the four canonical end-to-end scripts against a live Bulletin
+# deployment: store_big_data.js (IPFS + multi-chunked files),
+# authorize_and_store_papi_smoldot.js (Smoldot light client),
+# hop_round_trip.js (HOP), and check_chopsticks.js (Chopsticks fork).
 #
-# Usage:
-#   just run-live-tests-westend <seed>
-#   just run-live-tests-westend <seed> http://127.0.0.1:8283 small
+# The seed must hold authorizer rights on the target network — the scripts
+# authorize their worker signers inline (no pre-provisioned accounts needed).
+#
+# Per-network usage:
+#   just run-live-tests-westend         <seed>
+#   just run-live-tests-paseo           <seed>
+#   just run-live-tests-paseo-next-v2   <seed>
+#   just run-live-tests-previewnet      <seed>
+#   just run-live-tests-summit          <seed>   # needs `just ipfs-kubo-summit` running
+#
+# Ad-hoc usage (any network, supply all endpoints):
+#   just run-live-tests <seed> <rpc_url> <collator_url> <ipfs_gateway> <relay_chainspec> <parachain_chainspec>
 
-# Live network endpoints
-WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
-PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+# Live RPC endpoints (mirrors scripts/runtimes-matrix.json `try_runtime.instances[].uris`)
+WESTEND_RPC         := "wss://westend-bulletin-rpc.polkadot.io"
+PASEO_RPC           := "wss://paseo-bulletin-rpc.polkadot.io"
+PASEO_NEXT_V2_RPC   := "wss://paseo-bulletin-next-rpc.polkadot.io"
+PREVIEWNET_RPC      := "wss://previewnet.substrate.dev/bulletin"
 
-# Run store-big-data test against a live endpoint
-# Parameters:
-#   ws_url - WebSocket URL of the Bulletin chain node
-#   seed - Account seed phrase (must be pre-authorized on the network)
-#   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-#   image_size - Image size preset: small, big32, big64, big96 (default: small)
-_run-live-tests ws_url seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small": npm-install
+# HOP pool endpoint. The pool is node-local, so the round-trip must pin sender and
+# receiver to a single node. The public RPC is multi-replica, so a HOP call there
+# can land on two different nodes and break the round-trip; use a dedicated
+# single-node HOP endpoint where one exists.
+WESTEND_HOP_RPC         := WESTEND_RPC          # TODO(#639): no dedicated westend HOP DNS yet
+PASEO_HOP_RPC           := "wss://paseo-hop-0.polkadot.io"
+PASEO_NEXT_V2_HOP_RPC   := "wss://paseo-hop-next-0.polkadot.io"
+PREVIEWNET_HOP_RPC      := PREVIEWNET_RPC       # TODO(#639): no dedicated previewnet HOP DNS yet
+
+# Network-specific IPFS gateways.
+WESTEND_IPFS_GATEWAY        := "https://westend-ipfs.polkadot.io"
+PASEO_IPFS_GATEWAY          := "https://paseo-ipfs.polkadot.io"
+PASEO_NEXT_V2_IPFS_GATEWAY  := "https://paseo-bulletin-next-ipfs.polkadot.io"
+PREVIEWNET_IPFS_GATEWAY     := "https://previewnet.substrate.dev"
+
+# Bulletin parachain chainspecs, matched to each network by the spec's `id`:
+#   westend-chainspec.json    -> id bulletin-westend   (relay westend, para 2487)
+#   paseo-next-chainspec.json -> id bulletin-paseo     (relay paseo,   para 5118)
+#   paseo-next-v2-chainspec.json -> id next-bulletin-paseo (relay paseo, para 1501)
+# Previewnet has no chainspec in the repo yet. TODO(#580): add it.
+WESTEND_PARACHAIN_SPEC          := justfile_directory() + "/../chainspecs/westend-chainspec.json"
+PASEO_PARACHAIN_SPEC            := justfile_directory() + "/../chainspecs/paseo-next-chainspec.json"
+PASEO_NEXT_V2_PARACHAIN_SPEC    := PASEO_NEXT_V2_SPEC_DIR + "/para.raw.json"
+PREVIEWNET_PARACHAIN_SPEC       := "TODO-previewnet-bulletin-chainspec.json"
+
+# Relay chainspecs for smoldot parachain sync (arg 1 to the smoldot script; the
+# parachain spec is arg 2). Westend bulletin sits on the Westend relay, the Paseo
+# family on the Paseo relay. Not in the repo yet. TODO(#580): add them.
+WESTEND_RELAY_SPEC          := "TODO-westend-relay-chainspec.json"
+PASEO_RELAY_SPEC            := "TODO-paseo-relay-chainspec.json"
+PASEO_NEXT_V2_RELAY_SPEC    := PASEO_NEXT_V2_SPEC_DIR + "/relay.json"
+PREVIEWNET_RELAY_SPEC       := "TODO-paseo-relay-chainspec.json"
+
+# ── Web3 Summit network ───────────────────────────────────────────────────────
+# Bulletin v0.0.18-paseo on the Summit relay (para 1501). Verified end-to-end with
+# `--seed //Eve` + a local kubo peered to the Summit collators (`ipfs-kubo-summit`):
+# store_big_data, smoldot and chopsticks all pass. HOP runs with chain ops on the
+# public RPC and the pool round-trip pinned to a single node (summit-hop-0), since
+# the pool is node-local and the public RPC is multi-replica.
+SUMMIT_RPC              := "wss://summit-bulletin-rpc.polkadot.io"
+SUMMIT_RELAY_RPC        := "wss://summit-rpc.polkadot.io"
+SUMMIT_HOP_POOL_WS      := "wss://summit-hop-0.polkadot.io"
+SUMMIT_IPFS_GATEWAY     := "http://127.0.0.1:8283"   # local kubo; run `just ipfs-kubo-summit` first
+# Relay spec is fetched from the relay RPC via sync_state_genSyncSpec (carries a
+# lightSyncState checkpoint so smoldot warp-syncs). The bulletin parachain spec
+# doesn't have that RPC, so it's pulled (raw) from paritytech/chainspecs.
+SUMMIT_CHAINSPECS_REF   := "f3b09d1bd656576f3d78eab94a1c0dc3003ebe1e"
+SUMMIT_PARA_URL         := "https://raw.githubusercontent.com/paritytech/chainspecs/" + SUMMIT_CHAINSPECS_REF + "/summit/parachain/bulletin/raw.json"
+SUMMIT_SPEC_DIR         := justfile_directory() + "/../chainspecs/.summit-cache"
+SUMMIT_RELAY_SPEC       := SUMMIT_SPEC_DIR + "/relay.json"
+SUMMIT_PARACHAIN_SPEC   := SUMMIT_SPEC_DIR + "/para.raw.json"
+
+# ── Paseo Bulletin Next (next-v2, staging) ────────────────────────────────────
+# Live (para 1501 on the Paseo relay). Relay spec via Paseo relay sync_state,
+# parachain raw spec from paritytech/chainspecs. The public RPC carries
+# --enable-hop, so HOP runs against it directly (pool pinned to the same URL).
+PASEO_NEXT_V2_RELAY_RPC     := "wss://rpc.ibp.network/paseo"
+PASEO_NEXT_V2_PARA_URL      := "https://raw.githubusercontent.com/paritytech/chainspecs/main/paseo/parachain/bulletin-next/raw.json"
+PASEO_NEXT_V2_SPEC_DIR      := justfile_directory() + "/../chainspecs/.paseo-next-v2-cache"
+
+# Internal: run all four canonical live tests against the given endpoints.
+_run-live-tests rpc_url collator_url ipfs_gateway relay_spec parachain_spec seed image_size="small" run_smoldot="true": npm-install
     #!/usr/bin/env bash
     set -e
-    echo "🌐 Running live tests against: {{ ws_url }}"
-    just papi-generate "{{ ws_url }}"
-    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" --skip-authorize --skip-ipfs-verify
+    echo "🌐 Running live tests"
+    echo "   RPC:           {{ rpc_url }}"
+    echo "   HOP collator:  {{ collator_url }}"
+    echo "   IPFS gateway:  {{ ipfs_gateway }}"
+    echo "   Relay spec:    {{ relay_spec }}"
+    echo "   Parachain spec:{{ parachain_spec }}"
+    just papi-generate "{{ rpc_url }}"
+
+    # Run every script even if an earlier one fails, so one blocked endpoint
+    # doesn't mask the rest. Collect failures and exit non-zero if any failed.
+    set +e
+    failed=""
+
+    echo "▶️  store_big_data.js"
+    node store_big_data.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ image_size }}" || failed="$failed store_big_data.js"
+
+    echo "▶️  authorize_and_store_papi_smoldot.js"
+    # Smoldot warp-syncs the relay (its spec has a lightSyncState checkpoint) but
+    # full-syncs the parachain from genesis, since the parachain spec has no
+    # checkpoint. That only reaches the tip on a fresh/low-height chain; on an
+    # established parachain it never catches up and txs sign against a stale view
+    # (BadProof). So gate it: run where it works, skip elsewhere until the
+    # parachain publishes a lightSyncState. Parachain mode: relay spec arg 1, para arg 2.
+    if [ "{{ run_smoldot }}" = "true" ]; then
+        node authorize_and_store_papi_smoldot.js "{{ relay_spec }}" "{{ parachain_spec }}" "{{ ipfs_gateway }}" "{{ seed }}" || failed="$failed authorize_and_store_papi_smoldot.js"
+    else
+        echo "⏭️  Skipping smoldot (parachain has no lightSyncState; light client can't warp-sync an established parachain)."
+    fi
+
+    echo "▶️  hop_round_trip.js"
+    # Chain/state ops go to rpc_url; the HOP pool is node-local, so the pool
+    # round-trip is pinned to a single node (collator_url). They coincide for a
+    # single-node deployment (collator_url defaults to rpc_url when left blank).
+    # --skip-promotion: live nets use a long HOP retention (24h), so auto-promotion
+    # can't complete within a test run; the round-trip (steps 1-5) is what we check.
+    node hop_round_trip.js "{{ rpc_url }}" "{{ seed }}" "{{ ipfs_gateway }}" "{{ collator_url }}" --skip-promotion || failed="$failed hop_round_trip.js"
+
+    echo "▶️  check_chopsticks.js"
+    node check_chopsticks.js "{{ rpc_url }}" || failed="$failed check_chopsticks.js"
+
+    if [ -n "$failed" ]; then
+        echo "❌ Failed live tests:$failed"
+        exit 1
+    fi
+    echo "✅ All live tests passed"
 
 # Run live tests against Westend Bulletin
-run-live-tests-westend seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
-    just _run-live-tests "{{ WESTEND_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+run-live-tests-westend seed image_size="small":
+    just _run-live-tests "{{ WESTEND_RPC }}" "{{ WESTEND_HOP_RPC }}" "{{ WESTEND_IPFS_GATEWAY }}" "{{ WESTEND_RELAY_SPEC }}" "{{ WESTEND_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
 
 # Run live tests against Paseo Bulletin
-run-live-tests-paseo seed ipfs_gateway_url="http://127.0.0.1:8283" image_size="small":
-    just _run-live-tests "{{ PASEO_RPC }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+run-live-tests-paseo seed image_size="small":
+    just _run-live-tests "{{ PASEO_RPC }}" "{{ PASEO_HOP_RPC }}" "{{ PASEO_IPFS_GATEWAY }}" "{{ PASEO_RELAY_SPEC }}" "{{ PASEO_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
+
+# Run live tests against Paseo Bulletin next-v2 (staging).
+run-live-tests-paseo-next-v2 seed image_size="small": (_fetch-chainspecs PASEO_NEXT_V2_RELAY_RPC PASEO_NEXT_V2_PARA_URL PASEO_NEXT_V2_SPEC_DIR)
+    just _run-live-tests "{{ PASEO_NEXT_V2_RPC }}" "{{ PASEO_NEXT_V2_HOP_RPC }}" "{{ PASEO_NEXT_V2_IPFS_GATEWAY }}" "{{ PASEO_NEXT_V2_RELAY_SPEC }}" "{{ PASEO_NEXT_V2_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
+
+# Run live tests against Previewnet Bulletin
+run-live-tests-previewnet seed image_size="small":
+    just _run-live-tests "{{ PREVIEWNET_RPC }}" "{{ PREVIEWNET_HOP_RPC }}" "{{ PREVIEWNET_IPFS_GATEWAY }}" "{{ PREVIEWNET_RELAY_SPEC }}" "{{ PREVIEWNET_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}" "false"
+
+# Fetch a network's smoldot chainspecs into <dir> (cached, gitignored): the relay
+# spec via sync_state_genSyncSpec from <relay_rpc> (carries a lightSyncState
+# checkpoint), the parachain spec (raw) from <para_url> in paritytech/chainspecs.
+_fetch-chainspecs relay_rpc para_url dir: npm-install
+    #!/usr/bin/env bash
+    set -e
+    mkdir -p "{{ dir }}"
+    [ -s "{{ dir }}/relay.json" ]    || node fetch_sync_spec.js "{{ relay_rpc }}" > "{{ dir }}/relay.json"
+    [ -s "{{ dir }}/para.raw.json" ] || curl -fsSL "{{ para_url }}" -o "{{ dir }}/para.raw.json"
+    echo "✅ chainspecs in {{ dir }}"
+
+# Start a local Kubo IPFS node peered to the Summit bulletin collators over Bitswap.
+# Run in a separate shell before the IPFS-dependent Summit tests; the gateway serves
+# on {{ IPFS_GATEWAY_PORT }} (matches SUMMIT_IPFS_GATEWAY). Blocks until interrupted.
+ipfs-kubo-summit: ipfs-kubo-install
+    #!/usr/bin/env bash
+    set -e
+    IPFS="{{ KUBO_DIR }}/ipfs"
+    export IPFS_PATH="${IPFS_PATH:-/tmp/summit-ipfs}"
+    rm -rf "$IPFS_PATH"; mkdir -p "$IPFS_PATH"
+    $IPFS init >/dev/null
+    $IPFS config Addresses.Gateway "/ip4/127.0.0.1/tcp/{{ IPFS_GATEWAY_PORT }}"
+    $IPFS config Addresses.API "/ip4/127.0.0.1/tcp/{{ IPFS_API_PORT }}"
+    $IPFS config --json Addresses.Swarm '["/ip4/0.0.0.0/tcp/{{ IPFS_SWARM_PORT }}","/ip4/0.0.0.0/tcp/4012/ws"]'
+    $IPFS config --json Routing.Type '"none"'
+    $IPFS config --json Discovery.MDNS.Enabled false
+    $IPFS bootstrap rm --all >/dev/null
+    # Collator p2p identities from the Web3 Summit Network doc.
+    $IPFS config --json Peering.Peers '[
+      {"ID":"12D3KooWC6q8q3NXscVcpxMbteYrmzjpy7NvYnD4QDRkAQJ9ng8r","Addrs":["/dns4/summit-bulletin-collator-node-0.parity-chains.parity.io/tcp/443/wss"]},
+      {"ID":"12D3KooWRiRRk8EzmENBD6SkP7v2riWa6s74X7wzhnx84SxfD4yr","Addrs":["/dns4/summit-bulletin-collator-node-1.parity-chains.parity.io/tcp/443/wss"]}
+    ]'
+    echo "🛰️  Kubo peered to Summit collators; gateway http://127.0.0.1:{{ IPFS_GATEWAY_PORT }}"
+    exec $IPFS daemon
+
+# Run live tests against Web3 Summit Bulletin.
+# Prereq: `just ipfs-kubo-summit` running in another shell (provides the IPFS gateway).
+# HOP fails until summit-hop-0/1 DNS is published; the other three pass with //Eve.
+run-live-tests-summit seed image_size="small": (_fetch-chainspecs SUMMIT_RELAY_RPC SUMMIT_PARA_URL SUMMIT_SPEC_DIR)
+    just _run-live-tests "{{ SUMMIT_RPC }}" "{{ SUMMIT_HOP_POOL_WS }}" "{{ SUMMIT_IPFS_GATEWAY }}" "{{ SUMMIT_RELAY_SPEC }}" "{{ SUMMIT_PARACHAIN_SPEC }}" "{{ seed }}" "{{ image_size }}"
+
+# Run live tests against any endpoint set (caller supplies all URLs)
+run-live-tests seed rpc_url collator_url ipfs_gateway relay_spec parachain_spec image_size="small":
+    just _run-live-tests "{{ rpc_url }}" "{{ collator_url }}" "{{ ipfs_gateway }}" "{{ relay_spec }}" "{{ parachain_spec }}" "{{ seed }}" "{{ image_size }}"

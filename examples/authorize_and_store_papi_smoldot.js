@@ -109,9 +109,9 @@ async function main() {
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
         logError('Chain spec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url]');
-        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url]');
-        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url]');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url] [authorizer-seed]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url] [authorizer-seed]');
+        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url] [authorizer-seed]');
         process.exit(1);
     }
 
@@ -119,6 +119,8 @@ async function main() {
     const parachainSpecPath = process.argv[3] || null;
     // Optional IPFS API URL
     const HTTP_IPFS_API = process.argv[4] || DEFAULT_IPFS_GATEWAY_URL;
+    // Authorizer seed; must hold authorizer rights on a live network.
+    const AUTHORIZER_SEED = process.argv[5] || '//Eve';
 
     logConfig({
         'Mode': 'Smoldot Light Client',
@@ -140,9 +142,7 @@ async function main() {
         await waitForChainReady(bulletinAPI);
         await waitForBlockProduction(bulletinAPI);
 
-        // Signers: Use Bob for the account being authorized to avoid nonce conflicts
-        // when running after ws test (which uses Alice) on the same chain.
-        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Eve', '//Papismoldotsigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners(AUTHORIZER_SEED, '//Papismoldotsigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
