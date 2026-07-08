@@ -17,6 +17,11 @@ import { waitForConnection, waitForMinBlock, navigateTo } from "../utils";
 // Chain transactions take ~6s per block; generous timeout for multi-step flows
 test.setTimeout(180_000);
 
+// bulletin-westend-collator-1 from zombienet/bulletin-westend-local.toml
+// (deterministic node key; same peer the local kubo instance peers with)
+const COLLATOR_MULTIADDR =
+  "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ";
+
 test.describe("Preimage Round-Trip", () => {
   test("authorize preimage, upload data, and download to verify content", async ({
     localPage: page,
@@ -92,6 +97,34 @@ test.describe("Preimage Round-Trip", () => {
 
       const downloadedText = await response.text();
       expect(downloadedText).toBe(testData);
+    });
+
+    // ── Step 4: Download via in-browser Helia P2P and verify ───────
+
+    await test.step("fetch via Helia bitswap and verify content matches", async () => {
+      await page.goto("/download");
+      await page.getByRole("tab", { name: /P2P Connection/i }).click();
+
+      await page.getByTestId("peer-multiaddrs").fill(COLLATOR_MULTIADDR);
+      await page
+        .getByLabel("P2P Connection")
+        .getByRole("button", { name: "Connect" })
+        .click();
+
+      // Disconnect button only renders once the client reached ≥1 peer
+      await expect(
+        page.getByRole("button", { name: "Disconnect" }),
+      ).toBeVisible({ timeout: 30_000 });
+
+      await page
+        .getByPlaceholder("Enter CID (bafk... or 0x...)")
+        .fill(uploadedCid);
+
+      const fetchButton = page.getByRole("button", { name: "Fetch Data" });
+      await expect(fetchButton).toBeEnabled({ timeout: 15_000 });
+      await fetchButton.click();
+
+      await expect(page.getByText(testData)).toBeVisible({ timeout: 60_000 });
     });
   });
 });
