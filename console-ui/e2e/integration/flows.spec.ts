@@ -17,15 +17,11 @@ import { waitForConnection, waitForMinBlock, navigateTo } from "../utils";
 // Chain transactions take ~6s per block; generous timeout for multi-step flows
 test.setTimeout(180_000);
 
-// bulletin-westend-collator-1 from zombienet/bulletin-westend-local.toml
-// (deterministic node key; same peer the local kubo instance peers with)
-const COLLATOR_MULTIADDR =
-  "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ";
-
 test.describe("Preimage Round-Trip", () => {
   test("authorize preimage, upload data, and download to verify content", async ({
     localPage: page,
     request,
+    collatorMultiaddr,
   }) => {
     const testData = `Hello Bulletin Chain! Integration test ${Date.now()}`;
     let uploadedCid: string;
@@ -105,7 +101,7 @@ test.describe("Preimage Round-Trip", () => {
       await page.goto("/download");
       await page.getByRole("tab", { name: /P2P Connection/i }).click();
 
-      await page.getByTestId("peer-multiaddrs").fill(COLLATOR_MULTIADDR);
+      await page.getByTestId("peer-multiaddrs").fill(collatorMultiaddr);
       await page
         .getByLabel("P2P Connection")
         .getByRole("button", { name: "Connect" })
