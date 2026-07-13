@@ -53,5 +53,3 @@ For Parity's security disclosure process and Bug Bounty program, visit: https://
 ## License
 
 Apache-2.0
-</content>
-</invoke>
