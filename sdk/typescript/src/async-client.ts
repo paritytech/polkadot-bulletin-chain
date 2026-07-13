@@ -89,11 +89,40 @@ interface PapiTransaction {
  */
 export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
-  | { type: "ContentHash"; value: string }
+  | { type: "ContentHash"; value: { asBytes(): Uint8Array; asHex(): string } }
 
 /** Build a `Position` `TransactionRef` from a block number and extrinsic index. */
 function positionRef(block: number, index: number): TransactionRef {
   return { type: "Position", value: { block, index } }
+}
+
+/**
+ * Whether the connected runtime takes `TransactionRef` for the renewal
+ * extrinsics (and ships `force_renew`).
+ *
+ * On a real PAPI `TypedApi`, `tx.TransactionStorage.force_renew` is a proxy
+ * entry that is truthy for *any* name, so presence alone proves nothing; the
+ * entry's `getCompatibilityLevel()` compares descriptors against the live
+ * runtime and returns `CompatibilityLevel.Incompatible` (0) when the runtime
+ * lacks the call. Hand-rolled api objects (tests/mocks) have no such probe —
+ * there, presence of `force_renew` decides.
+ */
+async function usesTransactionRef(
+  ts: BulletinTypedApi["tx"]["TransactionStorage"],
+): Promise<boolean> {
+  const forceRenew = ts.force_renew
+  if (!forceRenew) return false
+  const probe = (
+    forceRenew as unknown as {
+      getCompatibilityLevel?: () => Promise<number>
+    }
+  ).getCompatibilityLevel
+  if (typeof probe !== "function") return true
+  try {
+    return (await probe.call(forceRenew)) > 0
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -1187,11 +1216,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param index - Extrinsic index within the block
    */
   renew(block: number, index: number): CallBuilder {
-    return new CallBuilder((options) => {
+    return new CallBuilder(async (options) => {
       const ts = this.api.tx.TransactionStorage
-      // `force_renew` ships together with `TransactionRef`, so its presence tells
-      // us which `renew` argument shape the runtime expects.
-      const tx = ts.force_renew
+      const tx = (await usesTransactionRef(ts))
         ? ts.renew({ entry: positionRef(block, index) })
         : ts.renew({ block, index })
       return this.submitTx(
@@ -1212,15 +1239,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param index - Extrinsic index within the block
    */
   forceRenew(block: number, index: number): CallBuilder {
-    return new CallBuilder((options) => {
-      const forceRenew = this.api.tx.TransactionStorage.force_renew
-      if (!forceRenew) {
+    return new CallBuilder(async (options) => {
+      const ts = this.api.tx.TransactionStorage
+      if (!(await usesTransactionRef(ts)) || !ts.force_renew) {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
           ErrorCode.TRANSACTION_FAILED,
         )
       }
-      const tx = forceRenew({ entry: positionRef(block, index) })
+      const tx = ts.force_renew({ entry: positionRef(block, index) })
       return this.submitTx(
         tx,
         "Failed to force renew",

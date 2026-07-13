@@ -4,7 +4,7 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(block, index)` schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `client.forceRenew(block, index)`. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
+> **Note**: `client.renew(block, index)` schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `client.forceRenew(block, index)`. On chains still running the pre-`TransactionRef` runtime, the SDK falls back to the legacy `renew` extrinsic (which renews immediately), and `forceRenew` errors. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
 
 ## Using the SDK Client
 
