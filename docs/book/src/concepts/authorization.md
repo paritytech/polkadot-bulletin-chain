@@ -98,7 +98,7 @@ if (auth) {
 
 ```rust
 // Rust (subxt)
-use bulletin::runtime_types::pallet_transaction_storage::types::AuthorizationScope;
+use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope;
 
 let scope = AuthorizationScope::Account(account_id);
 let auth = api
