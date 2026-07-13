@@ -120,8 +120,13 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      renew(args: { entry: TransactionRef }): PapiTransaction
-      force_renew(args: { entry: TransactionRef }): PapiTransaction
+      // `renew` takes a `TransactionRef` on current runtimes and `(block, index)`
+      // on older ones; the SDK detects which at runtime.
+      renew(
+        args: { block: number; index: number } | { entry: TransactionRef },
+      ): PapiTransaction
+      // Only present on runtimes that ship `TransactionRef`.
+      force_renew?(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -1183,9 +1188,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.renew({
-        entry: positionRef(block, index),
-      })
+      const ts = this.api.tx.TransactionStorage
+      // `force_renew` ships together with `TransactionRef`, so its presence tells
+      // us which `renew` argument shape the runtime expects.
+      const tx = ts.force_renew
+        ? ts.renew({ entry: positionRef(block, index) })
+        : ts.renew({ block, index })
       return this.submitTx(
         tx,
         "Failed to renew",
@@ -1198,14 +1206,21 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /**
    * Immediately renew stored data, extending its retention from the current block.
    *
+   * Requires a runtime that supports `force_renew`.
+   *
    * @param block - Block number where the original storage transaction was included
    * @param index - Extrinsic index within the block
    */
   forceRenew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.force_renew({
-        entry: positionRef(block, index),
-      })
+      const forceRenew = this.api.tx.TransactionStorage.force_renew
+      if (!forceRenew) {
+        throw new BulletinError(
+          "force_renew is not supported by this runtime",
+          ErrorCode.TRANSACTION_FAILED,
+        )
+      }
+      const tx = forceRenew({ entry: positionRef(block, index) })
       return this.submitTx(
         tx,
         "Failed to force renew",
