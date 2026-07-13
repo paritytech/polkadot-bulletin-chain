@@ -54,7 +54,8 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Renew storage at block/index |
+| `renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary) |
+| `force_renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time |
 
 ---
 
