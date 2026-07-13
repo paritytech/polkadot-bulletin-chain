@@ -2072,7 +2072,7 @@ pub mod pallet {
 
 pub mod extension;
 
-#[allow(dead_code)] // exercised by `try_state` (try-runtime) and cross-pallet tests
+#[cfg(any(test, feature = "std", feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {
 	pub fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
 		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");

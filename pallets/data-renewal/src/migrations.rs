@@ -24,6 +24,7 @@ extern crate alloc;
 
 use crate::{Config, RenewalData};
 use codec::{Decode, Encode};
+use pallet_bulletin_transaction_storage as txs;
 use polkadot_sdk_frame::deps::{
 	frame_support::{
 		pallet_prelude::PhantomData,
@@ -62,7 +63,8 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// retired `transaction_storage::migrations::v4::MigrateV3ToV4` for the original
 		// reshape. The Blake2_128Concat key suffix (the content hash) is identical
 		// across prefixes, so only the prefix is rewritten.
-		let old_auto_prefix = storage_prefix(OLD_PALLET, b"AutoRenewals");
+		let old_pallet = <txs::Pallet<T> as PalletInfoAccess>::name().as_bytes();
+		let old_auto_prefix = storage_prefix(old_pallet, b"AutoRenewals");
 		let new_auto_prefix = storage_prefix(NEW_PALLET, b"Renewals");
 		let mut moved: u64 = 0;
 		let mut previous = old_auto_prefix.to_vec();
