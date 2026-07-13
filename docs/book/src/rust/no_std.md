@@ -10,7 +10,7 @@ Disable default features in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { version = "0.1", default-features = false }
+bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 ```
 
 ## Limitations in `no_std`
@@ -44,8 +44,8 @@ fn verify_upload(data: &[u8], claimed_cid: &[u8]) -> bool {
     let calculated = calculate_cid_default(data).expect("Failed to calc CID");
     let cid_bytes = cid_to_bytes(&calculated).expect("Failed to convert");
 
-    // Compare bytes
-    cid_bytes.to_bytes() == claimed_cid
+    // Compare bytes (cid_to_bytes returns a Vec<u8>)
+    cid_bytes == claimed_cid
 }
 ```
 
@@ -53,7 +53,7 @@ fn verify_upload(data: &[u8], claimed_cid: &[u8]) -> bool {
 
 ```rust
 #![no_std]
-use bulletin_sdk_rust::{chunker::{Chunker, FixedSizeChunker}, types::ChunkerConfig};
+use bulletin_sdk_rust::prelude::*;
 extern crate alloc;
 use alloc::vec::Vec;
 
@@ -64,7 +64,7 @@ fn prepare_chunks(data: &[u8]) -> Vec<Vec<u8>> {
         create_manifest: false,
     };
 
-    let chunker = FixedSizeChunker::new(config);
+    let chunker = FixedSizeChunker::new(config).expect("Invalid chunker config");
     let chunks = chunker.chunk(data).expect("Failed to chunk");
 
     chunks.into_iter().map(|c| c.data).collect()

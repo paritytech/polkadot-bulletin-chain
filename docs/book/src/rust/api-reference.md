@@ -29,7 +29,7 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data (auto-chunks if > 2 MiB) |
+| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data in a single `store` extrinsic (no chunking; use `BulletinClient::prepare_store_chunked` for large files) |
 | `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
 
 **Authorization:**
@@ -366,13 +366,13 @@ pub fn calculate_cid_default(data: &[u8]) -> Result<CidData>;
 pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid>;
 ```
 
-**Re-exported from `transaction_storage_primitives`:**
+**Re-exported from `bulletin_transaction_storage_primitives`:**
 
 ```rust
-pub use transaction_storage_primitives::cids::{
-    calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm,
+pub use bulletin_transaction_storage_primitives::{
+    cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
+    ContentHash,
 };
-pub use transaction_storage_primitives::ContentHash;
 ```
 
 ---
@@ -410,7 +410,7 @@ impl CidCodec {
 
 ### HashingAlgorithm
 
-Re-exported from `transaction_storage_primitives`. Variants:
+Re-exported from `bulletin_transaction_storage_primitives`. Variants:
 - `Blake2b256` — BLAKE2b-256 (default, Substrate-native)
 - `Sha2_256` — SHA2-256
 - `Keccak256` — Keccak-256
@@ -559,7 +559,4 @@ pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `MAX_CHUNK_SIZE` | `2 * 1024 * 1024` (2 MiB) | Maximum single chunk size |
-| `MAX_FILE_SIZE` | `64 * 1024 * 1024` (64 MiB) | Maximum total file size |
-| `DEFAULT_CHUNK_SIZE` | `1024 * 1024` (1 MiB) | Default chunk size |
 | `VERSION` | `env!("CARGO_PKG_VERSION")` | Crate version string |

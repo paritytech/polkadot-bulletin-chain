@@ -21,7 +21,7 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 
 ```typescript
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
@@ -125,7 +125,7 @@ The SDK accepts an existing PAPI client, so you can share one connection across 
 
 ```typescript
 import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider/web';
+import { getWsProvider } from 'polkadot-api/ws';
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
 // Create ONE shared PAPI client for your whole app
@@ -161,7 +161,7 @@ npx papi add wss://bulletin-rpc.polkadot.io -n bulletin
 This creates a `bulletin` descriptor you can import:
 
 ```typescript
-import { bulletin } from 'polkadot-api/descriptors';
+import { bulletin } from '@polkadot-api/descriptors';
 
 const api = papiClient.getTypedApi(bulletin);
 ```
@@ -203,15 +203,19 @@ For production, use a seed phrase or mnemonic:
 ```typescript
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getPolkadotSigner } from 'polkadot-api/signer';
+import { mnemonicToMiniSecret } from '@polkadot-labs/hdkd-helpers';
 
-const keyring = sr25519CreateDerive(
+// sr25519CreateDerive takes a mini-secret, not a raw mnemonic
+const miniSecret = mnemonicToMiniSecret(
     "bottom drive obey lake curtain smoke basket hold race lonely fit walk"
 );
+const derive = sr25519CreateDerive(miniSecret);
 
+const keyPair = derive("//0"); // Derive first account
 const signer = getPolkadotSigner(
-    keyring.derive("//0"), // Derive first account
-    "My Account",
-    42 // Bulletin chain ID
+    keyPair.publicKey,
+    "Sr25519",
+    keyPair.sign,
 );
 ```
 

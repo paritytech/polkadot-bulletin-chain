@@ -49,7 +49,7 @@ npm install @parity/bulletin-sdk polkadot-api
 ```typescript
 import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
 async function main() {

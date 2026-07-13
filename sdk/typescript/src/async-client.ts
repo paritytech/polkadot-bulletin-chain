@@ -82,6 +82,21 @@ interface PapiTransaction {
 }
 
 /**
+ * On-chain `TransactionRef` used by the renewal extrinsics.
+ *
+ * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. The SDK only
+ * constructs the `Position` variant; `ContentHash` is included for completeness.
+ */
+export type TransactionRef =
+  | { type: "Position"; value: { block: number; index: number } }
+  | { type: "ContentHash"; value: string }
+
+/** Build a `Position` `TransactionRef` from a block number and extrinsic index. */
+function positionRef(block: number, index: number): TransactionRef {
+  return { type: "Position", value: { block, index } }
+}
+
+/**
  * Minimal interface for the PAPI typed API.
  *
  * Describes the pallets and extrinsics the SDK interacts with.
@@ -105,7 +120,8 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      renew(args: { block: number; index: number }): PapiTransaction
+      renew(args: { entry: TransactionRef }): PapiTransaction
+      force_renew(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -295,6 +311,7 @@ export interface BulletinClientInterface {
   ): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
   renew(block: number, index: number): CallBuilder
+  forceRenew(block: number, index: number): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -1156,17 +1173,42 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Renew/extend retention period for stored data
+   * Schedule a one-shot renewal of stored data.
+   *
+   * The renewal fires once when the data reaches its retention boundary; it does
+   * not renew synchronously. For immediate renewal use {@link forceRenew}.
    *
    * @param block - Block number where the original storage transaction was included
    * @param index - Extrinsic index within the block
    */
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+      const tx = this.api.tx.TransactionStorage.renew({
+        entry: positionRef(block, index),
+      })
       return this.submitTx(
         tx,
         "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * Immediately renew stored data, extending its retention from the current block.
+   *
+   * @param block - Block number where the original storage transaction was included
+   * @param index - Extrinsic index within the block
+   */
+  forceRenew(block: number, index: number): CallBuilder {
+    return new CallBuilder((options) => {
+      const tx = this.api.tx.TransactionStorage.force_renew({
+        entry: positionRef(block, index),
+      })
+      return this.submitTx(
+        tx,
+        "Failed to force renew",
         ErrorCode.TRANSACTION_FAILED,
         options,
       )

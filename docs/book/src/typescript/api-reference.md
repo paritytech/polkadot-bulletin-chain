@@ -20,6 +20,7 @@ class AsyncBulletinClient implements BulletinClientInterface {
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   );
 }
 ```
@@ -39,6 +40,7 @@ class AsyncBulletinClient implements BulletinClientInterface {
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
 | `removeExpiredPreimageAuthorization(contentHash)` | `CallBuilder` | Remove an expired preimage authorization |
 | `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Estimate authorization needed for a given data size |
+| `destroy()` | `Promise<void>` | Release resources; invokes the optional `onDestroy` callback passed to the constructor |
 
 ---
 
@@ -498,9 +500,6 @@ function estimateAuthorization(
 ### Data Helpers
 
 ```typescript
-// Convert Binary | Uint8Array to Uint8Array
-function toBytes(data: Binary | Uint8Array): Uint8Array;
-
 // Reassemble ordered chunks back into original data
 function reassembleChunks(chunks: Chunk[]): Uint8Array;
 ```
@@ -515,7 +514,6 @@ function reassembleChunks(chunks: Chunk[]): Uint8Array;
 | `MAX_FILE_SIZE` | `64 * 1024 * 1024` (64 MiB) | Maximum total file size |
 | `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 1048576, createManifest: true }` | Default chunking configuration |
 | `DEFAULT_STORE_OPTIONS` | `{ cidCodec: Raw, hashingAlgorithm: Blake2b256, waitFor: "in_block" }` | Default store options |
-| `VERSION` | `"0.1.0"` | SDK version string |
 
 ---
 

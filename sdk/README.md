@@ -84,15 +84,6 @@ npm run test:unit
 cd sdk/typescript && npm run test:integration
 ```
 
-### Build Script
-
-Use the provided build script:
-
-```bash
-cd sdk
-./build-all.sh
-```
-
 ## Documentation
 
 📚 **Complete SDK documentation**: [`docs/book`](../docs/book/)
@@ -108,7 +99,7 @@ The SDK book contains comprehensive guides including:
 Both SDKs provide:
 
 - ✅ **Authorization operations** (authorizeAccount, authorizePreimage, renew)
-- ⚠️ **Store transaction submission** (not yet implemented — use PAPI directly for now)
+- ✅ **Store transaction submission**
 - ✅ **Automatic chunking** with configurable chunk size (default 1 MiB)
 - ✅ **DAG-PB manifests** (IPFS-compatible)
 - ✅ **Authorization management** (account and preimage)
@@ -117,7 +108,7 @@ Both SDKs provide:
 
 ## Examples
 
-**Rust**: Example code is available in the [SDK book documentation](../docs/book/). Rust examples require metadata files from a running node, so they're not included in the repository. See the SDK book for complete working examples and instructions.
+**Rust**: See [`examples/rust/authorize-and-store/`](../examples/rust/authorize-and-store/) for a working SDK-based example, and the [SDK book documentation](../docs/book/) for more.
 
 **TypeScript**: See [`examples/typescript/`](../examples/typescript/) for working integration examples that use the SDK's chunker, CID calculation, and DAG-PB manifest generation with PAPI for transaction submission.
 
@@ -128,8 +119,14 @@ Both SDKs provide:
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-let client = AsyncBulletinClient::new(api);
-let result = client.store(data).send().await?;
+// Prepare locally (chunking, CID, manifest) - no network calls
+let client = BulletinClient::new();
+let data = b"Hello, Bulletin!".to_vec();
+let operation = client.prepare_store(data, StoreOptions::default())?;
+
+// Submit via the transaction client
+let tx_client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let receipt = tx_client.store(operation.data, &signer, WaitFor::InBlock).await?;
 ```
 
 See [rust/README.md](rust/README.md) for details.
@@ -139,7 +136,8 @@ See [rust/README.md](rust/README.md) for details.
 ```typescript
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 
-const client = new AsyncBulletinClient(api, signer);
+const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const data = new TextEncoder().encode("Hello, Bulletin!");
 const result = await client.store(data).send();
 ```
 
@@ -147,9 +145,9 @@ See [typescript/README.md](typescript/README.md) for details.
 
 ## Release & Publishing
 
-📦 **Release automation**: [RELEASE_AUTOMATION_SUMMARY.md](RELEASE_AUTOMATION_SUMMARY.md)
+📦 **Release automation**: [`.github/workflows/release-sdk.yml`](../.github/workflows/release-sdk.yml)
 
-Complete automated release pipeline for publishing both SDKs to crates.io, npm, and GitHub Releases with version validation, testing, and automated tagging.
+Automated pipeline for publishing the SDKs.
 
 ## Contributing
 

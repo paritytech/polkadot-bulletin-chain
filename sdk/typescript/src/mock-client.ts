@@ -63,6 +63,7 @@ export type MockOperation =
       contentHash: Uint8Array
     }
   | { type: "renew"; block: number; index: number }
+  | { type: "force_renew"; block: number; index: number }
   | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
@@ -332,6 +333,13 @@ export class MockBulletinClient implements BulletinClientInterface {
   renew(block: number, index: number): CallBuilder {
     return new CallBuilder(async () => {
       this.operations.push({ type: "renew", block, index })
+      return mockReceipt()
+    })
+  }
+
+  forceRenew(block: number, index: number): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({ type: "force_renew", block, index })
       return mockReceipt()
     })
   }

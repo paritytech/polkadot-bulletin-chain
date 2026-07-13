@@ -28,8 +28,11 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 });
 
 if (auth) {
-  console.log("Transactions remaining:", auth.extent.transactions);
-  console.log("Bytes remaining:", auth.extent.bytes);
+  // `*_allowance` fields are the caps; `transactions`/`bytes` are consumed so far.
+  const txRemaining = auth.extent.transactions_allowance - auth.extent.transactions;
+  const bytesRemaining = auth.extent.bytes_allowance - auth.extent.bytes;
+  console.log("Transactions remaining:", txRemaining);
+  console.log("Bytes remaining:", bytesRemaining);
   console.log("Expires at block:", auth.expiration ?? "Never");
 } else {
   console.log("Account not authorized");
@@ -50,7 +53,7 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 });
 
 if (auth) {
-  console.log("Preimage authorized for", auth.extent.bytes, "bytes");
+  console.log("Preimage authorized for", auth.extent.bytes_allowance, "bytes");
 }
 ```
 
@@ -107,7 +110,7 @@ console.log("Account authorized!");
 Pre-authorize a specific content hash. Useful for allowing anyone to store specific data:
 
 ```typescript
-import { calculateCid, getContentHash, HashAlgorithm, CidCodec } from "@parity/bulletin-sdk";
+import { getContentHash, HashAlgorithm } from "@parity/bulletin-sdk";
 
 // Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
@@ -160,12 +163,16 @@ if (!auth) {
   throw new Error("Not authorized. Request authorization first.");
 }
 
-if (auth.extent.transactions < transactions) {
-  throw new Error(`Need ${transactions} transactions, have ${auth.extent.transactions}`);
+// Available = allowance (cap) - consumed
+const availableTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
+const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
+
+if (availableTransactions < transactions) {
+  throw new Error(`Need ${transactions} transactions, have ${availableTransactions}`);
 }
 
-if (auth.extent.bytes < bytes) {
-  throw new Error(`Need ${bytes} bytes, have ${auth.extent.bytes}`);
+if (availableBytes < bytes) {
+  throw new Error(`Need ${bytes} bytes, have ${availableBytes}`);
 }
 
 console.log("Authorization sufficient, proceeding with upload...");
@@ -197,7 +204,7 @@ if (auth?.expiration) {
 
 ```typescript
 import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 
@@ -220,7 +227,14 @@ async function storeWithAuthCheck() {
     value: myAddress
   });
 
-  if (!auth || auth.extent.bytes < estimate.bytes) {
+  if (!auth) {
+    console.log("Not authorized. Please use the Faucet.");
+    return;
+  }
+
+  // Available = allowance (cap) - consumed
+  const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
+  if (availableBytes < estimate.bytes) {
     console.log("Insufficient authorization. Please use the Faucet.");
     return;
   }

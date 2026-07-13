@@ -225,7 +225,7 @@ impl TransactionClient {
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_bulletin_transaction_storage::AuthorizationScope as OnChainScope;
+		use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope as OnChainScope;
 
 		let storage_query = bulletin::storage()
 			.transaction_storage()
@@ -413,7 +413,11 @@ impl TransactionClient {
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
-	/// Renew/extend the retention period for stored data.
+	/// Schedule a one-shot renewal of stored data.
+	///
+	/// The renewal fires once when the data reaches its retention boundary; it
+	/// does not renew synchronously. For immediate renewal use
+	/// [`force_renew`](Self::force_renew).
 	pub async fn renew(
 		&self,
 		block: u32,
@@ -421,11 +425,42 @@ impl TransactionClient {
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		let tx = bulletin::tx().transaction_storage().renew(block, index);
+		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef;
+
+		let tx = bulletin::tx()
+			.transaction_storage()
+			.renew(TransactionRef::Position { block, index });
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
 				Error::RenewalFailed(format!("Renew failed: {e}"))
+			})
+			.await?;
+
+		Ok(RenewReceipt {
+			original_block: block,
+			transaction_index: index,
+			block_hash: result.block_hash,
+		})
+	}
+
+	/// Immediately renew stored data, extending its retention from the current block.
+	pub async fn force_renew(
+		&self,
+		block: u32,
+		index: u32,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<RenewReceipt> {
+		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef;
+
+		let tx = bulletin::tx()
+			.transaction_storage()
+			.force_renew(TransactionRef::Position { block, index });
+
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Force renew failed: {e}"))
 			})
 			.await?;
 
