@@ -17,6 +17,7 @@ import {
   CallBuilder,
   StoreBuilder,
   type TransactionReceipt,
+  type TransactionRef,
 } from "./async-client.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
@@ -62,8 +63,8 @@ export type MockOperation =
       type: "refresh_preimage_authorization"
       contentHash: Uint8Array
     }
-  | { type: "renew"; block: number; index: number }
-  | { type: "force_renew"; block: number; index: number }
+  | { type: "renew"; entry: TransactionRef }
+  | { type: "force_renew"; entry: TransactionRef }
   | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
@@ -330,16 +331,16 @@ export class MockBulletinClient implements BulletinClientInterface {
     })
   }
 
-  renew(block: number, index: number): CallBuilder {
+  renew(entry: TransactionRef): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "renew", block, index })
+      this.operations.push({ type: "renew", entry })
       return mockReceipt()
     })
   }
 
-  forceRenew(block: number, index: number): CallBuilder {
+  forceRenew(entry: TransactionRef): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "force_renew", block, index })
+      this.operations.push({ type: "force_renew", entry })
       return mockReceipt()
     })
   }

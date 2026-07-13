@@ -166,8 +166,9 @@ impl BulletinClient {
 	/// let renewal = client.prepare_renew(storage_ref)?;
 	///
 	/// // Submit via the transaction client:
-	/// // tx_client.renew(renewal.block(), renewal.index(), &signer, wait_for).await?
-	/// // (or `force_renew(..)` for immediate renewal)
+	/// // let entry = TransactionRef::Position { block: renewal.block(), index: renewal.index() };
+	/// // tx_client.renew(entry, &signer, wait_for).await?
+	/// // (or `force_renew(entry, ..)` for immediate renewal)
 	/// ```
 	#[must_use = "renewal operation must be submitted to the blockchain"]
 	pub fn prepare_renew(&self, storage_ref: StorageRef) -> Result<RenewalOperation> {

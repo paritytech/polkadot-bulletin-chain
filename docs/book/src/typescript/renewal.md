@@ -4,7 +4,7 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(block, index)` schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `client.forceRenew(block, index)`. On chains still running the pre-`TransactionRef` runtime, the SDK falls back to the legacy `renew` extrinsic (which renews immediately), and `forceRenew` errors. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
+> **Note**: `client.renew(entry)` takes a `TransactionRef` (`Position` or `ContentHash`) and schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `client.forceRenew(entry)`. On chains still running the pre-`TransactionRef` runtime, the SDK unpacks `Position` entries to the legacy `renew` extrinsic (which renews immediately); `ContentHash` entries and `forceRenew` error there. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
 
 ## Using the SDK Client
 
@@ -26,11 +26,11 @@ const blockNumber = result.blockNumber;   // block the store landed in
 const index = result.extrinsicIndex;      // from the Stored event
 
 // 2. RENEW (later) - before the retention period expires
-await client.renew(blockNumber, index).send();
+await client.renew({ type: "Position", value: { block: blockNumber, index } }).send();
 ```
 
 `store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
-`renew(block, index).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
+`renew(entry).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
 
 ## Querying the Retention Period
 
@@ -80,7 +80,7 @@ const tracker = new RenewalTracker();
 tracker.add(result.cid.toString(), result.blockNumber, result.extrinsicIndex);
 
 for (const item of await tracker.getItemsNeedingRenewal(api)) {
-  await client.renew(item.blockNumber, item.index).send();
+  await client.renew({ type: "Position", value: { block: item.blockNumber, index: item.index } }).send();
 }
 ```
 
@@ -124,7 +124,7 @@ Renewal consumes authorization just like storing — one transaction plus the da
 
 ```typescript
 try {
-  await client.renew(blockNumber, index).send();
+  await client.renew({ type: "Position", value: { block: blockNumber, index } }).send();
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");

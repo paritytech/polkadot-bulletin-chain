@@ -54,8 +54,8 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary) |
-| `force_renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time |
+| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal for a `TransactionRef` (fires at the retention boundary) |
+| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time |
 
 ---
 
@@ -372,8 +372,14 @@ pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid>;
 ```rust
 pub use bulletin_transaction_storage_primitives::{
     cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
-    ContentHash,
+    ContentHash, TransactionRef,
 };
+
+// TransactionRef identifies a stored entry for the renewal extrinsics:
+pub enum TransactionRef<BlockNumber> {
+    Position { block: BlockNumber, index: u32 },
+    ContentHash(ContentHash),
+}
 ```
 
 ---
@@ -539,8 +545,7 @@ pub struct PreimageAuthorizationReceipt {
 
 ```rust
 pub struct RenewReceipt {
-    pub original_block: u32,
-    pub transaction_index: u32,
+    pub entry: TransactionRef<u32>,
     pub block_hash: String,
 }
 ```

@@ -34,8 +34,8 @@ class AsyncBulletinClient implements BulletinClientInterface {
 | `storeWithPreimageAuth(data, options?)` | `Promise<StoreResult>` | Store using preimage-based authorization |
 | `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize an account for storage |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
-| `renew(block, index)` | `CallBuilder` | Schedule a one-shot renewal (legacy immediate renew on pre-`TransactionRef` runtimes) |
-| `forceRenew(block, index)` | `CallBuilder` | Renew immediately; errors on runtimes without `force_renew` |
+| `renew(entry)` | `CallBuilder` | Schedule a one-shot renewal for a `TransactionRef` (legacy immediate renew on pre-`TransactionRef` runtimes) |
+| `forceRenew(entry)` | `CallBuilder` | Renew immediately; errors on runtimes without `force_renew` |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Refresh a preimage authorization expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |

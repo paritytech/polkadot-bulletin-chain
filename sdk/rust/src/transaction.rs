@@ -10,6 +10,7 @@ use crate::{
 	cid::ContentHash,
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
+use bulletin_transaction_storage_primitives::TransactionRef;
 use subxt::{
 	blocks::BlockRef, config::DefaultExtrinsicParamsBuilder, utils::AccountId32, OnlineClient,
 	PolkadotConfig,
@@ -420,16 +421,17 @@ impl TransactionClient {
 	/// [`force_renew`](Self::force_renew).
 	pub async fn renew(
 		&self,
-		block: u32,
-		index: u32,
+		entry: TransactionRef<u32>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef;
-
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.renew(TransactionRef::Position { block, index });
+		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+		let runtime_entry = match &entry {
+			TransactionRef::Position { block, index } =>
+				Gen::Position { block: *block, index: *index },
+			TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+		};
+		let tx = bulletin::tx().transaction_storage().renew(runtime_entry);
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -437,26 +439,23 @@ impl TransactionClient {
 			})
 			.await?;
 
-		Ok(RenewReceipt {
-			original_block: block,
-			transaction_index: index,
-			block_hash: result.block_hash,
-		})
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
 	/// Immediately renew stored data, extending its retention from the current block.
 	pub async fn force_renew(
 		&self,
-		block: u32,
-		index: u32,
+		entry: TransactionRef<u32>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef;
-
-		let tx = bulletin::tx()
-			.transaction_storage()
-			.force_renew(TransactionRef::Position { block, index });
+		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+		let runtime_entry = match &entry {
+			TransactionRef::Position { block, index } =>
+				Gen::Position { block: *block, index: *index },
+			TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+		};
+		let tx = bulletin::tx().transaction_storage().force_renew(runtime_entry);
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -464,11 +463,7 @@ impl TransactionClient {
 			})
 			.await?;
 
-		Ok(RenewReceipt {
-			original_block: block,
-			transaction_index: index,
-			block_hash: result.block_hash,
-		})
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -574,7 +569,6 @@ pub struct PreimageAuthorizationReceipt {
 /// Receipt from a successful renew operation.
 #[derive(Debug, Clone)]
 pub struct RenewReceipt {
-	pub original_block: u32,
-	pub transaction_index: u32,
+	pub entry: TransactionRef<u32>,
 	pub block_hash: String,
 }

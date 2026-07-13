@@ -45,14 +45,17 @@ let index = renewal.index();
 let tx_client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
 
 let receipt = tx_client
-    .renew(renewal.block(), renewal.index(), &signer, WaitFor::Finalized)
+    .renew(
+        TransactionRef::Position { block: renewal.block(), index: renewal.index() },
+        &signer,
+        WaitFor::Finalized,
+    )
     .await?;
 
-println!("Renewed {}:{} in block {}",
-    receipt.original_block, receipt.transaction_index, receipt.block_hash);
+println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 ```
 
-`RenewReceipt` has `original_block`, `transaction_index`, and `block_hash`.
+`RenewReceipt` has `entry` (the `TransactionRef` that was renewed) and `block_hash`.
 
 ## Storing and Tracking
 
@@ -92,9 +95,8 @@ let expiring: Vec<StorageRef> = tracker
 
 for storage_ref in expiring {
     let renewal = client.prepare_renew(storage_ref)?;
-    tx_client
-        .renew(renewal.block(), renewal.index(), &signer, WaitFor::Finalized)
-        .await?;
+    let entry = TransactionRef::Position { block: renewal.block(), index: renewal.index() };
+    tx_client.renew(entry, &signer, WaitFor::Finalized).await?;
 
     // Update the tracker with the new reference (read from the Renewed event
     // when using the pallet's force_renew; see concepts).
@@ -160,10 +162,8 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 ```rust
 match client.prepare_renew(storage_ref) {
     Ok(renewal) => {
-        if let Err(e) = tx_client
-            .renew(renewal.block(), renewal.index(), &signer, WaitFor::Finalized)
-            .await
-        {
+        let entry = TransactionRef::Position { block: renewal.block(), index: renewal.index() };
+        if let Err(e) = tx_client.renew(entry, &signer, WaitFor::Finalized).await {
             tracing::error!(?e, "Renewal submission failed");
         }
     }

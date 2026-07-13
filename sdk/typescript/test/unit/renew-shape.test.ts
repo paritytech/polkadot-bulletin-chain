@@ -2,12 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest"
-import { AsyncBulletinClient } from "../../src/async-client"
+import {
+  AsyncBulletinClient,
+  type TransactionRef,
+} from "../../src/async-client"
 import { ErrorCode } from "../../src/types"
 
 // The renewal extrinsics changed shape: old runtimes take `renew({block, index})`,
 // current ones take `renew({entry: TransactionRef})` and add `force_renew`.
 // These tests pin the client's runtime detection for both shapes.
+
+const positionEntry: TransactionRef = {
+  type: "Position",
+  value: { block: 100, index: 5 },
+}
+
+const hashEntry: TransactionRef = {
+  type: "ContentHash",
+  value: {
+    asBytes: () => new Uint8Array(32),
+    asHex: () => `0x${"00".repeat(32)}`,
+  },
+}
 
 const signer = {
   publicKey: new Uint8Array(32),
@@ -53,7 +69,7 @@ function createClient(txPallet: Record<string, unknown>) {
 }
 
 describe("renew argument shape detection", () => {
-  it("uses {block, index} when the api has no force_renew (old runtime)", async () => {
+  it("unpacks Position to {block, index} when the api has no force_renew (old runtime)", async () => {
     let arg: unknown
     const client = createClient({
       renew: (a: unknown) => {
@@ -62,11 +78,22 @@ describe("renew argument shape detection", () => {
       },
     })
 
-    await client.renew(100, 5).send()
+    await client.renew(positionEntry).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 
-  it("uses {entry} when force_renew exists without a compatibility probe", async () => {
+  it("rejects ContentHash entries on old runtimes", async () => {
+    const client = createClient({
+      renew: () => mockTx,
+    })
+
+    await expect(client.renew(hashEntry).send()).rejects.toMatchObject({
+      code: ErrorCode.TRANSACTION_FAILED,
+      message: "content-hash renewal is not supported by this runtime",
+    })
+  })
+
+  it("passes {entry} when force_renew exists without a compatibility probe", async () => {
     let arg: unknown
     const client = createClient({
       renew: (a: unknown) => {
@@ -76,13 +103,11 @@ describe("renew argument shape detection", () => {
       force_renew: () => mockTx,
     })
 
-    await client.renew(100, 5).send()
-    expect(arg).toEqual({
-      entry: { type: "Position", value: { block: 100, index: 5 } },
-    })
+    await client.renew(positionEntry).send()
+    expect(arg).toEqual({ entry: positionEntry })
   })
 
-  it("uses {block, index} when the PAPI probe reports Incompatible", async () => {
+  it("unpacks Position when the PAPI probe reports Incompatible", async () => {
     // A real PAPI proxy returns a truthy entry for any name; only
     // getCompatibilityLevel() reveals that the runtime lacks force_renew.
     let arg: unknown
@@ -96,11 +121,11 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(100, 5).send()
+    await client.renew(positionEntry).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 
-  it("uses {entry} when the PAPI probe reports compatible", async () => {
+  it("passes {entry} when the PAPI probe reports compatible", async () => {
     let arg: unknown
     const forceRenew = () => mockTx
     forceRenew.getCompatibilityLevel = async () => 3
@@ -112,10 +137,8 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(100, 5).send()
-    expect(arg).toEqual({
-      entry: { type: "Position", value: { block: 100, index: 5 } },
-    })
+    await client.renew(hashEntry).send()
+    expect(arg).toEqual({ entry: hashEntry })
   })
 
   it("treats a throwing probe as unsupported", async () => {
@@ -132,7 +155,7 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(100, 5).send()
+    await client.renew(positionEntry).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 })
@@ -150,10 +173,8 @@ describe("forceRenew", () => {
       force_renew: forceRenew,
     })
 
-    await client.forceRenew(100, 5).send()
-    expect(arg).toEqual({
-      entry: { type: "Position", value: { block: 100, index: 5 } },
-    })
+    await client.forceRenew(positionEntry).send()
+    expect(arg).toEqual({ entry: positionEntry })
   })
 
   it("rejects with a clear error when the runtime lacks force_renew", async () => {
@@ -164,9 +185,11 @@ describe("forceRenew", () => {
       force_renew: forceRenew,
     })
 
-    await expect(client.forceRenew(100, 5).send()).rejects.toMatchObject({
-      code: ErrorCode.TRANSACTION_FAILED,
-      message: "force_renew is not supported by this runtime",
-    })
+    await expect(client.forceRenew(positionEntry).send()).rejects.toMatchObject(
+      {
+        code: ErrorCode.TRANSACTION_FAILED,
+        message: "force_renew is not supported by this runtime",
+      },
+    )
   })
 })

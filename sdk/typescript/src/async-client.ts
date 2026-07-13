@@ -91,10 +91,6 @@ export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
   | { type: "ContentHash"; value: { asBytes(): Uint8Array; asHex(): string } }
 
-/** Build a `Position` `TransactionRef` from a block number and extrinsic index. */
-function positionRef(block: number, index: number): TransactionRef {
-  return { type: "Position", value: { block, index } }
-}
 
 /**
  * Whether the connected runtime takes `TransactionRef` for the renewal
@@ -344,8 +340,8 @@ export interface BulletinClientInterface {
     bytes: bigint,
   ): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
-  renew(block: number, index: number): CallBuilder
-  forceRenew(block: number, index: number): CallBuilder
+  renew(entry: TransactionRef): CallBuilder
+  forceRenew(entry: TransactionRef): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -465,7 +461,7 @@ export class StoreBuilder {
  * @example
  * ```typescript
  * const receipt = await client
- *   .renew(blockNumber, index)
+ *   .renew({ type: 'Position', value: { block, index } })
  *   .withWaitFor('finalized')
  *   .withCallback((event) => console.log(event))
  *   .send();
@@ -1211,16 +1207,22 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * The renewal fires once when the data reaches its retention boundary; it does
    * not renew synchronously. For immediate renewal use {@link forceRenew}.
-   *
-   * @param block - Block number where the original storage transaction was included
-   * @param index - Extrinsic index within the block
    */
-  renew(block: number, index: number): CallBuilder {
+  renew(entry: TransactionRef): CallBuilder {
     return new CallBuilder(async (options) => {
       const ts = this.api.tx.TransactionStorage
-      const tx = (await usesTransactionRef(ts))
-        ? ts.renew({ entry: positionRef(block, index) })
-        : ts.renew({ block, index })
+      let tx: PapiTransaction
+      if (await usesTransactionRef(ts)) {
+        tx = ts.renew({ entry })
+      } else if (entry.type === "Position") {
+        // Pre-`TransactionRef` runtimes take the position fields directly.
+        tx = ts.renew(entry.value)
+      } else {
+        throw new BulletinError(
+          "content-hash renewal is not supported by this runtime",
+          ErrorCode.TRANSACTION_FAILED,
+        )
+      }
       return this.submitTx(
         tx,
         "Failed to renew",
@@ -1234,11 +1236,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Immediately renew stored data, extending its retention from the current block.
    *
    * Requires a runtime that supports `force_renew`.
-   *
-   * @param block - Block number where the original storage transaction was included
-   * @param index - Extrinsic index within the block
    */
-  forceRenew(block: number, index: number): CallBuilder {
+  forceRenew(entry: TransactionRef): CallBuilder {
     return new CallBuilder(async (options) => {
       const ts = this.api.tx.TransactionStorage
       if (!(await usesTransactionRef(ts)) || !ts.force_renew) {
@@ -1247,7 +1246,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           ErrorCode.TRANSACTION_FAILED,
         )
       }
-      const tx = ts.force_renew({ entry: positionRef(block, index) })
+      const tx = ts.force_renew({ entry })
       return this.submitTx(
         tx,
         "Failed to force renew",

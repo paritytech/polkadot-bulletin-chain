@@ -224,7 +224,10 @@ export function Renew() {
 
       // Use SDK to renew with progress callback
       const result = await bulletinClient
-        .renew(renewalTarget.blockNumber, renewalTarget.index)
+        .renew({
+          type: "Position",
+          value: { block: renewalTarget.blockNumber, index: renewalTarget.index },
+        })
         .withCallback(handleProgress)
         .withWaitFor(WaitFor.Finalized)
         .send();
@@ -387,7 +390,10 @@ export function Renew() {
         // Per-tx InBlock (not Finalized): each renew is idempotent and a
         // reorg-dropped one can simply be retried. Saves ~6s per CID.
         const result = await bulletinClient
-          .renew(t.location!.blockNumber, t.location!.index)
+          .renew({
+            type: "Position",
+            value: { block: t.location!.blockNumber, index: t.location!.index },
+          })
           .withCallback(handleProgress)
           .withWaitFor(WaitFor.InBlock)
           .send();
