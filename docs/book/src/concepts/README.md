@@ -54,7 +54,7 @@ Data has a **retention period** after which it may be pruned:
 
 - Track the block number and index from `Stored`/`Renewed` events, or use the content hash
 - Reference the data with a `TransactionRef` (`Position { block, index }` or `ContentHash(hash)`)
-- Renew before expiration: `renew(entry)` (one-shot scheduled), `force_renew(entry)` (immediate), or `enable_auto_renew(entry)` (recurring)
+- Renew before expiration: `renew(entry)` (one-shot scheduled), `force_renew(entry)` (immediate), or `enable_auto_renew(content_hash)` (recurring)
 - Each `force_renew` gives you a **new** block/index for the next renewal
 - Learn more: [Data Renewal](./renewal.md)
 

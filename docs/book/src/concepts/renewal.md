@@ -28,9 +28,9 @@ Renews the data **immediately** at dispatch time, extending its retention from t
 - Emits `Renewed { index, content_hash }` with the **new index**.
 - You must track the new `(block, index)` for the next renewal.
 
-### `enable_auto_renew(entry)` — continuous renewal
+### `enable_auto_renew(content_hash)` — continuous renewal
 
-Registers the data for **recurring** auto-renewal. The chain renews it automatically at each retention cycle until disabled.
+Registers the data (identified by content hash, not a `TransactionRef`) for **recurring** auto-renewal. The chain renews it automatically at each retention cycle until disabled.
 
 - Emits `RenewalEnabled { content_hash, who, recurring: true }`.
 - Emits `DataAutoRenewed { index, content_hash, account }` at each cycle.
@@ -70,17 +70,20 @@ With `enable_auto_renew` the chain tracks this for you and re-registers the data
 
 ## Raw Runtime Call
 
-The `entry` argument is a `TransactionRef` enum. A raw runtime call (e.g. via PAPI) uses the tagged shape:
+`renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
 
 ```typescript
 api.tx.TransactionStorage.renew({
   entry: { type: "Position", value: { block, index } }
 });
 
-// force_renew / enable_auto_renew take the same `entry`:
+// force_renew takes the same `entry`:
 api.tx.TransactionStorage.force_renew({
   entry: { type: "ContentHash", value: contentHash }
 });
+
+// enable_auto_renew / disable_auto_renew take a content hash, not an `entry`:
+api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHash });
 ```
 
 ## When to Renew

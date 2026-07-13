@@ -86,7 +86,7 @@ for (const item of await tracker.getItemsNeedingRenewal(api)) {
 
 ## Raw Runtime Renewal
 
-Bypassing the SDK client, a raw PAPI transaction targets the **current** runtime, where the renewal extrinsics take an `entry: TransactionRef`:
+Bypassing the SDK client, a raw PAPI transaction targets the **current** runtime, where `renew`/`force_renew` take an `entry: TransactionRef` and `enable_auto_renew` takes a `content_hash`:
 
 ```typescript
 // One-shot scheduled renewal
@@ -99,10 +99,8 @@ api.tx.TransactionStorage.force_renew({
   entry: { type: "Position", value: { block, index } },
 });
 
-// Recurring auto-renewal (identify by content hash)
-api.tx.TransactionStorage.enable_auto_renew({
-  entry: { type: "ContentHash", value: contentHash },
-});
+// Recurring auto-renewal (takes a content hash directly, not an `entry`)
+api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHash });
 ```
 
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
