@@ -2140,8 +2140,10 @@ impl<T: Config> Pallet<T> {
 	/// Verify the chain-wide permanent-storage accounting invariants visible from
 	/// this pallet alone:
 	/// - `PermanentStorageUsed >= Σ Renew sizes in Transactions` — the chain-wide counter is at
-	///   least the on-chain renewed bytes. The remainder is accounted for by paid auto-renewal
-	///   registrations and checked in `pallet-bulletin-data-renewal`'s own `try_state`.
+	///   least the on-chain renewed bytes. The remainder covers paid auto-renewal registrations
+	///   (charged into the counter before their `Renew` entry is written); those live in
+	///   `pallet-bulletin-data-renewal` and are not visible here, so only the lower bound is
+	///   checked.
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
@@ -2247,8 +2249,8 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 		init_weight.ref_time(),
 	);
 
-	// 4. Renew-call ref-time fit is checked by `pallet-bulletin-data-renewal`'s own
-	//    `ensure_weight_sanity` since the renew dispatchables live there now.
+	// 4. Renew-call ref-time fit is no longer checked here: the renew dispatchables moved to
+	//    `pallet-bulletin-data-renewal`.
 
 	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
 	// in max block at worst case (proof check over a full `MaxBlockTransactions` block).
