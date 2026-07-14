@@ -36,7 +36,7 @@ use core::marker::PhantomData;
 ///
 /// Renewal-related weights (`renew`, `force_renew`, `enable_auto_renew`,
 /// `disable_auto_renew`, `process_pending_renewals`, `migrate_v3_to_v4_step`) moved to
-/// `pallet-bulletin-data-renewal::WeightInfo`.
+/// `pallet-bulletin-transaction-storage-renewal::WeightInfo`.
 pub trait WeightInfo {
 	fn store(l: u32) -> Weight;
 	fn store_with_cid_config(l: u32, ) -> Weight;
@@ -242,7 +242,7 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
 	// Placeholder: the former linear benchmark folded at the worst case
 	// `n = MaxBlockTransactions = 512`. Stale since the renewal drain moved to
-	// `pallet-bulletin-data-renewal`; re-run benchmarks to refresh.
+	// `pallet-bulletin-transaction-storage-renewal`; re-run benchmarks to refresh.
 	fn apply_block_inherents() -> Weight {
 		Weight::from_parts(7_899_049_016, 0)
 			.saturating_add(Weight::from_parts(0, 1_390_031))

@@ -16,7 +16,7 @@
 // limitations under the License.
 
 //! Test environment for the data-renewal pallet. Wires both
-//! `pallet-bulletin-transaction-storage` and `pallet-bulletin-data-renewal` into a
+//! `pallet-bulletin-transaction-storage` and `pallet-bulletin-transaction-storage-renewal` into a
 //! single mock runtime so the cross-pallet flow (storage → trait callback → renewal
 //! drain) is exercised end-to-end.
 

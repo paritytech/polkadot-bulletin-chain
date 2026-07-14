@@ -152,8 +152,9 @@ pub enum TransactionKind {
 /// The storage pallet eagerly takes `Transactions[obsolete]`, computes `is_latest` for each
 /// entry (whether [`crate::TransactionByContentHash`] still points at this `(block, index)`),
 /// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
-/// resulting slice to this trait. Implementers — typically `pallet-bulletin-data-renewal` —
-/// use the slice to decrement chain-wide renewed-byte counters and queue auto-renewals.
+/// resulting slice to this trait. Implementers — typically
+/// `pallet-bulletin-transaction-storage-renewal` — use the slice to decrement chain-wide
+/// renewed-byte counters and queue auto-renewals.
 ///
 /// Wiring `()` (the default impl) makes the obsolete sweep a pure storage-pallet concern,
 /// suitable for runtimes that omit the renewal pallet entirely.

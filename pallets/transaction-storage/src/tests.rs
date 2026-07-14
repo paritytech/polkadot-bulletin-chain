@@ -1131,7 +1131,7 @@ fn try_state_passes_with_preimage_authorization() {
 
 /// Cross-pallet storage-side invariant: `PermanentStorageUsed >= Σ renewed sizes in
 /// `Transactions`. The remainder (paid auto-renewal prepayments) is reconciled
-/// inside `pallet-bulletin-data-renewal::try_state`. A `PermanentStorageUsed`
+/// inside `pallet-bulletin-transaction-storage-renewal::try_state`. A `PermanentStorageUsed`
 /// value strictly greater than the on-chain renewed sum is no longer an error
 /// here.
 #[test]
@@ -2026,7 +2026,7 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 }
 
 /// The no-op v3→v4 migration bumps the storage version 3 → 4 (the `AutoRenewals` reshape
-/// moved to `pallet-bulletin-data-renewal`).
+/// moved to `pallet-bulletin-transaction-storage-renewal`).
 #[test]
 fn migrate_v3_to_v4_bumps_storage_version() {
 	use crate::migrations::v4::MigrateV3ToV4;
