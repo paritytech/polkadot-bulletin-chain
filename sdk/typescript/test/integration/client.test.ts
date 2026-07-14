@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Integration tests against a live Bulletin Chain node.
@@ -301,6 +301,33 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const receipt = await client
         .refreshPreimageAuthorization(contentHash)
         .send()
+      expect(receipt.blockHash).toBeDefined()
+      expect(receipt.txHash).toBeDefined()
+    })
+  })
+
+  describe("Renew", () => {
+    it("renews a stored item via the registry-dispatched call", async () => {
+      // Store one item and capture its renew slot from ItemFinalized.
+      const items = [{ data: randomBytes(64) }]
+      let slot: { block: number; index: number } | undefined
+      const builder = await submitItems(client, items)
+      await builder
+        .withCallback((ev) => {
+          if (
+            ev.type === UploadStatus.ItemFinalized &&
+            typeof ev.blockNumber === "number" &&
+            typeof ev.transactionIndex === "number"
+          ) {
+            slot = { block: ev.blockNumber, index: ev.transactionIndex }
+          }
+        })
+        .send()
+      expect(slot).toBeDefined()
+
+      // The compat registry resolves the local chain's current shape
+      // (`renew(entry: TransactionRef)`) and encodes accordingly.
+      const receipt = await client.renew(slot!.block, slot!.index).send()
       expect(receipt.blockHash).toBeDefined()
       expect(receipt.txHash).toBeDefined()
     })

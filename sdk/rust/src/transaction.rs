@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! Transaction submission for Bulletin Chain operations.
 //!
@@ -12,6 +12,7 @@ use crate::{
 		UploadEstimate, UploadEstimateItem, UploadEstimateOptions,
 	},
 	cid::{calculate_cid_with_config, cid_to_bytes, CidCodec, ContentHash, HashingAlgorithm},
+	compat,
 	pipeline::{run_resolved, ResolvedItem, UploadConfig, UploadResult},
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
@@ -886,6 +887,12 @@ impl TransactionClient {
 	}
 
 	/// Renew/extend the retention period for stored data.
+	///
+	/// The fleet runs several runtime generations at once, so the call is
+	/// dispatched through the compat registry: the connected chain's
+	/// `TransactionStorage.renew` type-tree hash selects the encoder (a local
+	/// lookup, no extra RPC) — see [`crate::compat`]. An absent or unknown
+	/// shape fails closed.
 	pub async fn renew(
 		&self,
 		block: u32,
@@ -893,13 +900,29 @@ impl TransactionClient {
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		let tx = bulletin::tx().transaction_storage().renew(block, index);
-
-		let result = self
-			.submit_and_watch(&tx, signer, wait_for, None, |e| {
-				Error::RenewalFailed(format!("Renew failed: {e}"))
-			})
-			.await?;
+		let result = match compat::renew_adapter(&self.api.metadata())? {
+			compat::RenewAdapter::TransactionRef => {
+				// The pallet takes a `TransactionRef` (renew by position or by
+				// content hash); the SDK tracks the `(block, index)` slot from
+				// `Stored` events.
+				let entry = bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef::Position {
+					block,
+					index,
+				};
+				let tx = bulletin::tx().transaction_storage().renew(entry);
+				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+					Error::RenewalFailed(format!("Renew failed: {e}"))
+				})
+				.await?
+			},
+			compat::RenewAdapter::Positional => {
+				let tx = compat::bulletin_v1000011::tx().transaction_storage().renew(block, index);
+				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+					Error::RenewalFailed(format!("Renew failed: {e}"))
+				})
+				.await?
+			},
+		};
 
 		Ok(RenewReceipt {
 			original_block: block,

@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! Live integration test for the wave-batched upload pipeline.
 //!
@@ -951,4 +951,80 @@ async fn estimate_dedup_skip_existing_and_guard() {
 	assert_eq!(est2.base.transactions, 0, "nothing left to upload");
 	assert!(matches!(est2.base.items[0].skip_reason, Some(SkipReason::AlreadyOnChain)));
 	println!("estimate dedup + skip_existing + submit duplicate-guard OK");
+}
+
+/// Renew round-trip through the compat registry on the local chain: the
+/// registry must resolve the workspace runtime's `renew(entry: TransactionRef)`
+/// shape, and a stored item's `(block, index)` slot must renew successfully.
+#[tokio::test]
+#[ignore]
+async fn renew_roundtrip_via_registry() {
+	use bulletin_sdk_rust::compat::{renew_adapter, RenewAdapter};
+
+	let client = TransactionClient::new(&ws()).await.expect("connect");
+	let alice = dev::alice();
+
+	assert_eq!(
+		renew_adapter(&client.api().metadata()).expect("shape registered"),
+		RenewAdapter::TransactionRef,
+		"local chain speaks the current renew shape"
+	);
+
+	// Store one unique item and capture its renew slot from ItemFinalized.
+	let nonce_seed = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap()
+		.as_nanos();
+	let items = vec![UploadItem::new(format!("renew-live {nonce_seed}").into_bytes())];
+	let slot = Arc::new(Mutex::new(None::<(u32, u32)>));
+	let sink = slot.clone();
+	let config = UploadConfig {
+		complete_on: WaitFor::Finalized,
+		on_event: Some(Arc::new(move |ev| {
+			if let UploadEvent::ItemFinalized {
+				block_number: Some(block),
+				transaction_index: Some(index),
+				..
+			} = ev
+			{
+				*sink.lock().unwrap() = Some((block, index));
+			}
+		})),
+		..Default::default()
+	};
+	upload_items(&client, &alice, items, config).await.expect("upload");
+	let (block, index) = slot.lock().unwrap().expect("ItemFinalized carried the renew slot");
+
+	let receipt = client
+		.renew(block, index, &alice, WaitFor::Finalized)
+		.await
+		.expect("renew via registry dispatch");
+	assert!(!receipt.block_hash.is_empty(), "renew included");
+	println!("renew OK: slot ({block}, {index}) renewed in block {}", receipt.block_hash);
+}
+
+/// Read-only fleet probe: a live legacy chain resolves to the positional
+/// adapter. Network-dependent, so opt-in via env even within the ignored
+/// suite (CI runs `--ignored` hermetically against local zombienet):
+///
+/// ```text
+/// BULLETIN_LEGACY_RPC_URL=wss://westend-bulletin-rpc.polkadot.io \
+///     cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored renew_registry_resolves_live_legacy_chain
+/// ```
+#[tokio::test]
+#[ignore]
+async fn renew_registry_resolves_live_legacy_chain() {
+	use bulletin_sdk_rust::compat::{renew_adapter, RenewAdapter};
+
+	let Ok(url) = std::env::var("BULLETIN_LEGACY_RPC_URL") else {
+		println!("skipped: set BULLETIN_LEGACY_RPC_URL to a legacy-shape chain RPC");
+		return;
+	};
+	let client = TransactionClient::new(&url).await.expect("connect");
+	assert_eq!(
+		renew_adapter(&client.api().metadata()).expect("legacy shape registered"),
+		RenewAdapter::Positional,
+		"legacy chain resolves to the positional adapter"
+	);
+	println!("live legacy chain verified: registry resolves positional renew");
 }

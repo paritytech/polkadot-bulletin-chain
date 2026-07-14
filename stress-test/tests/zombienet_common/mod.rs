@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 pub mod cli_runner;
 pub mod expectations;
 
@@ -114,6 +117,10 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
 							"--ipfs-server".into(),
+							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
+							// limiter so a short burst isn't throttled.
+							"--enable-hop".into(),
+							"--hop-disable-rate-limit".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
 							"--pool-kbytes=65536".into(),
@@ -130,6 +137,10 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
 							"--ipfs-server".into(),
+							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
+							// limiter so a short burst isn't throttled.
+							"--enable-hop".into(),
+							"--hop-disable-rate-limit".into(),
 							"--rpc-max-request-size=20".into(),
 							"--rpc-max-response-size=20".into(),
 							"--pool-kbytes=65536".into(),

@@ -2138,6 +2138,7 @@ dependencies = [
  "bytes",
  "cid",
  "clap",
+ "ed25519-dalek",
  "futures",
  "hex",
  "jsonrpsee",

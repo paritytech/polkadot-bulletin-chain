@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Authorize a preimage and store data on Bulletin Chain via the SDK.
  *

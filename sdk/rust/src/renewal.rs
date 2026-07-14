@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! Renewal operations for extending data retention.
 //!
@@ -19,7 +19,7 @@
 //! let operation = client.prepare_renew(storage_ref)?;
 //!
 //! // Submit via subxt:
-//! // api.tx().transaction_storage().renew(operation.block, operation.index)
+//! // api.tx().transaction_storage().renew(TransactionRef::Position { block: operation.block, index: operation.index })
 //! ```
 
 use crate::types::{Error, Result, StorageRef};

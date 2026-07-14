@@ -1,5 +1,13 @@
 # TypeScript SDK
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 The `@parity/bulletin-sdk` package is a type-safe client for Node.js and the browser.
 
 ## Features
@@ -42,3 +50,13 @@ console.log('Stored with CID:', cids[cids.length - 1].toString());
 - [Error Handling](./error-handling.md) - Error codes, retry logic, and recovery hints
 - [PAPI Integration](./papi-integration.md) - Providers, light clients, and signers
 - [API Reference](./api-reference.md) - Full type and method reference
+
+## Security
+
+See the [root README](../../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

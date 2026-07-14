@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! High-level client for interacting with Bulletin Chain.
 //!
@@ -166,7 +166,7 @@ impl BulletinClient {
 	/// let renewal = client.prepare_renew(storage_ref)?;
 	///
 	/// // Submit via subxt:
-	/// // api.tx().transaction_storage().renew(renewal.block, renewal.index)
+	/// // api.tx().transaction_storage().renew(TransactionRef::Position { block: renewal.block, index: renewal.index })
 	/// ```
 	#[must_use = "renewal operation must be submitted to the blockchain"]
 	pub fn prepare_renew(&self, storage_ref: StorageRef) -> Result<RenewalOperation> {

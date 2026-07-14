@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! # Bulletin SDK for Rust
 //!
@@ -147,6 +147,12 @@ pub(crate) mod pipeline;
 // Re-openable byte sources + streaming plan/estimate (std-only)
 #[cfg(feature = "std")]
 pub(crate) mod blob_source;
+
+// Partial metadata for incompatibly-changed items on supported chains, and
+// the shape registry that dispatches between them (std-only). Public so
+// integration tests and diagnostics can probe which shape a chain speaks.
+#[cfg(feature = "std")]
+pub mod compat;
 
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};

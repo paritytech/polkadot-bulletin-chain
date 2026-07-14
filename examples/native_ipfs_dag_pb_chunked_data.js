@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Store a chunked file on Bulletin Chain with a UnixFS DAG-PB root and verify
  * it round-trips through an IPFS gateway.

@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Async client with full transaction submission support
@@ -10,6 +10,7 @@ import { ss58Address } from "@polkadot-labs/hdkd-helpers"
 import type { CID } from "multiformats/cid"
 import { Binary, createClient, type PolkadotSigner } from "polkadot-api"
 import type { BlobSource, SeekableSource } from "./blob-source.js"
+import { type RenewShape, resolveRenewShape } from "./compat.js"
 import {
   isStallError,
   type PipelineBootstrap,
@@ -126,7 +127,13 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      renew(args: { block: number; index: number }): PapiTransaction
+      /** The pallet takes a `TransactionRef` enum — renew by position or by
+       *  content hash; the SDK renews by the `(block, index)` slot. */
+      renew(args: {
+        entry:
+          | { type: "Position"; value: { block: number; index: number } }
+          | { type: "ContentHash"; value: string }
+      }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -666,6 +673,8 @@ export class BulletinClient implements BulletinClientInterface {
    * the lifetime of the client.
    */
   private pipelineBootstrap: PipelineBootstrap = {}
+  /** Cached `renew` shape resolution for the connected chain (see compat.ts). */
+  private renewShapePromise?: Promise<RenewShape>
 
   /**
    * Construct a client.
@@ -1505,8 +1514,19 @@ export class BulletinClient implements BulletinClientInterface {
    * @param index - Extrinsic index within the block
    */
   renew(block: number, index: number): CallBuilder {
-    return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+    return new CallBuilder(async (options) => {
+      // Registry dispatch (see compat.ts): the connected chain's checksum
+      // for `TransactionStorage.renew` selects the encoder — identification
+      // first, never trial-encoding; unknown shapes fail closed. Both arms
+      // encode via the unsafe api (codecs built from the live metadata) so
+      // a stale caller descriptor can't veto a compatible chain.
+      const shape = await this.renewShape()
+      const renewTx = this.papiClient.getUnsafeApi().tx.TransactionStorage
+        .renew as (args: object) => PapiTransaction
+      const tx =
+        shape === "transaction-ref"
+          ? renewTx({ entry: { type: "Position", value: { block, index } } })
+          : renewTx({ block, index })
       return this.submitTx(
         tx,
         "Failed to renew",
@@ -1514,6 +1534,36 @@ export class BulletinClient implements BulletinClientInterface {
         options,
       )
     })
+  }
+
+  /**
+   * Which `renew` shape the connected chain speaks, resolved once per client
+   * by checksumming the live metadata (one RPC + a local hash — see
+   * compat.ts). A failed resolution is not cached, so a transient RPC error
+   * retries on the next call.
+   */
+  private renewShape(): Promise<RenewShape> {
+    if (!this.renewShapePromise) {
+      const resolved = (async () => {
+        const metadataApis = this.papiClient.getUnsafeApi().apis.Metadata
+        // OpaqueMetadata; v15 preferred, default version as fallback.
+        const opaque =
+          (await metadataApis.metadata_at_version(15)) ??
+          (await metadataApis.metadata())
+        // The unsafe api decodes OpaqueMetadata as plain bytes; accept a
+        // Binary-like too in case that representation changes.
+        const bytes: Uint8Array =
+          opaque instanceof Uint8Array ? opaque : opaque.asBytes()
+        return resolveRenewShape(bytes)
+      })()
+      resolved.catch(() => {
+        if (this.renewShapePromise === resolved) {
+          this.renewShapePromise = undefined
+        }
+      })
+      this.renewShapePromise = resolved
+    }
+    return this.renewShapePromise
   }
 
   /**

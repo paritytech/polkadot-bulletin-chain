@@ -1,6 +1,15 @@
 # Polkadot Bulletin Chain
 
+> [!WARNING]                                                                                                                            
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
 The Bulletin Chain is a parachain providing distributed data storage and retrieval infrastructure for the Polkadot ecosystem. It stores arbitrary data with proof-of-storage guarantees and makes it accessible via IPFS, with data retention managed over a configurable period (default ~14 days). It is run using Polkadot SDK's `polkadot-omni-node`.
+
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
+[![Security: unaudited](https://img.shields.io/badge/security-unaudited-red.svg)](https://github.com/paritytech/polkadot-bulletin-chain/security) 
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+[![Polkadot SDK](https://img.shields.io/badge/built%20with-Polkadot%20SDK-green.svg)](#)
+
 
 ## Overview
 
@@ -8,8 +17,8 @@ The main purpose of the Bulletin Chain is to provide storage for the People Chai
 
 ### How it works
 
-1. **Authorization** - Storage access is controlled via root-origin calls. Authorization is granted either for a specific account (`authorize_account`) or for data with a specific content hash (`authorize_preimage`).
-2. **Storage** - Once authorized, data is submitted via `transactionStorage.store`. Large files are automatically chunked with DAG-PB manifests for IPFS compatibility.
+1. **Authorization** - Storage access is granted by a privileged origin — Root (sudo), a sibling parachain over XCM, or a registered authorizer — either for a specific account (`authorize_account`) or for data with a specific content hash (`authorize_preimage`).
+2. **Storage** - Once authorized, data is submitted via `transactionStorage.store`. Client SDKs automatically chunk large files with DAG-PB manifests for IPFS compatibility.
 3. **Retrieval** - Stored data can be retrieved from IPFS via Bitswap, or directly from the node via the transaction index or content hash.
 4. **Retention & Renewal** - Data is retained for a configurable period. It can be renewed before expiry to extend retention, with support for automatic renewal.
 
@@ -17,29 +26,68 @@ The main purpose of the Bulletin Chain is to provide storage for the People Chai
 
 The People Chain root calls `transactionStorage.authorize_preimage` (over XCM) to prime Bulletin to expect data with a given hash. A user account then submits the data via `transactionStorage.store`.
 
+## Quickstart
+
+The shortest path to a running Bulletin chain: launch a single dev node, authorize an account with sudo, then store and retrieve data. For multi-node networks and the full recipe list, see the [development guide](./docs/development.md).
+
+Prerequisites: a Rust toolchain and [`just`](https://github.com/casey/just) (`cargo install just --locked`).
+
+### 1. Fetch binaries and build a chain spec
+
+```bash
+just binaries-polkadot      # polkadot-omni-node (+ relay binaries), cached in ./.polkadot-binaries/
+just chain-spec westend     # builds the runtime, writes zombienet/bulletin-westend-spec.json
+```
+
+### 2. Launch a dev node
+
+A single node with no relay chain, producing and finalizing its own blocks. `//Alice` holds the sudo key.
+
+```bash
+OMNI_NODE="$(just binaries-polkadot)/polkadot-omni-node"
+"$OMNI_NODE" --chain ./zombienet/bulletin-westend-spec.json --dev --ipfs-server
+```
+
+- RPC / WebSocket: `ws://127.0.0.1:9944`
+- `--dev` wipes the node's database on exit; `--ipfs-server` lets IPFS peers fetch stored data from the node over Bitswap.
+
+### 3. Authorize an account (sudo)
+
+A fresh chain stores nothing until an account is authorized. On a dev chain `//Alice` is the sudo key, so use it to grant access. Connect [Polkadot.js Apps](https://polkadot.js.org/apps/?rpc=ws%3A%2F%2F127.0.0.1%3A9944) to `ws://127.0.0.1:9944`, then:
+
+**Developer → Sudo → `transactionStorage.authorizeAccount`**
+- `who`: the account to authorize (e.g. `//Bob`)
+- `transactions`: number of stores allowed (e.g. `100`)
+- `bytes`: total byte allowance (e.g. `104857600`, i.e. 100 MiB)
+
+Submit as sudo. The grant lasts for the [authorization period](#authorization--allowances) (~14 days).
+
+> To sponsor a single known blob instead of an account, use **Sudo → `transactionStorage.authorizePreimage(content_hash, max_size)`** — anyone can then store data matching that hash. This is the call the People Chain makes over XCM.
+
+### 4. Store data
+
+As the authorized account, submit **Developer → Extrinsics → `transactionStorage.store(data)`**. The chain content-addresses the data by its Blake2b-256 hash (the CID) and serves it to IPFS peers over Bitswap.
+
+### 5. Retrieve data
+
+The node speaks IPFS **Bitswap** (libp2p), not HTTP — to fetch a CID over HTTP, point an IPFS gateway or light client at the node: a local [Kubo](https://github.com/ipfs/kubo) node peered to it, or Helia/smoldot in the browser (see [Console UI](#console-ui)). With such a gateway listening on port 8283:
+
+```bash
+curl "http://127.0.0.1:8283/ipfs/<CID>" -o out.bin
+```
+
+### End-to-end in one command
+
+The bundled examples spin up a local network **and** a Kubo gateway, then authorize, store (chunking large files), and read back over IPFS — the quickest way to see the full round trip. This is self-contained and does not use the dev node above; see [examples/README.md](./examples/README.md):
+
+```bash
+cd examples
+just run-authorize-and-store bulletin-westend-runtime ws kubo-native
+```
+
 ## Architecture
 
-```
-polkadot-bulletin-chain/
-├── runtimes/
-│   ├── bulletin-westend/              # Parachain runtime (Westend testnet)
-│   │   └── integration-tests/         # XCM emulator integration tests
-│   └── bulletin-paseo/                # Parachain runtime (Paseo testnet)
-├── pallets/
-│   ├── transaction-storage/           # Core storage pallet
-│   │   └── primitives/                # Shared types (ContentHash, CID utilities)
-│   ├── hop-promotion/                 # HOP pool data promotion to chain storage
-│   └── common/                        # Shared pallet utilities (NoCurrency, call inspection)
-├── sdk/
-│   ├── rust/                          # Rust SDK (no_std compatible)
-│   └── typescript/                    # TypeScript SDK (@parity/bulletin-sdk)
-├── console-ui/                        # React web interface
-├── examples/                          # JavaScript/TypeScript/Rust integration examples
-├── stress-test/                       # Write throughput & Bitswap read benchmarks
-├── docs/                              # SDK book, authorization docs, operational playbook
-├── scripts/                           # Build, benchmarking, and deployment scripts
-└── zombienet/                         # Local parachain network configurations
-```
+Repository layout, pallet descriptions, and runtime details are in [docs/architecture.md](./docs/architecture.md).
 
 ## Storage Model
 
@@ -52,7 +100,7 @@ When data reaches the end of its retention period without being renewed, it is a
 
 ### Authorization & Allowances
 
-All storage operations require prior authorization, granted via root-origin calls. Each authorization carries an `AuthorizationExtent` — a set of counters that share a single `bytes_allowance` cap but enforce it differently depending on the operation:
+All storage operations require prior authorization, granted by a privileged origin (Root, a sibling parachain over XCM, or a registered authorizer). Each authorization carries an `AuthorizationExtent` — a set of counters that share a single `bytes_allowance` cap but enforce it differently depending on the operation:
 
 | Counter | Enforcement | Behavior |
 |---|---|---|
@@ -67,39 +115,6 @@ All counters reset to zero when an expired authorization is re-granted, starting
 ### Chain-wide Renewal Cap
 
 A global `MaxPermanentStorageSize` limits total renewed bytes across all authorizations. A `renew` is rejected when `PermanentStorageUsed + size > MaxPermanentStorageSize`. When usage crosses 80% of the cap, a `PermanentStorageNearCap` event is emitted as a signal for off-chain governance to raise the cap or coordinate another bulletin chain.
-
-## Pallets
-
-### pallet-transaction-storage
-
-Core storage pallet providing distributed data storage and retrieval with authorization-based access control.
-
-**Extrinsics:**
-- `store` / `store_with_cid_config` - Store data (with optional CID codec/hash configuration)
-- `renew` / `renew_content_hash` - Extend retention of stored data
-- `authorize_account` - Grant an account permission to store (with transaction/byte limits)
-- `authorize_preimage` - Authorize storage of data with a specific content hash
-- `refresh_account_authorization` / `refresh_preimage_authorization` - Extend authorization expiration
-
-**Key features:**
-- Authorization-based access control (account-scoped or content-addressed)
-- Configurable retention period with automatic cleanup
-- Auto-renewal tracking for important data
-- Merkle-based storage proofs with chunk validation
-- Soft-cap (priority signal) and hard-cap (per-window renewal quota) for storage capacity
-- Feeless transaction support via `pallet-skip-feeless-payment`
-
-### pallet-hop-promotion
-
-Promotes near-expiry HOP (Human-Operated Peer) pool data to permanent chain storage. Uses general (unsigned authorized) transactions to fill unused blockspace without charging users. Validates sr25519 signatures and checks that the promoting account has an active Bulletin authorization.
-
-### pallet-common
-
-Shared utilities including `NoCurrency` (a no-op fungible currency for pallets that require one) and call inspection helpers for unwrapping utility/sudo/proxy wrappers during authorization tracking.
-
-## Runtimes
-
-Two parachain runtimes (`bulletin-westend`, `bulletin-paseo`) share the same pallet composition with network-specific constants. Both use 24-second slots (4 relay chain slots), 10 MiB max block length, and a ~14 day retention period.
 
 ## SDK
 
@@ -173,79 +188,7 @@ bulletin-stress-test bitswap
 
 ## Local Development
 
-### One-time setup
-
-Install [`just`](https://github.com/casey/just) — every recipe in this repo is wired through it, and the CI workflows call the same recipes:
-
-```bash
-cargo install just --locked
-just --list   # see all recipes
-```
-
-### polkadot-sdk binaries
-
-All external binaries (`polkadot`, `polkadot-omni-node`, `polkadot-prepare-worker`, `polkadot-execute-worker`, `chain-spec-builder`, `frame-omni-bencher`, `try-runtime`, `zombienet`) are fetched on demand by `scripts/get_polkadot_binaries.sh` and cached under `./.polkadot-binaries/` (gitignored, repo-local — no `$HOME` writes).
-
-Five env vars in `.github/env` pin the version of each group:
-
-| Variable | Drives |
-|---|---|
-| `POLKADOT_NODE_VERSION` | `polkadot`, 2 workers, `polkadot-omni-node` |
-| `FRAME_OMNI_BENCHER_VERSION` | `frame-omni-bencher` |
-| `CHAIN_SPEC_BUILDER_VERSION` | `chain-spec-builder` |
-| `TRY_RUNTIME_VERSION` | `try-runtime` |
-| `ZOMBIENET_VERSION` | `zombienet` (release-tag only) |
-
-Each value is either:
-- **a release tag** (e.g. `polkadot-stable2603`) — script downloads the prebuilt asset for your platform (Linux x86_64 or macOS arm64) and verifies its `.sha256` companion file, OR
-- **a 40-char commit hash** — script clones `polkadot-sdk` / `try-runtime-cli` once into `./.polkadot-binaries/_src/`, checks out the commit, and builds with `SKIP_WASM_BUILD=1`.
-
-Override at the shell to pin a different version for one session:
-
-```bash
-POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
-POLKADOT_NODE_VERSION=d6a4f5977b39bf5e5152e2f2bb6719ea92b992ea just binaries-polkadot
-```
-
-Useful recipes:
-
-```bash
-just binaries-polkadot              # fetch / build polkadot + workers + omni-node
-just binaries-chain-spec-builder    # fetch / build chain-spec-builder
-just binaries-bencher               # frame-omni-bencher
-just binaries-try-runtime           # try-runtime CLI
-just binaries-zombienet             # zombienet (release-only)
-just binaries-all                   # cold-cache convenience: every group
-
-just chain-spec westend             # build runtime + emit zombienet/bulletin-westend-spec.json
-just chain-spec paseo               # same for paseo
-
-just test-pallets                   # pallet unit tests
-just test-zombienet-auto-renew      # auto-renew e2e suite (matrix: westend|paseo)
-just test-zombienet-sync            # sync e2e suite
-just bench <args>                   # frame-omni-bencher with extra args
-just try-runtime <args>             # try-runtime CLI with extra args
-```
-
-### Zombienet
-
-Local parachain networks can be spun up using the configurations in `zombienet/`:
-
-- `bulletin-westend-local.toml` - Local Westend relay + Bulletin parachain
-- `bulletin-paseo-local.toml` - Local Paseo relay + Bulletin parachain
-
-### Examples
-
-The `examples/` directory contains JavaScript, TypeScript, and Rust scripts demonstrating chain interaction:
-
-- Authorization and storage workflows (WebSocket RPC and Smoldot light client)
-- Content-addressed (preimage) authorization
-- Chunked data storage with DAG-PB manifests
-- Large file handling with parallel uploads
-- Auto-renewal monitoring
-- Runtime upgrades
-
-See [examples/README.md](./examples/README.md) for setup and usage.
+Building, fetching pinned `polkadot-sdk` binaries, running zombienet networks, and the full `just` recipe list are documented in the [development guide](./docs/development.md).
 
 ## CI/CD
 
@@ -292,6 +235,17 @@ Verify `libclang.dylib` exists: `ls "$(brew --prefix llvm)/lib/libclang.dylib"`,
 cargo clean
 cargo build --release
 ```
+
+## Security
+
+Before deploying for real use cases, you are responsible for:
+
+- Reviewing the code yourself — we publish a reference implementation, not a hardened production build
+- Checking that the dependencies are up to date and free of known vulnerabilities
+- Securing your own fork or deployment environment (keys, secrets, network configuration)
+- Tracking the latest tagged releases/commits for security fixes; older releases are not backported (exceptions might apply)
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
 
 ## License
 

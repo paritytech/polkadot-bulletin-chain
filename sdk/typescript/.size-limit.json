@@ -2,7 +2,12 @@
   {
     "name": "full SDK (ESM, brotli, peer deps external)",
     "path": "dist/index.mjs",
-    "ignore": ["polkadot-api", "multiformats"],
+    "ignore": [
+      "polkadot-api",
+      "@polkadot-api/metadata-builders",
+      "@polkadot-api/substrate-bindings",
+      "multiformats"
+    ],
     "limit": "34 kB"
   },
   {

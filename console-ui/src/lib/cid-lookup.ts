@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import type { CID } from "@parity/bulletin-sdk";
 import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
 import { bulletin_westend } from "@polkadot-api/descriptors";

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Authorize an account and store a single payload on Bulletin Chain.
  *

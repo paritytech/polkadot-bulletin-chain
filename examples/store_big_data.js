@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Store a big file on Bulletin Chain using the TypeScript SDK.
  *

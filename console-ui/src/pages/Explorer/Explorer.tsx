@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect, useCallback } from "react";
 import { Search, ChevronLeft, ChevronRight, RefreshCw, Box, Hash, ChevronDown, ChevronUp, Zap, FileText, Database } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
