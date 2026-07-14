@@ -111,7 +111,7 @@ import { Binary } from "polkadot-api";
 api.tx.TransactionStorage.store({ data: Binary.fromBytes(myData) });
 
 api.tx.TransactionStorage.store_with_cid_config({
-  cid: { codec: 0x55n, hashing: "Blake2b256" },
+  cid: { codec: 0x55n, hashing: { type: "Blake2b256" } },
   data: Binary.fromBytes(myData),
 });
 ```
@@ -128,7 +128,7 @@ try {
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");
-  } else if (error.message.includes("Unauthorized")) {
+  } else if (error.message.includes("AuthorizationNotFound")) {
     console.log("Insufficient authorization - request more via Faucet");
   } else {
     throw error;

@@ -25,7 +25,7 @@ let data = b"Hello, Bulletin!".to_vec();
 let operation = client.prepare_store(data, StoreOptions::default())?;
 
 // Submit via your subxt setup
-// let tx = your_runtime::tx().transaction_storage().store(operation.data, None);
+// let tx = your_runtime::tx().transaction_storage().store(operation.data);
 // api.tx().sign_and_submit_then_watch_default(&tx, &signer).await?;
 ```
 
