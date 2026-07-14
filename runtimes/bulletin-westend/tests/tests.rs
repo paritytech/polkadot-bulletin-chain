@@ -14,12 +14,12 @@ use bulletin_westend_runtime::{
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
-use pallet_bulletin_transaction_storage_renewal::{self as txs_renewal, Call as DataRenewalCall};
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin, TransactionRef,
 };
+use pallet_bulletin_transaction_storage_renewal::{self as txs_renewal, Call as DataRenewalCall};
 use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};

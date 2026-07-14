@@ -555,25 +555,30 @@ where
 	RuntimeCall: From<C>,
 {
 	fn create_extension() -> Self::Extension {
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
-			frame_system::AuthorizeCall::<Runtime>::new(),
-			frame_system::CheckNonZeroSender::<Runtime>::new(),
-			frame_system::CheckSpecVersion::<Runtime>::new(),
-			frame_system::CheckTxVersion::<Runtime>::new(),
-			frame_system::CheckGenesis::<Runtime>::new(),
-			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
-			frame_system::CheckNonce::<Runtime>::from(0),
-			frame_system::CheckWeight::<Runtime>::new(),
-			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new(
+			(
+				frame_system::AuthorizeCall::<Runtime>::new(),
+				frame_system::CheckNonZeroSender::<Runtime>::new(),
+				frame_system::CheckSpecVersion::<Runtime>::new(),
+				frame_system::CheckTxVersion::<Runtime>::new(),
+				frame_system::CheckGenesis::<Runtime>::new(),
+				frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+				frame_system::CheckNonce::<Runtime>::from(0),
+				frame_system::CheckWeight::<Runtime>::new(),
+				pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+					pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+				),
+				txs_renewal::extension::ValidateBulletinCalls::<
+					Runtime,
+					storage::StorageCallInspector,
+				>::default(),
+				pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+					Runtime,
+					pallet_bulletin_transaction_storage::extension::FlatBoost,
+				>::default(),
+				frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 			),
-			txs_renewal::extension::ValidateBulletinCalls::<Runtime, storage::StorageCallInspector>::default(),
-			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
-				Runtime,
-				pallet_bulletin_transaction_storage::extension::FlatBoost,
-			>::default(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-		))
+		)
 	}
 }
 
