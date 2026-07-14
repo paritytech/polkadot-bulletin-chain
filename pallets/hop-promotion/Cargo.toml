@@ -28,7 +28,7 @@ bulletin-transaction-storage-primitives = { workspace = true }
 
 [dev-dependencies]
 bulletin-pallets-common = { workspace = true, features = ["std"] }
-pallet-bulletin-data-renewal = { workspace = true, features = ["std"] }
+pallet-bulletin-transaction-storage-renewal = { workspace = true, features = ["std"] }
 sp-keyring = { workspace = true, features = ["std"] }
 sp-keystore = { workspace = true, features = ["std"] }
 
@@ -40,7 +40,7 @@ std = [
 	"codec/std",
 	"frame-support/std",
 	"frame-system/std",
-	"pallet-bulletin-data-renewal/std",
+	"pallet-bulletin-transaction-storage-renewal/std",
 	"pallet-bulletin-transaction-storage/std",
 	"pallet-timestamp/std",
 	"polkadot-sdk-frame/std",
@@ -54,7 +54,7 @@ runtime-benchmarks = [
 	"bulletin-pallets-common/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"frame-system/runtime-benchmarks",
-	"pallet-bulletin-data-renewal/runtime-benchmarks",
+	"pallet-bulletin-transaction-storage-renewal/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-timestamp/runtime-benchmarks",
 	"polkadot-sdk-frame/runtime-benchmarks",
@@ -64,7 +64,7 @@ try-runtime = [
 	"bulletin-pallets-common/try-runtime",
 	"frame-support/try-runtime",
 	"frame-system/try-runtime",
-	"pallet-bulletin-data-renewal/try-runtime",
+	"pallet-bulletin-transaction-storage-renewal/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-timestamp/try-runtime",
 	"polkadot-sdk-frame/try-runtime",

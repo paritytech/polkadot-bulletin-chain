@@ -28,8 +28,8 @@ use pallet_bulletin_transaction_storage as txs;
 use polkadot_sdk_frame::deps::{
 	frame_support::{
 		pallet_prelude::PhantomData,
-		storage::storage_prefix,
-		traits::{Get, GetStorageVersion, OnRuntimeUpgrade, StorageVersion},
+		storage::{storage_prefix, StoragePrefixedMap},
+		traits::{Get, GetStorageVersion, OnRuntimeUpgrade, PalletInfoAccess, StorageVersion},
 		weights::Weight,
 	},
 	sp_io,
@@ -65,7 +65,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// across prefixes, so only the prefix is rewritten.
 		let old_pallet = <txs::Pallet<T> as PalletInfoAccess>::name().as_bytes();
 		let old_auto_prefix = storage_prefix(old_pallet, b"AutoRenewals");
-		let new_auto_prefix = crate::Renewals::<T>::final_prefix();
+		let new_auto_prefix = crate::Renewals::<T>::final_prefix();
 		let mut moved: u64 = 0;
 		let mut previous = old_auto_prefix.to_vec();
 		while let Some(key) =

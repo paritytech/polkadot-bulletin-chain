@@ -16,6 +16,7 @@ use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
+use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use pallet_xcm::EnsureXcm;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
@@ -108,9 +109,9 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_bulletin_data_renewal::Config for Runtime {
+impl txs_renewal::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
 }
 
 parameter_types! {
