@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -4028,6 +4026,85 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 		assert_eq!(txs2[0].size, 999);
 
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
+	});
+}
+
+/// `post_upgrade` must accept pre-existing v4 entries (e.g. prepaid `paid=true`) that `step`
+/// leaves untouched. Regression for the summit migration check.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migrate_v3_to_v4_post_upgrade_allows_preexisting_v4_paid_entries() {
+	use crate::migrations::v4::{MigrateV3ToV4, V3AutoRenewalData};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(3).put::<TransactionStorage>();
+
+		// A genuine v3 entry (just `{ account }`), written raw at the AutoRenewals key.
+		let v3_hash: super::ContentHash = [1u8; 32];
+		unhashed::put(&AutoRenewals::hashed_key_for(v3_hash), &V3AutoRenewalData { account: 1u64 });
+
+		// A pre-existing v4 entry with `paid=true` — the case that broke on summit.
+		let v4_hash: super::ContentHash = [2u8; 32];
+		AutoRenewals::insert(
+			v4_hash,
+			super::RenewalData { account: 2u64, recurring: true, paid: true },
+		);
+
+		let state = MigrateV3ToV4::<Test>::pre_upgrade().expect("pre_upgrade succeeds");
+
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV3ToV4<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV3ToV4::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		MigrateV3ToV4::<Test>::post_upgrade(state).expect("pre-existing v4 entries are allowed");
+
+		let migrated = AutoRenewals::get(v3_hash).expect("v3 entry migrated");
+		assert!(migrated.recurring && !migrated.paid);
+		let preexisting = AutoRenewals::get(v4_hash).expect("v4 entry preserved");
+		assert!(preexisting.paid, "pre-existing v4 paid=true entry must be left untouched");
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
+	});
+}
+
+/// Re-running `step` against state already at/beyond v4 must not downgrade the storage version.
+#[test]
+fn migrate_v3_to_v4_does_not_downgrade_storage_version() {
+	use crate::migrations::v4::MigrateV3ToV4;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+
+	new_test_ext().execute_with(|| {
+		// Chain is already at v5 (e.g. summit), with a v4-format entry present.
+		StorageVersion::new(5).put::<TransactionStorage>();
+		AutoRenewals::insert(
+			[2u8; 32] as super::ContentHash,
+			super::RenewalData { account: 2u64, recurring: true, paid: true },
+		);
+
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV3ToV4<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV3ToV4::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		assert_eq!(
+			TransactionStorage::on_chain_storage_version(),
+			StorageVersion::new(5),
+			"migration must not downgrade the storage version",
+		);
 	});
 }
 

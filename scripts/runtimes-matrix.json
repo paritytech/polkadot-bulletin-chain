@@ -24,7 +24,7 @@
       "spec_name_check": "--disable-spec-name-check",
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
-        { "name": "paseo",       "uris": ["wss://paseo-bulletin-rpc.polkadot.io"] },
+        { "name": "paseo",      "uris": ["wss://paseo-bulletin-rpc.polkadot.io"] },
         { "name": "next-v2",    "uris": ["wss://paseo-bulletin-next-rpc.polkadot.io"] },
         { "name": "previewnet", "uris": ["wss://previewnet.substrate.dev/bulletin"] }
       ]

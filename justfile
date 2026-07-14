@@ -139,6 +139,22 @@ test-zombienet-hop runtime="westend" filter="parachain_hop_promotion":
         "{{filter}}" \
         -- --test-threads=1 --nocapture
 
+# Quick HOP submit/claim sanity check via the stress-test harness. runtime ∈ westend | paseo.
+test-stress-hop runtime="westend":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    POLKADOT_BIN_DIR="$(just binaries-polkadot)"
+    CSB_DIR="$(just binaries-chain-spec-builder)"
+    export PATH="$CSB_DIR:$PATH"
+    ./scripts/create_bulletin_{{runtime}}_spec.sh
+    export ZOMBIE_PROVIDER=native
+    export POLKADOT_RELAY_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
+    export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
+    export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
+    export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
+    cargo test --release -p bulletin-stress-test --test zombienet test_parachain_hop \
+        -- --test-threads=1 --nocapture
+
 # Zombienet sync suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
 test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     #!/usr/bin/env bash
