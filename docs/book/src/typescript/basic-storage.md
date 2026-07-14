@@ -66,7 +66,8 @@ import { Binary } from 'polkadot-api';
 // From text
 const data = new TextEncoder().encode('Hello, Bulletin!');
 
-// From hex string (Binary.asBytes() returns a Uint8Array)
+// From hex string — Binary.fromHex returns a Binary (not a Uint8Array);
+// unwrap the bytes with asBytes()
 const data = Binary.fromHex('0x48656c6c6f').asBytes();
 
 // From Uint8Array (used directly)
