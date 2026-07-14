@@ -18,6 +18,7 @@
 use crate::{mock::*, signing_payload};
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
+use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -449,15 +450,15 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		// Advance so the stored transaction is available for renew.
 		run_to_block(3);
 
-		// Renew now lives in `pallet-bulletin-data-renewal`; validate through that
-		// pallet's own extension entry point to get the renew priority.
-		let renew_call = pallet_bulletin_data_renewal::Call::<Test>::renew {
+		// Renew now lives in `pallet-bulletin-transaction-storage-renewal`; validate
+		// through that pallet's own extension entry point to get the renew priority.
+		let renew_call = txs_renewal::Call::<Test>::renew {
 			entry: pallet_bulletin_transaction_storage::TransactionRef::Position {
 				block: 1,
 				index: 0,
 			},
 		};
-		let (renew_tx, _) = pallet_bulletin_data_renewal::Pallet::<Test>::validate_renewal_signed(
+		let (renew_tx, _) = txs_renewal::Pallet::<Test>::validate_renewal_signed(
 			&alice,
 			&renew_call,
 		)

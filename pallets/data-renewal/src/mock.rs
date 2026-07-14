@@ -20,7 +20,7 @@
 //! single mock runtime so the cross-pallet flow (storage → trait callback → renewal
 //! drain) is exercised end-to-end.
 
-use crate as pallet_bulletin_data_renewal;
+use crate as pallet_bulletin_transaction_storage_renewal;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
@@ -60,7 +60,7 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 
 	#[runtime::pallet_index(2)]
-	pub type DataRenewal = pallet_bulletin_data_renewal;
+	pub type DataRenewal = pallet_bulletin_transaction_storage_renewal;
 }
 
 parameter_types! {
@@ -114,7 +114,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_bulletin_data_renewal::Config for Test {
+impl pallet_bulletin_transaction_storage_renewal::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 }

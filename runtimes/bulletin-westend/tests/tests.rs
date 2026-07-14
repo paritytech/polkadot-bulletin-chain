@@ -14,7 +14,7 @@ use bulletin_westend_runtime::{
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
-use pallet_bulletin_data_renewal::Call as DataRenewalCall;
+use pallet_bulletin_transaction_storage_renewal::{self as txs_renewal, Call as DataRenewalCall};
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
@@ -77,7 +77,7 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_bulletin_data_renewal::extension::ValidateBulletinCalls::<
+		txs_renewal::extension::ValidateBulletinCalls::<
 			Runtime,
 			bulletin_westend_runtime::storage::StorageCallInspector,
 		>::default(),

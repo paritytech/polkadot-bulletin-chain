@@ -16,7 +16,7 @@
 // limitations under the License.
 
 //! Weights for the data-renewal pallet. Concrete numbers live in the runtime
-//! at `runtimes/<runtime>/src/weights/pallet_bulletin_data_renewal.rs`.
+//! at `runtimes/<runtime>/src/weights/pallet_bulletin_transaction_storage_renewal.rs`.
 
 use polkadot_sdk_frame::deps::frame_support::weights::Weight;
 
