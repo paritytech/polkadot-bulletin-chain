@@ -84,13 +84,13 @@ interface PapiTransaction {
 /**
  * On-chain `TransactionRef` used by the renewal extrinsics.
  *
- * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. The SDK only
- * constructs the `Position` variant; `ContentHash` is included for completeness.
+ * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
+ * requires a runtime that ships `TransactionRef`; construct its value with
+ * `Binary.fromBytes(...)`.
  */
 export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
   | { type: "ContentHash"; value: { asBytes(): Uint8Array; asHex(): string } }
-
 
 /**
  * Whether the connected runtime takes `TransactionRef` for the renewal
