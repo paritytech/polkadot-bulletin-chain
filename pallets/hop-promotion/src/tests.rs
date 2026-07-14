@@ -458,11 +458,8 @@ fn promote_has_lower_priority_than_store_and_renew() {
 				index: 0,
 			},
 		};
-		let (renew_tx, _) = txs_renewal::Pallet::<Test>::validate_renewal_signed(
-			&alice,
-			&renew_call,
-		)
-		.unwrap();
+		let (renew_tx, _) =
+			txs_renewal::Pallet::<Test>::validate_renewal_signed(&alice, &renew_call).unwrap();
 
 		assert!(
 			promote_tx.priority < store_tx.priority,

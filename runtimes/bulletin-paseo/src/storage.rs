@@ -111,7 +111,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 
 impl txs_renewal::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
+	type WeightInfo =
+		crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
 }
 
 parameter_types! {
