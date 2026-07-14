@@ -884,6 +884,25 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	)?;
 	tracing::info!("✓ data_renewed still served via bitswap");
 
+	// `data_not_renewed` was stored a few blocks after `data_renewed`, so its store block
+	// crosses the `--blocks-pruning` boundary later than the `wait_until` above (which is
+	// anchored to `data_renewed`). Wait for FINALIZED to pass it before asserting eviction,
+	// otherwise the DONT_HAVE poll also has to absorb the finality-lag gap and races under
+	// slower finalization.
+	let not_renewed_pruned_finalized =
+		data_not_renewed_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	tracing::info!(
+		"Waiting for FINALIZED block {} so data_not_renewed's store block {} is past the pruning boundary",
+		not_renewed_pruned_finalized,
+		data_not_renewed_block
+	);
+	wait_for_finalized_height(
+		collator1,
+		not_renewed_pruned_finalized,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
+
 	expect_bitswap_dont_have(
 		collator1,
 		&data_not_renewed,
