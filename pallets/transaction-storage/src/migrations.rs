@@ -644,7 +644,7 @@ pub mod v3 {
 ///
 /// On `main` this reshaped `AutoRenewals` (`{ account }` →
 /// `{ account, recurring, paid }`). The renewal split moved `AutoRenewals` out of
-/// this pallet into `pallet-bulletin-data-renewal`, so that reshape now happens
+/// this pallet into `pallet-bulletin-transaction-storage-renewal`, so that reshape now happens
 /// there, during relocation (see
 /// [`pallet_bulletin_transaction_storage_renewal::migrations::RelocateFromTransactionStorage`]).
 /// This migration is kept as a no-op solely to keep the storage-version chain

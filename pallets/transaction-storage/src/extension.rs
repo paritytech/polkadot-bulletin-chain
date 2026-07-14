@@ -58,8 +58,9 @@ where
 	/// Returns `true` if `call` is a storage-mutating TransactionStorage call (`store`,
 	/// `store_with_cid_config`) — either directly or nested inside wrappers.
 	///
-	/// `force_renew` lives in `pallet-bulletin-data-renewal`; runtime `CallInspector`s
-	/// must additionally check for its call type if they care about renewal mutations.
+	/// `force_renew` lives in `pallet-bulletin-transaction-storage-renewal`; runtime
+	/// `CallInspector`s must additionally check for its call type if they care about renewal
+	/// mutations.
 	///
 	/// Intended for use in XCM `SafeCallFilter` implementations. The runtime's
 	/// [`CallInspector`] provides the wrapper-recursion logic, so this function

@@ -380,7 +380,7 @@ mod benchmarks {
 
 	/// Worst-case benchmark for the storage-proof inherent: verify the proof for a block
 	/// holding `MaxBlockTransactions` entries. Constant weight — the renewal drain (the old
-	/// linear `n` component) moved to `pallet-bulletin-data-renewal`.
+	/// linear `n` component) moved to `pallet-bulletin-transaction-storage-renewal`.
 	#[benchmark]
 	fn apply_block_inherents() -> Result<(), BenchmarkError> {
 		// Override the default retention period (DEFAULT_RETENTION_PERIOD = ~14 days
