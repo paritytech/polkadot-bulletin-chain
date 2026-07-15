@@ -18,6 +18,8 @@ import {
   StoreBuilder,
   type TransactionReceipt,
   type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "./async-client.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
@@ -331,16 +333,19 @@ export class MockBulletinClient implements BulletinClientInterface {
     })
   }
 
-  renew(entry: TransactionRef): CallBuilder {
+  renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "renew", entry })
+      this.operations.push({ type: "renew", entry: toTransactionRef(ref) })
       return mockReceipt()
     })
   }
 
-  forceRenew(entry: TransactionRef): CallBuilder {
+  forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "force_renew", entry })
+      this.operations.push({
+        type: "force_renew",
+        entry: toTransactionRef(ref),
+      })
       return mockReceipt()
     })
   }

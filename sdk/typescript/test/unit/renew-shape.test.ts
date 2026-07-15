@@ -4,9 +4,8 @@
 import { describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
-  contentHashRef,
-  positionRef,
-  type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "../../src/async-client"
 import { ErrorCode } from "../../src/types"
 
@@ -14,12 +13,11 @@ import { ErrorCode } from "../../src/types"
 // current ones take `renew({entry: TransactionRef})` and add `force_renew`.
 // These tests pin the client's runtime detection for both shapes.
 
-const positionEntry: TransactionRef = positionRef(100, 5)
+const positionInput: TransactionRefInput = { block: 100, index: 5 }
+const positionEntry = toTransactionRef(positionInput)
 
-const hashEntry: TransactionRef = contentHashRef({
-  asBytes: () => new Uint8Array(32),
-  asHex: () => `0x${"00".repeat(32)}`,
-})
+const hashInput: TransactionRefInput = new Uint8Array(32).fill(1)
+const hashEntry = toTransactionRef(hashInput)
 
 const signer = {
   publicKey: new Uint8Array(32),
@@ -74,7 +72,7 @@ describe("renew argument shape detection", () => {
       },
     })
 
-    await client.renew(positionEntry).send()
+    await client.renew(positionInput).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 
@@ -83,7 +81,7 @@ describe("renew argument shape detection", () => {
       renew: () => mockTx,
     })
 
-    await expect(client.renew(hashEntry).send()).rejects.toMatchObject({
+    await expect(client.renew(hashInput).send()).rejects.toMatchObject({
       code: ErrorCode.TRANSACTION_FAILED,
       message: "content-hash renewal is not supported by this runtime",
     })
@@ -99,7 +97,7 @@ describe("renew argument shape detection", () => {
       force_renew: () => mockTx,
     })
 
-    await client.renew(positionEntry).send()
+    await client.renew(positionInput).send()
     expect(arg).toEqual({ entry: positionEntry })
   })
 
@@ -117,7 +115,7 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(positionEntry).send()
+    await client.renew(positionInput).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 
@@ -133,7 +131,7 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(hashEntry).send()
+    await client.renew(hashInput).send()
     expect(arg).toEqual({ entry: hashEntry })
   })
 
@@ -151,7 +149,7 @@ describe("renew argument shape detection", () => {
       force_renew: forceRenew,
     })
 
-    await client.renew(positionEntry).send()
+    await client.renew(positionInput).send()
     expect(arg).toEqual({ block: 100, index: 5 })
   })
 })
@@ -169,7 +167,7 @@ describe("forceRenew", () => {
       force_renew: forceRenew,
     })
 
-    await client.forceRenew(positionEntry).send()
+    await client.forceRenew(positionInput).send()
     expect(arg).toEqual({ entry: positionEntry })
   })
 
@@ -181,11 +179,28 @@ describe("forceRenew", () => {
       force_renew: forceRenew,
     })
 
-    await expect(client.forceRenew(positionEntry).send()).rejects.toMatchObject(
+    await expect(client.forceRenew(positionInput).send()).rejects.toMatchObject(
       {
         code: ErrorCode.TRANSACTION_FAILED,
         message: "force_renew is not supported by this runtime",
       },
     )
+  })
+})
+
+describe("toTransactionRef variant inference", () => {
+  it("maps {block, index} to Position", () => {
+    expect(toTransactionRef({ block: 7, index: 2 })).toEqual({
+      type: "Position",
+      value: { block: 7, index: 2 },
+    })
+  })
+
+  it("maps a Uint8Array to ContentHash", () => {
+    const hash = new Uint8Array(32).fill(1)
+    expect(toTransactionRef(hash)).toEqual({
+      type: "ContentHash",
+      value: hash,
+    })
   })
 })

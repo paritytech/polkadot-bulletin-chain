@@ -34,8 +34,8 @@ class AsyncBulletinClient implements BulletinClientInterface {
 | `storeWithPreimageAuth(data, options?)` | `Promise<StoreResult>` | Store using preimage-based authorization |
 | `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize an account for storage |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
-| `renew(entry)` | `CallBuilder` | Schedule a one-shot renewal for a `TransactionRef` (legacy immediate renew on pre-`TransactionRef` runtimes) |
-| `forceRenew(entry)` | `CallBuilder` | Renew immediately; errors on runtimes without `force_renew` |
+| `renew(ref)` | `CallBuilder` | Schedule a one-shot renewal; `ref` is `{ block, index }` or a content hash (legacy immediate renew on pre-`TransactionRef` runtimes) |
+| `forceRenew(ref)` | `CallBuilder` | Renew immediately; errors on runtimes without `force_renew` |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Refresh a preimage authorization expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
@@ -454,14 +454,16 @@ type TransactionStatusEvent =
 
 ## Utility Functions
 
-### TransactionRef Constructors
+### TransactionRef Helpers
 
 ```typescript
-// Build a Position TransactionRef for renew()/forceRenew()
-function positionRef(block: number, index: number): TransactionRef;
+// Accepted by renew()/forceRenew(); the variant is inferred from the shape
+type TransactionRefInput =
+  | { block: number; index: number }  // -> Position
+  | Uint8Array                        // -> ContentHash
 
-// Build a ContentHash TransactionRef (pass e.g. Binary.fromBytes(hash))
-function contentHashRef(hash: { asBytes(): Uint8Array; asHex(): string }): TransactionRef;
+// Convert an input into the on-chain tagged TransactionRef enum
+function toTransactionRef(ref: TransactionRefInput): TransactionRef;
 ```
 
 ### CID Functions

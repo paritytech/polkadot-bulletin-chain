@@ -21,6 +21,17 @@ use subxt_signer::sr25519::Keypair;
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
+/// Convert the primitives `TransactionRef` into the subxt-generated one.
+fn to_runtime_ref(
+	entry: &TransactionRef<u32>,
+) -> bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef<u32> {
+	use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+	match entry {
+		TransactionRef::Position { block, index } => Gen::Position { block: *block, index: *index },
+		TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+	}
+}
+
 /// Transaction submission client for Bulletin Chain.
 ///
 /// This wraps a subxt OnlineClient and provides high-level methods
@@ -419,19 +430,17 @@ impl TransactionClient {
 	/// The renewal fires once when the data reaches its retention boundary; it
 	/// does not renew synchronously. For immediate renewal use
 	/// [`force_renew`](Self::force_renew).
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
 	pub async fn renew(
 		&self,
-		entry: TransactionRef<u32>,
+		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
-		let runtime_entry = match &entry {
-			TransactionRef::Position { block, index } =>
-				Gen::Position { block: *block, index: *index },
-			TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
-		};
-		let tx = bulletin::tx().transaction_storage().renew(runtime_entry);
+		let entry = entry.into();
+		let tx = bulletin::tx().transaction_storage().renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -443,19 +452,17 @@ impl TransactionClient {
 	}
 
 	/// Immediately renew stored data, extending its retention from the current block.
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
 	pub async fn force_renew(
 		&self,
-		entry: TransactionRef<u32>,
+		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
-		let runtime_entry = match &entry {
-			TransactionRef::Position { block, index } =>
-				Gen::Position { block: *block, index: *index },
-			TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
-		};
-		let tx = bulletin::tx().transaction_storage().force_renew(runtime_entry);
+		let entry = entry.into();
+		let tx = bulletin::tx().transaction_storage().force_renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {

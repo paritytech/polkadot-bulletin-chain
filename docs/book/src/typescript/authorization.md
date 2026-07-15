@@ -121,7 +121,7 @@ const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 // Authorize this specific content
 const authTx = api.tx.Sudo.sudo({
   call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: Binary.fromBytes(contentHash),
+    content_hash: contentHash,
     max_size: BigInt(data.length)
   })
 });

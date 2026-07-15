@@ -273,7 +273,7 @@ const prepared = await preparer.prepareStore(smallData);
 console.log('CID:', prepared.cid.toString());
 
 const tx = api.tx.TransactionStorage.store({
-    data: Binary.fromBytes(prepared.data)
+    data: prepared.data
 });
 await tx.signAndSubmit(signer);
 ```
@@ -285,14 +285,14 @@ const prepared = await preparer.prepareStoreChunked(largeData);
 
 for (const chunk of prepared.chunks) {
     const tx = api.tx.TransactionStorage.store({
-        data: Binary.fromBytes(chunk.data)
+        data: chunk.data
     });
     await tx.signAndSubmit(signer);
 }
 
 if (prepared.manifest) {
     const tx = api.tx.TransactionStorage.store({
-        data: Binary.fromBytes(prepared.manifest.data)
+        data: prepared.manifest.data
     });
     await tx.signAndSubmit(signer);
     console.log('Manifest CID:', prepared.manifest.cid.toString());

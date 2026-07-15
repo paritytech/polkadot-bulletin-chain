@@ -54,8 +54,8 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal for a `TransactionRef` (fires at the retention boundary) |
-| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time |
+| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary); `entry` is `impl Into<TransactionRef<u32>>` — a `(block, index)` tuple or a `ContentHash` |
+| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time (same `entry` conversions) |
 
 ---
 

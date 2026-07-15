@@ -4,14 +4,14 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(entry)` takes a `TransactionRef` (`Position` or `ContentHash`) and schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `client.forceRenew(entry)`. On chains still running the pre-`TransactionRef` runtime, the SDK unpacks `Position` entries to the legacy `renew` extrinsic (which renews immediately); `ContentHash` entries and `forceRenew` error there. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
+> **Note**: `client.renew(ref)` takes either a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the on-chain `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires once when the data reaches its retention boundary; for immediate renewal use `client.forceRenew(ref)`. On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
 
 ## Using the SDK Client
 
 `AsyncBulletinClient` wraps PAPI and returns builders you finish with `.send()`.
 
 ```typescript
-import { AsyncBulletinClient, positionRef } from "@parity/bulletin-sdk";
+import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
@@ -26,11 +26,11 @@ const blockNumber = result.blockNumber;   // block the store landed in
 const index = result.extrinsicIndex;      // from the Stored event
 
 // 2. RENEW (later) - before the retention period expires
-await client.renew(positionRef(blockNumber, index)).send();
+await client.renew({ block: blockNumber, index }).send();
 ```
 
 `store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
-`renew(entry).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
+`renew(ref).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
 
 ## Querying the Retention Period
 
@@ -80,7 +80,7 @@ const tracker = new RenewalTracker();
 tracker.add(result.cid.toString(), result.blockNumber, result.extrinsicIndex);
 
 for (const item of await tracker.getItemsNeedingRenewal(api)) {
-  await client.renew(positionRef(item.blockNumber, item.index)).send();
+  await client.renew({ block: item.blockNumber, index: item.index }).send();
 }
 ```
 
@@ -106,13 +106,11 @@ api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHash });
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
 
 ```typescript
-import { Binary } from "polkadot-api";
-
-api.tx.TransactionStorage.store({ data: Binary.fromBytes(myData) });
+api.tx.TransactionStorage.store({ data: myData });
 
 api.tx.TransactionStorage.store_with_cid_config({
   cid: { codec: 0x55n, hashing: { type: "Blake2b256" } },
-  data: Binary.fromBytes(myData),
+  data: myData,
 });
 ```
 
@@ -124,7 +122,7 @@ Renewal consumes authorization just like storing — one transaction plus the da
 
 ```typescript
 try {
-  await client.renew(positionRef(blockNumber, index)).send();
+  await client.renew({ block: blockNumber, index }).send();
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");

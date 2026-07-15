@@ -85,24 +85,25 @@ interface PapiTransaction {
  * On-chain `TransactionRef` used by the renewal extrinsics.
  *
  * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
- * requires a runtime that ships `TransactionRef`; construct its value with
- * `Binary.fromBytes(...)`.
+ * requires a runtime that ships `TransactionRef`; its value is the 32-byte
+ * content hash (PAPI v2 represents binary values as plain `Uint8Array`).
  */
 export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
-  | { type: "ContentHash"; value: { asBytes(): Uint8Array; asHex(): string } }
+  | { type: "ContentHash"; value: Uint8Array }
 
-/** Build a `Position` `TransactionRef` from a block number and extrinsic index. */
-export function positionRef(block: number, index: number): TransactionRef {
-  return { type: "Position", value: { block, index } }
-}
+/**
+ * Caller-friendly reference to stored data for `renew()`/`forceRenew()`.
+ *
+ * The variant is inferred from the shape: `{ block, index }` becomes
+ * `Position`; a `Uint8Array` content hash becomes `ContentHash`.
+ */
+export type TransactionRefInput = { block: number; index: number } | Uint8Array
 
-/** Build a `ContentHash` `TransactionRef` (pass e.g. `Binary.fromBytes(hash)`). */
-export function contentHashRef(hash: {
-  asBytes(): Uint8Array
-  asHex(): string
-}): TransactionRef {
-  return { type: "ContentHash", value: hash }
+/** Convert a {@link TransactionRefInput} into the on-chain tagged enum. */
+export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
+  if (ref instanceof Uint8Array) return { type: "ContentHash", value: ref }
+  return { type: "Position", value: { block: ref.block, index: ref.index } }
 }
 
 /**
@@ -353,8 +354,8 @@ export interface BulletinClientInterface {
     bytes: bigint,
   ): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
-  renew(entry: TransactionRef): CallBuilder
-  forceRenew(entry: TransactionRef): CallBuilder
+  renew(ref: TransactionRefInput): CallBuilder
+  forceRenew(ref: TransactionRefInput): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -1221,8 +1222,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * The renewal fires once when the data reaches its retention boundary; it does
    * not renew synchronously. For immediate renewal use {@link forceRenew}.
    */
-  renew(entry: TransactionRef): CallBuilder {
+  renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
+      const entry = toTransactionRef(ref)
       const ts = this.api.tx.TransactionStorage
       let tx: PapiTransaction
       if (await usesTransactionRef(ts)) {
@@ -1250,7 +1252,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * Requires a runtime that supports `force_renew`.
    */
-  forceRenew(entry: TransactionRef): CallBuilder {
+  forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       const ts = this.api.tx.TransactionStorage
       if (!(await usesTransactionRef(ts)) || !ts.force_renew) {
@@ -1259,7 +1261,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           ErrorCode.TRANSACTION_FAILED,
         )
       }
-      const tx = ts.force_renew({ entry })
+      const tx = ts.force_renew({ entry: toTransactionRef(ref) })
       return this.submitTx(
         tx,
         "Failed to force renew",

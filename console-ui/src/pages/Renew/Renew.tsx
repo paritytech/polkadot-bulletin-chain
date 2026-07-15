@@ -25,7 +25,7 @@ import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes, bytesToHex } from "@/utils/format";
 import { cn } from "@/utils/cn";
-import { CID, positionRef, WaitFor } from "@parity/bulletin-sdk";
+import { CID, WaitFor } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import {
   isDagPb,
@@ -224,7 +224,7 @@ export function Renew() {
 
       // Use SDK to renew with progress callback
       const result = await bulletinClient
-        .renew(positionRef(renewalTarget.blockNumber, renewalTarget.index))
+        .renew({ block: renewalTarget.blockNumber, index: renewalTarget.index })
         .withCallback(handleProgress)
         .withWaitFor(WaitFor.Finalized)
         .send();
@@ -387,7 +387,7 @@ export function Renew() {
         // Per-tx InBlock (not Finalized): each renew is idempotent and a
         // reorg-dropped one can simply be retried. Saves ~6s per CID.
         const result = await bulletinClient
-          .renew(positionRef(t.location!.blockNumber, t.location!.index))
+          .renew({ block: t.location!.blockNumber, index: t.location!.index })
           .withCallback(handleProgress)
           .withWaitFor(WaitFor.InBlock)
           .send();
