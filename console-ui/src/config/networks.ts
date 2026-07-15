@@ -6,6 +6,7 @@ import {
   bulletin_paseo_next_v2,
   bulletin_polkadot,
   bulletin_previewnet,
+  bulletin_products_devnet,
   bulletin_westend,
 } from "@polkadot-api/descriptors";
 
@@ -197,6 +198,23 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://westend-bulletin-rpc.polkadot.io"),
+    },
+  },
+  "products-devnet": {
+    id: "products-devnet",
+    name: "Products Devnet",
+    endpoints: ["wss://bullet.sik.rocks"],
+    lightClient: false,
+    descriptor: bulletin_products_devnet,
+    monitoring: {
+      grafana: grafanaLink("products-devnet"),
+      bitswap: bitswapLink("products-devnet"),
+      sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
+      sentryStorageSpan: SENTRY_STORAGE_SPAN,
+      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
+      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
+      telemetry: TELEMETRY_POLKADOT,
+      polkadotJs: polkadotJsAppsLink("wss://bullet.sik.rocks"),
     },
   },
   "paseo-next-v2": {
