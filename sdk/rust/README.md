@@ -48,13 +48,13 @@ println!("Stored in block: {}", receipt.block_hash);
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust" }
+bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
 ```
 
 For no_std environments:
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
+bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain", default-features = false }
 ```
 
 ## Architecture

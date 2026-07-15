@@ -11,7 +11,7 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 `AsyncBulletinClient` wraps PAPI and returns builders you finish with `.send()`.
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { AsyncBulletinClient, positionRef } from "@parity/bulletin-sdk";
 import { createClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
@@ -26,7 +26,7 @@ const blockNumber = result.blockNumber;   // block the store landed in
 const index = result.extrinsicIndex;      // from the Stored event
 
 // 2. RENEW (later) - before the retention period expires
-await client.renew({ type: "Position", value: { block: blockNumber, index } }).send();
+await client.renew(positionRef(blockNumber, index)).send();
 ```
 
 `store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
@@ -80,7 +80,7 @@ const tracker = new RenewalTracker();
 tracker.add(result.cid.toString(), result.blockNumber, result.extrinsicIndex);
 
 for (const item of await tracker.getItemsNeedingRenewal(api)) {
-  await client.renew({ type: "Position", value: { block: item.blockNumber, index: item.index } }).send();
+  await client.renew(positionRef(item.blockNumber, item.index)).send();
 }
 ```
 
@@ -124,7 +124,7 @@ Renewal consumes authorization just like storing — one transaction plus the da
 
 ```typescript
 try {
-  await client.renew({ type: "Position", value: { block: blockNumber, index } }).send();
+  await client.renew(positionRef(blockNumber, index)).send();
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");

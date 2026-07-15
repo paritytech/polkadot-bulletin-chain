@@ -454,6 +454,16 @@ type TransactionStatusEvent =
 
 ## Utility Functions
 
+### TransactionRef Constructors
+
+```typescript
+// Build a Position TransactionRef for renew()/forceRenew()
+function positionRef(block: number, index: number): TransactionRef;
+
+// Build a ContentHash TransactionRef (pass e.g. Binary.fromBytes(hash))
+function contentHashRef(hash: { asBytes(): Uint8Array; asHex(): string }): TransactionRef;
+```
+
 ### CID Functions
 
 ```typescript

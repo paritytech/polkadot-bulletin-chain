@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest"
 import {
   AsyncBulletinClient,
+  contentHashRef,
+  positionRef,
   type TransactionRef,
 } from "../../src/async-client"
 import { ErrorCode } from "../../src/types"
@@ -12,18 +14,12 @@ import { ErrorCode } from "../../src/types"
 // current ones take `renew({entry: TransactionRef})` and add `force_renew`.
 // These tests pin the client's runtime detection for both shapes.
 
-const positionEntry: TransactionRef = {
-  type: "Position",
-  value: { block: 100, index: 5 },
-}
+const positionEntry: TransactionRef = positionRef(100, 5)
 
-const hashEntry: TransactionRef = {
-  type: "ContentHash",
-  value: {
-    asBytes: () => new Uint8Array(32),
-    asHex: () => `0x${"00".repeat(32)}`,
-  },
-}
+const hashEntry: TransactionRef = contentHashRef({
+  asBytes: () => new Uint8Array(32),
+  asHex: () => `0x${"00".repeat(32)}`,
+})
 
 const signer = {
   publicKey: new Uint8Array(32),

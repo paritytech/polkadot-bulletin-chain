@@ -92,6 +92,19 @@ export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
   | { type: "ContentHash"; value: { asBytes(): Uint8Array; asHex(): string } }
 
+/** Build a `Position` `TransactionRef` from a block number and extrinsic index. */
+export function positionRef(block: number, index: number): TransactionRef {
+  return { type: "Position", value: { block, index } }
+}
+
+/** Build a `ContentHash` `TransactionRef` (pass e.g. `Binary.fromBytes(hash)`). */
+export function contentHashRef(hash: {
+  asBytes(): Uint8Array
+  asHex(): string
+}): TransactionRef {
+  return { type: "ContentHash", value: hash }
+}
+
 /**
  * Whether the connected runtime takes `TransactionRef` for the renewal
  * extrinsics (and ships `force_renew`).

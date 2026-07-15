@@ -29,10 +29,12 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 
 if (auth) {
   // `*_allowance` fields are the caps; `transactions`/`bytes` are consumed so far.
-  const txRemaining = auth.extent.transactions_allowance - auth.extent.transactions;
-  const bytesRemaining = auth.extent.bytes_allowance - auth.extent.bytes;
-  console.log("Transactions remaining:", txRemaining);
-  console.log("Bytes remaining:", bytesRemaining);
+  // The caps gate transaction *priority*, not acceptance: going over doesn't
+  // reject stores, they just lose their priority boost.
+  const txBoostRemaining = auth.extent.transactions_allowance - auth.extent.transactions;
+  const bytesBoostRemaining = auth.extent.bytes_allowance - auth.extent.bytes;
+  console.log("Boost-tier transactions remaining:", txBoostRemaining);
+  console.log("Boost-tier bytes remaining:", bytesBoostRemaining);
   console.log("Expires at block:", auth.expiration ?? "Never");
 } else {
   console.log("Account not authorized");
@@ -163,7 +165,8 @@ if (!auth) {
   throw new Error("Not authorized. Request authorization first.");
 }
 
-// Available = allowance (cap) - consumed
+// Boost budget left = allowance (cap) - consumed. Exceeding it doesn't reject
+// stores; they just lose their priority boost.
 const availableTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
 const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
 
@@ -232,7 +235,7 @@ async function storeWithAuthCheck() {
     return;
   }
 
-  // Available = allowance (cap) - consumed
+  // Boost budget left = allowance (cap) - consumed (priority only, not a hard limit)
   const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
   if (availableBytes < estimate.bytes) {
     console.log("Insufficient authorization. Please use the Faucet.");
