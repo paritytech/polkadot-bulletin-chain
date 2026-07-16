@@ -89,8 +89,6 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     POLKADOT_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombienet"
-    # Collator DB backend; rocksdb matches the omni-node default used before this knob existed.
-    BULLETIN_DB_BACKEND="${BULLETIN_DB_BACKEND:-rocksdb}"
 
     # Pick spec script + zombienet TOML based on the runtime
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
@@ -116,12 +114,10 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
         zombienet toml : $ZOMBIENET_TOML
         POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
-        BULLETIN_DB_BACKEND : $BULLETIN_DB_BACKEND
     EOF
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
     (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        BULLETIN_DB_BACKEND=$BULLETIN_DB_BACKEND \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
@@ -512,7 +508,8 @@ stop-services test_dir ipfs_mode="kubo-docker":
 #   ws_url - WebSocket URL (default: ws://127.0.0.1:10000, only used in ws mode)
 #   seed - Account seed phrase or dev seed (default: //Eve, only used in ws mode)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
+#   second_node_ws - collator-2 (paritydb) WS URL to verify the store on too; "" skips (ws mode only)
+run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283" second_node_ws="ws://127.0.0.1:12346":
     #!/usr/bin/env bash
     set -e
 
@@ -540,7 +537,7 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
         fi
         node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
     else
-        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" "{{ second_node_ws }}"
     fi
 
 # Run store-chunked-data test only (services must already be running via start-services)
