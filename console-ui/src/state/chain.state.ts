@@ -7,7 +7,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
+import { bulletin_westend, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
   DEFAULT_NETWORK,
@@ -24,7 +24,6 @@ export type { Network };
 const DESCRIPTORS: Record<string, any> = {
   local: bulletin_westend,
   westend: bulletin_westend,
-  paseo: bulletin_paseo,
   "paseo-next-v2": bulletin_paseo_next_v2,
   polkadot: bulletin_polkadot,
   previewnet: bulletin_westend,
