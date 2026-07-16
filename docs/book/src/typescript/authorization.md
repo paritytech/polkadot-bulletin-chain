@@ -203,7 +203,7 @@ import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
   // Setup
-  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
   const api = papiClient.getTypedApi(bulletin);
   const preparer = new BulletinPreparer();
 

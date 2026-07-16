@@ -874,7 +874,7 @@ run-authorize-preimage-and-store-papi runtime ws_url="ws://127.0.0.1:10000" seed
 
 # Live network endpoints
 WESTEND_RPC := "wss://westend-bulletin-rpc.polkadot.io"
-PASEO_RPC := "wss://paseo-bulletin-rpc.polkadot.io"
+PASEO_RPC := "wss://paseo-bulletin-next-rpc.polkadot.io"
 
 # Run store-big-data test against a live endpoint
 # Parameters:
