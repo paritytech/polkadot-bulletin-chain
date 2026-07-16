@@ -109,13 +109,14 @@ Mirror `bitswap_metrics.rs` (sdk PR #12232): private `Inner` registered against
 `Option<&Registry>`, public wrapper whose recorders are no-ops without a registry, label
 values as consts. Prefix `substrate_hop_*`. The pool `Arc` is shared by RPC and the
 maintenance task, so metrics living in `HopDataPool` are visible to all components.
+Implemented in [sdk PR #12662](https://github.com/paritytech/polkadot-sdk/pull/12662).
 
 Pool (`pool.rs`):
 
 | Metric | Type | Labels |
 |---|---|---|
-| `substrate_hop_pool_entries` / `substrate_hop_pool_bytes` / `substrate_hop_pool_max_bytes` | gauges | initialized from disk recovery at startup, updated at insert/remove |
-| `substrate_hop_pool_inserts_total` | counter | `outcome` = `inserted`, `no_recipients`, `duplicate_recipient`, `empty_data`, `rate_limited`, `pool_full`, `user_quota_exceeded`, `duplicate`, `io_error` |
+| `substrate_hop_pool_entries` / `substrate_hop_pool_bytes` / `substrate_hop_pool_max_bytes` | gauges | snapshot-set from the authoritative pool counters on every mutation (never inc/dec'd; a `Gauge<U64>` wraps on underflow), same pattern as the fork-aware txpool and statement store |
+| `substrate_hop_pool_inserts_total` | counter | `outcome` = `ok`, `no_recipients`, `duplicate_recipient`, `empty_data`, `rate_limited`, `pool_full`, `user_quota_exceeded`, `duplicate_entry`, `io_error` |
 | `substrate_hop_pool_removed_total` | counter | `reason` = `acked`, `expired_promoted`, **`expired_unpromoted`**, `corrupt` |
 | `substrate_hop_pool_inserted_bytes_total` | counter | - |
 
@@ -124,25 +125,26 @@ RPC (`rpc.rs`, single error funnel via `HopError -> ErrorObjectOwned`):
 | Metric | Type | Labels |
 |---|---|---|
 | `substrate_hop_rpc_requests_total` | counter | `method` = `submit`/`claim`/`ack`/`pool_status`, `outcome` = `ok` or HopError variant (incl. `not_found`, `already_claimed`, `not_authorized`, `invalid_signature`, `data_too_large`, ...) |
-| `substrate_hop_rpc_request_duration_seconds` | histogram | `method` |
+
+No per-method duration histogram: the node's RPC middleware already exposes
+`substrate_rpc_calls_started/finished/time{method}` (with `is_error`) for every RPC method,
+including `hop_*`. The counter above only adds error-variant granularity the middleware
+cannot see.
 
 Promotion (`promotion.rs`):
 
 | Metric | Type | Labels |
 |---|---|---|
-| `substrate_hop_promotion_attempts_total` | counter | `outcome` = `submitted`, `failed` |
-| `substrate_hop_promotion_confirmed_total` | counter | - (from `mark_promoted`, i.e. actually on-chain) |
-| `substrate_hop_promotion_abandoned_total` | counter | - (attempt cap reached) |
-| `substrate_hop_promotion_backlog` | gauge | - (`get_promotable` size per tick) |
+| `substrate_hop_promotion_submissions_total` | counter | `outcome` = `submitted` (accepted by local tx pool), `failed` |
+| `substrate_hop_promotions_confirmed_total` | counter | - (from `mark_promoted`, i.e. actually on-chain) |
+| `substrate_hop_promotions_abandoned_total` | counter | - (attempt cap reached) |
+| `substrate_hop_promotion_backlog` | gauge | - (full in-window unpromoted backlog, refreshed per tick) |
 | `substrate_hop_promotion_enabled` | gauge 0/1 | - |
 | `substrate_hop_maintenance_tick_duration_seconds` | histogram | - |
 
-Rate limiter (`rate_limit.rs`):
-
-| Metric | Type | Labels |
-|---|---|---|
-| `substrate_hop_rate_limited_total` | counter | `reason` = `requests`, `bandwidth` (+ `global` once sdk#11988 lands) |
-| `substrate_hop_rate_limiter_tracked_senders` | gauge | - |
+Rate limiter: rejections surface as `inserts_total{outcome="rate_limited"}`. A per-bucket
+`reason` split (`requests`/`bandwidth`/`global`) is deferred until sdk#11988 settles the
+limiter shape.
 
 Plumbing: add `prometheus-endpoint` to sc-hop's Cargo.toml; pass `Option<&Registry>` into
 `HopParams::build_pool` and `build_maintenance_task`. In
@@ -157,7 +159,8 @@ Grafana (per chain, per instance):
 - Insert outcomes stacked rate; `pool_full` and `rate_limited` called out.
 - Promotion funnel: backlog -> attempts(submitted/failed) -> confirmed; abandoned as a stat.
 - Data-loss panel: `expired_unpromoted` + `abandoned` (should be flat zero).
-- RPC: request rate and p95/p99 duration by method; `claim` `not_found` ratio
+- RPC: outcome rates from `substrate_hop_rpc_requests_total`; p95/p99 durations from the
+  existing middleware metric `substrate_rpc_calls_time{method=~"hop_.*"}`; `claim` `not_found` ratio
   (receiver hitting the wrong node is the node-local-pool symptom).
 
 Alert candidates for `bulletin.rules.yaml`:
