@@ -167,22 +167,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       polkadotJs: polkadotJsAppsLink("wss://westend-bulletin-rpc.polkadot.io"),
     },
   },
-  paseo: {
-    id: "paseo",
-    name: "Bulletin Paseo Next",
-    endpoints: ["wss://paseo-bulletin-rpc.polkadot.io"],
-    lightClient: false,
-    monitoring: {
-      grafana: grafanaLink("bulletin-paseo"),
-      bitswap: bitswapLink("bulletin-paseo"),
-      sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
-      sentryStorageSpan: SENTRY_STORAGE_SPAN,
-      sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
-      sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
-      telemetry: TELEMETRY_POLKADOT,
-      polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-rpc.polkadot.io"),
-    },
-  },
   "paseo-next-v2": {
     id: "paseo-next-v2",
     name: "Bulletin Paseo Next v2",
