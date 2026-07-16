@@ -38,7 +38,7 @@ use bulletin_sdk_rust::prelude::*;
 let client = BulletinClient::new();
 let operation = client.prepare_store(b"Hello!".to_vec(), StoreOptions::default())?;
 
-let tx_client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let tx_client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 let receipt = tx_client.store(operation.data, &signer, WaitFor::InBlock).await?;
 
 println!("Stored in block: {}", receipt.block_hash);

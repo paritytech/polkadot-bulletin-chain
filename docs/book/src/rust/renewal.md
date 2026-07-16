@@ -43,7 +43,7 @@ let index = renewal.index();
 accepts anything convertible to `TransactionRef`: a `(block, index)` tuple or a `ContentHash`:
 
 ```rust
-let tx_client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let tx_client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 
 let receipt = tx_client
     .renew((renewal.block(), renewal.index()), &signer, WaitFor::Finalized)

@@ -125,7 +125,7 @@ let data = b"Hello, Bulletin!".to_vec();
 let operation = client.prepare_store(data, StoreOptions::default())?;
 
 // Submit via the transaction client
-let tx_client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let tx_client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 let receipt = tx_client.store(operation.data, &signer, WaitFor::InBlock).await?;
 ```
 

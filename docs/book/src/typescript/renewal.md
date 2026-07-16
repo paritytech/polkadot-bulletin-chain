@@ -16,7 +16,7 @@ import { createClient } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
 const api = papiClient.getTypedApi(bulletin);
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 

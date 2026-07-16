@@ -72,7 +72,7 @@ import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
 const api = papiClient.getTypedApi(bulletin);
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
@@ -84,7 +84,7 @@ console.log("CID:", result.cid.toString());
 // Rust - Store data
 use bulletin_sdk_rust::prelude::*;
 
-let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 let data = b"Hello, Bulletin!".to_vec();
 let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 println!("Stored in block: {}", receipt.block_hash);
@@ -95,7 +95,7 @@ println!("Stored in block: {}", receipt.block_hash);
 | Network | Endpoint | Status |
 |---------|----------|--------|
 | Polkadot | - | Not released yet |
-| Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
+| Paseo (Testnet) | `wss://paseo-bulletin-next-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
 | Previewnet | `wss://previewnet.substrate.dev/bulletin` | Active |
 | Local Dev | `ws://localhost:10000` | - |
