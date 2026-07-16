@@ -108,34 +108,8 @@ export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
   return { type: "Position", value: { block: ref.block, index: ref.index } }
 }
 
-/**
- * Whether the connected runtime takes `TransactionRef` for the renewal
- * extrinsics (and ships `force_renew`).
- *
- * On a real PAPI `TypedApi`, `tx.TransactionStorage.force_renew` is a proxy
- * entry that is truthy for *any* name, so presence alone proves nothing; the
- * entry's `getCompatibilityLevel()` compares descriptors against the live
- * runtime and returns `CompatibilityLevel.Incompatible` (0) when the runtime
- * lacks the call. Hand-rolled api objects (tests/mocks) have no such probe —
- * there, presence of `force_renew` decides.
- */
-async function usesTransactionRef(
-  ts: BulletinTypedApi["tx"]["TransactionStorage"],
-): Promise<boolean> {
-  const forceRenew = ts.force_renew
-  if (!forceRenew) return false
-  const probe = (
-    forceRenew as unknown as {
-      getCompatibilityLevel?: () => Promise<number>
-    }
-  ).getCompatibilityLevel
-  if (typeof probe !== "function") return true
-  try {
-    return (await probe.call(forceRenew)) > 0
-  } catch {
-    return false
-  }
-}
+/** Which call shape the runtime's renewal extrinsics take. */
+type RenewShape = "transactionRef" | "legacy"
 
 /**
  * Minimal interface for the PAPI typed API.
@@ -1214,6 +1188,56 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     })
   }
 
+  /** Cached renewal call-shape resolution; a rejected probe is not cached. */
+  private renewShapePromise?: Promise<RenewShape>
+
+  /**
+   * Resolve which call shape the runtime's renewal extrinsics take, once per
+   * client.
+   *
+   * On a real PAPI `TypedApi`, `tx.TransactionStorage.force_renew` is a proxy
+   * entry that is truthy for *any* name, so presence alone proves nothing; the
+   * entry's `getCompatibilityLevel()` compares descriptors against the live
+   * runtime and returns `CompatibilityLevel.Incompatible` (0) when the runtime
+   * lacks the call. Hand-rolled api objects (tests/mocks) have no such probe —
+   * there, presence of `force_renew` decides.
+   *
+   * A probe failure throws instead of guessing — dispatching the wrong shape
+   * yields an opaque encode error — and is not cached, so the next call
+   * retries. A resolved shape is cached for the client's lifetime; after a
+   * runtime upgrade that changes the renewal call shape, create a new client.
+   */
+  private resolveRenewShape(): Promise<RenewShape> {
+    this.renewShapePromise ??= (async (): Promise<RenewShape> => {
+      const forceRenew = this.api.tx.TransactionStorage.force_renew
+      if (!forceRenew) return "legacy"
+      const probe = (
+        forceRenew as unknown as {
+          getCompatibilityLevel?: () => Promise<number>
+        }
+      ).getCompatibilityLevel
+      if (typeof probe !== "function") return "transactionRef"
+      let level: number
+      try {
+        level = await probe.call(forceRenew)
+      } catch (error) {
+        throw new BulletinError(
+          "failed to probe runtime compatibility for renew",
+          ErrorCode.TRANSACTION_FAILED,
+          error,
+        )
+      }
+      return level > 0 ? "transactionRef" : "legacy"
+    })()
+    const resolved = this.renewShapePromise
+    resolved.catch(() => {
+      if (this.renewShapePromise === resolved) {
+        this.renewShapePromise = undefined
+      }
+    })
+    return resolved
+  }
+
   /**
    * Schedule a one-shot renewal of stored data.
    *
@@ -1225,7 +1249,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       const entry = toTransactionRef(ref)
       const ts = this.api.tx.TransactionStorage
       let tx: PapiTransaction
-      if (await usesTransactionRef(ts)) {
+      if ((await this.resolveRenewShape()) === "transactionRef") {
         tx = ts.renew({ entry })
       } else if (entry.type === "Position") {
         // Pre-`TransactionRef` runtimes take the position fields directly.
@@ -1253,7 +1277,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       const ts = this.api.tx.TransactionStorage
-      if (!(await usesTransactionRef(ts)) || !ts.force_renew) {
+      if (
+        (await this.resolveRenewShape()) !== "transactionRef" ||
+        !ts.force_renew
+      ) {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
           ErrorCode.TRANSACTION_FAILED,

@@ -69,7 +69,7 @@ let storage_ref = StorageRef::new(block_number, index);
 
 ## Using RenewalTracker
 
-For applications managing multiple stored items, use `RenewalTracker` to know when to renew:
+For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — submitting again before the boundary rejects with `AutoRenewalAlreadyEnabled`:
 
 ```rust
 let mut tracker = RenewalTracker::new();
@@ -158,7 +158,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant:
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant, including on-chain rejections such as `AutoRenewalAlreadyEnabled` (a renewal is already scheduled for the content hash):
 
 ```rust
 match client.prepare_renew(storage_ref) {

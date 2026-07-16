@@ -165,12 +165,12 @@ export class MockBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    // Simulate authorization failure
+    // Chain-side rejection: the real client never throws
+    // INSUFFICIENT_AUTHORIZATION for store (boost exhaustion only warns).
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
-        "Insufficient authorization: need 100 bytes, have 0 bytes",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        { need: 100, available: 0 },
+        "Simulated authorization failure",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
 

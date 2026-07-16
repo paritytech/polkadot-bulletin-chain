@@ -20,6 +20,7 @@ Schedules a **single** auto-renewal that fires once when the data reaches its re
 - Does **not** renew synchronously at dispatch time.
 - Emits `RenewalEnabled { content_hash, who, recurring: false }`.
 - Does **not** emit `Renewed`.
+- Rejects with `AutoRenewalAlreadyEnabled` if a renewal is already registered for this content hash.
 
 ### `force_renew(entry)` — immediate synchronous renewal
 
@@ -35,7 +36,7 @@ Registers the data (identified by content hash, not a `TransactionRef`) for **re
 - Emits `RenewalEnabled { content_hash, who, recurring: true }`.
 - Emits `DataAutoRenewed { index, content_hash, account }` at each cycle.
 
-Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`.
+Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid it is refused with `CannotDisablePrepaidAutoRenewal` — disabling becomes possible after the first cycle has fired.
 
 ## Retention Period
 
