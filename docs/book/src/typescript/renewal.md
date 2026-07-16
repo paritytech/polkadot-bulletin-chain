@@ -231,7 +231,7 @@ import { bulletin } from "@polkadot-api/descriptors";
 import { calculateCid, CidCodec, HashAlgorithm } from "@parity/bulletin-sdk";
 
 async function storeAndTrackRenewal() {
-  const client = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+  const client = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
   const api = client.getTypedApi(bulletin);
 
   // 1. Store data
