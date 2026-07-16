@@ -82,7 +82,7 @@ describe("renew argument shape detection", () => {
     })
 
     await expect(client.renew(hashInput).send()).rejects.toMatchObject({
-      code: ErrorCode.TRANSACTION_FAILED,
+      code: ErrorCode.UNSUPPORTED_OPERATION,
       message: "content-hash renewal is not supported by this runtime",
     })
   })
@@ -257,7 +257,7 @@ describe("forceRenew", () => {
 
     await expect(client.forceRenew(positionInput).send()).rejects.toMatchObject(
       {
-        code: ErrorCode.TRANSACTION_FAILED,
+        code: ErrorCode.UNSUPPORTED_OPERATION,
         message: "force_renew is not supported by this runtime",
       },
     )
@@ -270,7 +270,7 @@ describe("forceRenew", () => {
 
     await expect(client.forceRenew(positionInput).send()).rejects.toMatchObject(
       {
-        code: ErrorCode.TRANSACTION_FAILED,
+        code: ErrorCode.UNSUPPORTED_OPERATION,
         message: "force_renew is not supported by this runtime",
       },
     )

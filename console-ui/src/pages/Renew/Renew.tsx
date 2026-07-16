@@ -25,7 +25,7 @@ import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBytes, bytesToHex } from "@/utils/format";
 import { cn } from "@/utils/cn";
-import { CID, WaitFor } from "@parity/bulletin-sdk";
+import { BulletinError, CID, ErrorCode, WaitFor } from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import {
   isDagPb,
@@ -34,6 +34,16 @@ import {
   type OnChainTransaction,
 } from "@/lib/cid-lookup";
 import { fetchRawBlock, IPFS_GATEWAYS } from "@/lib/ipfs";
+
+// The SDK rejects forceRenew on pre-`TransactionRef` runtimes with
+// UNSUPPORTED_OPERATION; there the plain renew extrinsic is already an
+// immediate renewal.
+function isForceRenewUnsupported(err: unknown): boolean {
+  return (
+    err instanceof BulletinError &&
+    err.code === ErrorCode.UNSUPPORTED_OPERATION
+  );
+}
 
 interface RenewalTarget {
   blockNumber: number;
@@ -222,12 +232,24 @@ export function Renew() {
       // Create SDK client with user's signer
       const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
 
-      // Use SDK to renew with progress callback
+      // Immediate renewal: force_renew on TransactionRef runtimes; legacy
+      // runtimes reject it as unsupported, and there plain renew is already
+      // immediate. Both keep the "renewed at this block, expires at block +
+      // retention" math below correct.
+      const ref = { block: renewalTarget.blockNumber, index: renewalTarget.index };
       const result = await bulletinClient
-        .renew({ block: renewalTarget.blockNumber, index: renewalTarget.index })
+        .forceRenew(ref)
         .withCallback(handleProgress)
         .withWaitFor(WaitFor.Finalized)
-        .send();
+        .send()
+        .catch((err) => {
+          if (!isForceRenewUnsupported(err)) throw err;
+          return bulletinClient
+            .renew(ref)
+            .withCallback(handleProgress)
+            .withWaitFor(WaitFor.Finalized)
+            .send();
+        });
 
       // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
@@ -384,13 +406,24 @@ export function Renew() {
       setBatchProgress(`Renewing ${i + 1} of ${targets.length}: ${shortCid}`);
 
       try {
-        // Per-tx InBlock (not Finalized): each renew is idempotent and a
-        // reorg-dropped one can simply be retried. Saves ~6s per CID.
+        // Per-tx InBlock (not Finalized): an immediate renewal is safe to
+        // retry — a reorg-dropped one can simply be resubmitted. Saves ~6s
+        // per CID. force_renew falls back to plain renew on legacy runtimes,
+        // where renew is already immediate.
+        const ref = { block: t.location!.blockNumber, index: t.location!.index };
         const result = await bulletinClient
-          .renew({ block: t.location!.blockNumber, index: t.location!.index })
+          .forceRenew(ref)
           .withCallback(handleProgress)
           .withWaitFor(WaitFor.InBlock)
-          .send();
+          .send()
+          .catch((err) => {
+            if (!isForceRenewUnsupported(err)) throw err;
+            return bulletinClient
+              .renew(ref)
+              .withCallback(handleProgress)
+              .withWaitFor(WaitFor.InBlock)
+              .send();
+          });
 
         const renewedAtBlock = result.blockNumber ?? currentBlockNumber ?? 0;
         const newExpiresAt = renewedAtBlock + (retentionPeriod ?? 0);

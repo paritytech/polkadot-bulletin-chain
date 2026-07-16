@@ -1257,7 +1257,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       } else {
         throw new BulletinError(
           "content-hash renewal is not supported by this runtime",
-          ErrorCode.TRANSACTION_FAILED,
+          ErrorCode.UNSUPPORTED_OPERATION,
         )
       }
       return this.submitTx(
@@ -1283,7 +1283,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ) {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
-          ErrorCode.TRANSACTION_FAILED,
+          ErrorCode.UNSUPPORTED_OPERATION,
         )
       }
       const tx = ts.force_renew({ entry: toTransactionRef(ref) })
