@@ -89,6 +89,8 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     POLKADOT_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombienet"
+    # Collator DB backend; rocksdb matches the omni-node default used before this knob existed.
+    BULLETIN_DB_BACKEND="${BULLETIN_DB_BACKEND:-rocksdb}"
 
     # Pick spec script + zombienet TOML based on the runtime
     if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
@@ -114,10 +116,12 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
         zombienet toml : $ZOMBIENET_TOML
         POLKADOT_BINARY_PATH : $POLKADOT_BINARY_PATH
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
+        BULLETIN_DB_BACKEND : $BULLETIN_DB_BACKEND
     EOF
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
     (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
+        BULLETIN_DB_BACKEND=$BULLETIN_DB_BACKEND \
         $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
