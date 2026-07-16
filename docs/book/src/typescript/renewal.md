@@ -99,8 +99,9 @@ api.tx.TransactionStorage.force_renew({
   entry: { type: "Position", value: { block, index } },
 });
 
-// Recurring auto-renewal (takes a content hash directly, not an `entry`)
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHash });
+// Recurring auto-renewal (takes the content hash directly, not an `entry`;
+// fixed-size hashes are passed as 0x-prefixed hex)
+api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:

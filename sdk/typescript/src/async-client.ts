@@ -86,11 +86,12 @@ interface PapiTransaction {
  *
  * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
  * requires a runtime that ships `TransactionRef`; its value is the 32-byte
- * content hash (PAPI v2 represents binary values as plain `Uint8Array`).
+ * content hash as a `0x`-prefixed hex string (PAPI represents fixed-size
+ * binary values as `SizedHex`, and its encoder rejects raw byte arrays).
  */
 export type TransactionRef =
   | { type: "Position"; value: { block: number; index: number } }
-  | { type: "ContentHash"; value: Uint8Array }
+  | { type: "ContentHash"; value: string }
 
 /**
  * Caller-friendly reference to stored data for `renew()`/`forceRenew()`.
@@ -102,7 +103,8 @@ export type TransactionRefInput = { block: number; index: number } | Uint8Array
 
 /** Convert a {@link TransactionRefInput} into the on-chain tagged enum. */
 export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
-  if (ref instanceof Uint8Array) return { type: "ContentHash", value: ref }
+  if (ref instanceof Uint8Array)
+    return { type: "ContentHash", value: Binary.toHex(ref) }
   return { type: "Position", value: { block: ref.block, index: ref.index } }
 }
 
@@ -475,7 +477,7 @@ export class StoreBuilder {
  * @example
  * ```typescript
  * const receipt = await client
- *   .renew({ type: 'Position', value: { block, index } })
+ *   .renew({ block, index })
  *   .withWaitFor('finalized')
  *   .withCallback((event) => console.log(event))
  *   .send();

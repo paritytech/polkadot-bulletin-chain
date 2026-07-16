@@ -77,13 +77,14 @@ api.tx.TransactionStorage.renew({
   entry: { type: "Position", value: { block, index } }
 });
 
-// force_renew takes the same `entry`:
+// force_renew takes the same `entry`; fixed-size hashes are passed as
+// 0x-prefixed hex (PAPI SizedHex):
 api.tx.TransactionStorage.force_renew({
-  entry: { type: "ContentHash", value: contentHash }
+  entry: { type: "ContentHash", value: contentHashHex }
 });
 
 // enable_auto_renew / disable_auto_renew take a content hash, not an `entry`:
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHash });
+api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
 ## When to Renew

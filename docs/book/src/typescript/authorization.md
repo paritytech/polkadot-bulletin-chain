@@ -44,10 +44,9 @@ if (auth) {
 ### Check Preimage Authorization
 
 ```typescript
-import { Binary } from "polkadot-api";
-
-// Check if a specific content hash is pre-authorized
-const contentHash = Binary.fromHex("0x...");  // Your content hash
+// Check if a specific content hash is pre-authorized.
+// Fixed-size hashes are passed as 0x-prefixed hex (PAPI SizedHex).
+const contentHash = "0x...";  // Your content hash
 
 const auth = await api.query.TransactionStorage.Authorizations.getValue({
   type: "Preimage",
@@ -113,15 +112,16 @@ Pre-authorize a specific content hash. Useful for allowing anyone to store speci
 
 ```typescript
 import { getContentHash, HashAlgorithm } from "@parity/bulletin-sdk";
+import { Binary } from "polkadot-api";
 
 // Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
 const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 
-// Authorize this specific content
+// Authorize this specific content (fixed-size hashes are passed as hex)
 const authTx = api.tx.Sudo.sudo({
   call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: contentHash,
+    content_hash: Binary.toHex(contentHash),
     max_size: BigInt(data.length)
   })
 });

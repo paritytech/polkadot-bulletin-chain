@@ -460,7 +460,7 @@ type TransactionStatusEvent =
 // Accepted by renew()/forceRenew(); the variant is inferred from the shape
 type TransactionRefInput =
   | { block: number; index: number }  // -> Position
-  | Uint8Array                        // -> ContentHash
+  | Uint8Array                        // -> ContentHash (converted to 0x-hex)
 
 // Convert an input into the on-chain tagged TransactionRef enum
 function toTransactionRef(ref: TransactionRefInput): TransactionRef;

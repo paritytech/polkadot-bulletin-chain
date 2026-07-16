@@ -196,11 +196,13 @@ describe("toTransactionRef variant inference", () => {
     })
   })
 
-  it("maps a Uint8Array to ContentHash", () => {
+  it("maps a Uint8Array to a hex ContentHash", () => {
+    // PAPI encodes fixed-size binaries from hex strings (SizedHex), so the
+    // converter must emit hex, not raw bytes.
     const hash = new Uint8Array(32).fill(1)
     expect(toTransactionRef(hash)).toEqual({
       type: "ContentHash",
-      value: hash,
+      value: `0x${"01".repeat(32)}`,
     })
   })
 })
