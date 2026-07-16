@@ -116,7 +116,7 @@ api.tx.TransactionStorage.store_with_cid_config({
 
 ## Authorization for Renewal
 
-Renewal consumes authorization just like storing — one transaction plus the data's byte size. Ensure the account has enough authorized capacity before renewing (see [Authorization](./authorization.md)).
+Renewal is accounted differently from storing. A store only consumes the soft boost budget (going over just lowers priority), but a renewal charges the data's byte size against `bytes_permanent` — the account's renew quota — plus one transaction unit, and also counts against the chain-wide permanent-storage **hard cap**. Unlike stores, renewals **are rejected** when either limit is exceeded (see [Authorization](./authorization.md)).
 
 ## Error Handling
 

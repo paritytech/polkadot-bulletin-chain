@@ -166,19 +166,15 @@ if (!auth) {
 }
 
 // Boost budget left = allowance (cap) - consumed. Exceeding it doesn't reject
-// stores; they just lose their priority boost.
+// stores; they just lose their priority boost — so warn, don't block.
 const availableTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
 const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
 
-if (availableTransactions < transactions) {
-  throw new Error(`Need ${transactions} transactions, have ${availableTransactions}`);
+if (availableTransactions < transactions || availableBytes < bytes) {
+  console.warn("Boost budget exhausted - the upload will proceed at lower priority");
 }
 
-if (availableBytes < bytes) {
-  throw new Error(`Need ${bytes} bytes, have ${availableBytes}`);
-}
-
-console.log("Authorization sufficient, proceeding with upload...");
+console.log("Proceeding with upload...");
 ```
 
 ## Authorization Expiration
@@ -238,8 +234,7 @@ async function storeWithAuthCheck() {
   // Boost budget left = allowance (cap) - consumed (priority only, not a hard limit)
   const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
   if (availableBytes < estimate.bytes) {
-    console.log("Insufficient authorization. Please use the Faucet.");
-    return;
+    console.warn("Boost budget exhausted - storing at lower priority");
   }
 
   // 3. Store via SDK
