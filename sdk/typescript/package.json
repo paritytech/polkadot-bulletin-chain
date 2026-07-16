@@ -2,16 +2,21 @@
   "name": "@parity/bulletin-sdk",
   "version": "0.3.0",
   "description": "TypeScript SDK for Polkadot Bulletin Chain",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs",
   "module": "dist/index.mjs",
   "browser": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "types": "dist/index.d.cts",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./package.json": "./package.json"
   },
@@ -21,8 +26,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "build": "tsdown src/index.ts --format cjs,esm --dts",
+    "dev": "tsdown src/index.ts --format cjs,esm --dts --watch",
     "test": "vitest run test/unit",
     "test:all": "vitest",
     "test:unit": "vitest run test/unit",
@@ -66,7 +71,7 @@
     "happy-dom": "^20.8.9",
     "multiformats": "^14.0.0",
     "polkadot-api": "^2.1.2",
-    "tsup": "^8.3.5",
+    "tsdown": "^0.22.8",
     "typescript": "^7.0.2",
     "vitest": "^4.1.2"
   },
