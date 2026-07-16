@@ -7,7 +7,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
+import { bulletin_westend } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
   DEFAULT_NETWORK,
@@ -19,15 +19,6 @@ export type NetworkId = string;
 
 // Re-export Network type for convenience
 export type { Network };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DESCRIPTORS: Record<string, any> = {
-  local: bulletin_westend,
-  westend: bulletin_westend,
-  "paseo-next-v2": bulletin_paseo_next_v2,
-  polkadot: bulletin_polkadot,
-  previewnet: bulletin_westend,
-};
 
 // No-op WebSocket that never connects. Used to silence the PAPI provider's
 // internal reconnection loop after we switch away from a network.
@@ -219,8 +210,7 @@ export async function connectToNetwork(
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
-    const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
+    const api = client.getTypedApi(network.descriptor) as TypedApi<typeof bulletin_westend>;
     apiSubject.next(api);
 
     // Get chain info from runtime constants and RPC

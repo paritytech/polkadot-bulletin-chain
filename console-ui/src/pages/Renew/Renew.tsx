@@ -33,7 +33,7 @@ import {
   type CidResolution,
   type OnChainTransaction,
 } from "@/lib/cid-lookup";
-import { fetchRawBlock, IPFS_GATEWAYS } from "@/lib/ipfs";
+import { fetchRawBlock } from "@/lib/ipfs";
 
 interface RenewalTarget {
   blockNumber: number;
@@ -272,7 +272,7 @@ export function Renew() {
     setBatchError(null);
     setBatchResults([]);
 
-    const gatewayUrl = IPFS_GATEWAYS[currentNetwork.id];
+    const gatewayUrl = currentNetwork.ipfsGateway;
     if (isDagPb(parsedCid) && !gatewayUrl) {
       setResolveError(
         `No IPFS gateway configured for the "${currentNetwork.id}" network. ` +
@@ -328,7 +328,7 @@ export function Renew() {
       setIsResolving(false);
       setResolveProgress(null);
     }
-  }, [api, parsedCid, currentNetwork.id, networkHistory]);
+  }, [api, parsedCid, currentNetwork, networkHistory]);
 
   // Toggle a single CID checkbox
   const handleToggleCid = (cidString: string) => {
