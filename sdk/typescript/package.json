@@ -67,7 +67,7 @@
     "multiformats": "^14.0.0",
     "polkadot-api": "^2.1.2",
     "tsup": "^8.3.5",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.2"
   },
   "publishConfig": {
