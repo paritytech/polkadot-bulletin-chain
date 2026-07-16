@@ -654,11 +654,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /**
    * Best-effort authorization check before a store submission.
    *
-   * If `api.query` is not available (optional interface), this silently returns.
-   * If authorization is explicitly insufficient (numbers too low), throws
-   * `INSUFFICIENT_AUTHORIZATION`. If the query fails or returns nothing (e.g.,
-   * timing issue after recent authorization), silently proceeds and lets the
-   * chain validate.
+   * Allowances gate transaction *priority*, not acceptance — the chain never
+   * rejects a store for an exhausted boost budget. So this only warns when the
+   * budget looks insufficient and always proceeds. If `api.query` is not
+   * available, the query fails, or returns nothing, it silently proceeds and
+   * lets the chain validate.
    */
   private async checkAccountAuthorization(
     requiredTransactions: number,
@@ -712,17 +712,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           )
         : Number(auth.extent.bytes)
 
-    if (availableTransactions < requiredTransactions) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredTransactions} transactions, have ${availableTransactions}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-
-    if (availableBytes < requiredBytes) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredBytes} bytes, have ${availableBytes}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+    if (
+      availableTransactions < requiredTransactions ||
+      availableBytes < requiredBytes
+    ) {
+      console.warn(
+        `Boost budget exhausted (need ${requiredTransactions} transactions / ${requiredBytes} bytes, ` +
+          `have ${availableTransactions} / ${availableBytes}) - the store will proceed at lower priority`,
       )
     }
   }

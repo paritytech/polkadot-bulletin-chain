@@ -134,10 +134,7 @@ try {
     console.log('Success!');
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
-            console.error('Need more authorization!');
-            console.error('Details:', error.cause);
-        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+        if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
             console.error('Authorization call failed!');
             console.error('Hint:', error.recoveryHint);
         } else if (error.retryable) {
@@ -178,10 +175,7 @@ try {
     console.log('Stored:', result.cid.toString());
 } catch (error) {
     if (error instanceof BulletinError) {
-        if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
-            console.error('Insufficient authorization');
-            console.error('Please authorize your account first');
-        } else if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
+        if (error.code === ErrorCode.AUTHORIZATION_FAILED) {
             console.error('Authorization call failed');
             console.error('Hint:', error.recoveryHint);
         } else {

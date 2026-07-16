@@ -44,8 +44,6 @@ export interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
   simulateStorageFailure?: boolean
-  /** Simulate insufficient authorization (for testing pre-check error path) */
-  simulateInsufficientAuth?: boolean
 }
 
 /**
@@ -111,7 +109,6 @@ export class MockBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig> & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
-    simulateInsufficientAuth: boolean
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
@@ -124,7 +121,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       ...resolveClientConfig(config),
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
-      simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,
     }
   }
 
@@ -167,14 +163,6 @@ export class MockBulletinClient implements BulletinClientInterface {
   ): Promise<StoreResult> {
     if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
-    }
-
-    // Simulate insufficient authorization (pre-submission check)
-    if (this.config.simulateInsufficientAuth) {
-      throw new BulletinError(
-        "Insufficient authorization: need 1 transactions, have 0",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
     }
 
     // Simulate authorization failure

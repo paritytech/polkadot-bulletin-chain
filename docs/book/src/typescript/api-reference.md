@@ -162,7 +162,6 @@ class MockBulletinClient implements BulletinClientInterface {
 interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean;
   simulateStorageFailure?: boolean;
-  simulateInsufficientAuth?: boolean;
 }
 ```
 
