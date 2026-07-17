@@ -74,13 +74,13 @@ npm run preview
 
 Select "Bulletin Westend" from the network dropdown. The UI connects to `wss://bulletin-westend-rpc.polkadot.io`.
 
-### Products Devnet
-
-Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
-
 ### Polkadot Mainnet
 
 Select "Bulletin Polkadot" from the network dropdown. The UI connects to `wss://bulletin-rpc.polkadot.io`.
+
+### Paseo Testnet
+
+Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
 
 ## IPFS Gateway
 
