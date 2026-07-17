@@ -11,14 +11,15 @@ import { logHeader, logConnection, logSuccess, logError, logTestResult } from '.
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { bulletin } from './.papi/descriptors/dist/index.js';
 
-// Command line arguments: [ws_url] [seed] [ipfs_api_url] [second_node_ws]
+// Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
-const NODE_WS = args[0] || 'ws://localhost:10000';
+// Comma-separated list of node WS URLs: the first one is used to submit, the
+// stored transaction is then verified on every node in the list (collator-1
+// rocksdb and collator-2 paritydb in the mixed-backend test network).
+const NODE_WS_URLS = (args[0] || 'ws://localhost:10000').split(',');
+const NODE_WS = NODE_WS_URLS[0];
 const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
-// Optional second node (collator-2, paritydb in the mixed-backend network) to
-// verify the stored transaction on as well; empty skips the check.
-const SECOND_NODE_WS = args[3] || '';
 
 async function main() {
     await cryptoWaitReady();
@@ -26,7 +27,7 @@ async function main() {
     logHeader('AUTHORIZE AND STORE TEST (WebSocket)');
     logConnection(NODE_WS, SEED, HTTP_IPFS_API);
 
-    let client, secondClient, resultCode;
+    let client, resultCode;
     try {
         // Init WS PAPI client and typed api.
         client = createClient(getWsProvider(NODE_WS));
@@ -69,15 +70,19 @@ async function main() {
         );
         logSuccess('Verified content!');
 
-        if (SECOND_NODE_WS) {
-            secondClient = createClient(getWsProvider(SECOND_NODE_WS));
-            await verifyStoredOnNode(
-                secondClient,
-                secondClient.getTypedApi(bulletin),
-                blockNumber,
-                cid,
-            );
-            logSuccess(`Verified stored transaction on second node ${SECOND_NODE_WS}!`);
+        for (const wsUrl of NODE_WS_URLS) {
+            const nodeClient = createClient(getWsProvider(wsUrl));
+            try {
+                await verifyStoredOnNode(
+                    nodeClient,
+                    nodeClient.getTypedApi(bulletin),
+                    blockNumber,
+                    cid,
+                );
+            } finally {
+                nodeClient.destroy();
+            }
+            logSuccess(`Verified stored transaction on ${wsUrl}!`);
         }
 
         logTestResult(true, 'Authorize and Store Test');
@@ -88,7 +93,6 @@ async function main() {
         resultCode = 1;
     } finally {
         if (client) client.destroy();
-        if (secondClient) secondClient.destroy();
         process.exit(resultCode);
     }
 }
