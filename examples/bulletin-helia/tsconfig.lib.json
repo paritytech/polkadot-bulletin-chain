@@ -1,4 +1,4 @@
 {
-  "extends": "./tsconfig.build.json",
+  "extends": "./tsconfig.json",
   "include": ["src/ipfs.ts", "src/logger-base.ts", "src/logger-cli.ts"]
 }

@@ -114,6 +114,6 @@ src/
 └── cli.ts          # reference CLI consumer — imports 'bulletin-helia/*'  ── consumer (build:cli)
 ```
 
-Build config: `tsconfig.build.json` holds the shared emit settings;
+Build config: `tsconfig.json` holds the shared compiler options;
 `tsconfig.lib.json` and `tsconfig.cli.json` extend it and differ only in which
-files they include. `tsconfig.json` is the base used by the editor/ESLint.
+files they include. Lint/format is [Biome](https://biomejs.dev) (`biome.json`).
