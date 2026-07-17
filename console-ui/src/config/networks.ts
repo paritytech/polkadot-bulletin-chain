@@ -206,6 +206,10 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: ["wss://bullet.sik.rocks"],
     lightClient: false,
     descriptor: bulletin_products_devnet,
+    peerMultiaddrs: [
+      "/dns/bulletin-paseo.faradaynodes.com/tcp/35507/wss/p2p/12D3KooWRVrepgbKXa8qUq1NAR6ehqZr1tZZK8Y7NynaruNJy9gA",
+      "/dns/paseo-bulletin-bootnode.bestvalidator.com/tcp/30345/wss/p2p/12D3KooWGM3gLv9wwZicmEbh57jV1ZuCa23rYW3pXEp2B76UTZvk",
+    ],
     monitoring: {
       grafana: grafanaLink("products-devnet"),
       bitswap: bitswapLink("products-devnet"),
@@ -216,6 +220,11 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       telemetry: TELEMETRY_POLKADOT,
       polkadotJs: polkadotJsAppsLink("wss://bullet.sik.rocks"),
     },
+    hopNodes: [
+      "wss://bullet.sik.rocks",
+      "wss://bulletin-paseo.tservices.es:8443",
+      "wss://bullet.tunastaking.eu",
+    ],
   },
   "paseo-next-v2": {
     id: "paseo-next-v2",
