@@ -7,7 +7,7 @@ import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend } from "@polkadot-api/descriptors";
+import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
   DEFAULT_NETWORK,
@@ -69,8 +69,9 @@ export interface ChainState {
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
-  // Using bulletin_westend as the base type; all bulletin chains share the same core pallets
-  api?: TypedApi<typeof bulletin_westend>;
+  // Base type is the newest live chain's descriptors; all bulletin chains
+  // share the same core pallets, and older chains are guarded at runtime.
+  api?: TypedApi<typeof bulletin_paseo_next_v2>;
   blockNumber?: number;
   chainName?: string;
   specVersion?: number;
@@ -116,7 +117,7 @@ const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
 const clientSubject = new BehaviorSubject<PolkadotClient | undefined>(undefined);
-const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_westend> | undefined>(undefined);
+const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_paseo_next_v2> | undefined>(undefined);
 const blockNumberSubject = new BehaviorSubject<number | undefined>(undefined);
 const chainInfoSubject = new BehaviorSubject<{
   chainName?: string;
@@ -210,7 +211,7 @@ export async function connectToNetwork(
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const api = client.getTypedApi(network.descriptor) as TypedApi<typeof bulletin_westend>;
+    const api = client.getTypedApi(network.descriptor) as TypedApi<typeof bulletin_paseo_next_v2>;
     apiSubject.next(api);
 
     // Get chain info from runtime constants and RPC
