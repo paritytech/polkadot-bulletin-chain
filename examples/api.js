@@ -221,6 +221,35 @@ export async function fetchCid(httpIpfsApi, cid) {
 }
 
 /**
+ * Fetch the stored block directly from the node via the `bitswap_v1_get` RPC.
+ */
+export async function fetchCidFromNode(client, cid) {
+    console.log('⬇️ Downloading content by cid from node via bitswap_v1_get: ', cid.toString());
+    const hex = await client._request('bitswap_v1_get', [cid.toString()]);
+    return Buffer.from(hex.replace(/^0x/, ''), 'hex');
+}
+
+/**
+ * Fetch a block from both the IPFS gateway and the node's `bitswap_v1_get` RPC,
+ * assert both return identical bytes, and return them.
+ *
+ * Only valid for CIDs of single stored blocks: for dag-pb root CIDs the gateway
+ * returns the assembled file while the node returns the indexed block.
+ */
+export async function fetchContent(cid, httpIpfsApi, client) {
+    const [fromIpfs, fromNode] = await Promise.all([
+        fetchCid(httpIpfsApi, cid),
+        fetchCidFromNode(client, cid),
+    ]);
+    assert(
+        fromIpfs.equals(fromNode),
+        `❌ IPFS gateway and node RPC content mismatch for CID ${cid.toString()} ` +
+        `(${fromIpfs.length} vs ${fromNode.length} bytes)`,
+    );
+    return fromIpfs;
+}
+
+/**
  * Read the file, chunk it, store in Bulletin and return CIDs.
  * @param {object} typedApi - PAPI typed API
  * @param {object} signer - Signer for transactions

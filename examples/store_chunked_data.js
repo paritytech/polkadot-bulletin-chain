@@ -11,7 +11,7 @@ import { TextDecoder } from 'util'
 import assert from "assert";
 import { generateTextImage, filesAreEqual, fileToDisk, setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js'
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js'
-import { authorizeAccount, fetchCid, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
+import { authorizeAccount, fetchCid, fetchContent, store, storeChunkedFile, TX_MODE_FINALIZED_BLOCK } from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes, convertCid } from "./cid_dag_metadata.js";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from "polkadot-api/ws";
@@ -28,11 +28,11 @@ const CHUNK_SIZE = 6 * 1024 // 6 KB
 /**
  * Reads metadata JSON from IPFS by metadataCid.
  */
-async function retrieveMetadata(metadataCid) {
+async function retrieveMetadata(metadataCid, client) {
     console.log(`🧩 Retrieving file from metadataCid: ${metadataCid.toString()}`);
 
     // 1️⃣ Fetch metadata block
-    const metadataBlock = await fetchCid(HTTP_IPFS_API, metadataCid);
+    const metadataBlock = await fetchContent(metadataCid, HTTP_IPFS_API, client);
     const metadataJson = JSON.parse(new TextDecoder().decode(metadataBlock));
     console.log(`📜 Loaded metadata:`, metadataJson);
     return metadataJson;
@@ -42,7 +42,7 @@ async function retrieveMetadata(metadataCid) {
  * Fetches all chunks listed in metdataJson, concatenates into a single file,
  * and saves to disk (or returns as Buffer).
  */
-async function retrieveFileForMetadata(metadataJson, outputPath) {
+async function retrieveFileForMetadata(metadataJson, outputPath, client) {
     console.log(`🧩 Retrieving file for metadataJson`);
 
     // Basic sanity check
@@ -55,7 +55,7 @@ async function retrieveFileForMetadata(metadataJson, outputPath) {
     for (const chunk of metadataJson.chunks) {
         const chunkCid = CID.parse(chunk.cid);
         console.log(`⬇️  Fetching chunk: ${chunkCid.toString()} (len: ${chunk.len})`);
-        const block = await fetchCid(HTTP_IPFS_API, chunkCid);
+        const block = await fetchContent(chunkCid, HTTP_IPFS_API, client);
         buffers.push(block);
     }
 
@@ -117,13 +117,14 @@ async function buildUnixFSDag(metadataJson, mhCode = 0x12) {
  *
  * @param {CID} expectedRootCid - Expected root CID to verify against
  * @param {CID|string} proofCid - CID of the stored DAG-PB node
- * @param {number} mhCode - Multihash code (default: 0x12 for SHA2-256)
+ * @param {number} mhCode - Multihash code (e.g. 0x12 for SHA2-256)
+ * @param {object} client - PAPI client for the node RPC check
  */
-export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode = 0x12) {
+export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode, client) {
     console.log(`📦 Fetching DAG bytes for proof CID: ${proofCid.toString()}`);
 
-    // 1️⃣ Read the raw block bytes from IPFS
-    const dagBytes = await fetchCid(HTTP_IPFS_API, proofCid);
+    // 1️⃣ Read the raw block bytes from IPFS and the node RPC, verifying both match
+    const dagBytes = await fetchContent(proofCid, HTTP_IPFS_API, client);
 
     // 2️⃣ Decode the DAG-PB node structure
     const dagNode = dagPB.decode(dagBytes);
@@ -198,8 +199,8 @@ async function main() {
 
         ////////////////////////////////////////////////////////////////////////////////////
         // 1. example manually retrieve the picture (no IPFS DAG feature)
-        const metadataJson = await retrieveMetadata(metadataCid)
-        await retrieveFileForMetadata(metadataJson, out1Path);
+        const metadataJson = await retrieveMetadata(metadataCid, client)
+        await retrieveFileForMetadata(metadataJson, out1Path, client);
         filesAreEqual(filePath, out1Path);
 
         ////////////////////////////////////////////////////////////////////////////////////
@@ -210,7 +211,7 @@ async function main() {
 
         // Store DAG and proof to the Bulletin.
         let { rawDagCid } = await storeProof(bulletinAPI, authorizationSigner, rootCid, Buffer.from(dagBytes));
-        await reconstructDagFromProof(rootCid, rawDagCid, 0xb220);
+        await reconstructDagFromProof(rootCid, rawDagCid, 0xb220, client);
 
         // Store DAG into IPFS.
         assert.strictEqual(
@@ -232,8 +233,8 @@ async function main() {
         filesAreEqual(filePath, out1Path);
         filesAreEqual(out1Path, out2Path);
 
-        // Download the DAG descriptor raw file itself.
-        const downloadedDagBytes = await fetchCid(HTTP_IPFS_API, rawDagCid);
+        // Download the DAG descriptor raw file itself (from IPFS and the node RPC).
+        const downloadedDagBytes = await fetchContent(rawDagCid, HTTP_IPFS_API, client);
         logSuccess(`Downloaded DAG raw descriptor file size: ${downloadedDagBytes.length} bytes`);
         assert.deepStrictEqual(downloadedDagBytes, Buffer.from(dagBytes));
         const dagNode = dagPB.decode(downloadedDagBytes);
