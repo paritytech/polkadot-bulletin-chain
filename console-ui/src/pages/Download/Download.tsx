@@ -33,32 +33,10 @@ import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, format
 import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
 import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
-import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
+import { buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
+import { useNetwork, useBlockNumber, useApi, type Network } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
-
-const P2P_MULTIADDRS: Record<string, string> = {
-  local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
-  westend: [
-    "/dns4/westend-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSxYQRoTT9rZNZRrjCfG2fPpBwPumkQsxLroTKjX6Mvkw",
-    "/dns4/westend-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSD5tovFkmja9aFYA6QM8eU3mFhZKdAuCsa5MgSsNDmxc",
-    "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
-    "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
-  ].join("\n"),
-  paseo: [
-    "/dns4/paseo-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWRuKisocQ2Z5hBZagV5YGxJMYuW13xT42sUiUCWf5bRtu",
-    "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
-    "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
-    "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
-  ].join("\n"),
-  "paseo-next-v2": [
-    "/dns4/paseo-bulletin-next-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWDGdPBWpytPdNAXDT2KJWwmPXkxvxyQLGc7pRdFWeZnyB",
-    "/dns4/paseo-bulletin-next-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWC45NgktSLMPQafAhi8TMAtiiatnmNc3Qv6wA74u7YBVc",
-    "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
-    "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
-  ].join("\n"),
-};
 
 interface FetchResult {
   cid: string;
@@ -70,8 +48,8 @@ interface FetchResult {
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-function getDefaultMultiaddrs(networkId: string): string {
-  return P2P_MULTIADDRS[networkId] ?? "";
+function getDefaultMultiaddrs(network: Network): string {
+  return network.peerMultiaddrs?.join("\n") ?? "";
 }
 
 function OnChainStatusContent({
@@ -193,7 +171,7 @@ export function Download() {
   const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
   const [contentHashError, setContentHashError] = useState<string | null>(null);
 
-  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
+  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<ConnectionInfo[]>([]);
@@ -212,11 +190,9 @@ export function Download() {
   const [cidLookupDone, setCidLookupDone] = useState(false);
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
 
-  const [gatewayUrl, setGatewayUrl] = useState(
-    () => IPFS_GATEWAYS[network.id] ?? ""
-  );
+  const [gatewayUrl, setGatewayUrl] = useState(() => network.ipfsGateway ?? "");
 
-  const activeTab = searchParams.get("tab") || PREFERRED_DOWNLOAD_METHOD[network.id] || "p2p";
+  const activeTab = searchParams.get("tab") || network.preferredDownloadMethod || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
   const prevNetworkId = useRef(network.id);
@@ -239,7 +215,7 @@ export function Download() {
     heliaClientRef.current?.stop();
     heliaClientRef.current = null;
 
-    setPeerMultiaddrs(getDefaultMultiaddrs(network.id));
+    setPeerMultiaddrs(getDefaultMultiaddrs(network));
     setConnectionStatus("disconnected");
     setConnectionError(null);
     setConnectedPeers([]);
@@ -252,7 +228,7 @@ export function Download() {
     setFetchError(null);
     setFetchResult(null);
 
-    setGatewayUrl(IPFS_GATEWAYS[network.id] ?? "");
+    setGatewayUrl(network.ipfsGateway ?? "");
 
     // Clear tab param so the new network's preferred method takes effect
     setSearchParams((prev) => {
@@ -261,7 +237,7 @@ export function Download() {
       next.delete("cid");
       return next;
     });
-  }, [network.id, setSearchParams]);
+  }, [network, setSearchParams]);
 
   // Update URL when CID changes
   useEffect(() => {

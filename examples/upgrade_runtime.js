@@ -31,7 +31,7 @@ const NETWORKS = {
         method: 'sudo',
     },
     paseo: {
-        rpc: 'wss://paseo-bulletin-rpc.polkadot.io',
+        rpc: 'wss://paseo-bulletin-next-rpc.polkadot.io',
         method: 'sudo',
     }
 };
