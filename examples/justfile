@@ -534,9 +534,7 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
         fi
-        # Pass the first node WS URL so the script can cross-check content via bitswap_v1_get
-        WS_URLS="{{ ws_url }}"
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}" "${WS_URLS%%,*}"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
     else
         node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     fi
@@ -745,7 +743,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
         fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283" "ws://127.0.0.1:10000"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
     else
         node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283"
     fi
