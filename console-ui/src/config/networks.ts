@@ -5,6 +5,7 @@ import type { ChainDefinition } from "polkadot-api";
 import {
   bulletin_paseo_next_v2,
   bulletin_polkadot,
+  bulletin_previewnet,
   bulletin_westend,
 } from "@polkadot-api/descriptors";
 
@@ -162,7 +163,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Local Dev",
     endpoints: ["ws://localhost:10000"],
     lightClient: false,
-    descriptor: bulletin_westend,
+    descriptor: bulletin_paseo_next_v2,
     ipfsGateway: "http://127.0.0.1:8283",
     peerMultiaddrs: [
       "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
@@ -232,7 +233,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Previewnet",
     endpoints: ["wss://previewnet.substrate.dev/bulletin"],
     lightClient: false,
-    descriptor: bulletin_westend,
+    descriptor: bulletin_previewnet,
     ipfsGateway: "https://previewnet.substrate.dev",
     preferredDownloadMethod: "gateway",
     monitoring: {
@@ -265,7 +266,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Custom WS URL…",
     endpoints: [],
     lightClient: false,
-    descriptor: bulletin_westend,
+    descriptor: bulletin_paseo_next_v2,
   },
 };
 
