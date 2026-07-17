@@ -56,6 +56,9 @@ export {
   StoreBuilder,
   type SubmitFn,
   type TransactionReceipt,
+  type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "./async-client.js"
 
 // chunker: data splitting and reassembly

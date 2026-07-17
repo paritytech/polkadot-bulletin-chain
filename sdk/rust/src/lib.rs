@@ -177,6 +177,9 @@ pub use types::{
 // Re-export CID types from pallet
 pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm};
 
+// Re-export the renewal entry reference from the pallet primitives
+pub use bulletin_transaction_storage_primitives::TransactionRef;
+
 // Re-export key traits
 pub use chunker::Chunker;
 pub use dag::DagBuilder;
@@ -198,6 +201,7 @@ pub mod prelude {
 		renewal::{RenewalOperation, RenewalTracker, TrackedEntry},
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
+		TransactionRef,
 	};
 
 	#[cfg(feature = "std")]
