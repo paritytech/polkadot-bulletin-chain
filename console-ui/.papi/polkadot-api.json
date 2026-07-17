@@ -19,6 +19,12 @@
       "metadata": ".papi/metadata/bulletin_polkadot.scale",
       "genesis": "0x2761c95259d59e55ae3daf756c1413b46e45a5a2987299f8ef8e5d8e4776cbc4",
       "codeHash": "0xad57082d2d342a06f487fd0d7f2d21e0e03b8a48432a2d9cc8b876fa27c43967"
+    },
+    "bulletin_previewnet": {
+      "wsUrl": "wss://previewnet.substrate.dev/bulletin",
+      "metadata": ".papi/metadata/bulletin_previewnet.scale",
+      "genesis": "0xf37fa1f1450ea120edbf64c3fc447f671a00e1f1095a698f42eeec073c7ee487",
+      "codeHash": "0xbf2cd56d20198f00ab6f38d7e77f15a9d5671d47beb5d456012ed45d23572045"
     }
   }
 }

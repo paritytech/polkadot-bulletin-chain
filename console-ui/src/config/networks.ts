@@ -1,6 +1,14 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-only
 
+import type { ChainDefinition } from "polkadot-api";
+import {
+  bulletin_paseo_next_v2,
+  bulletin_polkadot,
+  bulletin_previewnet,
+  bulletin_westend,
+} from "@polkadot-api/descriptors";
+
 export interface MonitoringLinks {
   /** Parity SRE Grafana dashboard for this chain. */
   grafana?: string;
@@ -32,6 +40,14 @@ export interface Network {
   endpoints: string[];
   lightClient: boolean;
   chainSpec?: string;
+  /** PAPI descriptor used for the typed API. */
+  descriptor: ChainDefinition;
+  /** IPFS HTTP gateway serving this network's data. */
+  ipfsGateway?: string;
+  /** Bulletin node multiaddrs for in-browser P2P (Bitswap) downloads. */
+  peerMultiaddrs?: string[];
+  /** Default method on the Download page; "p2p" when unset. */
+  preferredDownloadMethod?: "p2p" | "gateway";
   monitoring?: MonitoringLinks;
   // HOP relay nodes for this network, exposing the public `hop_poolStatus`
   // JSON-RPC method over HTTPS POST. Polled by the HOP dashboard.
@@ -147,6 +163,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Local Dev",
     endpoints: ["ws://localhost:10000"],
     lightClient: false,
+    descriptor: bulletin_paseo_next_v2,
+    ipfsGateway: "http://127.0.0.1:8283",
+    // Peer IDs match zombienet's bulletin-{westend,paseo}-collator-{1,2}.
+    peerMultiaddrs: [
+      "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ",
+      "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ",
+      "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWKjTeRJH8nMcFytc7qTTCQy7JrFgiZFr7iUjd1aPEBn8v",
+      "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWM8qgmWsh9ddbdX3kqR7W8tWuh62zhsdpwfs81eSnQuaH",
+    ],
     monitoring: {
       polkadotJs: polkadotJsAppsLink("ws://localhost:10000"),
     },
@@ -156,6 +181,13 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Westend",
     endpoints: ["wss://westend-bulletin-rpc.polkadot.io"],
     lightClient: false,
+    descriptor: bulletin_westend,
+    peerMultiaddrs: [
+      "/dns4/westend-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSxYQRoTT9rZNZRrjCfG2fPpBwPumkQsxLroTKjX6Mvkw",
+      "/dns4/westend-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSD5tovFkmja9aFYA6QM8eU3mFhZKdAuCsa5MgSsNDmxc",
+      "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
+      "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
+    ],
     monitoring: {
       grafana: grafanaLink("bulletin-westend"),
       bitswap: bitswapLink("bulletin-westend"),
@@ -172,6 +204,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Paseo Next v2",
     endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
     lightClient: false,
+    descriptor: bulletin_paseo_next_v2,
+    ipfsGateway: "https://paseo-bulletin-next-ipfs.polkadot.io",
+    peerMultiaddrs: [
+      "/dns4/paseo-bulletin-next-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWDGdPBWpytPdNAXDT2KJWwmPXkxvxyQLGc7pRdFWeZnyB",
+      "/dns4/paseo-bulletin-next-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWC45NgktSLMPQafAhi8TMAtiiatnmNc3Qv6wA74u7YBVc",
+      "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
+      "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
+    ],
+    preferredDownloadMethod: "gateway",
     monitoring: {
       grafana: grafanaLink(
         "next-bulletin-paseo",
@@ -196,6 +237,9 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Previewnet",
     endpoints: ["wss://previewnet.substrate.dev/bulletin"],
     lightClient: false,
+    descriptor: bulletin_previewnet,
+    ipfsGateway: "https://previewnet.substrate.dev",
+    preferredDownloadMethod: "gateway",
     monitoring: {
       polkadotJs: polkadotJsAppsLink("wss://previewnet.substrate.dev/bulletin"),
     },
@@ -209,6 +253,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Bulletin Polkadot",
     endpoints: ["wss://bulletin-rpc.polkadot.io"],
     lightClient: false,
+    descriptor: bulletin_polkadot,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
       bitswap: bitswapLink("bulletin-polkadot"),
@@ -225,6 +270,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     name: "Custom WS URL…",
     endpoints: [],
     lightClient: false,
+    descriptor: bulletin_paseo_next_v2,
   },
 };
 
