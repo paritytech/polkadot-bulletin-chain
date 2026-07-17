@@ -221,12 +221,43 @@ export async function fetchCid(httpIpfsApi, cid) {
 }
 
 /**
- * Verify a specific node imported and indexed a stored transaction: its finalized
- * head reached `blockNumber` and the on-chain metadata at that block contains the
- * CID's content hash. Used to assert on both collators of the mixed-backend test
- * network (collator-1 rocksdb, collator-2 paritydb).
+ * Fetch the stored block directly from the node via the `bitswap_v1_get` RPC.
  */
-export async function verifyStoredOnNode(client, typedApi, blockNumber, cid, timeoutSec = 120) {
+export async function fetchCidFromNode(client, cid) {
+    console.log('⬇️ Downloading content by cid from node via bitswap_v1_get: ', cid.toString());
+    const hex = await client._request('bitswap_v1_get', [cid.toString()]);
+    return Buffer.from(hex.replace(/^0x/, ''), 'hex');
+}
+
+/**
+ * Fetch a block from both the IPFS gateway and the node's `bitswap_v1_get` RPC,
+ * assert both return identical bytes, and return them.
+ *
+ * Only valid for CIDs of single stored blocks: for dag-pb root CIDs the gateway
+ * returns the assembled file while the node returns the indexed block.
+ */
+export async function fetchContent(cid, httpIpfsApi, client) {
+    const [fromIpfs, fromNode] = await Promise.all([
+        fetchCid(httpIpfsApi, cid),
+        fetchCidFromNode(client, cid),
+    ]);
+    assert(
+        fromIpfs.equals(fromNode),
+        `❌ IPFS gateway and node RPC content mismatch for CID ${cid.toString()} ` +
+        `(${fromIpfs.length} vs ${fromNode.length} bytes)`,
+    );
+    return fromIpfs;
+}
+
+/**
+ * Verify a specific node stored an indexed transaction: its finalized head
+ * reached `blockNumber`, the on-chain metadata at that block contains the CID's
+ * content hash, and (when `expectedData` is given) the node serves the data
+ * back via `bitswap_v1_get`, proving it sits in that node's database. Used to
+ * assert on both collators of the mixed-backend test network (collator-1
+ * rocksdb, collator-2 paritydb).
+ */
+export async function verifyStoredOnNode(client, typedApi, blockNumber, cid, expectedData = null, timeoutSec = 120) {
     const deadline = Date.now() + timeoutSec * 1000;
     let finalized = await client.getFinalizedBlock();
     while (finalized.number < blockNumber) {
@@ -243,6 +274,13 @@ export async function verifyStoredOnNode(client, typedApi, blockNumber, cid, tim
         txs.some((tx) => tx.content_hash === contentHash),
         `❌ Content hash ${contentHash} not found in Transactions(${blockNumber})`,
     );
+    if (expectedData != null) {
+        const fromNode = await fetchCidFromNode(client, cid);
+        assert(
+            fromNode.equals(Buffer.from(expectedData)),
+            `❌ bitswap_v1_get returned wrong data for ${cid.toString()} (${fromNode.length} bytes)`,
+        );
+    }
 }
 
 /**

@@ -6,8 +6,9 @@ import * as smoldot from 'smoldot';
 import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, fetchCid, fetchContent, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -109,9 +110,9 @@ async function main() {
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
         logError('Chain spec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url]');
-        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url]');
-        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url]');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url] [node-ws-url]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url] [node-ws-url]');
+        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url] [node-ws-url]');
         process.exit(1);
     }
 
@@ -119,12 +120,16 @@ async function main() {
     const parachainSpecPath = process.argv[3] || null;
     // Optional IPFS API URL
     const HTTP_IPFS_API = process.argv[4] || DEFAULT_IPFS_GATEWAY_URL;
+    // Optional node WS URL for the bitswap_v1_get cross-check (smoldot cannot
+    // serve custom RPC methods, so this needs a direct node connection).
+    const NODE_WS = process.argv[5] || null;
 
     logConfig({
         'Mode': 'Smoldot Light Client',
         'Chain Spec': chainSpecPath,
         'Parachain Spec': parachainSpecPath || 'N/A (solochain)',
-        'IPFS API': HTTP_IPFS_API
+        'IPFS API': HTTP_IPFS_API,
+        'Node WS (bitswap RPC check)': NODE_WS || 'N/A (skipped)'
     });
     
     let sd, client, resultCode;
@@ -162,8 +167,18 @@ async function main() {
         const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
-        // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        // Read back from IPFS, cross-checking against the node RPC when a node WS URL is given.
+        let downloadedContent;
+        if (NODE_WS) {
+            const wsClient = createClient(getWsProvider(NODE_WS));
+            try {
+                downloadedContent = await fetchContent(cid, HTTP_IPFS_API, wsClient);
+            } finally {
+                wsClient.destroy();
+            }
+        } else {
+            downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        }
         logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,

@@ -15,6 +15,7 @@ import {
   Loader2,
   Globe,
   History,
+  Server,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -34,7 +35,8 @@ import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
 import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
+import { fetchFromBitswapRpc } from "@/lib/bitswap-rpc";
+import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
 
@@ -172,6 +174,8 @@ export function Download() {
   const network = useNetwork();
   const blockNumber = useBlockNumber();
   const api = useApi();
+  const client = useClient();
+  const chainStatus = useConnectionStatus();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -463,6 +467,14 @@ export function Download() {
             // not valid JSON despite content-type
           }
         }
+      } else if (activeTab === "rpc" && client) {
+        data = await fetchFromBitswapRpc(client, parsedCid.toString());
+        try {
+          parsedJSON = JSON.parse(new TextDecoder().decode(data));
+          isJSON = true;
+        } catch {
+          // not JSON content
+        }
       } else if (heliaClientRef.current) {
         const result = await heliaClientRef.current.fetchData(parsedCid);
         data = result.data;
@@ -575,13 +587,15 @@ export function Download() {
 
   const isConnected = connectionStatus === "connected";
   const hasGateway = gatewayUrl.trim().length > 0;
-  const canFetch = activeTab === "gateway" ? hasGateway : isConnected;
+  const isNodeConnected = chainStatus === "connected" && !!client;
+  const canFetch =
+    activeTab === "gateway" ? hasGateway : activeTab === "rpc" ? isNodeConnected : isConnected;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Download Data</h1>
-        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P or IPFS Gateway</p>
+        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P, IPFS Gateway, or node Bitswap RPC</p>
       </div>
 
       <Tabs
@@ -604,6 +618,10 @@ export function Download() {
           <TabsTrigger value="gateway">
             <Globe className="h-4 w-4 mr-2" />
             IPFS Gateway
+          </TabsTrigger>
+          <TabsTrigger value="rpc">
+            <Server className="h-4 w-4 mr-2" />
+            Bitswap RPC
           </TabsTrigger>
         </TabsList>
 
@@ -799,6 +817,50 @@ export function Download() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Tab 3: Bitswap RPC */}
+        <TabsContent value="rpc" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                Bitswap RPC
+              </CardTitle>
+              <CardDescription>
+                Fetch stored data directly from the connected node via the{" "}
+                <code>bitswap_v1_get</code> JSON-RPC method
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isNodeConnected ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                    Connected
+                  </Badge>
+                  <span className="text-muted-foreground font-mono text-xs truncate">
+                    {network.endpoints[0] ?? network.name}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>Not connected to a node. Select a network to fetch via RPC.</span>
+                </div>
+              )}
+
+              <div className="border-t pt-4 text-sm text-muted-foreground space-y-2">
+                <p>
+                  The node looks up the indexed transaction by the CID's hash digest and returns
+                  the exact stored block.
+                </p>
+                <p>
+                  Unlike the IPFS gateway, there is no DAG assembly: a dag-pb root CID returns the
+                  DAG node bytes, not the assembled file.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Always visible: Fetch by CID + CID Info */}
@@ -815,7 +877,9 @@ export function Download() {
                 {canFetch
                   ? activeTab === "gateway"
                     ? "Enter a CID to retrieve data via IPFS Gateway"
-                    : "Enter a CID to retrieve data via P2P"
+                    : activeTab === "rpc"
+                      ? "Enter a CID to retrieve data via the node's Bitswap RPC"
+                      : "Enter a CID to retrieve data via P2P"
                   : "Enter a CID to retrieve data"}
               </CardDescription>
             </CardHeader>
@@ -825,8 +889,9 @@ export function Download() {
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>
                     No data source configured. Connect to a peer in the{" "}
-                    <strong>P2P Connection</strong> tab or set a gateway URL in the{" "}
-                    <strong>IPFS Gateway</strong> tab.
+                    <strong>P2P Connection</strong> tab, set a gateway URL in the{" "}
+                    <strong>IPFS Gateway</strong> tab, or connect to a network for the{" "}
+                    <strong>Bitswap RPC</strong> tab.
                   </span>
                 </div>
               )}
@@ -934,7 +999,11 @@ export function Download() {
                 {isFetching ? (
                   <>
                     <Spinner size="sm" className="mr-2" />
-                    {activeTab === "gateway" ? "Fetching via Gateway..." : "Fetching via P2P..."}
+                    {activeTab === "gateway"
+                      ? "Fetching via Gateway..."
+                      : activeTab === "rpc"
+                        ? "Fetching via Node RPC..."
+                        : "Fetching via P2P..."}
                   </>
                 ) : (
                   <>

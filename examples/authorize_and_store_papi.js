@@ -5,7 +5,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, verifyStoredOnNode, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, fetchContent, store, verifyStoredOnNode, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -55,8 +55,8 @@ async function main() {
         const { cid, blockNumber } = await store(bulletinAPI, whoSigner, dataToStore);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
-        // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        // Read back from IPFS and the node RPC, verifying both match.
+        let downloadedContent = await fetchContent(cid, HTTP_IPFS_API, client);
         logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,
@@ -70,6 +70,8 @@ async function main() {
         );
         logSuccess('Verified content!');
 
+        // Each node must have the transaction in state AND serve the data back
+        // over bitswap_v1_get, proving it sits in that node's database.
         for (const wsUrl of NODE_WS_URLS) {
             const nodeClient = createClient(getWsProvider(wsUrl));
             try {
@@ -78,11 +80,12 @@ async function main() {
                     nodeClient.getTypedApi(bulletin),
                     blockNumber,
                     cid,
+                    dataToStore,
                 );
             } finally {
                 nodeClient.destroy();
             }
-            logSuccess(`Verified stored transaction on ${wsUrl}!`);
+            logSuccess(`Verified stored transaction and data retrieval on ${wsUrl}!`);
         }
 
         logTestResult(true, 'Authorize and Store Test');

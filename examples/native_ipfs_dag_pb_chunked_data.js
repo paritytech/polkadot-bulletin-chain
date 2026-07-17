@@ -6,7 +6,7 @@ import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
-import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, store, storeChunkedFile, fetchCid, fetchContent, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import assert from "assert";
 
@@ -85,7 +85,7 @@ async function main() {
 
         // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
         const rootCidAsRaw = convertCid(rootCid, 0x55);
-        const storedDagNode = dagPB.decode(await fetchCid(HTTP_IPFS_API, rootCidAsRaw));
+        const storedDagNode = dagPB.decode(await fetchContent(rootCidAsRaw, HTTP_IPFS_API, client));
         const decodedDagNode = dagPB.decode(Buffer.from(dagBytes));
         console.log("✅ Reconstructed DAG file: ", storedDagNode);
         assert.deepStrictEqual(storedDagNode, decodedDagNode);
