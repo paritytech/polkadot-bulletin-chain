@@ -43,3 +43,15 @@ pub enum TransactionRef<BlockNumber> {
 	Position { block: BlockNumber, index: u32 },
 	ContentHash(ContentHash),
 }
+
+impl<BlockNumber> From<(BlockNumber, u32)> for TransactionRef<BlockNumber> {
+	fn from((block, index): (BlockNumber, u32)) -> Self {
+		Self::Position { block, index }
+	}
+}
+
+impl<BlockNumber> From<ContentHash> for TransactionRef<BlockNumber> {
+	fn from(hash: ContentHash) -> Self {
+		Self::ContentHash(hash)
+	}
+}

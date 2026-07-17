@@ -12,6 +12,8 @@ import { Renew } from "@/pages/Renew/Renew";
 import { Explorer } from "@/pages/Explorer/Explorer";
 import { Authorizations } from "@/pages/Authorizations/Authorizations";
 import { Accounts } from "@/pages/Accounts/Accounts";
+import { Ops } from "@/pages/Ops/Ops";
+import { Hop } from "@/pages/Hop/Hop";
 import { restoreWalletConnection } from "@/state/wallet.state";
 
 export default function App() {
@@ -31,6 +33,8 @@ export default function App() {
             <Route path="/explorer" element={<Explorer />} />
             <Route path="/authorizations" element={<Authorizations />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/hop" element={<Hop />} />
+            <Route path="/ops" element={<Ops />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

@@ -6,19 +6,13 @@
       "wsUrl": "wss://westend-bulletin-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_westend.scale",
       "genesis": "0xee1f44f62e68312c4852f37585941e9b64b5ceae539e4aa112ce9d3cf7bbe9fd",
-      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
-    },
-    "bulletin_paseo": {
-      "wsUrl": "wss://paseo-bulletin-rpc.polkadot.io",
-      "metadata": ".papi/metadata/bulletin_paseo.scale",
-      "genesis": "0x744960c32e3a3df5440e1ecd4d34096f1ce2230d7016a5ada8a765d5a622b4ea",
-      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
+      "codeHash": "0x38bfc044dabd6d3ad3494e4096d8efbf8f6d7e66f69dd6a4526f5ceaf4e72356"
     },
     "bulletin_paseo_next_v2": {
       "wsUrl": "wss://paseo-bulletin-next-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_paseo_next_v2.scale",
       "genesis": "0x8cfe6717dc4becfda2e13c488a1e2061ff2dfee96e7d031157f72d36716c0a22",
-      "codeHash": "0x4fe167698d8a654b0d832ffa2b22471689331b278d93e1802b4f3d469b807d5a"
+      "codeHash": "0xe6deb62a7078a64b2534febedb4638acce1615a95b2622272d368db3e559b8ac"
     },
     "bulletin_polkadot": {
       "wsUrl": "wss://bulletin-rpc.polkadot.io",

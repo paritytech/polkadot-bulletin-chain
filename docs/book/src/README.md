@@ -1,5 +1,13 @@
 # Polkadot Bulletin Chain
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Welcome to the official documentation for the **Polkadot Bulletin Chain** - a decentralized storage ledger for the Polkadot ecosystem.
 
 ## What is Bulletin Chain?
@@ -61,10 +69,11 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 // TypeScript - Store data
 import { AsyncBulletinClient } from "@parity/bulletin-sdk";
 import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
+import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
-const api = papiClient.getTypedApi(bulletinDescriptor);
+const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
+const api = papiClient.getTypedApi(bulletin);
 const client = new AsyncBulletinClient(api, signer, papiClient.submit);
 
 const result = await client.store(Binary.fromText("Hello, Bulletin!")).send();
@@ -75,7 +84,7 @@ console.log("CID:", result.cid.toString());
 // Rust - Store data
 use bulletin_sdk_rust::prelude::*;
 
-let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+let client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 let data = b"Hello, Bulletin!".to_vec();
 let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 println!("Stored in block: {}", receipt.block_hash);
@@ -86,7 +95,7 @@ println!("Stored in block: {}", receipt.block_hash);
 | Network | Endpoint | Status |
 |---------|----------|--------|
 | Polkadot | - | Not released yet |
-| Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
+| Paseo (Testnet) | `wss://paseo-bulletin-next-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
 | Previewnet | `wss://previewnet.substrate.dev/bulletin` | Active |
 | Local Dev | `ws://localhost:10000` | - |
@@ -115,3 +124,13 @@ mdbook serve --open
 # Build static HTML
 mdbook build
 ```
+
+## Security
+
+See the [root README](../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

@@ -46,23 +46,11 @@ const P2P_MULTIADDRS: Record<string, string> = {
     "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
     "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
   ].join("\n"),
-  paseo: [
-    "/dns4/paseo-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWRuKisocQ2Z5hBZagV5YGxJMYuW13xT42sUiUCWf5bRtu",
-    "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
-    "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
-    "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
-  ].join("\n"),
   "paseo-next-v2": [
     "/dns4/paseo-bulletin-next-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWDGdPBWpytPdNAXDT2KJWwmPXkxvxyQLGc7pRdFWeZnyB",
     "/dns4/paseo-bulletin-next-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWC45NgktSLMPQafAhi8TMAtiiatnmNc3Qv6wA74u7YBVc",
     "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
     "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
-  ].join("\n"),
-  summit: [
-    "/dns4/summit-bulletin-collator-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWC6q8q3NXscVcpxMbteYrmzjpy7NvYnD4QDRkAQJ9ng8r",
-    "/dns4/summit-bulletin-collator-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWRiRRk8EzmENBD6SkP7v2riWa6s74X7wzhnx84SxfD4yr",
-    "/dns4/summit-bulletin-rpc-node-0.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWSCrFvEXpRn9J5VC7TiabNwofVfbg3QPzJK9R5ZoDGjVq",
-    "/dns4/summit-bulletin-rpc-node-1.parity-chains.parity.io/tcp/443/wss/p2p/12D3KooWHV6qNxpwkbTezwgsDW1xBL4J56o3xZnJXvRzHLdsMQJG",
   ].join("\n"),
 };
 
@@ -360,10 +348,7 @@ export function Download() {
       if (bytes.length !== 32) {
         throw new Error("Content hash must be 32 bytes");
       }
-      // multiformats `digest.create` types `digest` as `Uint8Array<ArrayBufferLike>`
-      // but `CID.createV1` wants `Uint8Array<ArrayBuffer>`; cast through `any`
-      // at this single seam rather than rewriting the call site.
-      const mh = digest.create(hashAlgo, bytes) as any;
+      const mh = digest.create(hashAlgo, bytes);
       const cid = CID.createV1(cidCodec, mh);
       setContentHashError(null);
       setCidInput(cid.toString());
