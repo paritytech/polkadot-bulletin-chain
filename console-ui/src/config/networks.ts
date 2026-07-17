@@ -165,8 +165,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     lightClient: false,
     descriptor: bulletin_paseo_next_v2,
     ipfsGateway: "http://127.0.0.1:8283",
+    // Peer IDs match zombienet's bulletin-{westend,paseo}-collator-{1,2}.
     peerMultiaddrs: [
-      "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
+      "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ",
+      "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWJ8sqAYtMBX3z3jy2iM98XGLFVzVfUPtmgDzxXSPkVpZZ",
+      "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWKjTeRJH8nMcFytc7qTTCQy7JrFgiZFr7iUjd1aPEBn8v",
+      "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWM8qgmWsh9ddbdX3kqR7W8tWuh62zhsdpwfs81eSnQuaH",
     ],
     monitoring: {
       polkadotJs: polkadotJsAppsLink("ws://localhost:10000"),
