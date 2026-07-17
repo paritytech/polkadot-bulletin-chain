@@ -21,20 +21,19 @@
     "bulletin-helia": "./dist-cli/cli.js"
   },
   "scripts": {
-    "prepare": "tsc --project tsconfig.cli.json",
-    "dev": "vite",
-    "dev:cli": "tsx src/cli.ts",
-    "build": "npm run build:web && npm run build:cli",
-    "build:web": "tsc && vite build",
+    "prepare": "npm run build",
+    "dev:cli": "npm run build:lib && tsx src/cli.ts",
+    "build": "npm run build:lib && npm run build:cli",
+    "build:lib": "tsc --project tsconfig.lib.json",
     "build:cli": "tsc --project tsconfig.cli.json",
-    "preview": "vite preview",
-    "lint": "eslint 'src/**/*.{ts,tsx}'",
-    "lint:fix": "eslint 'src/**/*.{ts,tsx}' --fix",
-    "format": "prettier --write 'src/**/*.{ts,tsx,json,css}' 'index.html'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx,json,css}' 'index.html'"
+    "lint": "eslint 'src/**/*.ts'",
+    "lint:fix": "eslint 'src/**/*.ts' --fix",
+    "format": "prettier --write 'src/**/*.ts'",
+    "format:check": "prettier --check 'src/**/*.ts'"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@types/node": "^25.9.3",
     "@typescript-eslint/eslint-plugin": "^8.49.0",
     "@typescript-eslint/parser": "^8.49.0",
     "eslint": "^9.39.1",
@@ -42,10 +41,10 @@
     "eslint-plugin-prettier": "^2.7.0",
     "prettier": "^3.7.4",
     "tsx": "^4.21.0",
-    "typescript": "~5.9.3",
-    "vite": "^7.2.4"
+    "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@helia/block-brokers": "^5.2.4",
     "@multiformats/blake2": "^2.0.2",
     "@multiformats/multiaddr": "^13.0.1",
     "helia": "^6.0.11",

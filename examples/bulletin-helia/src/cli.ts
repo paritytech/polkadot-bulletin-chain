@@ -1,24 +1,46 @@
 #!/usr/bin/env node
 
-import { IPFSClient } from './ipfs.js';
-import { CLILogger } from './logger-cli.js';
+import { writeFileSync } from 'node:fs';
+// Imported via the package's public exports, exactly as an external client
+// would — the CLI is a reference consumer of the library, not part of it.
+import { IPFSClient } from 'bulletin-helia/ipfs';
+import { CLILogger } from 'bulletin-helia/logger-cli';
 
 async function main() {
   const args = process.argv.slice(2);
 
-  if (args.length < 2) {
-    console.error('Usage: bulletin-helia <CID> <peer-multiaddr1> [peer-multiaddr2] ...');
+  // Extract the optional `-o/--out <file>` flag; the rest are positional
+  // (CID followed by one or more peer multiaddrs).
+  let outPath: string | undefined;
+  const positional: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-o' || arg === '--out') {
+      outPath = args[++i];
+    } else if (arg.startsWith('--out=')) {
+      outPath = arg.slice('--out='.length);
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  const cid = positional[0];
+  const peerMultiaddrs = positional.slice(1);
+
+  if (peerMultiaddrs.length < 1 || (outPath !== undefined && outPath.length === 0)) {
+    console.error(
+      'Usage: bulletin-helia [-o <file>] <CID> <peer-multiaddr1> [peer-multiaddr2] ...'
+    );
+    console.error('');
+    console.error('  -o, --out <file>  Write the fetched raw bytes to <file> instead of stdout');
     console.error('');
     console.error('Examples:');
     console.error('  bulletin-helia bafyreifhj6h... /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooW...');
     console.error(
-      '  bulletin-helia bafyreifhj6h... /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooW... /ip4/127.0.0.1/tcp/10002/ws/p2p/12D3KooW...'
+      '  bulletin-helia -o block.bin bafyreifhj6h... /ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooW...'
     );
     process.exit(1);
   }
-
-  const cid = args[0];
-  const peerMultiaddrs = args.slice(1);
 
   const logger = new CLILogger();
 
@@ -37,18 +59,26 @@ async function main() {
   try {
     await client.initialize();
 
-    const result = await client.fetchData(cid);
-
-    console.log('\n=== RAW BYTES ===');
-    if (result.rawHex) {
-      console.log(result.rawHex);
+    if (outPath !== undefined) {
+      // Write the exact downloaded bytes (already verified against the CID by
+      // bitswap) to disk, with no hex/JSON transformation.
+      const bytes = await client.fetchRawBytes(cid);
+      writeFileSync(outPath, bytes);
+      logger.success(`Wrote ${bytes.length} bytes to ${outPath}`);
     } else {
-      console.log('(No raw hex data available)');
-    }
+      const result = await client.fetchData(cid);
 
-    if (result.isJSON) {
-      console.log('\n=== PARSED JSON ===');
-      console.log(JSON.stringify(result.data, null, 2));
+      console.log('\n=== RAW BYTES ===');
+      if (result.rawHex) {
+        console.log(result.rawHex);
+      } else {
+        console.log('(No raw hex data available)');
+      }
+
+      if (result.isJSON) {
+        console.log('\n=== PARSED JSON ===');
+        console.log(JSON.stringify(result.data, null, 2));
+      }
     }
 
     await client.stop();
