@@ -78,6 +78,10 @@ Select "Bulletin Westend" from the network dropdown. The UI connects to `wss://b
 
 Select "Bulletin Polkadot" from the network dropdown. The UI connects to `wss://bulletin-rpc.polkadot.io`.
 
+### Paseo Testnet
+
+Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
+
 ## IPFS Gateway
 
 For downloading data, configure the IPFS gateway URL:

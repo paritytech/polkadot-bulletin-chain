@@ -25,6 +25,12 @@
       "metadata": ".papi/metadata/bulletin_previewnet.scale",
       "genesis": "0xf37fa1f1450ea120edbf64c3fc447f671a00e1f1095a698f42eeec073c7ee487",
       "codeHash": "0xbf2cd56d20198f00ab6f38d7e77f15a9d5671d47beb5d456012ed45d23572045"
+    },
+    "bulletin_products_devnet": {
+      "wsUrl": "wss://bullet.sik.rocks",
+      "metadata": ".papi/metadata/bulletin_products_devnet.scale",
+      "genesis": "0xe101f0fa4627d29a257645e02be86d80378fea1a2bf8fa6a918d150ebc760a59",
+      "codeHash": "0x919b08470811f08edef7c2d15d387182adf5b501c2a2c8486c5b829a2c78018b"
     }
   }
 }
