@@ -2,68 +2,115 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for Bulletin SDK
+ * Integration tests against a live Bulletin Chain node.
  *
- * These tests require a running Bulletin Chain node.
- * Default endpoint: ws://localhost:9944 (override with BULLETIN_RPC_URL env var)
+ * Requires a running node (default `ws://localhost:9944`; override with
+ * `BULLETIN_RPC_URL`). Run with `npm run test:integration`.
  *
- * Run with: npm run test:integration
- *
- * Note: Tests run sequentially to avoid conflicts on the same chain
+ * Exercises the SDK's sole submission API — `estimateUpload()` →
+ * `submit(estimate, source).send()` (with `.asUnsigned()` for the
+ * preimage-authorized path) — end-to-end against the pipeline engine.
  */
 
+import { randomBytes } from "node:crypto"
+import { blake2b } from "@noble/hashes/blake2.js"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
-import {
-  blake2b256,
-  DEV_MINI_SECRET,
-  ss58Address,
-} from "@polkadot-labs/hdkd-helpers"
-import { createClient, type PolkadotClient } from "polkadot-api"
+import { DEV_MINI_SECRET, ss58Address } from "@polkadot-labs/hdkd-helpers"
 import { getPolkadotSigner } from "polkadot-api/signer"
 import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
-  AsyncBulletinClient,
-  type BulletinTypedApi,
-  ChunkStatus,
+  BulletinClient,
+  blobFromBytes,
+  blobFromItems,
   CidCodec,
   HashAlgorithm,
+  type UploadItem,
+  UploadStatus,
 } from "../../src"
+
+// The sole submission API: estimate the source, then submit it. A thin
+// wrapper keeps each test focused on its assertion. The returned builder
+// is exposed so callers can chain `.withWaitFor()`, `.withCallback()`,
+// `.asUnsigned()`, etc. before `.send()`.
+async function submitItems(client: BulletinClient, items: UploadItem[]) {
+  return client.submit(await client.estimateUpload(items), blobFromItems(items))
+}
+async function submitBlob(client: BulletinClient, data: Uint8Array) {
+  const src = blobFromBytes(data)
+  return client.submit(await client.estimateUpload(src), src)
+}
+
+// Records the highest block at which any item finalized. The accounting tests
+// upload through their own rival clients but snapshot `Authorizations` through
+// the shared `client` — a separate chainHead subscription that can lag a block
+// behind. Pass this as the upload callback, then barrier on the max block
+// before reading the snapshot so the read reflects every charged store.
+function makeFinalizedTracker() {
+  let maxBlock = 0
+  const onEvent = (ev: { type: UploadStatus; blockNumber?: number }) => {
+    if (
+      ev.type === UploadStatus.ItemFinalized &&
+      typeof ev.blockNumber === "number"
+    ) {
+      maxBlock = Math.max(maxBlock, ev.blockNumber)
+    }
+  }
+  return { onEvent, max: () => maxBlock }
+}
+
+// Block until `client`'s finalized head reaches `target`. `System.Number`
+// read via `query.getValue()` resolves at the latest finalized block.
+async function waitForFinalized(client: BulletinClient, target: number) {
+  for (let i = 0; i < 120; i++) {
+    const head = await client.api.query.System.Number.getValue()
+    if (head >= target) return
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  throw new Error(`finalized head did not reach block ${target} within 120s`)
+}
 
 const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
-describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
-  let client: AsyncBulletinClient
-  let papiClient: PolkadotClient
+const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 })
+
+describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
+  let client: BulletinClient
   let aliceAddress: string
 
   beforeAll(async () => {
-    // Setup connection
-    const wsProvider = getWsProvider(ENDPOINT)
-    papiClient = createClient(wsProvider)
-    const api = papiClient.getUnsafeApi() as unknown as BulletinTypedApi
-
-    // Create signer (Alice for dev chain)
     const derive = sr25519CreateDerive(DEV_MINI_SECRET)
     const aliceKeyPair = derive("//Alice")
-    const signer = getPolkadotSigner(
+    const aliceSigner = getPolkadotSigner(
       aliceKeyPair.publicKey,
       "Sr25519",
       aliceKeyPair.sign,
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
-    // Create client directly with api, signer, and submit function
-    // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
-    // finalization regularly takes >60s under CI load, causing flaky
-    // "Transaction timed out" failures on chunked store tests.
-    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
+    // The bulletin-westend and bulletin-paseo genesis presets put `Eve`
+    // in `AllowedAuthorizers` and only pre-authorize `Alice` as a regular
+    // user. Signing `authorize_account` with Alice fails with `BadSigner`
+    // because the `EnsureAllowedAuthorizers<T>` origin check rejects her.
+    const eveKeyPair = derive("//Eve")
+    const eveSigner = getPolkadotSigner(
+      eveKeyPair.publicKey,
+      "Sr25519",
+      eveKeyPair.sign,
+    )
+
+    // Self-contained client: SDK owns the PAPI client lifecycle.
+    // No `descriptor` here → SDK uses getUnsafeApi() (works at runtime,
+    // loses compile-time chain types). Alice uploads; Eve authorizes.
+    client = new BulletinClient({
+      providers: () => [getWsProvider(ENDPOINT)],
+      uploadSigner: aliceSigner,
+      authorizerSigner: eveSigner,
       txTimeout: 120_000,
     })
 
-    // Authorize Alice's account for storage operations
-    // The bulletin chain requires account authorization before storing data
-    const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
+    // Authorize Alice's account so signed uploads succeed.
+    const estimate = client.estimateAuthorization(50 * 1024 * 1024)
     await client
       .authorizeAccount(
         aliceAddress,
@@ -71,282 +118,143 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         BigInt(estimate.bytes),
       )
       .send()
-    console.log("Alice authorized for storage:", aliceAddress)
   })
 
   afterAll(async () => {
-    if (papiClient) {
-      papiClient.destroy()
-    }
+    if (client) await client.destroy()
   })
 
-  describe("Store Operations", () => {
-    it("should store simple data", async () => {
+  describe("submit(items) — signed via pipeline", () => {
+    it("stores a single item", async () => {
       const data = new TextEncoder().encode(
-        "Hello, Bulletin Chain! Integration test.",
+        "Hello, Bulletin — integration test",
       )
-
-      const result = await client.store(data).send()
-
-      expect(result).toBeDefined()
-      expect(result.cid).toBeDefined()
-      expect(result.size).toBe(data.length)
-      expect(result.cid.toString()).toMatch(/^[a-z0-9]+$/i)
-
-      console.log("Simple store test passed")
-      console.log("   CID:", result.cid.toString())
-      console.log("   Size:", result.size, "bytes")
+      const { cids } = await (await submitItems(client, [{ data }])).send()
+      expect(cids).toHaveLength(1)
+      expect(cids[0]!.toString()).toMatch(/^[a-z0-9]+$/i)
     })
 
-    it("should store with custom CID options", async () => {
-      const data = new TextEncoder().encode("Test with custom options")
-
-      const result = await client
-        .store(data)
-        .withCodec(CidCodec.DagPb)
-        .withHashAlgorithm(HashAlgorithm.Sha2_256)
+    it("stores with non-default codec + hash", async () => {
+      const data = new TextEncoder().encode("custom codec test")
+      const { cids } = await (
+        await submitItems(client, [
+          { data, codec: CidCodec.DagPb, hashAlgo: HashAlgorithm.Sha2_256 },
+        ])
+      )
         .withWaitFor("finalized")
         .send()
-
-      expect(result).toBeDefined()
-      expect(result.cid).toBeDefined()
-      expect(result.size).toBe(data.length)
-
-      console.log("Custom options store test passed")
-      console.log("   CID:", result.cid.toString())
+      expect(cids).toHaveLength(1)
     })
 
-    it("should store chunked data with progress tracking", {
-      timeout: 180_000,
-    }, async () => {
-      // Create 5 MiB test data
-      const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
+    it("stores N items in one batch and resolves N CIDs", async () => {
+      const items = Array.from({ length: 4 }, (_, i) => ({
+        data: new TextEncoder().encode(`batch item ${i} ${Date.now()}`),
+      }))
+      const { cids } = await (await submitItems(client, items)).send()
+      expect(cids).toHaveLength(4)
+    })
+  })
 
-      let chunksCompleted = 0
-      let manifestCreated = false
-      let totalChunks = 0
+  /**
+   * Chunk data MUST be unique across chunks, otherwise the SDK's
+   * `TransactionByContentHash`-based reconciler can't tell two chunks
+   * with the same content_hash apart and the SDK rejects with
+   * `INVALID_CONFIG`. Each byte mixes the position's high-byte windows
+   * so 1 MiB chunks at different positions produce distinct hashes,
+   * and a per-call random tag avoids cross-run collisions on the chain.
+   */
+  function makeChunkedTestData(size: number): Uint8Array {
+    const data = new Uint8Array(size)
+    const tag = Math.floor(Math.random() * 0xffffffff)
+    for (let i = 0; i < size; i++) {
+      // Bits from every byte-window of `i` contribute, so position
+      // 0x100000 (1 MiB) yields a different value than position 0.
+      data[i] = (tag ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+    }
+    return data
+  }
 
-      const result = await client
-        .store(data)
-        .withChunkSize(1024 * 1024)
-        .withCallback((event) => {
-          switch (event.type) {
-            case "chunk_started":
-              if (totalChunks === 0) totalChunks = event.total
-              break
-            case "chunk_completed":
-              chunksCompleted++
-              console.log(
-                `   Chunk ${event.index + 1}/${event.total} completed`,
-              )
-              break
-            case "manifest_created":
-              manifestCreated = true
-              console.log("   Manifest created:", event.cid.toString())
-              break
+  describe("submit(blob) — chunked file + DAG-PB manifest", () => {
+    it("auto-chunks a 5 MiB file and returns one root CID", async () => {
+      const data = makeChunkedTestData(5 * 1024 * 1024)
+      const events: Array<{
+        type: UploadStatus
+        index: number
+        total: number
+      }> = []
+
+      // Default 1 MiB chunk size → 5 chunks + 1 manifest.
+      const { cids } = await (await submitBlob(client, data))
+        .withCallback((ev) =>
+          events.push({ type: ev.type, index: ev.index, total: ev.total }),
+        )
+        .send()
+
+      // Root CID (the retrieval id) is the last unit — the manifest.
+      expect(cids[cids.length - 1]).toBeDefined()
+      // 5 chunks + 1 manifest = 6 items
+      const finalized = events.filter(
+        (e) => e.type === UploadStatus.ItemFinalized,
+      )
+      expect(finalized).toHaveLength(6)
+      expect(finalized[0]?.total).toBe(6)
+    })
+
+    it("fires events in input order (Started → InBlock → Finalized per item)", async () => {
+      const data = makeChunkedTestData(3 * 1024 * 1024) // 3 MiB
+      const lastSeenByIndex = new Map<number, UploadStatus>()
+
+      await (await submitBlob(client, data))
+        .withCallback((ev) => {
+          const prev = lastSeenByIndex.get(ev.index)
+          lastSeenByIndex.set(ev.index, ev.type)
+          // Per-item state machine: Started → InBlock → Finalized.
+          if (ev.type === UploadStatus.ItemInBlock) {
+            expect(prev).toBe(UploadStatus.ItemStarted)
+          }
+          if (ev.type === UploadStatus.ItemFinalized) {
+            expect([
+              UploadStatus.ItemStarted,
+              UploadStatus.ItemInBlock,
+            ]).toContain(prev)
           }
         })
         .send()
 
-      expect(result).toBeDefined()
-      expect(result.chunks).toBeDefined()
-      expect(result.chunks?.numChunks).toBe(5) // 5 MiB / 1 MiB = 5 chunks
-      expect(chunksCompleted).toBe(5)
-      expect(manifestCreated).toBe(true)
-
-      console.log("Chunked store test passed")
-      console.log("   Chunks:", result.chunks?.numChunks)
+      // 3 chunks + 1 manifest = 4 items
+      expect(lastSeenByIndex.size).toBe(4)
     })
 
-    it("should fire progress events in correct order during chunked upload", {
-      timeout: 180_000,
-    }, async () => {
-      const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
+    it("surfaces per-item CIDs through ItemFinalized events", async () => {
+      const data = makeChunkedTestData(2 * 1024 * 1024) // 2 MiB → 2 chunks
+      const finalizedCids: string[] = []
 
-      const events: { type: string; chunkIndex?: number }[] = []
-      const highLevelTypes = new Set([
-        "chunk_started",
-        "chunk_completed",
-        "manifest_started",
-        "manifest_created",
-        "completed",
-      ])
-
-      const result = await client
-        .store(data)
-        .withChunkSize(1024 * 1024)
-        .withCallback((event) => {
-          events.push({
-            type: event.type,
-            chunkIndex: "chunkIndex" in event ? event.chunkIndex : undefined,
-          })
-        })
-        .send()
-
-      // Verify event order: started/completed pairs for each chunk, then manifest, then completed
-      expect(result.chunks?.numChunks).toBe(3)
-
-      // Filter to high-level events (ignore intermediate tx status: signed, broadcasted, in_block)
-      const highLevelEvents = events.filter((e) => highLevelTypes.has(e.type))
-      const expectedOrder = [
-        "chunk_started",
-        "chunk_completed",
-        "chunk_started",
-        "chunk_completed",
-        "chunk_started",
-        "chunk_completed",
-        "manifest_started",
-        "manifest_created",
-        "completed",
-      ]
-      expect(highLevelEvents.map((e) => e.type)).toEqual(expectedOrder)
-
-      // Verify chunkIndex is set on tx status events for chunk submissions
-      const chunkTxEvents = events.filter(
-        (e) =>
-          (e.type === "signed" ||
-            e.type === "broadcasted" ||
-            e.type === "in_block") &&
-          e.chunkIndex !== undefined,
-      )
-      expect(chunkTxEvents.length).toBeGreaterThan(0)
-
-      // Each chunk tx event should reference a valid chunk index (0, 1, or 2)
-      for (const e of chunkTxEvents) {
-        expect(e.chunkIndex).toBeGreaterThanOrEqual(0)
-        expect(e.chunkIndex).toBeLessThan(3)
-      }
-
-      // Manifest tx events should NOT have chunkIndex
-      // Find events between manifest_started and manifest_created
-      const manifestStartIdx = events.findIndex(
-        (e) => e.type === "manifest_started",
-      )
-      const manifestEndIdx = events.findIndex(
-        (e) => e.type === "manifest_created",
-      )
-      const manifestTxEvents = events.slice(
-        manifestStartIdx + 1,
-        manifestEndIdx,
-      )
-      for (const e of manifestTxEvents) {
-        expect(e.chunkIndex).toBeUndefined()
-      }
-    })
-
-    it("should fire chunk events sequentially (each chunk submitted before next starts)", {
-      timeout: 180_000,
-    }, async () => {
-      const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
-
-      const eventLog: { type: string; index: number; time: number }[] = []
-
-      await client
-        .store(data)
-        .withChunkSize(1024 * 1024)
-        .withCallback((event) => {
-          if (
-            event.type === ChunkStatus.ChunkStarted ||
-            event.type === ChunkStatus.ChunkCompleted
-          ) {
-            eventLog.push({
-              type: event.type,
-              index: event.index,
-              time: Date.now(),
-            })
+      const { cids } = await (await submitBlob(client, data))
+        .withCallback((ev) => {
+          if (ev.type === UploadStatus.ItemFinalized) {
+            finalizedCids.push(ev.cid.toString())
           }
         })
         .send()
+      const rootCid = cids[cids.length - 1]!
 
-      // 2x started + 2x completed for chunks, plus manifest events
-      expect(
-        eventLog.filter(
-          (e) =>
-            e.type === ChunkStatus.ChunkStarted ||
-            e.type === ChunkStatus.ChunkCompleted,
-        ),
-      ).toHaveLength(4)
-
-      // Verify sequential order: chunk 0 must complete before chunk 1 starts
-      const chunk0Completed = eventLog.find(
-        (e) => e.type === ChunkStatus.ChunkCompleted && e.index === 0,
-      )
-      const chunk1Started = eventLog.find(
-        (e) => e.type === ChunkStatus.ChunkStarted && e.index === 1,
-      )
-      expect(chunk0Completed).toBeDefined()
-      expect(chunk1Started).toBeDefined()
-      expect(chunk0Completed?.time).toBeLessThanOrEqual(chunk1Started?.time)
-    })
-
-    it("should include CID in chunk_completed events", {
-      timeout: 180_000,
-    }, async () => {
-      const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
-
-      const chunkCids: string[] = []
-
-      const result = await client
-        .store(data)
-        .withChunkSize(1024 * 1024)
-        .withCallback((event) => {
-          if (event.type === ChunkStatus.ChunkCompleted) {
-            chunkCids.push(event.cid.toString())
-          }
-        })
-        .send()
-
-      expect(chunkCids).toHaveLength(2)
-      expect(result.chunks).toBeDefined()
-      expect(result.chunks?.chunkCids).toHaveLength(2)
-      // CIDs from events should match CIDs from result
-      expect(chunkCids).toEqual(
-        result.chunks?.chunkCids.map((c) => c.toString()),
-      )
-    })
-
-    it("should fire chunk_completed via store() builder for large data", {
-      timeout: 180_000,
-    }, async () => {
-      const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
-
-      const events: string[] = []
-
-      const result = await client
-        .store(data)
-        .withCallback((event) => {
-          events.push(event.type)
-        })
-        .send()
-
-      expect(result.cid).toBeDefined()
-      expect(result.chunks).toBeDefined()
-      expect(result.chunks?.numChunks).toBe(3)
-
-      // Should have chunk events from the submission loop
-      expect(events.filter((e) => e === "chunk_completed")).toHaveLength(3)
-      expect(events.filter((e) => e === "chunk_started")).toHaveLength(3)
+      // 2 chunks + 1 manifest = 3 finalized events
+      expect(finalizedCids).toHaveLength(3)
+      // The root CID is the last finalized item (the manifest).
+      expect(finalizedCids[finalizedCids.length - 1]).toBe(rootCid.toString())
     })
   })
 
   describe("Authorization Operations", () => {
-    it("should estimate authorization", () => {
-      const estimate = client.estimateAuthorization(10_000_000) // 10 MB
-
-      expect(estimate).toBeDefined()
+    it("estimates authorization", () => {
+      const estimate = client.estimateAuthorization(10_000_000)
       expect(estimate.transactions).toBeGreaterThan(0)
-      // bytes includes manifest overhead (numChunks * 10 + 1000)
       expect(estimate.bytes).toBeGreaterThanOrEqual(10_000_000)
-
-      console.log("Authorization estimation test passed")
-      console.log("   Transactions:", estimate.transactions)
-      console.log("   Bytes:", estimate.bytes)
     })
 
-    it("should authorize account", async () => {
+    it("authorizes an account", async () => {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
-
       const receipt = await client
         .authorizeAccount(
           bobAddress,
@@ -354,33 +262,22 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
           BigInt(estimate.bytes),
         )
         .send()
-
-      expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
       expect(receipt.txHash).toBeDefined()
-
-      console.log("Account authorization test passed")
-      console.log("   Block hash:", receipt.blockHash)
     })
 
-    it("should authorize preimage", async () => {
+    it("authorizes a preimage", async () => {
       const data = new TextEncoder().encode("Specific content to authorize")
       const contentHash = blake2b256(data)
-
       const receipt = await client
         .authorizePreimage(contentHash, BigInt(data.length))
         .send()
-
-      expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
-
-      console.log("Preimage authorization test passed")
     })
   })
 
   describe("Refresh Operations", () => {
-    it("should refresh account authorization", async () => {
-      // First authorize Bob
+    it("refreshes account authorization", async () => {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
       await client
@@ -390,133 +287,110 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
           BigInt(estimate.bytes),
         )
         .send()
-
-      // Now refresh Bob's authorization
       const receipt = await client
         .refreshAccountAuthorization(bobAddress)
         .send()
-
-      expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
       expect(receipt.txHash).toBeDefined()
-
-      console.log("Refresh account authorization test passed")
     })
 
-    it("should refresh preimage authorization", async () => {
-      // First authorize a preimage
+    it("refreshes preimage authorization", async () => {
       const data = new TextEncoder().encode("Content for refresh test")
       const contentHash = blake2b256(data)
       await client.authorizePreimage(contentHash, BigInt(data.length)).send()
-
-      // Now refresh the preimage authorization
       const receipt = await client
         .refreshPreimageAuthorization(contentHash)
         .send()
-
-      expect(receipt).toBeDefined()
       expect(receipt.blockHash).toBeDefined()
       expect(receipt.txHash).toBeDefined()
+    })
+  })
 
-      console.log("Refresh preimage authorization test passed")
+  describe("Renew", () => {
+    it("renews a stored item via the registry-dispatched call", async () => {
+      // Store one item and capture its renew slot from ItemFinalized.
+      const items = [{ data: randomBytes(64) }]
+      let slot: { block: number; index: number } | undefined
+      const builder = await submitItems(client, items)
+      await builder
+        .withCallback((ev) => {
+          if (
+            ev.type === UploadStatus.ItemFinalized &&
+            typeof ev.blockNumber === "number" &&
+            typeof ev.transactionIndex === "number"
+          ) {
+            slot = { block: ev.blockNumber, index: ev.transactionIndex }
+          }
+        })
+        .send()
+      expect(slot).toBeDefined()
+
+      // The compat registry resolves the local chain's current shape
+      // (`renew(entry: TransactionRef)`) and encodes accordingly.
+      const receipt = await client
+        .renew({ block: slot!.block, index: slot!.index })
+        .send()
+      expect(receipt.blockHash).toBeDefined()
+      expect(receipt.txHash).toBeDefined()
     })
   })
 
   describe("Remove Expired Authorization Operations", () => {
-    it("should attempt to remove expired account authorization", async () => {
+    // These authorizations haven't expired; we just verify the SDK methods
+    // dispatch without local-side errors (the chain may reject as expected).
+    it("attempts to remove expired account authorization", async () => {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
-
-      // This will likely fail because the authorization hasn't expired yet
-      // but it tests the SDK method is wired up correctly
       try {
         const receipt = await client
           .removeExpiredAccountAuthorization(bobAddress)
           .send()
-        expect(receipt).toBeDefined()
         expect(receipt.blockHash).toBeDefined()
-        console.log("Remove expired account authorization succeeded")
-      } catch (_error) {
-        // Expected - authorization hasn't expired
-        console.log(
-          "Remove expired account authorization failed as expected (not expired)",
-        )
+      } catch (_err) {
+        // Expected — authorization not expired.
       }
     })
 
-    it("should attempt to remove expired preimage authorization", async () => {
+    it("attempts to remove expired preimage authorization", async () => {
       const data = new TextEncoder().encode("Content for expiry test")
       const contentHash = blake2b256(data)
-
       try {
         const receipt = await client
           .removeExpiredPreimageAuthorization(contentHash)
           .send()
-        expect(receipt).toBeDefined()
-        console.log("Remove expired preimage authorization succeeded")
-      } catch (_error) {
-        // Expected - authorization hasn't expired or doesn't exist
-        console.log("Remove expired preimage authorization failed as expected")
+        expect(receipt.blockHash).toBeDefined()
+      } catch (_err) {
+        // Expected — authorization not expired or doesn't exist.
       }
     })
   })
 
-  describe("Preimage Store Operations", () => {
-    it("should store data with preimage authorization", async () => {
+  describe("asUnsigned() — preimage-authorized", () => {
+    it("stores data via the unsigned (preimage-auth) path", async () => {
+      // Per-run unique data — the unsigned bareTx hash is deterministic
+      // from data; constant content across runs hits the pool's
+      // `TemporarilyBanned` hash ban (~30 min window).
       const data = new TextEncoder().encode(
-        "This content is preimage-authorized for unsigned storage",
+        `Preimage-authorized unsigned storage ${Date.now()}-${Math.random()}`,
       )
       const contentHash = blake2b256(data)
 
-      // Authorize the preimage first
+      // Authorize the preimage first (signed by Alice).
       await client.authorizePreimage(contentHash, BigInt(data.length)).send()
 
-      // Store with preimage auth (unsigned transaction)
-      const result = await client.storeWithPreimageAuth(data)
-
-      expect(result).toBeDefined()
-      expect(result.cid).toBeDefined()
-      expect(result.size).toBe(data.length)
-
-      console.log("Store with preimage auth test passed")
-      console.log("   CID:", result.cid.toString())
+      // Anonymous submitter — no signer needed for the unsigned path. We
+      // reuse the existing signed `client` (its signer field is set but
+      // unused on `.asUnsigned()`).
+      const { cids } = await (await submitItems(client, [{ data }]))
+        .asUnsigned()
+        .send()
+      expect(cids).toHaveLength(1)
     })
   })
 
-  describe("Maintenance Operations", () => {
-    it("should renew stored data", async () => {
-      // First store something
-      const data = new TextEncoder().encode("Data to be renewed")
-      const storeResult = await client.store(data).send()
-
-      // Wait a bit for block finalization
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      // Try to renew (may fail if not renewable yet)
-      try {
-        const receipt = await client
-          .renew({ block: storeResult.blockNumber ?? 0, index: 0 })
-          .send()
-        expect(receipt).toBeDefined()
-        console.log("Renew test passed")
-      } catch (_error) {
-        console.log("Renew not available yet (expected)")
-      }
-    })
-  })
-
-  describe("Complete Workflow", () => {
-    it("should complete full authorization and store workflow", async () => {
-      // 1. Estimate authorization
-      const dataSize = 2 * 1024 * 1024 // 2 MB
+  describe("Complete workflow", () => {
+    it("authorizes Bob then stores via submit(blob)", async () => {
+      const dataSize = 2 * 1024 * 1024
       const estimate = client.estimateAuthorization(dataSize)
-
-      console.log(
-        "   Authorization needed:",
-        estimate.transactions,
-        "transactions",
-      )
-
-      // 2. Authorize a new account (Bob)
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const authReceipt = await client
         .authorizeAccount(
@@ -525,19 +399,308 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
           BigInt(estimate.bytes),
         )
         .send()
-
       expect(authReceipt.blockHash).toBeDefined()
-      console.log("   Bob authorized")
 
-      // 3. Store data (as Alice, who was already authorized in beforeAll)
-      const data = new Uint8Array(dataSize).fill(0x55)
-      const storeResult = await client.store(data).send()
+      // Alice (already authorized in beforeAll) uploads.
+      const data = makeChunkedTestData(dataSize)
+      const { cids } = await (await submitBlob(client, data)).send()
+      expect(cids[cids.length - 1]).toBeDefined()
+    })
+  })
 
-      expect(storeResult.cid).toBeDefined()
-      expect(storeResult.size).toBe(dataSize)
-      console.log("   Data stored with CID:", storeResult.cid.toString())
+  /**
+   * Hijack-recovery stress test: two SDK clients upload from the SAME
+   * signer in parallel, racing for nonces. Each client's hijack-detection
+   * loop reassigns fresh nonces (via `poolNonce`-aware allocation) so both
+   * uploads eventually succeed. Exercises the per-item retry queue +
+   * `chainNonce`-based hijack detection introduced in sub-PR #4.
+   */
+  describe("Hijack recovery", { timeout: 180_000 }, () => {
+    it("two parallel uploads from the same signer both succeed", async () => {
+      // Both clients share the SAME signer → fight over the same nonces.
+      const makeRivalClient = () => {
+        const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+        const kp = derive("//Alice")
+        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        return new BulletinClient({
+          providers: () => [getWsProvider(ENDPOINT)],
+          uploadSigner: rivalSigner,
+          authorizerSigner: rivalSigner,
+          txTimeout: 120_000,
+        })
+      }
+      const clientA = makeRivalClient()
+      const clientB = makeRivalClient()
 
-      console.log("Complete workflow test passed")
+      // Distinct data → distinct content hashes → both items must each
+      // land at SOME nonce (not the same nonce, since pool dedupes hash
+      // collisions and each tx has different content).
+      const dataA = new TextEncoder().encode(
+        `hijack-test-A ${Date.now()} ${Math.random()}`,
+      )
+      const dataB = new TextEncoder().encode(
+        `hijack-test-B ${Date.now()} ${Math.random()}`,
+      )
+
+      const [resA, resB] = await Promise.all([
+        submitItems(clientA, [{ data: dataA }]).then((b) => b.send()),
+        submitItems(clientB, [{ data: dataB }]).then((b) => b.send()),
+      ])
+
+      expect(resA.cids).toHaveLength(1)
+      expect(resB.cids).toHaveLength(1)
+      // Distinct content → distinct CIDs.
+      expect(resA.cids[0]!.toString()).not.toBe(resB.cids[0]!.toString())
+    })
+  })
+
+  /**
+   * Exactly-once accounting under concurrent same-account uploads. Each
+   * successful `store` extrinsic in the runtime increments the caller's
+   * `Authorizations.extent.transactions` by 1 and `extent.bytes` by
+   * `data.len()` (see pallets/transaction-storage `do_store`). If the SDK
+   * ever double-broadcasts a chunk (e.g. on watchdog reconnect or
+   * STORE_STALLED retry) the chain would either reject as `Duplicate`
+   * OR (if the prior copy was pruned) accept it again and double-count.
+   * Either way the delta would drift from the expected sum — this test
+   * locks the invariant.
+   */
+  describe("Exactly-once accounting under parallel same-account upload", {
+    timeout: 480_000,
+  }, () => {
+    it("3 parallel uploads → Authorizations.extent advances by exact sum", async () => {
+      const SESSIONS = 3
+      // 17 items per session is intentionally above the chain's ~9
+      // items-per-block cap so the test exercises the contention path
+      // across multiple blocks (waves, hijack/dedup, retries).
+      const ITEMS_PER = 17
+      const ITEM_SIZE = 1024 * 1024 // 1 MiB
+
+      // Top up Alice's authorization with enough headroom for the
+      // expected work (3 × 17 = 51 transactions, 51 MiB). authorizeAccount
+      // is additive within the unexpired window, so this stacks on top
+      // of whatever was authorized in earlier tests / beforeAll.
+      await client
+        .authorizeAccount(
+          aliceAddress,
+          SESSIONS * ITEMS_PER + 10, // 51 txs + a small safety margin
+          BigInt((SESSIONS * ITEMS_PER + 10) * ITEM_SIZE),
+        )
+        .withWaitFor("finalized")
+        .send()
+
+      // Snapshot BEFORE — current usage at the latest finalized state.
+      const before =
+        await client.api.query.TransactionStorage.Authorizations.getValue({
+          type: "Account",
+          value: aliceAddress,
+        })
+      expect(before).toBeDefined()
+      const beforeTx = before!.extent.transactions
+      const beforeBytes = before!.extent.bytes
+
+      // Build SESSIONS × ITEMS_PER unique 1-MiB chunks. Content MUST be
+      // distinct cross-session, cross-item, and cross-run — the chain
+      // dedupes by content_hash (TBCH overwrites) and Authorizations.extent
+      // increments per execution, so the accounting check breaks if any
+      // pair of items collide.
+      //
+      // We mix an 8-byte crypto-random seed PER ITEM into every byte of
+      // the payload (collision probability 2^-64). Earlier XOR-shuffle
+      // generators looked random but collapsed many (sIdx, iIdx) pairs to
+      // identical content because only byte 0 of the 32-bit tag was used.
+      const sessionItems = Array.from({ length: SESSIONS }, () =>
+        Array.from({ length: ITEMS_PER }, () => {
+          const data = new Uint8Array(ITEM_SIZE)
+          const seed = randomBytes(8)
+          for (let i = 0; i < ITEM_SIZE; i++) {
+            data[i] =
+              (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+          }
+          return { data }
+        }),
+      )
+
+      // 3 separate clients sharing the same signer — emulates 3
+      // independent scripts on //Alice racing for the same nonces.
+      const rivals = Array.from({ length: SESSIONS }, () => {
+        const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+        const kp = derive("//Alice")
+        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        return new BulletinClient({
+          providers: () => [getWsProvider(ENDPOINT)],
+          uploadSigner: rivalSigner,
+          txTimeout: 180_000,
+        })
+      })
+
+      const tracker = makeFinalizedTracker()
+      try {
+        // Fire all 3 uploads in parallel; each waits for finalization.
+        const results = await Promise.all(
+          rivals.map(async (c, idx) =>
+            (await submitItems(c, sessionItems[idx] as UploadItem[]))
+              .withWaitFor("finalized")
+              .withCallback(tracker.onEvent)
+              .send(),
+          ),
+        )
+        for (const r of results) {
+          expect(r.cids).toHaveLength(ITEMS_PER)
+        }
+
+        // The rival clients may finalize a block ahead of `client`'s own
+        // chainHead subscription; wait for `client` to catch up so the
+        // snapshot below counts every store the uploads finalized.
+        await waitForFinalized(client, tracker.max())
+
+        // Snapshot AFTER — at a finalized head that includes all uploads.
+        const after =
+          await client.api.query.TransactionStorage.Authorizations.getValue({
+            type: "Account",
+            value: aliceAddress,
+          })
+        expect(after).toBeDefined()
+        const afterTx = after!.extent.transactions
+        const afterBytes = after!.extent.bytes
+
+        // Expected deltas come from estimateUpload over the full batch:
+        // any content_hash collisions across sessions would naturally
+        // reduce the per-tx expectation, matching what the chain sees.
+        // With crypto-random per-item seeds these will equal SESSIONS *
+        // ITEMS_PER but the estimate keeps the assertion self-consistent.
+        const allItems = sessionItems.flat()
+        const estimate = await client.estimateUpload(allItems)
+        expect(afterTx - beforeTx).toBe(estimate.transactions)
+        expect(afterBytes - beforeBytes).toBe(estimate.bytes)
+      } finally {
+        await Promise.all(rivals.map((c) => c.destroy()))
+      }
+    })
+
+    it("3 parallel uploads from 3 DIFFERENT accounts → each Authorizations.extent advances by exact per-account sum", async () => {
+      const SESSIONS = 3
+      // 17 items per session, same as same-account variant, so the
+      // per-account work matches and we can compare wall-clock easily.
+      const ITEMS_PER = 17
+      const ITEM_SIZE = 1024 * 1024 // 1 MiB
+
+      // Per-test derivation paths — chosen to be distinct from any
+      // other test's signer so we don't collide with shared state.
+      const derive = sr25519CreateDerive(DEV_MINI_SECRET)
+      const paths = ["//ParallelA", "//ParallelB", "//ParallelC"]
+      const accounts = paths.map((path) => {
+        const kp = derive(path)
+        return {
+          address: ss58Address(kp.publicKey, 42),
+          signer: getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign),
+        }
+      })
+
+      // Authorize all 3 target accounts in a single atomic batched call
+      // (Utility.batch_all under the hood). One round-trip instead of
+      // three serial ones, and the batch is all-or-nothing.
+      await client
+        .authorizeAccount(
+          accounts.map((acc) => ({
+            who: acc.address,
+            transactions: ITEMS_PER + 5,
+            bytes: BigInt((ITEMS_PER + 5) * ITEM_SIZE),
+          })),
+        )
+        .withWaitFor("finalized")
+        .send()
+
+      // Snapshot per-account BEFORE.
+      const before = await Promise.all(
+        accounts.map((acc) =>
+          client.api.query.TransactionStorage.Authorizations.getValue({
+            type: "Account",
+            value: acc.address,
+          }),
+        ),
+      )
+      for (const auth of before) expect(auth).toBeDefined()
+      const beforeTx = before.map((a) => a!.extent.transactions)
+      const beforeBytes = before.map((a) => a!.extent.bytes)
+
+      // Unique 1-MiB chunks. Cross-session uniqueness still required —
+      // even though signers differ, the chain's `TransactionByContentHash`
+      // is keyed by content_hash regardless of signer. Per-item
+      // crypto-random seed (see same-account variant above for rationale).
+      const sessionItems = Array.from({ length: SESSIONS }, () =>
+        Array.from({ length: ITEMS_PER }, () => {
+          const data = new Uint8Array(ITEM_SIZE)
+          const seed = randomBytes(8)
+          for (let i = 0; i < ITEM_SIZE; i++) {
+            data[i] =
+              (seed[i & 7]! ^ i ^ (i >> 8) ^ (i >> 16) ^ (i >> 24)) & 0xff
+          }
+          return { data }
+        }),
+      )
+
+      // 3 clients, each with its OWN signer — no nonce sharing.
+      const clients = accounts.map(
+        (acc) =>
+          new BulletinClient({
+            providers: () => [getWsProvider(ENDPOINT)],
+            uploadSigner: acc.signer,
+            txTimeout: 120_000,
+          }),
+      )
+
+      const tracker = makeFinalizedTracker()
+      try {
+        const results = await Promise.all(
+          clients.map(async (c, idx) =>
+            (await submitItems(c, sessionItems[idx] as UploadItem[]))
+              .withWaitFor("finalized")
+              .withCallback(tracker.onEvent)
+              .send(),
+          ),
+        )
+        for (const r of results) {
+          expect(r.cids).toHaveLength(ITEMS_PER)
+        }
+
+        // The per-account clients may finalize a block ahead of `client`'s
+        // chainHead; wait for `client` to catch up so each snapshot counts
+        // every store that account finalized.
+        await waitForFinalized(client, tracker.max())
+
+        // Snapshot per-account AFTER.
+        const after = await Promise.all(
+          accounts.map((acc) =>
+            client.api.query.TransactionStorage.Authorizations.getValue({
+              type: "Account",
+              value: acc.address,
+            }),
+          ),
+        )
+        for (const auth of after) expect(auth).toBeDefined()
+
+        // Per-account exact-match delta. Each account did exactly
+        // estimate.transactions successful stores (which equals ITEMS_PER
+        // when there are no input duplicates within a session). Using
+        // estimateUpload here keeps the assertion robust if the test
+        // data generator ever emits collisions again.
+        for (let i = 0; i < SESSIONS; i++) {
+          const sessionEstimate = await client.estimateUpload(
+            sessionItems[i] as { data: Uint8Array }[],
+          )
+          const txDelta = after[i]!.extent.transactions - beforeTx[i]!
+          const bytesDelta = after[i]!.extent.bytes - beforeBytes[i]!
+          expect(txDelta, `account ${i} tx delta`).toBe(
+            sessionEstimate.transactions,
+          )
+          expect(bytesDelta, `account ${i} bytes delta`).toBe(
+            sessionEstimate.bytes,
+          )
+        }
+      } finally {
+        await Promise.all(clients.map((c) => c.destroy()))
+      }
     })
   })
 })

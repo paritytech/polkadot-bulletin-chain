@@ -47,6 +47,7 @@ rpc_port = 10000
 args = [
 	"--ipfs-server",
 	"--pool-kbytes 65536",
+	"--rpc-max-response-size=20",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
 	# HOP
 	"--enable-hop",
@@ -77,6 +78,7 @@ rpc_port = 12346
 args = [
 	"--ipfs-server",
 	"--pool-kbytes 65536",
+	"--rpc-max-response-size=20",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
 	# HOP
 	"--enable-hop",

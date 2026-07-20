@@ -513,16 +513,6 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
     set -e
 
     if [ "{{ mode }}" = "smoldot" ]; then
-        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
-    elif [ "{{ mode }}" = "ws" ]; then
-        SCRIPT_NAME="authorize_and_store_papi.js"
-    else
-        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
-        exit 1
-    fi
-
-    # Run the script with parameters
-    if [ "{{ mode }}" = "smoldot" ]; then
         RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
         # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
         # and the containing directory by the collator name used in each toml.
@@ -534,21 +524,49 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
         fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        node authorize_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" \
+            --smoldot="$RELAY_CHAINSPEC_PATH:$PARACHAIN_CHAINSPEC_PATH"
+    elif [ "{{ mode }}" = "ws" ]; then
+        node authorize_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     else
-        node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+        echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
+        exit 1
+    fi
+
+# Helper: convert mode + test_dir + runtime into a `--smoldot=<relay>:<para>`
+# flag (or empty string for ws mode). Echoed; runners capture and append.
+_provider-flag mode test_dir runtime:
+    #!/usr/bin/env bash
+    set -e
+    if [ "{{ mode }}" = "smoldot" ]; then
+        RELAY="{{ test_dir }}/bob/cfg/westend-local.json"
+        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
+            PARA="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1010.json"
+        elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
+            PARA="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
+        else
+            echo "❌ Unhandled runtime: {{ runtime }}" 1>&2
+            exit 1
+        fi
+        echo "--smoldot=$RELAY:$PARA"
+    elif [ "{{ mode }}" != "ws" ]; then
+        echo "❌ Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'" 1>&2
+        exit 1
     fi
 
 # Run store-chunked-data test only (services must already be running via start-services)
 # Parameters:
 #   test_dir - Test directory where services are running
-#   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
-#   seed - Account seed phrase or dev seed (default: //Eve)
+#   runtime  - Runtime name for smoldot chainspec path resolution
+#   mode     - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
+#   ws_url   - WebSocket URL (default: ws://127.0.0.1:10000, only used in ws mode)
+#   seed     - Authorizer seed (default: //Eve)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-store-chunked-data test_dir ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
+run-test-store-chunked-data test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
-    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    FLAG=$(just _provider-flag "{{ mode }}" "{{ test_dir }}" "{{ runtime }}")
+    node store_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" $FLAG
 
 # Run native-ipfs-dag-pb-chunked-data test only (services must already be running via start-services)
 # Parameters:
@@ -556,10 +574,11 @@ run-test-store-chunked-data test_dir ws_url="ws://127.0.0.1:10000" seed="//Eve" 
 #   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Eve)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
+run-test-native-ipfs-dag-pb-chunked-data test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
-    node native_ipfs_dag_pb_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    FLAG=$(just _provider-flag "{{ mode }}" "{{ test_dir }}" "{{ runtime }}")
+    node native_ipfs_dag_pb_chunked_data.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" $FLAG
 
 # Run store-big-data test only (services must already be running via start-services)
 # Parameters:
@@ -568,10 +587,11 @@ run-test-native-ipfs-dag-pb-chunked-data test_dir ws_url="ws://127.0.0.1:10000" 
 #   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Eve)
 #   ipfs_gateway_url - IPFS Gateway URL (default: http://127.0.0.1:8283)
-run-test-store-big-data test_dir image_size="big64" ws_url="ws://127.0.0.1:10000" seed="//Eve" ipfs_gateway_url="http://127.0.0.1:8283":
+run-test-store-big-data test_dir runtime image_size="big64" mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" ipfs_gateway_url="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
-    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}"
+    FLAG=$(just _provider-flag "{{ mode }}" "{{ test_dir }}" "{{ runtime }}")
+    node store_big_data.js "{{ ws_url }}" "{{ seed }}" "{{ ipfs_gateway_url }}" "{{ image_size }}" $FLAG
 
 # Run authorize-preimage-and-store test only (services must already be running via start-services)
 # Parameters:
@@ -579,10 +599,11 @@ run-test-store-big-data test_dir image_size="big64" ws_url="ws://127.0.0.1:10000
 #   ws_url - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed - Account seed phrase or dev seed (default: //Eve)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
-run-test-authorize-preimage-and-store test_dir ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
+run-test-authorize-preimage-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
     #!/usr/bin/env bash
     set -e
-    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
+    FLAG=$(just _provider-flag "{{ mode }}" "{{ test_dir }}" "{{ runtime }}")
+    node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}" $FLAG
 
 # Run auto-renewal Chopsticks test
 # Tests enable/disable auto-renewal and verifies on_initialize scheduling.
@@ -714,39 +735,20 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     #!/usr/bin/env bash
     set -e
 
-    if [ "{{ mode }}" = "smoldot" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: smoldot, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
-        SCRIPT_NAME="authorize_and_store_papi_smoldot.js"
-    elif [ "{{ mode }}" = "ws" ]; then
-        echo "🚀 Starting authorize and store workflow test (mode: ws, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
-        SCRIPT_NAME="authorize_and_store_papi.js"
-    else
+    if [ "{{ mode }}" != "ws" ] && [ "{{ mode }}" != "smoldot" ]; then
         echo "❌ Error: Invalid mode '{{ mode }}'. Must be 'ws' or 'smoldot'"
         exit 1
     fi
+    echo "🚀 Starting authorize and store workflow test (mode: {{ mode }}, runtime: {{ runtime }}, ipfs: {{ ipfs_mode }})..."
 
     TEST_DIR="$(just compute-test-dir)"
     just setup-services "$TEST_DIR" "{{ runtime }}" "{{ ipfs_mode }}"
 
     set +e
-    # Run the script with parameters
-    if [ "{{ mode }}" = "smoldot" ]; then
-        # Parachain: relay chain (required) + parachain spec (optional).
-        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
-        # and the containing directory by the collator name used in each toml.
-        RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
-        if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
-        elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
-        else
-            echo "❌ Unhandled runtime: {{ runtime }}"
-            exit 1
-        fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
-    else
-        node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283"
-    fi
+    # One SDK example for both modes — smoldot rides the shared provider flag
+    # (same path as run-test-authorize-and-store / CI).
+    FLAG=$(just _provider-flag "{{ mode }}" "$TEST_DIR" "{{ runtime }}")
+    node authorize_and_store_papi.js "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283" $FLAG
     EXAMPLE_EXIT=$?
 
     echo ""
@@ -765,9 +767,15 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
 #   test_dir - Test directory where services are running
 #   ws_url   - WebSocket URL of the Bulletin chain node (default: ws://127.0.0.1:10000)
 #   seed     - Account seed phrase or dev seed (default: //Eve)
-run-test-hop-round-trip test_dir ws_url="ws://127.0.0.1:10000" seed="//Eve":
+run-test-hop-round-trip test_dir mode="ws" ws_url="ws://127.0.0.1:10000" seed="//Eve":
     #!/usr/bin/env bash
     set -e
+    # HOP RPCs are node-only — the smoldot light client doesn't expose them.
+    # The script itself exits 0 in smoldot mode; this branch is informational.
+    if [ "{{ mode }}" = "smoldot" ]; then
+        echo "HOP test skipped: HOP RPCs require a full node."
+        exit 0
+    fi
     node hop_round_trip.js "{{ ws_url }}" "{{ seed }}"
 
 # Run store chunked data example

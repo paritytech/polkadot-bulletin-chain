@@ -403,9 +403,9 @@ dependencies = [
 
 [[package]]
 name = "ark-vrf"
-version = "0.5.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b9bd02dbd2f282fe742d51f681adb2745a79dc8a025bc8d16cac9b255d55bf7"
+checksum = "f69f34cb5a7d5d4627792c7a6343508becc19deab59a87ef73367cc112dfd02c"
 dependencies = [
  "ark-bls12-381 0.5.0",
  "ark-ec 0.5.0",
@@ -799,15 +799,17 @@ dependencies = [
 
 [[package]]
 name = "bulletin-sdk-rust"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "cid",
+ "futures",
  "parity-scale-codec",
  "scale-info",
  "subxt",
  "subxt-signer",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

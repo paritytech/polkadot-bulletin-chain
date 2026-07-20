@@ -81,6 +81,10 @@ jobs:
         working-directory: sdk/typescript
         run: npm run build
 
+      - name: Bundle size
+        working-directory: sdk/typescript
+        run: npm run size
+
       - name: Unit tests
         working-directory: sdk/typescript
         run: npm test

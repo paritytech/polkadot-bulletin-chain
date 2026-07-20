@@ -46,8 +46,6 @@
  *   node examples/hop_round_trip.js ws://localhost:10000 //Eve http://127.0.0.1:8283
  */
 
-import { createClient } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws';
 import { getPolkadotSigner } from 'polkadot-api/signer';
 import { HopClient, HopNotFoundError } from 'hop-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
@@ -58,7 +56,14 @@ import {
 	ss58Address,
 	blake2b256,
 } from '@polkadot-labs/hdkd-helpers';
-import { waitForBlockProduction, toHex, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
+import {
+	waitForChainReady,
+	waitForBlockProduction,
+	parseProviderArgs,
+	buildProviders,
+	toHex,
+	DEFAULT_IPFS_GATEWAY_URL,
+} from './common.js';
 import { authorizeAccount, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
 import {
@@ -71,13 +76,24 @@ import {
 	logTestResult,
 } from './logger.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
+import { BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
 // ── CLI args ─────────────────────────────────────────────────────────────────
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter(arg => !arg.startsWith('--'));
 const NODE_WS = args[0] || 'ws://localhost:10000';
 const SUDO_PATH = args[1] || '//Eve';
 const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const SENDER_PATH = '//CustomSigner';
+const PROVIDER_CFG = parseProviderArgs(process.argv);
+
+// HOP RPC methods (`hop_poolStatus`, `hop_send`, `hop_claim`, `hop_ack`) are
+// node-side custom RPCs that the smoldot light client does not implement,
+// and `HopClient.connect*` accepts a WS URL — not an arbitrary JsonRpcProvider.
+// Skip smoldot mode by design.
+if (PROVIDER_CFG.mode === 'smoldot') {
+	console.log('HOP test only runs against a full RPC node (ws). Skipping in smoldot mode.');
+	process.exit(0);
+}
 
 // ── Timing constants ─────────────────────────────────────────────────────────
 const CLAIM_POLL_INTERVAL_MS = 2_000;
@@ -195,8 +211,16 @@ async function main() {
 	logInfo(`Round-trip msg : "${roundTripMessage}" (hash ${toHex(roundTripHash)})`);
 	logInfo(`Promotion msg  : "${promotionMessage}" (hash ${toHex(promotionHash)})`);
 
-	const papiClient = createClient(getWsProvider(NODE_WS));
-	const bulletinAPI = papiClient.getTypedApi(bulletin);
+	const providersHandle = await buildProviders({ ...PROVIDER_CFG, wsUrl: NODE_WS });
+	// Use the SDK client both for the typed API (HopRuntimeApi calls) and
+	// for the `authorize_account` extrinsic. HOP's pool/send/claim/ack
+	// remain on the WS URL since hop-sdk has its own RPC client.
+	const sdkClient = new BulletinClient({
+		descriptor: bulletin,
+		providers: providersHandle.providers,
+		uploadSigner: sudoSigner,        // also our authorizer on dev chains
+		authorizerSigner: sudoSigner,
+	});
 	const senderHop = HopClient.connectWithAccount(NODE_WS, rawSigner(senderKeyPair), 'sr25519');
 	// Anonymous client — claim/ack don't need a signer, only the ticket.
 	const receiverHop = HopClient.connect(NODE_WS);
@@ -205,7 +229,8 @@ async function main() {
 	let resultCode = 0;
 
 	try {
-		await waitForBlockProduction(bulletinAPI);
+		await waitForChainReady(sdkClient.api);
+		await waitForBlockProduction(sdkClient.api);
 
 		// ── Step 1: pool baseline ────────────────────────────────────────────
 		logStep('1️⃣', 'hop_poolStatus (baseline)…');
@@ -239,19 +264,15 @@ async function main() {
 
 		// ── Step 3: authorize sender ─────────────────────────────────────────
 		logStep('3️⃣', `Sudo authorizing ${senderAddress}…`);
-		await authorizeAccount(
-			bulletinAPI,
-			sudoSigner,
-			senderAddress,
-			10 /* transactions */,
-			BigInt(10 * 1024 * 1024) /* bytes */,
-			TX_MODE_FINALIZED_BLOCK,
-		);
+		await sdkClient
+			.authorizeAccount(senderAddress, 10 /* transactions */, BigInt(10 * 1024 * 1024))
+			.withWaitFor(WaitFor.Finalized)
+			.send();
 		logSuccess('Authorization confirmed on-chain.');
 
 		// ── Step 4: post-auth runtime checks ─────────────────────────────────
 		logStep('4️⃣', 'Post-auth runtime checks (expect can_account_promote = true)…');
-		const postAuthCanViaPapi = await bulletinAPI.apis.HopRuntimeApi.can_account_promote(
+		const postAuthCanViaPapi = await sdkClient.api.apis.HopRuntimeApi.can_account_promote(
 			senderAddress,
 			roundTripData.length,
 		);
@@ -361,7 +382,8 @@ async function main() {
 	} finally {
 		senderHop.destroy();
 		receiverHop.destroy();
-		papiClient.destroy();
+		await sdkClient.destroy();
+		await providersHandle.cleanup();
 		process.exit(resultCode);
 	}
 }

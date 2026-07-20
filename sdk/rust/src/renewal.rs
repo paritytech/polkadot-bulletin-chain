@@ -19,7 +19,7 @@
 //! let operation = client.prepare_renew(storage_ref)?;
 //!
 //! // Submit via subxt:
-//! // api.tx().transaction_storage().renew(operation.block, operation.index)
+//! // api.tx().transaction_storage().renew(TransactionRef::Position { block: operation.block, index: operation.index })
 //! ```
 
 use crate::types::{Error, Result, StorageRef};

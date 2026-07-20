@@ -1,0 +1,20 @@
+[
+  {
+    "name": "full SDK (ESM, brotli, peer deps external)",
+    "path": "dist/index.mjs",
+    "ignore": [
+      "polkadot-api",
+      "@polkadot-api/metadata-builders",
+      "@polkadot-api/substrate-bindings",
+      "multiformats"
+    ],
+    "limit": "34 kB"
+  },
+  {
+    "name": "offline only: { calculateCid, FixedSizeChunker }",
+    "path": "dist/index.mjs",
+    "import": "{ calculateCid, FixedSizeChunker }",
+    "ignore": ["polkadot-api", "multiformats"],
+    "limit": "11 kB"
+  }
+]

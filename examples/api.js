@@ -240,7 +240,9 @@ export async function fetchCidRaw(httpIpfsApi, cid) {
  */
 export async function fetchCidFromNode(client, cid) {
     console.log('⬇️ Downloading content by cid from node via bitswap_v1_get: ', cid.toString());
-    const hex = await client._request('bitswap_v1_get', [cid.toString()]);
+    // `client` is a raw PAPI client (`_request`) or the SDK BulletinClient (`request`).
+    const request = (client._request ?? client.request).bind(client);
+    const hex = await request('bitswap_v1_get', [cid.toString()]);
     return Buffer.from(hex.replace(/^0x/, ''), 'hex');
 }
 
@@ -269,13 +271,14 @@ export const nodeRpcSource = (client, label = 'bitswap-rpc') =>
 
 /**
  * Fetch the block `cid` addresses from every source and assert each hashes to the
- * CID. Verifying every block against the CID also proves they are byte-identical
- * (equal digests under a collision-resistant hash), so no separate cross-source
- * compare is needed. Returns the block, the raw node for dag-pb CIDs, not the
- * assembled file (use `fetchCid` for that).
+ * CID. With a single source this is a plain hash-verified fetch; with several it
+ * is also a cross-check — verifying every block against the CID proves they are
+ * byte-identical (equal digests under a collision-resistant hash), so no separate
+ * cross-source compare is needed. Returns the block, the raw node for dag-pb CIDs,
+ * not the assembled file (use `fetchCid` for that).
  */
 export async function fetchAndVerifyBlock(cid, ...sources) {
-    assert(sources.length >= 2, `cross-check needs >=2 sources, got ${sources.length}`);
+    assert(sources.length >= 1, `verification needs >=1 source, got ${sources.length}`);
     const blocks = await Promise.all(
         sources.map(async (s) => ({ name: s.name, data: await s.fetch(cid) })),
     );

@@ -1,216 +1,208 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Tests for the opt-in `ensureAuthorized()` pre-flight on the upload
+ * builders. The chain itself does not reject store calls when allowance
+ * is exhausted (it lowers priority via `AllowanceBasedPriority`), so the
+ * SDK's pre-flight only verifies that an `Authorizations` entry exists
+ * and is not expired.
+ */
+
 import { Binary } from "polkadot-api"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-describe("Authorization Check", () => {
-  describe("AsyncBulletinClient authorization check", () => {
-    // These tests exercise the checkAccountAuthorization logic through
-    // the AsyncBulletinClient by providing mock api.query implementations.
+// File-scope mock: createClient(provider).getTypedApi(descriptor) returns
+// `currentApi`, which each test sets via the helper below.
+// biome-ignore lint/suspicious/noExplicitAny: dynamic apiStub
+let currentApi: any = {}
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => currentApi,
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: () => {},
+    })),
+  }
+})
 
-    // We dynamically import to avoid pulling in full PAPI at module level.
-    async function createClientWithQuery(queryImpl: unknown) {
-      const { AsyncBulletinClient } = await import("../../src/async-client")
+import { blobFromBytes } from "../../src/blob-source"
+import { MockBulletinClient } from "../../src/mock-client"
+import { BulletinError, ErrorCode } from "../../src/types"
 
-      // Minimal mock signer
+describe("ensureAuthorized() pre-flight", () => {
+  describe("MockBulletinClient", () => {
+    const hello = () => blobFromBytes(new TextEncoder().encode("hello"))
+
+    it("throws INSUFFICIENT_AUTHORIZATION when simulateInsufficientAuth + ensureAuthorized()", async () => {
+      const client = new MockBulletinClient({
+        simulateInsufficientAuth: true,
+      })
+      const src = hello()
+      await expect(
+        client
+          .submit(await client.estimateUpload(src), src)
+          .ensureAuthorized()
+          .send(),
+      ).rejects.toMatchObject({
+        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      })
+    })
+
+    it("does NOT throw when simulateInsufficientAuth + NO ensureAuthorized()", async () => {
+      const client = new MockBulletinClient({
+        simulateInsufficientAuth: true,
+      })
+      const src = hello()
+      const { cids } = await client
+        .submit(await client.estimateUpload(src), src)
+        .send()
+      expect(cids[cids.length - 1]).toBeDefined()
+    })
+
+    it("passes when ensureAuthorized() + no simulated failure", async () => {
+      const client = new MockBulletinClient()
+      const src = hello()
+      const { cids } = await client
+        .submit(await client.estimateUpload(src), src)
+        .ensureAuthorized()
+        .send()
+      expect(cids[cids.length - 1]).toBeDefined()
+    })
+  })
+
+  describe("BulletinClient.ensureAuthorizedOnChain (via reflection)", () => {
+    // Direct testing of the private method via `as any`. The method only
+    // touches `this.api.query` and `this.signer.publicKey`; we can call it
+    // in isolation without needing a real chainHead follow.
+    async function callEnsureAuthorized(
+      query: unknown,
+      systemNumber?: number,
+    ): Promise<void> {
+      const { BulletinClient } = await import("../../src/client")
+
+      const sysQuery =
+        systemNumber !== undefined
+          ? { System: { Number: { getValue: async () => systemNumber } } }
+          : {}
+
+      const apiStub = {
+        tx: { TransactionStorage: {}, Sudo: { sudo: () => ({}) } },
+        query:
+          query === null
+            ? undefined
+            : Object.assign({}, query as object, sysQuery),
+      }
       const signer = {
-        publicKey: new Uint8Array(32), // all zeros
+        publicKey: new Uint8Array(32),
         sign: async () => new Uint8Array(64),
       }
-
-      // Minimal mock tx object
-      const mockTx = {
-        signAndSubmit: async () => ({
-          txHash: "0x01",
-          block: { hash: "0x02", number: 1 },
-        }),
-        signSubmitAndWatch: () => ({
-          subscribe: (observer: {
-            next: (ev: unknown) => void
-            error: (err: unknown) => void
-          }) => {
-            // Defer so signAndSubmitWithProgress's timerId is initialized
-            setTimeout(() => {
-              observer.next({
-                txHash: "0x01",
-                type: "finalized",
-                block: { hash: "0x02", number: 1 },
-              })
-            }, 0)
-            return { unsubscribe: () => {} }
-          },
-        }),
-        getBareTx: async () => "0x00",
-        decodedCall: {},
-      }
-
-      const api = {
-        tx: {
-          TransactionStorage: {
-            store: () => mockTx,
-            store_with_cid_config: () => mockTx,
-            authorize_account: () => mockTx,
-            authorize_preimage: () => mockTx,
-            renew: () => mockTx,
-            remove_expired_account_authorization: () => mockTx,
-            remove_expired_preimage_authorization: () => mockTx,
-            refresh_account_authorization: () => mockTx,
-            refresh_preimage_authorization: () => mockTx,
-          },
-        },
-        query: queryImpl,
-      }
-
-      const submitFn = async () => ({
-        ok: true,
-        block: { hash: "0x02", number: 1, index: 0 },
-        txHash: "0x01",
-        events: [],
+      // File-scope vi.mock returns this stub from getTypedApi.
+      currentApi = apiStub
+      const client = new BulletinClient({
+        descriptor: {},
+        // biome-ignore lint/suspicious/noExplicitAny: provider stub
+        providers: () => [{} as any],
+        // biome-ignore lint/suspicious/noExplicitAny: signer stub
+        uploadSigner: signer as any,
       })
-
-      // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
-      return new AsyncBulletinClient(api as any, signer as any, submitFn)
+      // biome-ignore lint/suspicious/noExplicitAny: invoking private method by name
+      await (client as any).ensureAuthorizedOnChain()
     }
 
-    it("should skip check gracefully when api.query is not provided", async () => {
-      const client = await createClientWithQuery(undefined)
-
-      // Should not throw — check is skipped
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
+    it("throws UNSUPPORTED_OPERATION when api.query is unavailable", async () => {
+      await expect(callEnsureAuthorized(null)).rejects.toMatchObject({
+        code: ErrorCode.UNSUPPORTED_OPERATION,
+      })
     })
 
-    it("should skip check gracefully when query throws (network error)", async () => {
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => {
-              throw new Error("Network timeout")
+    it("throws INSUFFICIENT_AUTHORIZATION when no Authorizations entry exists", async () => {
+      await expect(
+        callEnsureAuthorized({
+          TransactionStorage: {
+            Authorizations: { getValue: async () => undefined },
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      })
+    })
+
+    it("throws INSUFFICIENT_AUTHORIZATION when authorization has expired", async () => {
+      await expect(
+        callEnsureAuthorized(
+          {
+            TransactionStorage: {
+              Authorizations: {
+                getValue: async () => ({
+                  extent: { transactions: 0, bytes: 0n },
+                  expiration: 100,
+                }),
+              },
             },
           },
-        },
+          200, // current block > expiration
+        ),
+      ).rejects.toMatchObject({
+        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        message: expect.stringMatching(/expired/i),
       })
-
-      // Should not throw — check is best-effort, lets the chain validate
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
     })
 
-    it("should skip check gracefully when no authorization exists", async () => {
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => undefined,
+    it("passes when authorization exists and is not expired", async () => {
+      await expect(
+        callEnsureAuthorized(
+          {
+            TransactionStorage: {
+              Authorizations: {
+                getValue: async () => ({
+                  extent: { transactions: 0, bytes: 0n },
+                  expiration: 1_000_000,
+                }),
+              },
+            },
           },
-        },
-      })
-
-      // Should not throw — authorization not found could be a timing issue,
-      // so we proceed and let the chain validate
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
+          100, // current block < expiration
+        ),
+      ).resolves.toBeUndefined()
     })
 
-    // Allowances gate priority, not acceptance: an exhausted boost budget
-    // must warn and proceed, never block the store.
-    afterEach(() => {
-      vi.restoreAllMocks()
-    })
-
-    it("should warn and proceed when transactions are insufficient", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => ({
-              extent: { transactions: 0, bytes: BigInt(1000000) },
-              expiration: 999999,
-            }),
+    it("passes when expiration is unknown (no System.Number on api.query)", async () => {
+      // Without System.Number we can't tell if it's expired; pre-flight
+      // accepts and lets the chain reject if it's actually expired.
+      await expect(
+        callEnsureAuthorized({
+          TransactionStorage: {
+            Authorizations: {
+              getValue: async () => ({
+                extent: { transactions: 0, bytes: 0n },
+                expiration: 100,
+              }),
+            },
           },
-        },
-      })
-
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("lower priority"),
-      )
+        }),
+      ).resolves.toBeUndefined()
     })
 
-    it("should warn and proceed when bytes are insufficient", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => ({
-              extent: { transactions: 10, bytes: BigInt(1) },
-              expiration: 999999,
-            }),
+    it("returned error is a BulletinError with recoveryHint", async () => {
+      try {
+        await callEnsureAuthorized({
+          TransactionStorage: {
+            Authorizations: { getValue: async () => undefined },
           },
-        },
-      })
-
-      const result = await client
-        .store(Binary.fromText("hello world, this is longer than 1 byte"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining("lower priority"),
-      )
-    })
-
-    it("should pass when authorization is sufficient", async () => {
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => ({
-              extent: { transactions: 10, bytes: BigInt(1000000) },
-              expiration: 999999,
-            }),
-          },
-        },
-      })
-
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
-    })
-
-    it("should not warn when the boost budget covers the store", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-      const client = await createClientWithQuery({
-        TransactionStorage: {
-          Authorizations: {
-            getValue: async () => ({
-              extent: { transactions: 10, bytes: BigInt(1000000) },
-              expiration: 999999,
-            }),
-          },
-        },
-      })
-
-      const result = await client
-        .store(Binary.fromText("hello"))
-        .withWaitFor("in_block")
-        .send()
-      expect(result.cid).toBeDefined()
-      expect(warn).not.toHaveBeenCalled()
+        })
+        expect.fail("Should have thrown")
+      } catch (error) {
+        expect(error).toBeInstanceOf(BulletinError)
+        expect((error as BulletinError).code).toBe(
+          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        )
+        expect((error as BulletinError).recoveryHint).toContain(
+          "authorizeAccount()",
+        )
+      }
     })
   })
 })

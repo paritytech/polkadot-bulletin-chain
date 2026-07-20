@@ -2,35 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest"
-import { AsyncBulletinClient } from "../../src/async-client"
+import { BulletinClient } from "../../src/client"
 
-// Minimal stand-ins; destroy() doesn't touch any of these.
-const dummyApi = {} as never
-const dummySigner = {} as never
-const dummySubmit = (async () => {
-  throw new Error("not used")
-}) as never
+// File-scope mock — captures the destroy() spy so each test can assert
+// on it.
+const destroySpy = vi.fn()
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => ({}),
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: destroySpy,
+    })),
+  }
+})
 
-describe("AsyncBulletinClient.destroy", () => {
-  it("resolves to a no-op when no onDestroy is provided", async () => {
-    const client = new AsyncBulletinClient(dummyApi, dummySigner, dummySubmit)
-    await expect(client.destroy()).resolves.toBeUndefined()
+describe("BulletinClient.destroy", () => {
+  it("tears down the internal PolkadotClient", async () => {
+    destroySpy.mockClear()
+    const client = new BulletinClient({
+      descriptor: {},
+      // biome-ignore lint/suspicious/noExplicitAny: provider stub
+      providers: () => [{} as any],
+    })
+    await client.destroy()
+    expect(destroySpy).toHaveBeenCalledTimes(1)
   })
 
-  it("invokes onDestroy and awaits async teardown", async () => {
-    const teardown = vi.fn(
-      () => new Promise<void>((resolve) => setTimeout(resolve, 5)),
-    )
-    const client = new AsyncBulletinClient(
-      dummyApi,
-      dummySigner,
-      dummySubmit,
-      undefined,
-      teardown,
-    )
-
+  it("is idempotent — second destroy() is a no-op", async () => {
+    destroySpy.mockClear()
+    const client = new BulletinClient({
+      descriptor: {},
+      // biome-ignore lint/suspicious/noExplicitAny: provider stub
+      providers: () => [{} as any],
+    })
     await client.destroy()
-
-    expect(teardown).toHaveBeenCalledTimes(1)
+    await client.destroy()
+    expect(destroySpy).toHaveBeenCalledTimes(1)
   })
 })

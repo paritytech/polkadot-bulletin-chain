@@ -31,8 +31,8 @@ import {
 } from "@/state/storage.state";
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
-import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@parity/bulletin-sdk";
-import { useProgressHandler } from "@/hooks/useProgressHandler";
+import { getContentHash, blobFromItems, CidCodec, HashAlgorithm, UploadStatus, WaitFor, type UploadEvent } from "@parity/bulletin-sdk";
+import { useUploadProgressHandler } from "@/hooks/useUploadProgressHandler";
 import { bytesToHex } from "@/utils/format";
 
 const HASH_ALGORITHMS: { value: HashAlgorithm; label: string }[] = [
@@ -66,7 +66,7 @@ export function Upload() {
   const preimageAuth = usePreimageAuth();
   const preimageAuthLoading = usePreimageAuthLoading();
   const [txStatus, setTxStatus] = useState<string | null>(null);
-  const handleProgress = useProgressHandler(setTxStatus);
+  const handleUploadProgress = useUploadProgressHandler(setTxStatus);
 
   const [inputMode, setInputMode] = useState<"text" | "file">("text");
   const [textData, setTextData] = useState("");
@@ -167,129 +167,69 @@ export function Upload() {
       const contentHash = await getContentHash(data, hashAlgorithm);
       const contentHashHex = bytesToHex(contentHash);
 
+      // Capture final block info + transactionIndex directly from the
+      // SDK's ItemFinalized event — no separate System.Events lookup
+      // needed since the pipeline surfaces them via `TransactionByContentHash`.
+      let finalBlockHash: string | undefined;
+      let finalBlockNumber: number | undefined;
+      let storedIndex: number | undefined;
+      const captureFinal = (ev: UploadEvent) => {
+        if (ev.type === UploadStatus.ItemFinalized) {
+          finalBlockHash = ev.blockHash;
+          finalBlockNumber = ev.blockNumber;
+          storedIndex = ev.transactionIndex;
+        }
+        handleUploadProgress(ev);
+      };
+
       if (hasPreimageAuth) {
-        // Unsigned submission via raw PAPI (no wallet/signer needed)
-        const isCustomCid = hashAlgorithm !== HashAlgorithm.Blake2b256 || cidCodec !== CidCodec.Raw;
+        // Unsigned (preimage-authorized). The SDK accepts no signer; the
+        // chain validates via the preimage authorization for the item's
+        // content hash.
+        const bulletinClient = createBulletinClient!();
+        const items = [{ data, codec: cidCodec, hashAlgo: hashAlgorithm }];
+        const { cids } = await bulletinClient
+          .submit(await bulletinClient.estimateUpload(items), blobFromItems(items))
+          .asUnsigned()
+          .withCallback(captureFinal)
+          .send();
+        const cidStr = cids[0]?.toString() ?? "";
 
-        const toHashingEnum = (alg: HashAlgorithm) => {
-          switch (alg) {
-            case HashAlgorithm.Blake2b256: return { type: "Blake2b256" as const, value: undefined };
-            case HashAlgorithm.Sha2_256: return { type: "Sha2_256" as const, value: undefined };
-            case HashAlgorithm.Keccak256: return { type: "Keccak256" as const, value: undefined };
-            default: return { type: "Blake2b256" as const, value: undefined };
-          }
-        };
-
-        const tx = isCustomCid
-          ? api.tx.TransactionStorage.store_with_cid_config({
-              cid: {
-                codec: BigInt(cidCodec),
-                hashing: toHashingEnum(hashAlgorithm),
-              },
-              data,
-            })
-          : api.tx.TransactionStorage.store({
-              data,
-            });
-
-        setTxStatus("Submitting unsigned transaction...");
-
-        const bareTx = await tx.getBareTx();
-
-        const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
-          let resolved = false;
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const handleEvent = (ev: any) => {
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-
-              let index: number | undefined;
-              if (ev.events) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const storedEvent = ev.events.find((e: any) =>
-                  e.type === "TransactionStorage" && e.value?.type === "Stored"
-                );
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  index = storedEvent.value.value.index;
-                }
-              }
-
-              resolve({
-                blockHash: ev.block.hash,
-                blockNumber: ev.block.number,
-                index,
-              });
-            }
-          };
-
-          const subscription = client.submitAndWatch(bareTx).subscribe({
-            next: handleEvent,
-            error: (err) => {
-              if (!resolved) {
-                resolved = true;
-                reject(err);
-              }
-            },
-          });
-
-          setTimeout(() => {
-            if (!resolved) {
-              resolved = true;
-              subscription.unsubscribe();
-              reject(new Error("Transaction timed out"));
-            }
-          }, 120000);
-        });
-
-        // Calculate CID for display
-        const { calculateCid } = await import("@parity/bulletin-sdk");
-        const cid = await calculateCid(data, cidCodec, hashAlgorithm);
-        const cidStr = cid.toString();
-
-        const uploadResultData: UploadResult = {
+        setUploadResult({
           cid: cidStr,
           contentHash: contentHashHex,
-          blockHash: result.blockHash,
-          blockNumber: result.blockNumber,
-          index: result.index,
+          blockHash: finalBlockHash,
+          blockNumber: finalBlockNumber,
+          index: storedIndex,
           size: data.length,
           unsigned: true,
-        };
-
-        setUploadResult(uploadResultData);
+        });
       } else {
-        // Signed submission via SDK
         const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
-
-        const result = await bulletinClient
-          .store(data)
-          .withCodec(cidCodec)
-          .withHashAlgorithm(hashAlgorithm)
-          .withCallback(handleProgress)
+        const items = [{ data, codec: cidCodec, hashAlgo: hashAlgorithm }];
+        const { cids } = await bulletinClient
+          .submit(await bulletinClient.estimateUpload(items), blobFromItems(items))
+          .withCallback(captureFinal)
           .withWaitFor(WaitFor.Finalized)
           .send();
+        const cidStr = cids[0]?.toString() ?? "";
 
-        const cidStr = result.cid?.toString() ?? "";
-        const uploadResultData: UploadResult = {
+        setUploadResult({
           cid: cidStr,
           contentHash: contentHashHex,
-          blockNumber: result.blockNumber,
-          index: result.extrinsicIndex,
-          size: result.size,
-        };
-
-        setUploadResult(uploadResultData);
+          blockNumber: finalBlockNumber,
+          index: storedIndex,
+          size: data.length,
+        });
 
         // Save to history for easy renewal later (only for signed transactions)
-        if (result.blockNumber !== undefined && result.extrinsicIndex !== undefined) {
+        if (finalBlockNumber !== undefined && storedIndex !== undefined) {
           addStorageEntry({
-            blockNumber: result.blockNumber,
-            index: result.extrinsicIndex,
+            blockNumber: finalBlockNumber,
+            index: storedIndex,
             cid: cidStr,
             contentHash: contentHashHex,
-            size: result.size,
+            size: data.length,
             account: selectedAccount!.address,
             networkId: network.id,
             label: fileName || undefined,

@@ -4,135 +4,276 @@ This guide shows how to renew stored data using the TypeScript SDK to extend the
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(ref)` takes either a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the on-chain `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires once when the data reaches its retention boundary; for immediate renewal use `client.forceRenew(ref)`. On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
+## Overview
 
-## Using the SDK Client
+Data stored on Bulletin Chain has a **retention period**. After this period, data may be pruned. To keep data available, you must **renew** it before expiration.
 
-`AsyncBulletinClient` wraps PAPI and returns builders you finish with `.send()`.
+The renewal flow:
+1. **Store** data → capture `blockNumber` and `extrinsicIndex` from the `ItemFinalized` event
+2. **Track** that `(block, index)` reference
+3. **Renew** before expiration with `client.renew({ block, index })` → capture the new reference
+4. **Repeat** as needed
+
+## The Complete Flow
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-import { createClient } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws";
-import { bulletin } from "@polkadot-api/descriptors";
+import { blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
-const api = papiClient.getTypedApi(bulletin);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+// 1. STORE - submit and capture the storage reference from the event.
+let blockNumber: number | undefined;
+let index: number | undefined;
+let cid: string | undefined;
 
-// 1. STORE - returns a StoreResult with the reference you need to renew
-const result = await client.store(myData).send();
-const blockNumber = result.blockNumber;   // block the store landed in
-const index = result.extrinsicIndex;      // from the Stored event
+const src = blobFromBytes(myData);
+await client
+  .submit(await client.estimateUpload(src), src)
+  .withWaitFor("finalized")
+  .withCallback((ev) => {
+    if (ev.type === UploadStatus.ItemFinalized) {
+      blockNumber = ev.blockNumber;
+      index = ev.extrinsicIndex; // the storage slot for renew()
+      cid = ev.cid.toString();
+    }
+  })
+  .send();
 
-// 2. RENEW (later) - before the retention period expires
-await client.renew({ block: blockNumber, index }).send();
+console.log(`Stored ${cid} at block ${blockNumber}, index ${index}`);
+
+// 2. SAVE these for later renewal.
+saveToDatabase({ blockNumber, index, cid });
+
+// 3. RENEW (later) - when approaching expiration.
+const receipt = await client.renew(blockNumber!, index!).withWaitFor("finalized").send();
+
+// 4. UPDATE the reference for the NEXT renewal. The SDK receipt gives the
+//    renewal's block; read the `Renewed` event for the new slot index.
+const block = await client.api.query.System.Number.getValue(); // or from receipt
+// See "Tracking the renewed index" below.
 ```
 
-`store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
-`renew(ref).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
+### Tracking the renewed index
 
-## Querying the Retention Period
+`client.renew()` resolves with a `TransactionReceipt` (block hash, tx hash, block number) but not the new slot index. To chain renewals, read the `Renewed` event from that block via `client.api`, or query `TransactionByContentHash` for the content's current `(block, index)`.
 
-`RetentionPeriod` is an on-chain storage value (default 201,600 blocks, ~14 days at 6s/block), not a constant — read it from storage:
+## Querying Retention Period
+
+Check how long data is retained:
 
 ```typescript
-const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
+// Get retention period (in blocks)
+const retentionPeriod = await api.constants.TransactionStorage.RetentionPeriod();
+console.log("Retention period:", retentionPeriod, "blocks");
+
+// Get current block
 const currentBlock = await api.query.System.Number.getValue();
 
-const storedAtBlock = 1000; // your stored block number
+// Calculate when data expires
+const storedAtBlock = 1000; // Your stored block number
 const expiresAtBlock = storedAtBlock + retentionPeriod;
 const blocksRemaining = expiresAtBlock - currentBlock;
 
-console.log(`Data expires at block ${expiresAtBlock} (${blocksRemaining} blocks remaining)`);
+console.log(`Data expires at block ${expiresAtBlock}`);
+console.log(`${blocksRemaining} blocks remaining`);
+```
+
+## Checking if Data Exists
+
+Before renewing, verify the data still exists on-chain:
+
+```typescript
+// Query transaction info
+const txInfo = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
+
+if (!txInfo || txInfo.length <= index) {
+  console.log("Data not found - may have been pruned");
+  return;
+}
+
+const info = txInfo[index];
+console.log("Data exists:");
+console.log("  Size:", info.size, "bytes");
+console.log("  Content hash:", info.content_hash.asHex());
 ```
 
 ## Building a Renewal Tracker
 
-For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `AutoRenewalAlreadyEnabled`, so drop entries once scheduled:
+For applications managing multiple stored items, create a tracker:
 
 ```typescript
 interface StoredItem {
   cid: string;
   blockNumber: number;
   index: number;
+  storedAt: Date;
 }
 
 class RenewalTracker {
-  private items = new Map<string, StoredItem>();
+  private items: Map<string, StoredItem> = new Map();
 
   add(cid: string, blockNumber: number, index: number) {
-    this.items.set(cid, { cid, blockNumber, index });
+    this.items.set(cid, {
+      cid,
+      blockNumber,
+      index,
+      storedAt: new Date()
+    });
   }
 
-  async getItemsNeedingRenewal(api: TypedApi, bufferBlocks = 100) {
-    const currentBlock = await api.query.System.Number.getValue();
-    const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
+  update(cid: string, newBlockNumber: number, newIndex: number) {
+    const item = this.items.get(cid);
+    if (item) {
+      item.blockNumber = newBlockNumber;
+      item.index = newIndex;
+    }
+  }
 
-    return [...this.items.values()].filter(
-      (item) => currentBlock + bufferBlocks >= item.blockNumber + retentionPeriod,
-    );
+  async getItemsNeedingRenewal(api: TypedApi, bufferBlocks: number = 100) {
+    const currentBlock = await api.query.System.Number.getValue();
+    const retentionPeriod = await api.constants.TransactionStorage.RetentionPeriod();
+
+    const needsRenewal: StoredItem[] = [];
+
+    for (const item of this.items.values()) {
+      const expiresAt = item.blockNumber + retentionPeriod;
+      if (currentBlock + bufferBlocks >= expiresAt) {
+        needsRenewal.push(item);
+      }
+    }
+
+    return needsRenewal;
   }
 }
 
 // Usage
 const tracker = new RenewalTracker();
-tracker.add(result.cid.toString(), result.blockNumber, result.extrinsicIndex);
 
-for (const item of await tracker.getItemsNeedingRenewal(api)) {
-  await client.renew({ block: item.blockNumber, index: item.index }).send();
+// After storing
+tracker.add(cid.toString(), blockNumber, index);
+
+// Check what needs renewal
+const toRenew = await tracker.getItemsNeedingRenewal(api);
+for (const item of toRenew) {
+  console.log(`Need to renew: ${item.cid}`);
 }
 ```
 
-## Raw Runtime Renewal
+## Batch Renewal
 
-Bypassing the SDK client, a raw PAPI transaction targets the **current** runtime, where `renew`/`force_renew` take an `entry: TransactionRef` and `enable_auto_renew` takes a `content_hash`:
-
-```typescript
-// One-shot scheduled renewal
-api.tx.TransactionStorage.renew({
-  entry: { type: "Position", value: { block, index } },
-});
-
-// Immediate renewal (emits Renewed with a new index)
-api.tx.TransactionStorage.force_renew({
-  entry: { type: "Position", value: { block, index } },
-});
-
-// Recurring auto-renewal (takes the content hash directly, not an `entry`;
-// fixed-size hashes are passed as 0x-prefixed hex)
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
-```
-
-`disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.
-
-The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
+Renew multiple items efficiently:
 
 ```typescript
-api.tx.TransactionStorage.store({ data: myData });
+async function renewBatch(
+  api: TypedApi,
+  signer: PolkadotSigner,
+  items: Array<{ blockNumber: number; index: number }>
+) {
+  // Create renewal calls
+  const calls = items.map(item =>
+    api.tx.TransactionStorage.renew({
+      block: item.blockNumber,
+      index: item.index
+    }).decodedCall
+  );
 
-api.tx.TransactionStorage.store_with_cid_config({
-  cid: { codec: 0x55n, hashing: { type: "Blake2b256" } },
-  data: myData,
-});
+  // Batch them together
+  const batchTx = api.tx.Utility.batch_all({ calls });
+
+  const result = await batchTx.signAndSubmit(signer);
+
+  // Extract all Renewed events
+  const renewedEvents = result.events.filter(
+    e => e.type === "TransactionStorage" && e.value.type === "Renewed"
+  );
+
+  return renewedEvents.map((event, i) => ({
+    originalBlock: items[i].blockNumber,
+    originalIndex: items[i].index,
+    newBlock: result.block.number,
+    newIndex: event.value.value.index
+  }));
+}
 ```
 
 ## Authorization for Renewal
 
-Renewal is accounted differently from storing. A store only consumes the soft boost budget (going over just lowers priority), but a renewal charges the data's byte size against `bytes_permanent` — the account's renew quota — plus one transaction unit, and also counts against the chain-wide permanent-storage **hard cap**. Unlike stores, renewals **are rejected** when either limit is exceeded (see [Authorization](./authorization.md)).
+Renewal consumes authorization just like storing:
+
+```typescript
+// Check you have enough authorization for renewal
+const auth = await api.query.TransactionStorage.Authorizations.getValue({
+  type: "Account",
+  value: myAddress
+});
+
+// Each renewal needs:
+// - 1 transaction
+// - Same number of bytes as the original data
+
+const txInfo = await api.query.TransactionStorage.Transactions.getValue(blockNumber);
+const dataSize = txInfo[index].size;
+
+if (!auth || auth.extent.transactions < 1 || auth.extent.bytes < dataSize) {
+  console.log("Insufficient authorization for renewal");
+  return;
+}
+```
+
+## Complete Example: Store and Schedule Renewal
+
+```typescript
+import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { bulletin } from "@polkadot-api/descriptors";
+import { BulletinClient, blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
+
+const client = new BulletinClient({
+  providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
+  uploadSigner: signer,
+  descriptor: bulletin,
+});
+
+async function storeAndTrackRenewal() {
+  // 1. Store and capture the (block, index) reference.
+  const data = new TextEncoder().encode("Important data to keep!");
+  const src = blobFromBytes(data);
+  let ref: { blockNumber: number; index?: number; cid: string } | undefined;
+  await client
+    .submit(await client.estimateUpload(src), src)
+    .withWaitFor("finalized")
+    .withCallback((ev) => {
+      if (ev.type === UploadStatus.ItemFinalized) {
+        ref = { blockNumber: ev.blockNumber, index: ev.extrinsicIndex, cid: ev.cid.toString() };
+      }
+    })
+    .send();
+
+  // 2. Compute when to renew (10% buffer before expiry).
+  const retentionPeriod = await client.api.constants.TransactionStorage.RetentionPeriod();
+  const expiresAt = ref!.blockNumber + retentionPeriod;
+  const renewAtBlock = expiresAt - Math.floor(retentionPeriod * 0.1);
+
+  // 3. Save for later (in your app's database).
+  return { ...ref!, renewAtBlock, expiresAt };
+}
+
+async function performRenewal(blockNumber: number, index: number) {
+  const receipt = await client.renew({ block: blockNumber, index }).withWaitFor("finalized").send();
+  console.log(`Renewed in block ${receipt.blockNumber}`);
+  // Read the Renewed event from that block for the new slot index (see above).
+}
+```
 
 ## Error Handling
 
+`client.renew(...).send()` throws a `BulletinError`; inspect `error.code` / `error.message` for the on-chain reason (data pruned/already renewed, insufficient authorization, proofs not yet checked).
+
 ```typescript
+import { BulletinError } from "@parity/bulletin-sdk";
+
 try {
   await client.renew({ block: blockNumber, index }).send();
 } catch (error) {
-  if (error.message.includes("RenewedNotFound")) {
-    console.log("Data not found - may have been pruned");
-  } else if (error.message.includes("AutoRenewalAlreadyEnabled")) {
-    console.log("A renewal is already scheduled for this data");
-  } else if (error.message.includes("AuthorizationNotFound")) {
-    console.log("Insufficient authorization - request more via Faucet");
+  if (error instanceof BulletinError) {
+    console.error(error.code, error.message);
   } else {
     throw error;
   }
