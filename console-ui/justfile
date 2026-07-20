@@ -13,6 +13,11 @@
 
 default: dev
 
+# Collator-1 P2P multiaddrs (deterministic zombienet node keys; must match
+# WESTEND_PEER1_* / PASEO_PEER1_* in examples/justfile)
+WESTEND_COLLATOR_MULTIADDR := "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWJKVVNYByvML4Pgx1GWAYryYo6exA68jQX9Mw3AJ6G5gQ"
+PASEO_COLLATOR_MULTIADDR := "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWKjTeRJH8nMcFytc7qTTCQy7JrFgiZFr7iUjd1aPEBn8v"
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 # Install npm dependencies
@@ -37,6 +42,6 @@ dev:
 # ── Testing ──────────────────────────────────────────────────────────
 
 # Run integration Playwright tests (chain must already be running on ws://localhost:10000)
-test: install ensure-browsers
+test runtime=env_var_or_default("RUNTIME_PACKAGE", "bulletin-westend-runtime"): install ensure-browsers
     npx papi generate
-    npx playwright test
+    COLLATOR_MULTIADDR={{ if runtime == "bulletin-paseo-runtime" { PASEO_COLLATOR_MULTIADDR } else { WESTEND_COLLATOR_MULTIADDR } }} npx playwright test
