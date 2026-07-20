@@ -6,13 +6,15 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
-use crate::paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
-use alloc::{vec, vec::Vec};
+use crate::{
+	parameters::dynamic_params::xcm::{AllowedParachainIds, GovernanceParachainIds},
+	paseo_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID},
+};
 use frame_support::{
 	parameter_types,
 	traits::{
 		fungible::HoldConsideration, tokens::imbalance::ResolveTo, ConstU32, Contains, Equals,
-		Everything, EverythingBut, LinearStoragePrice, Nothing,
+		Everything, EverythingBut, Get, LinearStoragePrice, Nothing,
 	},
 };
 use frame_system::EnsureRoot;
@@ -127,17 +129,6 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	fn contains(location: &Location) -> bool {
 		matches!(location.unpack(), (1, []) | (1, [Plurality { .. }]))
 	}
-}
-
-parameter_types! {
-	/// Sibling parachain IDs authorized to dispatch storage authorizations via
-	/// XCM. Storage-backed so governance (root) can update via
-	/// `system.set_storage` without a runtime upgrade.
-	pub storage AllowedParachainIds: Vec<u32> = vec![1502, 5140];
-	/// Sibling parachain IDs treated as governance origins. Storage-backed so
-	/// governance (root) can update via `system.set_storage` without a runtime
-	/// upgrade.
-	pub storage GovernanceParachainIds: Vec<u32> = vec![1500];
 }
 
 /// Filter matching sibling parachain origins listed in [`AllowedParachainIds`]
