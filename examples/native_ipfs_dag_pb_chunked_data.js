@@ -83,9 +83,11 @@ async function main() {
         await fileToDisk(downloadedFilePath, fullBuffer);
         filesAreEqual(filePath, downloadedFilePath);
 
-        // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
-        const rootCidAsRaw = convertCid(rootCid, 0x55);
-        const storedDagNode = dagPB.decode(await fetchContent(rootCidAsRaw, HTTP_IPFS_API, client));
+        // Fetch the dag-pb root block by its real 0x70 CID. fetchContent pulls the
+        // raw root node (not the gateway-composed file) over both the gateway and
+        // bitswap RPC and verifies each against the CID, so this exercises the
+        // dag-pb codec path directly.
+        const storedDagNode = dagPB.decode(await fetchContent(rootCid, HTTP_IPFS_API, client));
         const decodedDagNode = dagPB.decode(Buffer.from(dagBytes));
         console.log("✅ Reconstructed DAG file: ", storedDagNode);
         assert.deepStrictEqual(storedDagNode, decodedDagNode);

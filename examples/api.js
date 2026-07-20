@@ -5,7 +5,7 @@ import fs from 'fs';
 import assert from 'assert';
 import { cidFromBytes } from "./cid_dag_metadata.js";
 import { Enum } from '@polkadot-api/substrate-bindings';
-import { CHUNK_SIZE, toHex, toHashingEnum } from './common.js';
+import { CHUNK_SIZE, toHex, toHashingEnum, getContentHash } from './common.js';
 
 function toBytes(data) {
     if (typeof data === 'string') {
@@ -221,6 +221,21 @@ export async function fetchCid(httpIpfsApi, cid) {
 }
 
 /**
+ * Fetch the single raw block for `cid` from the IPFS gateway via `?format=raw`.
+ *
+ * Unlike `fetchCid`, this never traverses dag-pb links: for a dag-pb CID the
+ * gateway returns the root node bytes, not the assembled file, so the result
+ * hashes back to the CID for any codec.
+ */
+export async function fetchCidRaw(httpIpfsApi, cid) {
+    const contentUrl = `${httpIpfsApi}/ipfs/${cid.toString()}?format=raw`;
+    console.log('⬇️ Downloading raw block by cid from url: ', contentUrl);
+    const res = await fetch(contentUrl);
+    if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+    return Buffer.from(await res.arrayBuffer())
+}
+
+/**
  * Fetch the stored block directly from the node via the `bitswap_v1_get` RPC.
  */
 export async function fetchCidFromNode(client, cid) {
@@ -230,17 +245,34 @@ export async function fetchCidFromNode(client, cid) {
 }
 
 /**
- * Fetch a block from both the IPFS gateway and the node's `bitswap_v1_get` RPC,
- * assert both return identical bytes, and return them.
- *
- * Only valid for CIDs of single stored blocks: for dag-pb root CIDs the gateway
- * returns the assembled file while the node returns the indexed block.
+ * Hash `data` with the algorithm the CID encodes and assert it matches the CID's
+ * digest. This is the actual integrity check: a CID always hashes its own block
+ * (raw bytes, or the dag-pb root node), never a composed file.
+ */
+export function verifyCid(data, cid) {
+    const expected = Buffer.from(cid.multihash.digest);
+    const actual = Buffer.from(getContentHash(data, cid.multihash.code));
+    assert(
+        actual.equals(expected),
+        `❌ Data does not hash to CID ${cid.toString()}: ` +
+        `got ${actual.toString('hex')}, expected ${expected.toString('hex')}`,
+    );
+}
+
+/**
+ * Fetch the raw block for `cid` over two independent paths, the IPFS gateway
+ * (`?format=raw`) and the node's `bitswap_v1_get` RPC, verify each against the
+ * CID, and return the block. Both paths return the block the CID addresses, so
+ * this also works for dag-pb root CIDs (the root node, not the composed file).
+ * Use `fetchCid` when you want the gateway-assembled dag-pb file.
  */
 export async function fetchContent(cid, httpIpfsApi, client) {
     const [fromIpfs, fromNode] = await Promise.all([
-        fetchCid(httpIpfsApi, cid),
+        fetchCidRaw(httpIpfsApi, cid),
         fetchCidFromNode(client, cid),
     ]);
+    verifyCid(fromIpfs, cid);
+    verifyCid(fromNode, cid);
     assert(
         fromIpfs.equals(fromNode),
         `❌ IPFS gateway and node RPC content mismatch for CID ${cid.toString()} ` +
