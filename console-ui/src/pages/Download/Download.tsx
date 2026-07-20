@@ -15,6 +15,7 @@ import {
   Loader2,
   Globe,
   History,
+  Server,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -33,32 +34,11 @@ import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, format
 import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
 import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
-import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork, useBlockNumber, useApi } from "@/state/chain.state";
+import { buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
+import { fetchFromBitswapRpc } from "@/lib/bitswap-rpc";
+import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus, type Network } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
-
-const P2P_MULTIADDRS: Record<string, string> = {
-  local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
-  westend: [
-    "/dns4/westend-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSxYQRoTT9rZNZRrjCfG2fPpBwPumkQsxLroTKjX6Mvkw",
-    "/dns4/westend-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSD5tovFkmja9aFYA6QM8eU3mFhZKdAuCsa5MgSsNDmxc",
-    "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
-    "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
-  ].join("\n"),
-  paseo: [
-    "/dns4/paseo-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWRuKisocQ2Z5hBZagV5YGxJMYuW13xT42sUiUCWf5bRtu",
-    "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
-    "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
-    "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
-  ].join("\n"),
-  "paseo-next-v2": [
-    "/dns4/paseo-bulletin-next-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWDGdPBWpytPdNAXDT2KJWwmPXkxvxyQLGc7pRdFWeZnyB",
-    "/dns4/paseo-bulletin-next-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWC45NgktSLMPQafAhi8TMAtiiatnmNc3Qv6wA74u7YBVc",
-    "/dns4/paseo-bulletin-next-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWS4ptBbHGritdb1T7JPxKT2EN7FXvqq9rUp12jUvjnqQ1",
-    "/dns4/paseo-bulletin-next-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWKMc4jJsU7fdEsis4AsM8Assk5jFqhEUEa2ZSiWJGKpfv",
-  ].join("\n"),
-};
 
 interface FetchResult {
   cid: string;
@@ -70,8 +50,8 @@ interface FetchResult {
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-function getDefaultMultiaddrs(networkId: string): string {
-  return P2P_MULTIADDRS[networkId] ?? "";
+function getDefaultMultiaddrs(network: Network): string {
+  return network.peerMultiaddrs?.join("\n") ?? "";
 }
 
 function OnChainStatusContent({
@@ -178,6 +158,8 @@ export function Download() {
   const network = useNetwork();
   const blockNumber = useBlockNumber();
   const api = useApi();
+  const client = useClient();
+  const chainStatus = useConnectionStatus();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -193,7 +175,7 @@ export function Download() {
   const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
   const [contentHashError, setContentHashError] = useState<string | null>(null);
 
-  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
+  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<ConnectionInfo[]>([]);
@@ -212,11 +194,9 @@ export function Download() {
   const [cidLookupDone, setCidLookupDone] = useState(false);
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
 
-  const [gatewayUrl, setGatewayUrl] = useState(
-    () => IPFS_GATEWAYS[network.id] ?? ""
-  );
+  const [gatewayUrl, setGatewayUrl] = useState(() => network.ipfsGateway ?? "");
 
-  const activeTab = searchParams.get("tab") || PREFERRED_DOWNLOAD_METHOD[network.id] || "p2p";
+  const activeTab = searchParams.get("tab") || network.preferredDownloadMethod || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
   const prevNetworkId = useRef(network.id);
@@ -239,7 +219,7 @@ export function Download() {
     heliaClientRef.current?.stop();
     heliaClientRef.current = null;
 
-    setPeerMultiaddrs(getDefaultMultiaddrs(network.id));
+    setPeerMultiaddrs(getDefaultMultiaddrs(network));
     setConnectionStatus("disconnected");
     setConnectionError(null);
     setConnectedPeers([]);
@@ -252,7 +232,7 @@ export function Download() {
     setFetchError(null);
     setFetchResult(null);
 
-    setGatewayUrl(IPFS_GATEWAYS[network.id] ?? "");
+    setGatewayUrl(network.ipfsGateway ?? "");
 
     // Clear tab param so the new network's preferred method takes effect
     setSearchParams((prev) => {
@@ -261,7 +241,7 @@ export function Download() {
       next.delete("cid");
       return next;
     });
-  }, [network.id, setSearchParams]);
+  }, [network, setSearchParams]);
 
   // Update URL when CID changes
   useEffect(() => {
@@ -469,6 +449,14 @@ export function Download() {
             // not valid JSON despite content-type
           }
         }
+      } else if (activeTab === "rpc" && client) {
+        data = await fetchFromBitswapRpc(client, parsedCid.toString());
+        try {
+          parsedJSON = JSON.parse(new TextDecoder().decode(data));
+          isJSON = true;
+        } catch {
+          // not JSON content
+        }
       } else if (heliaClientRef.current) {
         const result = await heliaClientRef.current.fetchData(parsedCid);
         data = result.data;
@@ -581,13 +569,15 @@ export function Download() {
 
   const isConnected = connectionStatus === "connected";
   const hasGateway = gatewayUrl.trim().length > 0;
-  const canFetch = activeTab === "gateway" ? hasGateway : isConnected;
+  const isNodeConnected = chainStatus === "connected" && !!client;
+  const canFetch =
+    activeTab === "gateway" ? hasGateway : activeTab === "rpc" ? isNodeConnected : isConnected;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Download Data</h1>
-        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P or IPFS Gateway</p>
+        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P, IPFS Gateway, or node Bitswap RPC</p>
       </div>
 
       <Tabs
@@ -610,6 +600,10 @@ export function Download() {
           <TabsTrigger value="gateway">
             <Globe className="h-4 w-4 mr-2" />
             IPFS Gateway
+          </TabsTrigger>
+          <TabsTrigger value="rpc">
+            <Server className="h-4 w-4 mr-2" />
+            Bitswap RPC
           </TabsTrigger>
         </TabsList>
 
@@ -805,6 +799,50 @@ export function Download() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Tab 3: Bitswap RPC */}
+        <TabsContent value="rpc" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                Bitswap RPC
+              </CardTitle>
+              <CardDescription>
+                Fetch stored data directly from the connected node via the{" "}
+                <code>bitswap_v1_get</code> JSON-RPC method
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isNodeConnected ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                    Connected
+                  </Badge>
+                  <span className="text-muted-foreground font-mono text-xs truncate">
+                    {network.endpoints[0] ?? network.name}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>Not connected to a node. Select a network to fetch via RPC.</span>
+                </div>
+              )}
+
+              <div className="border-t pt-4 text-sm text-muted-foreground space-y-2">
+                <p>
+                  The node looks up the indexed transaction by the CID's hash digest and returns
+                  the exact stored block.
+                </p>
+                <p>
+                  Unlike the IPFS gateway, there is no DAG assembly: a dag-pb root CID returns the
+                  DAG node bytes, not the assembled file.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Always visible: Fetch by CID + CID Info */}
@@ -821,7 +859,9 @@ export function Download() {
                 {canFetch
                   ? activeTab === "gateway"
                     ? "Enter a CID to retrieve data via IPFS Gateway"
-                    : "Enter a CID to retrieve data via P2P"
+                    : activeTab === "rpc"
+                      ? "Enter a CID to retrieve data via the node's Bitswap RPC"
+                      : "Enter a CID to retrieve data via P2P"
                   : "Enter a CID to retrieve data"}
               </CardDescription>
             </CardHeader>
@@ -831,8 +871,9 @@ export function Download() {
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>
                     No data source configured. Connect to a peer in the{" "}
-                    <strong>P2P Connection</strong> tab or set a gateway URL in the{" "}
-                    <strong>IPFS Gateway</strong> tab.
+                    <strong>P2P Connection</strong> tab, set a gateway URL in the{" "}
+                    <strong>IPFS Gateway</strong> tab, or connect to a network for the{" "}
+                    <strong>Bitswap RPC</strong> tab.
                   </span>
                 </div>
               )}
@@ -940,7 +981,11 @@ export function Download() {
                 {isFetching ? (
                   <>
                     <Spinner size="sm" className="mr-2" />
-                    {activeTab === "gateway" ? "Fetching via Gateway..." : "Fetching via P2P..."}
+                    {activeTab === "gateway"
+                      ? "Fetching via Gateway..."
+                      : activeTab === "rpc"
+                        ? "Fetching via Node RPC..."
+                        : "Fetching via P2P..."}
                   </>
                 ) : (
                   <>

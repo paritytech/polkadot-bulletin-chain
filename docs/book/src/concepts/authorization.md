@@ -81,23 +81,36 @@ Authorizes a specific **piece of data** (by hash) to be stored by anyone.
 
 Query your current authorization status:
 
+The `Authorizations` map is keyed by an `AuthorizationScope` (`Account(accountId)` or `Preimage(contentHash)`). The stored value carries an `extent` with the consumed counters (`transactions`, `bytes`) and the granted caps (`transactions_allowance`, `bytes_allowance`).
+
 ```typescript
-// TypeScript (PAPI)
-const auth = await api.query.TransactionStorage.Authorizations.getValue(accountId);
+// TypeScript (PAPI) - key is an AuthorizationScope enum
+const auth = await api.query.TransactionStorage.Authorizations.getValue({
+  type: "Account",
+  value: accountId,
+});
 if (auth) {
-  console.log(`Transactions remaining: ${auth.transactions}`);
-  console.log(`Bytes remaining: ${auth.bytes}`);
+  const { transactions, transactions_allowance, bytes, bytes_allowance } = auth.extent;
+  console.log(`Transactions: ${transactions} / ${transactions_allowance}`);
+  console.log(`Bytes: ${bytes} / ${bytes_allowance}`);
 }
 ```
 
 ```rust
 // Rust (subxt)
+use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope;
+
+let scope = AuthorizationScope::Account(account_id);
 let auth = api
     .storage()
     .at_latest()
     .await?
-    .fetch(&bulletin::storage().transaction_storage().authorizations(account_id))
+    .fetch(&bulletin::storage().transaction_storage().authorizations(scope))
     .await?;
+if let Some(auth) = auth {
+    println!("Transactions: {}/{}", auth.extent.transactions, auth.extent.transactions_allowance);
+    println!("Bytes: {}/{}", auth.extent.bytes, auth.extent.bytes_allowance);
+}
 ```
 
 ## Estimating Authorization Needs
@@ -113,8 +126,10 @@ println!("Need {} transactions and {} bytes", txs, bytes);
 
 ```typescript
 // TypeScript
-const client = new BulletinClient();
-const { transactions, bytes } = client.estimateAuthorization(fileSizeInBytes);
+import { estimateAuthorization } from "@parity/bulletin-sdk";
+
+const chunkSize = 1024 * 1024; // 1 MiB
+const { transactions, bytes } = estimateAuthorization(fileSizeInBytes, chunkSize, true);
 console.log(`Need ${transactions} transactions and ${bytes} bytes`);
 ```
 

@@ -54,7 +54,7 @@ import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 async function main() {
   // 1. Create the client — it owns its PAPI connection.
   const client = new BulletinClient({
-    providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+    providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
     uploadSigner: signer,
     descriptor: bulletin, // optional; omit to use getUnsafeApi()
   });
@@ -103,7 +103,7 @@ use std::str::FromStr;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Connect to Bulletin Chain
-    let client = TransactionClient::new("wss://paseo-bulletin-rpc.polkadot.io").await?;
+    let client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 
     // 2. Create signer (replace with your key)
     let uri = subxt_signer::SecretUri::from_str("//Alice")?;
@@ -155,6 +155,6 @@ You'll receive authorization to store up to 1 MiB of data.
 
 | Network | RPC Endpoint | Status |
 |---------|--------------|--------|
-| Paseo (Testnet) | `wss://paseo-bulletin-rpc.polkadot.io` | Active |
+| Paseo (Testnet) | `wss://paseo-bulletin-next-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
 | Local Dev | `ws://localhost:10000` | - |

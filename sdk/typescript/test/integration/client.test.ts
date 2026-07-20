@@ -327,7 +327,9 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       // The compat registry resolves the local chain's current shape
       // (`renew(entry: TransactionRef)`) and encodes accordingly.
-      const receipt = await client.renew(slot!.block, slot!.index).send()
+      const receipt = await client
+        .renew({ block: slot!.block, index: slot!.index })
+        .send()
       expect(receipt.blockHash).toBeDefined()
       expect(receipt.txHash).toBeDefined()
     })

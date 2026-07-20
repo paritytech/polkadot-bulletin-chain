@@ -71,6 +71,9 @@ export {
   type SubmitAndWatchFn,
   SubmitBuilder,
   type TransactionReceipt,
+  type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "./client.js"
 
 // dag: DAG-PB manifest building

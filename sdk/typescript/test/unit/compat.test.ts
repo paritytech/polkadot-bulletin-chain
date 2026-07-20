@@ -85,7 +85,7 @@ describe("client renew dispatch (mocked PAPI)", () => {
     const { client, renewTx, submitTx } = await makeDispatchClient(
       metadataFile("metadata.scale"),
     )
-    await client.renew(7, 3).send()
+    await client.renew({ block: 7, index: 3 }).send()
     expect(renewTx).toHaveBeenCalledWith({
       entry: { type: "Position", value: { block: 7, index: 3 } },
     })
@@ -96,7 +96,7 @@ describe("client renew dispatch (mocked PAPI)", () => {
     const { client, renewTx } = await makeDispatchClient(
       metadataFile("metadata-compat/transaction-storage-v1000011.scale"),
     )
-    await client.renew(7, 3).send()
+    await client.renew({ block: 7, index: 3 }).send()
     expect(renewTx).toHaveBeenCalledWith({ block: 7, index: 3 })
   })
 
@@ -104,8 +104,8 @@ describe("client renew dispatch (mocked PAPI)", () => {
     const { client, metadataAtVersion } = await makeDispatchClient(
       metadataFile("metadata.scale"),
     )
-    await client.renew(1, 0).send()
-    await client.renew(2, 0).send()
+    await client.renew({ block: 1, index: 0 }).send()
+    await client.renew({ block: 2, index: 0 }).send()
     expect(metadataAtVersion).toHaveBeenCalledTimes(1)
   })
 })

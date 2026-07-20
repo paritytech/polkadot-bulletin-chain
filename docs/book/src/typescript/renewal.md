@@ -11,7 +11,7 @@ Data stored on Bulletin Chain has a **retention period**. After this period, dat
 The renewal flow:
 1. **Store** data → capture `blockNumber` and `extrinsicIndex` from the `ItemFinalized` event
 2. **Track** that `(block, index)` reference
-3. **Renew** before expiration with `client.renew(block, index)` → capture the new reference
+3. **Renew** before expiration with `client.renew({ block, index })` → capture the new reference
 4. **Repeat** as needed
 
 ## The Complete Flow
@@ -226,7 +226,7 @@ import { bulletin } from "@polkadot-api/descriptors";
 import { BulletinClient, blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
 
 const client = new BulletinClient({
-  providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+  providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
   uploadSigner: signer,
   descriptor: bulletin,
 });
@@ -256,7 +256,7 @@ async function storeAndTrackRenewal() {
 }
 
 async function performRenewal(blockNumber: number, index: number) {
-  const receipt = await client.renew(blockNumber, index).withWaitFor("finalized").send();
+  const receipt = await client.renew({ block: blockNumber, index }).withWaitFor("finalized").send();
   console.log(`Renewed in block ${receipt.blockNumber}`);
   // Read the Renewed event from that block for the new slot index (see above).
 }
@@ -270,7 +270,7 @@ async function performRenewal(blockNumber: number, index: number) {
 import { BulletinError } from "@parity/bulletin-sdk";
 
 try {
-  await client.renew(blockNumber, index).send();
+  await client.renew({ block: blockNumber, index }).send();
 } catch (error) {
   if (error instanceof BulletinError) {
     console.error(error.code, error.message);

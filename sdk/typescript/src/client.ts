@@ -104,6 +104,31 @@ interface PapiTransaction {
 }
 
 /**
+ * On-chain `TransactionRef` used by the renewal extrinsics — the PAPI
+ * tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
+ * requires a runtime that ships `TransactionRef`; its value is the 32-byte
+ * content hash as a `0x`-prefixed hex string (PAPI encodes fixed-size binary
+ * as `SizedHex` and rejects raw byte arrays).
+ */
+export type TransactionRef =
+  | { type: "Position"; value: { block: number; index: number } }
+  | { type: "ContentHash"; value: string }
+
+/**
+ * Caller-friendly reference to stored data for `renew()`/`forceRenew()`. The
+ * variant is inferred from the shape: `{ block, index }` becomes `Position`;
+ * a `Uint8Array` content hash becomes `ContentHash`.
+ */
+export type TransactionRefInput = { block: number; index: number } | Uint8Array
+
+/** Convert a {@link TransactionRefInput} into the on-chain tagged enum. */
+export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
+  if (ref instanceof Uint8Array)
+    return { type: "ContentHash", value: Binary.toHex(ref) }
+  return { type: "Position", value: { block: ref.block, index: ref.index } }
+}
+
+/**
  * Minimal interface for the PAPI typed API.
  *
  * Describes the pallets and extrinsics the SDK interacts with.
@@ -127,13 +152,13 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      /** The pallet takes a `TransactionRef` enum — renew by position or by
-       *  content hash; the SDK renews by the `(block, index)` slot. */
-      renew(args: {
-        entry:
-          | { type: "Position"; value: { block: number; index: number } }
-          | { type: "ContentHash"; value: string }
-      }): PapiTransaction
+      // `renew` takes a `TransactionRef` on current runtimes and `(block, index)`
+      // on older ones; the SDK detects which via the compat registry.
+      renew(
+        args: { block: number; index: number } | { entry: TransactionRef },
+      ): PapiTransaction
+      // Only present on runtimes that ship `TransactionRef`.
+      force_renew?(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -341,7 +366,8 @@ export interface BulletinClientInterface {
   ): AuthCallBuilder
   authorizeAccount(entries: AuthorizeAccountEntry[]): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
-  renew(block: number, index: number): CallBuilder
+  renew(ref: TransactionRefInput): CallBuilder
+  forceRenew(ref: TransactionRefInput): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -455,7 +481,7 @@ export class SubmitBuilder extends BaseUploadBuilder<UploadResult> {
  * @example
  * ```typescript
  * const receipt = await client
- *   .renew(blockNumber, index)
+ *   .renew({ block: blockNumber, index })
  *   .withWaitFor('finalized')
  *   .withCallback((event) => console.log(event))
  *   .send();
@@ -1508,28 +1534,71 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Renew/extend retention period for stored data
+   * Schedule a one-shot renewal of stored data.
    *
-   * @param block - Block number where the original storage transaction was included
-   * @param index - Extrinsic index within the block
+   * The renewal fires once when the data reaches its retention boundary; it
+   * does not renew synchronously. For immediate renewal use {@link forceRenew}.
+   *
+   * @param ref - A `{ block, index }` position (from the `Stored`/`Renewed`
+   *   event) or a `Uint8Array` content hash. Content-hash renewal requires a
+   *   `TransactionRef` runtime.
    */
-  renew(block: number, index: number): CallBuilder {
+  renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       // Registry dispatch (see compat.ts): the connected chain's checksum
       // for `TransactionStorage.renew` selects the encoder — identification
       // first, never trial-encoding; unknown shapes fail closed. Both arms
       // encode via the unsafe api (codecs built from the live metadata) so
       // a stale caller descriptor can't veto a compatible chain.
+      const entry = toTransactionRef(ref)
       const shape = await this.renewShape()
       const renewTx = this.papiClient.getUnsafeApi().tx.TransactionStorage
         .renew as (args: object) => PapiTransaction
-      const tx =
-        shape === "transaction-ref"
-          ? renewTx({ entry: { type: "Position", value: { block, index } } })
-          : renewTx({ block, index })
+      let tx: PapiTransaction
+      if (shape === "transaction-ref") {
+        tx = renewTx({ entry })
+      } else if (entry.type === "Position") {
+        // Pre-`TransactionRef` runtimes take the position fields directly.
+        tx = renewTx(entry.value)
+      } else {
+        throw new BulletinError(
+          "content-hash renewal is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
       return this.submitTx(
         tx,
         "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * Immediately renew stored data, extending its retention from the current
+   * block.
+   *
+   * Requires a runtime that ships `TransactionRef` / `force_renew`; older
+   * runtimes reject with `UNSUPPORTED_OPERATION`.
+   *
+   * @param ref - A `{ block, index }` position or a `Uint8Array` content hash.
+   */
+  forceRenew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const ts = this.papiClient.getUnsafeApi().tx.TransactionStorage
+      if ((await this.renewShape()) !== "transaction-ref" || !ts.force_renew) {
+        throw new BulletinError(
+          "force_renew is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
+      const tx = (ts.force_renew as (args: object) => PapiTransaction)({
+        entry: toTransactionRef(ref),
+      })
+      return this.submitTx(
+        tx,
+        "Failed to force renew",
         ErrorCode.TRANSACTION_FAILED,
         options,
       )

@@ -996,7 +996,7 @@ async fn renew_roundtrip_via_registry() {
 	let (block, index) = slot.lock().unwrap().expect("ItemFinalized carried the renew slot");
 
 	let receipt = client
-		.renew(block, index, &alice, WaitFor::Finalized)
+		.renew((block, index), &alice, WaitFor::Finalized)
 		.await
 		.expect("renew via registry dispatch");
 	assert!(!receipt.block_hash.is_empty(), "renew included");

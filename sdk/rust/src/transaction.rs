@@ -16,6 +16,7 @@ use crate::{
 	pipeline::{run_resolved, ResolvedItem, UploadConfig, UploadResult},
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
+use bulletin_transaction_storage_primitives::TransactionRef;
 use std::{
 	collections::{BTreeSet, HashMap, HashSet},
 	sync::Arc,
@@ -32,6 +33,17 @@ use subxt_signer::sr25519::Keypair;
 // Subxt metadata for TransactionStorage pallet
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
+
+/// Convert the primitives `TransactionRef` into the subxt-generated one.
+fn to_runtime_ref(
+	entry: &TransactionRef<u32>,
+) -> bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef<u32> {
+	use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+	match entry {
+		TransactionRef::Position { block, index } => Gen::Position { block: *block, index: *index },
+		TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+	}
+}
 
 /// Input to [`TransactionClient::estimate_upload`]: either in-memory items (each
 /// stored as its own unit, no manifest) or a re-openable byte source (chunked
@@ -886,37 +898,44 @@ impl TransactionClient {
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
-	/// Renew/extend the retention period for stored data.
+	/// Schedule a one-shot renewal of stored data.
+	///
+	/// The renewal fires once when the data reaches its retention boundary; it
+	/// does not renew synchronously. For immediate renewal use
+	/// [`force_renew`](Self::force_renew).
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
 	///
 	/// The fleet runs several runtime generations at once, so the call is
 	/// dispatched through the compat registry: the connected chain's
 	/// `TransactionStorage.renew` type-tree hash selects the encoder (a local
 	/// lookup, no extra RPC) — see [`crate::compat`]. An absent or unknown
-	/// shape fails closed.
+	/// shape fails closed. Legacy positional runtimes take `(block, index)`
+	/// only; content-hash renewal there fails closed.
 	pub async fn renew(
 		&self,
-		block: u32,
-		index: u32,
+		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
+		let entry = entry.into();
 		let result = match compat::renew_adapter(&self.api.metadata())? {
 			compat::RenewAdapter::TransactionRef => {
-				// The pallet takes a `TransactionRef` (renew by position or by
-				// content hash); the SDK tracks the `(block, index)` slot from
-				// `Stored` events.
-				let entry = bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef::Position {
-					block,
-					index,
-				};
-				let tx = bulletin::tx().transaction_storage().renew(entry);
+				let tx = bulletin::tx().transaction_storage().renew(to_runtime_ref(&entry));
 				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
 					Error::RenewalFailed(format!("Renew failed: {e}"))
 				})
 				.await?
 			},
 			compat::RenewAdapter::Positional => {
-				let tx = compat::bulletin_v1000011::tx().transaction_storage().renew(block, index);
+				let TransactionRef::Position { block, index } = &entry else {
+					return Err(Error::RenewalFailed(
+						"content-hash renewal is not supported by this runtime".into(),
+					));
+				};
+				let tx =
+					compat::bulletin_v1000011::tx().transaction_storage().renew(*block, *index);
 				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
 					Error::RenewalFailed(format!("Renew failed: {e}"))
 				})
@@ -924,11 +943,34 @@ impl TransactionClient {
 			},
 		};
 
-		Ok(RenewReceipt {
-			original_block: block,
-			transaction_index: index,
-			block_hash: result.block_hash,
-		})
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
+	}
+
+	/// Immediately renew stored data, extending its retention from the current
+	/// block.
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`]. Requires a runtime that
+	/// ships `TransactionRef` / `force_renew`; legacy positional runtimes fail
+	/// closed.
+	pub async fn force_renew(
+		&self,
+		entry: impl Into<TransactionRef<u32>>,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<RenewReceipt> {
+		if compat::renew_adapter(&self.api.metadata())? != compat::RenewAdapter::TransactionRef {
+			return Err(Error::RenewalFailed("force_renew is not supported by this runtime".into()));
+		}
+		let entry = entry.into();
+		let tx = bulletin::tx().transaction_storage().force_renew(to_runtime_ref(&entry));
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Force renew failed: {e}"))
+			})
+			.await?;
+
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -1043,8 +1085,8 @@ pub struct PreimageAuthorizationReceipt {
 /// Receipt from a successful renew operation.
 #[derive(Debug, Clone)]
 pub struct RenewReceipt {
-	pub original_block: u32,
-	pub transaction_index: u32,
+	/// The renewed entry (position or content hash) that was submitted.
+	pub entry: TransactionRef<u32>,
 	pub block_hash: String,
 }
 

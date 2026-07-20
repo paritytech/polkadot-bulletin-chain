@@ -193,7 +193,7 @@ import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
   const client = new BulletinClient({
-    providers: () => [getWsProvider("wss://paseo-bulletin-rpc.polkadot.io")],
+    providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
     uploadSigner: signer,
     descriptor: bulletin,
   });
