@@ -6,7 +6,7 @@ import fs from 'fs'
 import os from "os";
 import path from "path";
 import assert from "assert";
-import {authorizeAccount, store, fetchCid, fetchContent, TX_MODE_FINALIZED_BLOCK, TX_MODE_IN_BLOCK} from "./api.js";
+import {authorizeAccount, store, fetchCid, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, TX_MODE_FINALIZED_BLOCK, TX_MODE_IN_BLOCK} from "./api.js";
 import { buildUnixFSDagPB, cidFromBytes } from "./cid_dag_metadata.js";
 import {
     setupKeyringAndSigners,
@@ -337,7 +337,7 @@ async function main() {
             let downloadedChunks = [];
             for (const chunk of chunks) {
                 // Download the chunk from IPFS and the node RPC, verifying both match.
-                let block = await fetchContent(chunk.cid, IPFS_GATEWAY_URL, client);
+                let block = await fetchAndVerifyBlock(chunk.cid, gatewaySource(IPFS_GATEWAY_URL), nodeRpcSource(client));
                 downloadedChunks.push(block);
             }
             let fullBuffer = Buffer.concat(downloadedChunks);

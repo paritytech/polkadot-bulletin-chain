@@ -5,7 +5,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchContent, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, authorizePreimage, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -68,7 +68,7 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
     logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
     // Read back from IPFS and the node RPC, verifying both match.
-    const downloadedContent = await fetchContent(cid, HTTP_IPFS_API, client);
+    const downloadedContent = await fetchAndVerifyBlock(cid, gatewaySource(HTTP_IPFS_API), nodeRpcSource(client));
     logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     // Verify CID matches

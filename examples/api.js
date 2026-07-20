@@ -247,38 +247,40 @@ export async function fetchCidFromNode(client, cid) {
 /**
  * Hash `data` with the algorithm the CID encodes and assert it matches the CID's
  * digest. This is the actual integrity check: a CID always hashes its own block
- * (raw bytes, or the dag-pb root node), never a composed file.
+ * (raw bytes, or the dag-pb root node), never a composed file. `source` labels
+ * the origin of the data in the failure message.
  */
-export function verifyCid(data, cid) {
+export function verifyCid(data, cid, source = 'data') {
     const expected = Buffer.from(cid.multihash.digest);
     const actual = Buffer.from(getContentHash(data, cid.multihash.code));
     assert(
         actual.equals(expected),
-        `❌ Data does not hash to CID ${cid.toString()}: ` +
+        `❌ ${source} does not hash to CID ${cid.toString()}: ` +
         `got ${actual.toString('hex')}, expected ${expected.toString('hex')}`,
     );
 }
 
+/** A retrieval path: a `name` plus an async `(cid) => Buffer` fetcher of the raw block. */
+export const gatewaySource = (httpIpfsApi) =>
+    ({ name: `ipfs-gateway ${httpIpfsApi}`, fetch: (cid) => fetchCidRaw(httpIpfsApi, cid) });
+
+export const nodeRpcSource = (client, label = 'bitswap-rpc') =>
+    ({ name: label, fetch: (cid) => fetchCidFromNode(client, cid) });
+
 /**
- * Fetch the raw block for `cid` over two independent paths, the IPFS gateway
- * (`?format=raw`) and the node's `bitswap_v1_get` RPC, verify each against the
- * CID, and return the block. Both paths return the block the CID addresses, so
- * this also works for dag-pb root CIDs (the root node, not the composed file).
- * Use `fetchCid` when you want the gateway-assembled dag-pb file.
+ * Fetch the block `cid` addresses from every source and assert each hashes to the
+ * CID. Verifying every block against the CID also proves they are byte-identical
+ * (equal digests under a collision-resistant hash), so no separate cross-source
+ * compare is needed. Returns the block, the raw node for dag-pb CIDs, not the
+ * assembled file (use `fetchCid` for that).
  */
-export async function fetchContent(cid, httpIpfsApi, client) {
-    const [fromIpfs, fromNode] = await Promise.all([
-        fetchCidRaw(httpIpfsApi, cid),
-        fetchCidFromNode(client, cid),
-    ]);
-    verifyCid(fromIpfs, cid);
-    verifyCid(fromNode, cid);
-    assert(
-        fromIpfs.equals(fromNode),
-        `❌ IPFS gateway and node RPC content mismatch for CID ${cid.toString()} ` +
-        `(${fromIpfs.length} vs ${fromNode.length} bytes)`,
+export async function fetchAndVerifyBlock(cid, ...sources) {
+    assert(sources.length >= 2, `cross-check needs >=2 sources, got ${sources.length}`);
+    const blocks = await Promise.all(
+        sources.map(async (s) => ({ name: s.name, data: await s.fetch(cid) })),
     );
-    return fromIpfs;
+    for (const { name, data } of blocks) verifyCid(data, cid, name);
+    return blocks[0].data;
 }
 
 /**
