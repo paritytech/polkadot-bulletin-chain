@@ -25,7 +25,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import { blobFromBytes, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
-import { fetchCid } from './api.js';
+import { fetchAndVerifyBlock, gatewaySource, nodeRpcSource } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
 import {
     setupKeyringAndSigners,
@@ -118,17 +118,23 @@ async function main() {
             '❌ expectedCid does not match cid!',
         );
 
-        // IPFS verification — optional, skipped if the gateway isn't reachable.
+        // Verify the stored block via the node's `bitswap_v1_get` RPC — it
+        // rides the client's own provider, so it always runs. The IPFS gateway
+        // cross-check is best-effort (local runs may lack kubo), but a hash or
+        // content mismatch from either source is fatal.
+        const downloadedContent = await fetchAndVerifyBlock(cid, nodeRpcSource(client));
+        assert.deepStrictEqual(
+            dataToStore,
+            downloadedContent.toString(),
+            '❌ dataToStore does not match downloadedContent!',
+        );
+        logSuccess('Verified content via node RPC!');
         try {
-            const downloadedContent = await fetchCid(HTTP_IPFS_API, cid.toString());
-            assert.deepStrictEqual(
-                dataToStore,
-                downloadedContent.toString(),
-                '❌ dataToStore does not match downloadedContent!',
-            );
-            logSuccess('Verified content via IPFS!');
+            await fetchAndVerifyBlock(cid, gatewaySource(HTTP_IPFS_API));
+            logSuccess('Verified content via IPFS gateway!');
         } catch (err) {
-            console.log(`⚠️  IPFS verification skipped (${HTTP_IPFS_API} unreachable): ${err.message}`);
+            if (err.code === 'ERR_ASSERTION') throw err;
+            console.log(`⚠️  IPFS gateway verification skipped (${HTTP_IPFS_API} unreachable): ${err.message}`);
         }
 
         logTestResult(true, `Authorize and Store Test (${PROVIDER_CFG.mode})`);

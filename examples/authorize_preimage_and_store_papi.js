@@ -25,7 +25,7 @@ import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 
-import { fetchCid } from './api.js';
+import { fetchAndVerifyBlock, gatewaySource, nodeRpcSource } from './api.js';
 import { cidFromBytes } from './cid_dag_metadata.js';
 import {
     setupKeyringAndSigners,
@@ -104,7 +104,12 @@ async function runPreimageStoreTest({ label, client, userAddress, signed, cidCod
     const cid = cids[0];
     logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
-    const downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+    // Read back from the IPFS gateway and the node RPC, verifying both match.
+    const downloadedContent = await fetchAndVerifyBlock(
+        cid,
+        gatewaySource(HTTP_IPFS_API),
+        nodeRpcSource(client),
+    );
     logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     assert.deepStrictEqual(

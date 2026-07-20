@@ -40,7 +40,7 @@ import {
     WaitFor,
 } from '../sdk/typescript/dist/index.mjs';
 
-import { fetchCid } from './api.js';
+import { fetchCid, fetchAndVerifyBlock, gatewaySource, nodeRpcSource } from './api.js';
 import {
     setupKeyringAndSigners,
     newSigner,
@@ -70,6 +70,16 @@ const IMAGE_SIZE = args[3] || 'big64';
 const signerDiscriminator = process.argv.find(arg => arg.startsWith('--signer-disc='))?.split('=')[1] ?? null;
 const SKIP_AUTHORIZE = process.argv.includes('--skip-authorize');
 const SKIP_IPFS_VERIFY = process.argv.includes('--skip-ipfs-verify');
+
+/**
+ * Retrieval paths for block verification: always the node's bitswap RPC (rides
+ * the SDK client's provider, so it works on live networks and under smoldot),
+ * plus the IPFS gateway unless `--skip-ipfs-verify` (no kubo).
+ */
+const blockSources = (client) =>
+    SKIP_IPFS_VERIFY
+        ? [nodeRpcSource(client)]
+        : [gatewaySource(IPFS_GATEWAY_URL), nodeRpcSource(client)];
 const PROVIDER_CFG = parseProviderArgs(process.argv);
 
 // -------------------- helpers --------------------
@@ -198,7 +208,8 @@ async function main() {
 
         printPerBlock(perBlock);
 
-        // 5) Verify via IPFS
+        // 5) Verify. The root-CID dag traversal needs the gateway; chunk blocks
+        //    are always fetched back hash-verified via `blockSources`.
         if (!SKIP_IPFS_VERIFY) {
             logStep('3️⃣', 'Downloading root CID from IPFS...');
             const downloadedManifest = await fetchCid(IPFS_GATEWAY_URL, rootCid.toString());
@@ -210,26 +221,26 @@ async function main() {
                 '❌ Failed to download all the data via root CID!',
             );
             logSuccess(`Reconstructed via root CID: ${downloadedManifest.length} bytes`);
-
-            if (chunkCids.length) {
-                logStep('4️⃣', 'Downloading each chunk from IPFS...');
-                const downloadedChunks = [];
-                for (const cid of chunkCids) {
-                    downloadedChunks.push(await fetchCid(IPFS_GATEWAY_URL, cid.toString()));
-                }
-                const fullBuffer = Buffer.concat(downloadedChunks);
-                await fileToDisk(downloadedByChunksPath, fullBuffer);
-                filesAreEqual(filePath, downloadedByChunksPath);
-                assert.strictEqual(
-                    fileBytes.length,
-                    fullBuffer.length,
-                    '❌ Failed to download all the data via chunks!',
-                );
-                logSuccess(`Reconstructed from ${chunkCids.length} chunks: ${fullBuffer.length} bytes`);
-            }
         }
 
-        logTestResult(true, SKIP_IPFS_VERIFY ? 'Store Big Data SDK Test (Storage Only)' : 'Store Big Data SDK Test');
+        if (chunkCids.length) {
+            logStep('4️⃣', `Downloading each chunk (${SKIP_IPFS_VERIFY ? 'node RPC' : 'gateway + node RPC'})...`);
+            const downloadedChunks = [];
+            for (const cid of chunkCids) {
+                downloadedChunks.push(await fetchAndVerifyBlock(cid, ...blockSources(client)));
+            }
+            const fullBuffer = Buffer.concat(downloadedChunks);
+            await fileToDisk(downloadedByChunksPath, fullBuffer);
+            filesAreEqual(filePath, downloadedByChunksPath);
+            assert.strictEqual(
+                fileBytes.length,
+                fullBuffer.length,
+                '❌ Failed to download all the data via chunks!',
+            );
+            logSuccess(`Reconstructed from ${chunkCids.length} chunks: ${fullBuffer.length} bytes`);
+        }
+
+        logTestResult(true, SKIP_IPFS_VERIFY ? 'Store Big Data SDK Test (node-RPC verify)' : 'Store Big Data SDK Test');
         resultCode = 0;
     } catch (error) {
         logError(`Error: ${error.message}`);

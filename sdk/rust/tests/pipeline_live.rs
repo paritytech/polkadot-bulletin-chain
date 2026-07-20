@@ -18,7 +18,7 @@
 
 use bulletin_sdk_rust::prelude::*;
 use std::{
-	collections::HashMap,
+	collections::{HashMap, HashSet},
 	sync::{
 		atomic::{AtomicUsize, Ordering},
 		Arc, Mutex,
@@ -205,7 +205,7 @@ async fn pipeline_uploads_64mib_multiwave() {
 		.collect();
 
 	let started = Arc::new(AtomicUsize::new(0));
-	let in_block = Arc::new(AtomicUsize::new(0));
+	let in_block = Arc::new(Mutex::new(HashSet::new()));
 	let failed = Arc::new(AtomicUsize::new(0));
 	let (s, b, f) = (started.clone(), in_block.clone(), failed.clone());
 	let config = UploadConfig {
@@ -215,8 +215,10 @@ async fn pipeline_uploads_64mib_multiwave() {
 			UploadEvent::ItemStarted { .. } => {
 				s.fetch_add(1, Ordering::SeqCst);
 			},
-			UploadEvent::ItemInBlock { .. } => {
-				b.fetch_add(1, Ordering::SeqCst);
+			UploadEvent::ItemInBlock { index, .. } => {
+				// A fork can re-include an item and fire ItemInBlock again —
+				// count distinct items, not events.
+				b.lock().unwrap().insert(index);
 			},
 			UploadEvent::ItemFailed { index, error, .. } => {
 				f.fetch_add(1, Ordering::SeqCst);
@@ -234,14 +236,14 @@ async fn pipeline_uploads_64mib_multiwave() {
 	println!(
 		"64 MiB / {CHUNKS} chunks uploaded in {secs:.1}s — started={} in_block={} failed={} cids={}",
 		started.load(Ordering::SeqCst),
-		in_block.load(Ordering::SeqCst),
+		in_block.lock().unwrap().len(),
 		failed.load(Ordering::SeqCst),
 		result.cids.len(),
 	);
 
 	assert_eq!(result.cids.len(), CHUNKS, "one CID per chunk");
 	assert_eq!(started.load(Ordering::SeqCst), CHUNKS, "ItemStarted per chunk");
-	assert_eq!(in_block.load(Ordering::SeqCst), CHUNKS, "every chunk reached a block");
+	assert_eq!(in_block.lock().unwrap().len(), CHUNKS, "every chunk reached a block");
 	assert_eq!(failed.load(Ordering::SeqCst), 0, "no chunk failed");
 
 	// All CIDs distinct (no accidental dedup of distinct chunks).

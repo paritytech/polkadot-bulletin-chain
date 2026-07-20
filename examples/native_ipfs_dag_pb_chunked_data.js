@@ -27,7 +27,7 @@ import {
     buildProviders,
     DEFAULT_IPFS_GATEWAY_URL,
 } from './common.js';
-import { fetchCid } from './api.js';
+import { fetchCid, fetchAndVerifyBlock, gatewaySource, nodeRpcSource } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import { blobFromItems, BulletinClient, WaitFor } from '../sdk/typescript/dist/index.mjs';
 import assert from 'assert';
@@ -129,8 +129,15 @@ async function main() {
         await fileToDisk(downloadedFilePath, fullBuffer);
         filesAreEqual(filePath, downloadedFilePath);
 
-        const rootCidAsRaw = convertCid(rootCid, 0x55);
-        const storedDagNode = dagPB.decode(await fetchCid(HTTP_IPFS_API, rootCidAsRaw));
+        // Fetch the dag-pb root block by its real 0x70 CID. fetchAndVerifyBlock pulls
+        // the raw root node (not the gateway-composed file) over both the gateway and
+        // bitswap RPC and verifies each against the CID, so this exercises the dag-pb
+        // codec path directly.
+        const storedDagNode = dagPB.decode(await fetchAndVerifyBlock(
+            rootCid,
+            gatewaySource(HTTP_IPFS_API),
+            nodeRpcSource(client),
+        ));
         const decodedDagNode = dagPB.decode(Buffer.from(dagBytes));
         assert.deepStrictEqual(storedDagNode, decodedDagNode);
 

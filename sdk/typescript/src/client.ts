@@ -750,6 +750,15 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * Raw JSON-RPC escape hatch for node-custom methods the typed api cannot
+   * reach (e.g. the bulletin node's `bitswap_v1_get`). Rides the client's own
+   * provider, so it works over ws and smoldot alike.
+   */
+  request<T = unknown>(method: string, params: unknown[] = []): Promise<T> {
+    return this.papiClient._request(method, params)
+  }
+
+  /**
    * Release the SDK's internal PAPI client (closes its WS connection and
    * clears subscriptions). Idempotent after the first call.
    */
