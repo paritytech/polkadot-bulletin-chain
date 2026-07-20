@@ -122,6 +122,19 @@ test.describe("Preimage Round-Trip", () => {
 
       await expect(page.getByText(testData)).toBeVisible({ timeout: 60_000 });
     });
+
+    // ── Step 5: Download via node Bitswap RPC and verify ───────────
+
+    await test.step("fetch via bitswap_v1_get RPC and verify content matches", async () => {
+      await page.getByRole("tab", { name: /Bitswap RPC/i }).click();
+
+      // Switching tabs clears the previous result; CID input is preserved
+      const fetchButton = page.getByRole("button", { name: "Fetch Data" });
+      await expect(fetchButton).toBeEnabled({ timeout: 15_000 });
+      await fetchButton.click();
+
+      await expect(page.getByText(testData)).toBeVisible({ timeout: 60_000 });
+    });
   });
 });
 
