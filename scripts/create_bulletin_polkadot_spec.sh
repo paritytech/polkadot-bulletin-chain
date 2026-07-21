@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
 #
 # Generate the zombienet chain spec for bulletin-polkadot from a pre-built
 # runtime WASM. The runtime lives in the polkadot-fellows/runtimes repo and
@@ -15,20 +17,20 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 : "${WASM_PATH:?WASM_PATH must be set (path to bulletin_polkadot_runtime.compact.compressed.wasm)}"
 
 if [ ! -f "$WASM_PATH" ]; then
-	echo "❌ WASM not found at: $WASM_PATH"
-	exit 1
+    echo "❌ WASM not found at: $WASM_PATH"
+    exit 1
 fi
 
 cd "$ROOT_DIR"
 
 chain-spec-builder create \
-	-p 1010 \
-	-c westend \
-	-i bulletin-polkadot \
-	-n Bulletin \
-	-t local \
-	-r "$WASM_PATH" \
-	named-preset local_testnet
+        -p 1010 \
+        -c westend \
+        -i bulletin-polkadot \
+        -n Bulletin \
+        -t local \
+        -r "$WASM_PATH" \
+        named-preset local_testnet
 
 mv chain_spec.json ./zombienet/bulletin-polkadot-spec.json
 echo "✅ Wrote ./zombienet/bulletin-polkadot-spec.json"
