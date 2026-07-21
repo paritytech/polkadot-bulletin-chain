@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Async client with full transaction submission support
@@ -82,6 +82,36 @@ interface PapiTransaction {
 }
 
 /**
+ * On-chain `TransactionRef` used by the renewal extrinsics.
+ *
+ * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
+ * requires a runtime that ships `TransactionRef`; its value is the 32-byte
+ * content hash as a `0x`-prefixed hex string (PAPI represents fixed-size
+ * binary values as `SizedHex`, and its encoder rejects raw byte arrays).
+ */
+export type TransactionRef =
+  | { type: "Position"; value: { block: number; index: number } }
+  | { type: "ContentHash"; value: string }
+
+/**
+ * Caller-friendly reference to stored data for `renew()`/`forceRenew()`.
+ *
+ * The variant is inferred from the shape: `{ block, index }` becomes
+ * `Position`; a `Uint8Array` content hash becomes `ContentHash`.
+ */
+export type TransactionRefInput = { block: number; index: number } | Uint8Array
+
+/** Convert a {@link TransactionRefInput} into the on-chain tagged enum. */
+export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
+  if (ref instanceof Uint8Array)
+    return { type: "ContentHash", value: Binary.toHex(ref) }
+  return { type: "Position", value: { block: ref.block, index: ref.index } }
+}
+
+/** Which call shape the runtime's renewal extrinsics take. */
+type RenewShape = "transactionRef" | "legacy"
+
+/**
  * Minimal interface for the PAPI typed API.
  *
  * Describes the pallets and extrinsics the SDK interacts with.
@@ -105,7 +135,13 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      renew(args: { block: number; index: number }): PapiTransaction
+      // `renew` takes a `TransactionRef` on current runtimes and `(block, index)`
+      // on older ones; the SDK detects which at runtime.
+      renew(
+        args: { block: number; index: number } | { entry: TransactionRef },
+      ): PapiTransaction
+      // Only present on runtimes that ship `TransactionRef`.
+      force_renew?(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -294,7 +330,8 @@ export interface BulletinClientInterface {
     bytes: bigint,
   ): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
-  renew(block: number, index: number): CallBuilder
+  renew(ref: TransactionRefInput): CallBuilder
+  forceRenew(ref: TransactionRefInput): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -414,7 +451,7 @@ export class StoreBuilder {
  * @example
  * ```typescript
  * const receipt = await client
- *   .renew(blockNumber, index)
+ *   .renew({ block, index })
  *   .withWaitFor('finalized')
  *   .withCallback((event) => console.log(event))
  *   .send();
@@ -591,11 +628,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /**
    * Best-effort authorization check before a store submission.
    *
-   * If `api.query` is not available (optional interface), this silently returns.
-   * If authorization is explicitly insufficient (numbers too low), throws
-   * `INSUFFICIENT_AUTHORIZATION`. If the query fails or returns nothing (e.g.,
-   * timing issue after recent authorization), silently proceeds and lets the
-   * chain validate.
+   * Allowances gate transaction *priority*, not acceptance — the chain never
+   * rejects a store for an exhausted boost budget. So this only warns when the
+   * budget looks insufficient and always proceeds. If `api.query` is not
+   * available, the query fails, or returns nothing, it silently proceeds and
+   * lets the chain validate.
    */
   private async checkAccountAuthorization(
     requiredTransactions: number,
@@ -649,17 +686,13 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           )
         : Number(auth.extent.bytes)
 
-    if (availableTransactions < requiredTransactions) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredTransactions} transactions, have ${availableTransactions}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-
-    if (availableBytes < requiredBytes) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredBytes} bytes, have ${availableBytes}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+    if (
+      availableTransactions < requiredTransactions ||
+      availableBytes < requiredBytes
+    ) {
+      console.warn(
+        `Boost budget exhausted (need ${requiredTransactions} transactions / ${requiredBytes} bytes, ` +
+          `have ${availableTransactions} / ${availableBytes}) - the store will proceed at lower priority`,
       )
     }
   }
@@ -1155,18 +1188,108 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     })
   }
 
+  /** Cached renewal call-shape resolution; a rejected probe is not cached. */
+  private renewShapePromise?: Promise<RenewShape>
+
   /**
-   * Renew/extend retention period for stored data
+   * Resolve which call shape the runtime's renewal extrinsics take, once per
+   * client.
    *
-   * @param block - Block number where the original storage transaction was included
-   * @param index - Extrinsic index within the block
+   * On a real PAPI `TypedApi`, `tx.TransactionStorage.force_renew` is a proxy
+   * entry that is truthy for *any* name, so presence alone proves nothing; the
+   * entry's `getCompatibilityLevel()` compares descriptors against the live
+   * runtime and returns `CompatibilityLevel.Incompatible` (0) when the runtime
+   * lacks the call. Hand-rolled api objects (tests/mocks) have no such probe —
+   * there, presence of `force_renew` decides.
+   *
+   * A probe failure throws instead of guessing — dispatching the wrong shape
+   * yields an opaque encode error — and is not cached, so the next call
+   * retries. A resolved shape is cached for the client's lifetime; after a
+   * runtime upgrade that changes the renewal call shape, create a new client.
    */
-  renew(block: number, index: number): CallBuilder {
-    return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+  private resolveRenewShape(): Promise<RenewShape> {
+    this.renewShapePromise ??= (async (): Promise<RenewShape> => {
+      const forceRenew = this.api.tx.TransactionStorage.force_renew
+      if (!forceRenew) return "legacy"
+      const probe = (
+        forceRenew as unknown as {
+          getCompatibilityLevel?: () => Promise<number>
+        }
+      ).getCompatibilityLevel
+      if (typeof probe !== "function") return "transactionRef"
+      let level: number
+      try {
+        level = await probe.call(forceRenew)
+      } catch (error) {
+        throw new BulletinError(
+          "failed to probe runtime compatibility for renew",
+          ErrorCode.TRANSACTION_FAILED,
+          error,
+        )
+      }
+      return level > 0 ? "transactionRef" : "legacy"
+    })()
+    const resolved = this.renewShapePromise
+    resolved.catch(() => {
+      if (this.renewShapePromise === resolved) {
+        this.renewShapePromise = undefined
+      }
+    })
+    return resolved
+  }
+
+  /**
+   * Schedule a one-shot renewal of stored data.
+   *
+   * The renewal fires once when the data reaches its retention boundary; it does
+   * not renew synchronously. For immediate renewal use {@link forceRenew}.
+   */
+  renew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const entry = toTransactionRef(ref)
+      const ts = this.api.tx.TransactionStorage
+      let tx: PapiTransaction
+      if ((await this.resolveRenewShape()) === "transactionRef") {
+        tx = ts.renew({ entry })
+      } else if (entry.type === "Position") {
+        // Pre-`TransactionRef` runtimes take the position fields directly.
+        tx = ts.renew(entry.value)
+      } else {
+        throw new BulletinError(
+          "content-hash renewal is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
       return this.submitTx(
         tx,
         "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * Immediately renew stored data, extending its retention from the current block.
+   *
+   * Requires a runtime that supports `force_renew`.
+   */
+  forceRenew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const ts = this.api.tx.TransactionStorage
+      if (
+        (await this.resolveRenewShape()) !== "transactionRef" ||
+        !ts.force_renew
+      ) {
+        throw new BulletinError(
+          "force_renew is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
+      const tx = ts.force_renew({ entry: toTransactionRef(ref) })
+      return this.submitTx(
+        tx,
+        "Failed to force renew",
         ErrorCode.TRANSACTION_FAILED,
         options,
       )

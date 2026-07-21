@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Integration tests for Bulletin SDK
@@ -494,7 +494,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // Try to renew (may fail if not renewable yet)
       try {
         const receipt = await client
-          .renew(storeResult.blockNumber ?? 0, 0)
+          .renew({ block: storeResult.blockNumber ?? 0, index: 0 })
           .send()
         expect(receipt).toBeDefined()
         console.log("Renew test passed")

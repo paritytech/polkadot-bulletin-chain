@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -122,8 +120,8 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 	AuthorizerBudget {
 		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
-		authorization_period: None,
 		valid_until: None,
+		feeless: false,
 	}
 }
 
@@ -351,8 +349,8 @@ mod benchmarks {
 			&who,
 			AuthorizerBudget {
 				quota: Some(Quota { transactions: 0, bytes: 0 }),
-				authorization_period: None,
 				valid_until: None,
+				feeless: false,
 			},
 		);
 

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Chopsticks integration test for auto-renewal using PAPI typed codecs.
  *
@@ -146,7 +149,7 @@ async function main() {
 
   // ── Setup accounts ──
   const keyring = new Keyring({ type: "sr25519" });
-  const alice = keyring.addFromUri("//Alice");
+  const authorizer = keyring.addFromUri("//Eve");
 
   // ── Compute content hash ──
   const testData = new Uint8Array(2000).fill(42);
@@ -162,14 +165,14 @@ async function main() {
   // ── Set base storage with PAPI codecs ──
   logStep(2, "Setting base storage state (authorization, transactions, content hash map)...");
 
-  // AuthorizationScope::Account(alice) = 0x00 ++ alice.publicKey
+  // AuthorizationScope::Account(authorizer) = 0x00 ++ authorizer.publicKey
   const scopeBytes = new Uint8Array(1 + 32);
   scopeBytes[0] = 0; // Account variant
-  scopeBytes.set(alice.publicKey, 1);
+  scopeBytes.set(authorizer.publicKey, 1);
 
   const chunks = Math.ceil(testData.length / (1024 * 1024)) || 1;
   const baseStorageItems = [
-    // Authorizations(Account(alice))
+    // Authorizations(Account(authorizer))
     [
       mapKey("TransactionStorage", "Authorizations", scopeBytes),
       encodeHex(AuthorizationCodec, {
@@ -220,7 +223,7 @@ async function main() {
   // ── Test enable_auto_renew ──
   logStep(3, "Testing enable_auto_renew: setting AutoRenewals entry...");
   const autoRenewalValue = encodeHex(AutoRenewalDataCodec, {
-    account: alice.publicKey,
+    account: authorizer.publicKey,
   });
   await provider.send("dev_setStorage", [[[autoRenewalsKey, autoRenewalValue]]], false);
 

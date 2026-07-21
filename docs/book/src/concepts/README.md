@@ -1,5 +1,13 @@
 # Core Concepts
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 This section covers the fundamental concepts you need to understand when working with Bulletin Chain.
 
 ## Data Lifecycle
@@ -24,8 +32,8 @@ Before storing data, accounts must be **authorized**. This prevents spam and man
 
 Once authorized, submit data to the chain:
 
-- **Small data** (< 8 MiB): Stored directly in a single transaction
-- **Large data** (> 8 MiB): Split into chunks with a DAG-PB manifest
+- **Small data** (< 2 MiB): Stored directly in a single transaction
+- **Large data** (> 2 MiB): Split into chunks with a DAG-PB manifest
 - On success, you receive:
   - **CID** (Content Identifier) for retrieval
   - **Block number** and **index** (needed for renewal)
@@ -44,9 +52,10 @@ Data is retrieved from Bulletin validator nodes:
 
 Data has a **retention period** after which it may be pruned:
 
-- Track the block number and index from `Stored`/`Renewed` events
-- Call `renew(block, index)` before expiration to extend retention
-- Each renewal gives you a **new** block/index for the next renewal
+- Track the block number and index from `Stored`/`Renewed` events, or use the content hash
+- Reference the data with a `TransactionRef` (`Position { block, index }` or `ContentHash(hash)`)
+- Renew before expiration: `renew(entry)` (one-shot scheduled), `force_renew(entry)` (immediate), or `enable_auto_renew(content_hash)` (recurring)
+- Each `force_renew` gives you a **new** block/index for the next renewal
 - Learn more: [Data Renewal](./renewal.md)
 
 ## CIDs (Content Identifiers)
@@ -65,9 +74,9 @@ When you store data, the chain records the CID. This proves that *this specific 
 
 | Limit | Value | Notes |
 |-------|-------|-------|
-| Max Transaction Size | ~8 MiB | Substrate limit |
+| Max Transaction Size | ~2 MiB | runtime `MaxTransactionSize` |
 | Recommended Chunk Size | 1 MiB | Optimal for most use cases |
-| Retention Period | Chain-specific | Check `transactionStorage.retentionPeriod()` |
+| Retention Period | Chain-specific | Storage value `TransactionStorage.RetentionPeriod` (default 201,600 blocks) |
 
 Files larger than the transaction limit must be chunked. The SDKs handle this automatically.
 
@@ -78,3 +87,13 @@ Files larger than the transaction limit must be chunked. The SDKs handle this au
 - [Data Retrieval](./retrieval.md) - Fetching data from validator nodes
 - [Data Renewal](./renewal.md) - Extending storage retention
 - [DAG-PB Manifests](./manifests.md) - Manifest format for chunked data
+
+## Security
+
+See the [root README](../../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

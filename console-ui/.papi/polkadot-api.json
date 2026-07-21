@@ -6,31 +6,31 @@
       "wsUrl": "wss://westend-bulletin-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_westend.scale",
       "genesis": "0xee1f44f62e68312c4852f37585941e9b64b5ceae539e4aa112ce9d3cf7bbe9fd",
-      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
-    },
-    "bulletin_paseo": {
-      "wsUrl": "wss://paseo-bulletin-rpc.polkadot.io",
-      "metadata": ".papi/metadata/bulletin_paseo.scale",
-      "genesis": "0x744960c32e3a3df5440e1ecd4d34096f1ce2230d7016a5ada8a765d5a622b4ea",
-      "codeHash": "0xce76768a4d9db3a9dbea8acdefeec037a1119dafdc98c62c30c90453ef3a2c75"
-    },
-    "web3_storage": {
-      "wsUrl": "ws://localhost:2222",
-      "metadata": ".papi/metadata/web3_storage.scale",
-      "genesis": "0x4545454545454545454545454545454545454545454545454545454545454545",
-      "codeHash": "0x289091ecfc0d1c0b66b62e22d54788fbcd0314f037c3ed7aebae4c330d21e879"
+      "codeHash": "0x38bfc044dabd6d3ad3494e4096d8efbf8f6d7e66f69dd6a4526f5ceaf4e72356"
     },
     "bulletin_paseo_next_v2": {
       "wsUrl": "wss://paseo-bulletin-next-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_paseo_next_v2.scale",
       "genesis": "0x8cfe6717dc4becfda2e13c488a1e2061ff2dfee96e7d031157f72d36716c0a22",
-      "codeHash": "0x4fe167698d8a654b0d832ffa2b22471689331b278d93e1802b4f3d469b807d5a"
+      "codeHash": "0xe6deb62a7078a64b2534febedb4638acce1615a95b2622272d368db3e559b8ac"
     },
     "bulletin_polkadot": {
       "wsUrl": "wss://bulletin-rpc.polkadot.io",
       "metadata": ".papi/metadata/bulletin_polkadot.scale",
       "genesis": "0x2761c95259d59e55ae3daf756c1413b46e45a5a2987299f8ef8e5d8e4776cbc4",
       "codeHash": "0xad57082d2d342a06f487fd0d7f2d21e0e03b8a48432a2d9cc8b876fa27c43967"
+    },
+    "bulletin_previewnet": {
+      "wsUrl": "wss://previewnet.substrate.dev/bulletin",
+      "metadata": ".papi/metadata/bulletin_previewnet.scale",
+      "genesis": "0xf37fa1f1450ea120edbf64c3fc447f671a00e1f1095a698f42eeec073c7ee487",
+      "codeHash": "0xbf2cd56d20198f00ab6f38d7e77f15a9d5671d47beb5d456012ed45d23572045"
+    },
+    "bulletin_products_devnet": {
+      "wsUrl": "wss://bullet.sik.rocks",
+      "metadata": ".papi/metadata/bulletin_products_devnet.scale",
+      "genesis": "0xe101f0fa4627d29a257645e02be86d80378fea1a2bf8fa6a918d150ebc760a59",
+      "codeHash": "0x919b08470811f08edef7c2d15d387182adf5b501c2a2c8486c5b829a2c78018b"
     }
   }
 }

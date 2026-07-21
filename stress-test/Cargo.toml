@@ -3,6 +3,7 @@ name = "bulletin-stress-test"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
+license = "Apache-2.0"
 publish = false
 autotests = false
 
@@ -43,6 +44,9 @@ serde_json = { workspace = true, features = ["std"] }
 # Hashing
 blake2 = "0.10"
 twox-hash = "2"
+
+# Ed25519 (HOP ephemeral recipient keys)
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 
 # Utilities
 anyhow = "1"

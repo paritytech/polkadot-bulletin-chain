@@ -1,35 +1,10 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 import { Binary } from "polkadot-api"
-import { describe, expect, it } from "vitest"
-import { MockBulletinClient } from "../../src/mock-client"
-import { BulletinError, ErrorCode } from "../../src/types"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 describe("Authorization Check", () => {
-  describe("MockBulletinClient simulateInsufficientAuth", () => {
-    it("should throw INSUFFICIENT_AUTHORIZATION when simulateInsufficientAuth is true", async () => {
-      const client = new MockBulletinClient({
-        simulateInsufficientAuth: true,
-      })
-
-      await expect(
-        client.store(Binary.fromText("hello")).send(),
-      ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      })
-    })
-
-    it("should not throw when simulateInsufficientAuth is false", async () => {
-      const client = new MockBulletinClient({
-        simulateInsufficientAuth: false,
-      })
-
-      const result = await client.store(Binary.fromText("hello")).send()
-      expect(result.cid).toBeDefined()
-    })
-  })
-
   describe("AsyncBulletinClient authorization check", () => {
     // These tests exercise the checkAccountAuthorization logic through
     // the AsyncBulletinClient by providing mock api.query implementations.
@@ -146,7 +121,14 @@ describe("Authorization Check", () => {
       expect(result.cid).toBeDefined()
     })
 
-    it("should throw INSUFFICIENT_AUTHORIZATION when transactions insufficient", async () => {
+    // Allowances gate priority, not acceptance: an exhausted boost budget
+    // must warn and proceed, never block the store.
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it("should warn and proceed when transactions are insufficient", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
@@ -158,15 +140,18 @@ describe("Authorization Check", () => {
         },
       })
 
-      await expect(
-        client.store(Binary.fromText("hello")).withWaitFor("in_block").send(),
-      ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        message: expect.stringContaining("transactions"),
-      })
+      const result = await client
+        .store(Binary.fromText("hello"))
+        .withWaitFor("in_block")
+        .send()
+      expect(result.cid).toBeDefined()
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("lower priority"),
+      )
     })
 
-    it("should throw INSUFFICIENT_AUTHORIZATION when bytes insufficient", async () => {
+    it("should warn and proceed when bytes are insufficient", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
@@ -178,15 +163,14 @@ describe("Authorization Check", () => {
         },
       })
 
-      await expect(
-        client
-          .store(Binary.fromText("hello world, this is longer than 1 byte"))
-          .withWaitFor("in_block")
-          .send(),
-      ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        message: expect.stringContaining("bytes"),
-      })
+      const result = await client
+        .store(Binary.fromText("hello world, this is longer than 1 byte"))
+        .withWaitFor("in_block")
+        .send()
+      expect(result.cid).toBeDefined()
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("lower priority"),
+      )
     })
 
     it("should pass when authorization is sufficient", async () => {
@@ -208,30 +192,25 @@ describe("Authorization Check", () => {
       expect(result.cid).toBeDefined()
     })
 
-    it("should verify insufficient auth error is BulletinError instance", async () => {
+    it("should not warn when the boost budget covers the store", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
       const client = await createClientWithQuery({
         TransactionStorage: {
           Authorizations: {
             getValue: async () => ({
-              extent: { transactions: 0, bytes: BigInt(0) },
+              extent: { transactions: 10, bytes: BigInt(1000000) },
               expiration: 999999,
             }),
           },
         },
       })
 
-      try {
-        await client
-          .store(Binary.fromText("hello"))
-          .withWaitFor("in_block")
-          .send()
-        expect.fail("Should have thrown")
-      } catch (error) {
-        expect(error).toBeInstanceOf(BulletinError)
-        expect((error as BulletinError).recoveryHint).toContain(
-          "authorizeAccount()",
-        )
-      }
+      const result = await client
+        .store(Binary.fromText("hello"))
+        .withWaitFor("in_block")
+        .send()
+      expect(result.cid).toBeDefined()
+      expect(warn).not.toHaveBeenCalled()
     })
   })
 })

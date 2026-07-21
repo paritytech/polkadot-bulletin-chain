@@ -1,8 +1,11 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, authorizePreimage, fetchCid, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, authorizePreimage, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, store, TX_MODE_IN_BLOCK, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, getContentHash, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSection, logSuccess, logError, logInfo, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -11,7 +14,7 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SEED = args[1] || '//Alice';
+const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
 /**
@@ -24,7 +27,7 @@ const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
  * @param {string|null} signerAddress - Address of the signer (required if signer is not null)
  * @param {number|null} cidCodec - CID codec (null for default)
  * @param {number|null} mhCode - Multihash code (null for default)
- * @param {object|null} client - Client for unsigned transactions
+ * @param {object} client - Client for unsigned transactions and the node RPC content check
  */
 async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, signer, signerAddress, cidCodec, mhCode, client) {
     logSection(testName);
@@ -64,8 +67,8 @@ async function runPreimageStoreTest(testName, bulletinAPI, authorizationSigner, 
     const { cid } = await store(bulletinAPI, signer, dataToStore, cidCodec, mhCode, TX_MODE_IN_BLOCK, client);
     logSuccess(`Data stored successfully with CID: ${cid.toString()}`);
 
-    // Read back from IPFS
-    const downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+    // Read back from IPFS and the node RPC, verifying both match.
+    const downloadedContent = await fetchAndVerifyBlock(cid, gatewaySource(HTTP_IPFS_API), nodeRpcSource(client));
     logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
 
     // Verify CID matches

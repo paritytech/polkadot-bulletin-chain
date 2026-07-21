@@ -1,18 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// This file is part of Cumulus.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg(test)]
 
@@ -739,53 +726,48 @@ fn governance_authorize_upgrade_works() {
 }
 
 #[test]
-fn allowed_authorizer_needs_balance_to_sign_authorize_account() {
-	// With `feeless_if` removed from `authorize_account`, the signer — even one registered
-	// in `AllowedAuthorizers` — must hold balance: `ChargeTransactionPayment` runs before
-	// the pallet's origin / budget checks. With balance the dispatch succeeds and the
-	// budget shrinks; without it the extrinsic is rejected with `Payment` and the budget
-	// is untouched.
-	let authorizer = Sr25519Keyring::Ferdie; // not in `TestAccounts`, only `AllowedAuthorizers`
-	let (txs_budget, bytes_budget, bytes) = (1000u32, 100 * 1024 * 1024u64, 1024u64);
+fn authorize_account_fee_path_follows_feeless_flag() {
+	// `feeless: false` → fee charged, unfunded caller rejected.
+	// `feeless: true`  → fee skipped via `SkipCheckIfFeeless`, unfunded caller succeeds.
+	let alice = Sr25519Keyring::Alice;
+	let authorizer = Sr25519Keyring::Charlie;
+	let call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+		who: Sr25519Keyring::Eve.to_account_id(),
+		transactions: 0,
+		bytes: 1024,
+	});
 
-	let attempt_authorize = |funded: bool| {
+	let attempt = |feeless: bool, funded: bool| {
 		let mut genesis = RuntimeGenesisConfig::default();
-		genesis.transaction_storage.allowed_authorizers =
-			vec![(authorizer.to_account_id(), txs_budget, bytes_budget)];
+		genesis.transaction_storage.allowed_authorizers = vec![];
+		genesis.sudo.key = Some(alice.to_account_id());
 		sp_io::TestExternalities::new(genesis.build_storage().unwrap()).execute_with(|| {
+			use frame_support::traits::fungible::Mutate;
+			Balances::mint_into(&alice.to_account_id(), 1_000_000_000_000_000).unwrap();
 			if funded {
-				use frame_support::traits::fungible::Mutate;
-				Balances::mint_into(&authorizer.to_account_id(), 1_000_000_000_000).unwrap();
+				Balances::mint_into(&authorizer.to_account_id(), 1_000_000_000_000_000).unwrap();
 			}
-			let call =
-				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
-					who: Sr25519Keyring::Eve.to_account_id(),
-					transactions: 0,
-					bytes,
-				});
-			let result = construct_and_apply_extrinsic(Some(authorizer.pair()), call);
-			let post = pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(
-				authorizer.to_account_id(),
-			)
-			.expect("authorizer remains registered")
-			.quota
-			.map(|q| q.bytes);
-			(result, post)
+			let add = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::add_authorizer {
+				who: authorizer.to_account_id(),
+				budget: pallet_bulletin_transaction_storage::AuthorizerBudget {
+					feeless,
+					..default_authorizer_budget()
+				},
+			});
+			assert_ok_ok(construct_and_apply_extrinsic(
+				Some(alice.pair()),
+				RuntimeCall::Sudo(pallet_sudo::Call::<Runtime>::sudo { call: Box::new(add) }),
+			));
+			construct_and_apply_extrinsic(Some(authorizer.pair()), call.clone())
 		})
 	};
 
-	// Funded: dispatch succeeds; budget decremented by the requested bytes.
-	let (res, post) = attempt_authorize(true);
-	assert_ok_ok(res);
-	assert_eq!(post, Some(bytes_budget - bytes));
-
-	// Unfunded: fee check rejects before dispatch; budget unchanged.
-	let (res, post) = attempt_authorize(false);
+	assert_ok_ok(attempt(false, true));
 	assert_eq!(
-		res,
+		attempt(false, false),
 		Err(transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)),
 	);
-	assert_eq!(post, Some(bytes_budget));
+	assert_ok_ok(attempt(true, false));
 }
 
 #[test]
@@ -1926,8 +1908,8 @@ fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::Authorize
 			transactions: 1000,
 			bytes: 100 * 1024 * 1024,
 		}),
-		authorization_period: None,
 		valid_until: None,
+		feeless: false,
 	}
 }
 

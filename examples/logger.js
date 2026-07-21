@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Unified logging functions for example scripts
  * Provides consistent formatting and visual hierarchy across all tests

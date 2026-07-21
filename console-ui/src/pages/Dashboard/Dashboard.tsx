@@ -1,13 +1,16 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, ExternalLink, RefreshCw } from "lucide-react";
+import { Upload, Download, Search, Shield, Database, Activity, BarChart3, Droplets, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import { PalletUnavailableNotice } from "@/components/PalletUnavailableNotice";
-import { useChainState, useApi, StorageType } from "@/state/chain.state";
+import { useChainState, useApi } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
   type RawTransactionInfo,
@@ -137,70 +140,7 @@ function ChainInfoCard() {
   );
 }
 
-function WelcomeCard({ storageType }: { storageType: StorageType }) {
-  if (storageType === "web3storage") {
-    return (
-      <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
-        <CardHeader>
-          <CardTitle className="text-2xl">Welcome to Web3 Storage Console</CardTitle>
-          <CardDescription className="text-base">
-            Decentralized storage powered by Web3 infrastructure
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid sm:grid-cols-3 gap-4 text-sm">
-            <div className="space-y-1">
-              <p className="font-medium">Web3 Native</p>
-              <p className="text-muted-foreground">
-                Built for the decentralized web
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium">Content Addressed</p>
-              <p className="text-muted-foreground">
-                Data identified and verified by content hashes
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="font-medium">Permissionless</p>
-              <p className="text-muted-foreground">
-                Open access to store and retrieve data
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 pt-4 border-t border-primary/10 space-y-2 text-sm">
-            <div>
-              <p className="font-medium mb-1">Design by <a href="https://github.com/eskimor" target="_blank" rel="noopener noreferrer" className="hover:text-foreground underline">eskimor</a></p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <a href="https://github.com/paritytech/polkadot-sdk/pull/10731" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Design PR
-                </a>
-                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Scalable Web3 Storage
-                </a>
-                <a href="https://github.com/paritytech/polkadot-sdk/blob/robertkirsz/web3-storage-design/docs/scalable-web3-storage-implementation.md" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  Implementation Details
-                </a>
-              </div>
-            </div>
-            <div>
-              <p className="font-medium mb-1">Proof of Concept</p>
-              <div className="flex flex-wrap gap-x-4 gap-y-1">
-                <a href="https://github.com/paritytech/web3-storage?tab=readme-ov-file#quick-start" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
-                  <ExternalLink className="h-3 w-3" />
-                  web3-storage (see README for local setup)
-                </a>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
+function WelcomeCard() {
   return (
     <Card className="col-span-full bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
       <CardHeader>
@@ -441,121 +381,23 @@ function TotalsStat({ label, value, hint }: { label: string; value: string; hint
   );
 }
 
-function Web3StorageTotalsCard() {
-  const api = useApi();
-  const [providerCount, setProviderCount] = useState<number | null>(null);
-  const [bucketCount, setBucketCount] = useState<number | null>(null);
-  const [challengeCount, setChallengeCount] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!api) return;
-
-    let cancelled = false;
-    setLoading(true);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const typedApi = api as any;
-
-    Promise.all([
-      typedApi.query.StorageProvider.Providers.getEntries(),
-      typedApi.query.StorageProvider.Buckets.getEntries(),
-      typedApi.query.StorageProvider.Challenges.getEntries(),
-    ])
-      .then(([providers, buckets, challenges]: [unknown[], unknown[], unknown[]]) => {
-        if (cancelled) return;
-        setProviderCount(providers.length);
-        setBucketCount(buckets.length);
-        setChallengeCount(challenges.length);
-      })
-      .catch((err: unknown) => {
-        console.error("Failed to fetch storage totals:", err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BarChart3 className="h-5 w-5" />
-          Storage Totals
-        </CardTitle>
-        <CardDescription>On-chain storage provider statistics</CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading || providerCount === null ? (
-          <div className="flex items-center justify-center py-4">
-            <Spinner size="sm" />
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Providers
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(providerCount)}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Buckets
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(bucketCount ?? 0)}
-              </p>
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Challenges
-              </p>
-              <p className="text-2xl font-semibold">
-                {formatNumber(challengeCount ?? 0)}
-              </p>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 export function Dashboard() {
-  const { storageType } = useChainState();
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground">
-          {storageType === "web3storage"
-            ? "Overview of your Web3 Storage activity"
-            : "Overview of your Bulletin Chain activity"}
+          Overview of your Bulletin Chain activity
         </p>
       </div>
 
-      {storageType === "web3storage" ? (
-        <div className="grid gap-6 md:grid-cols-2">
-          <WelcomeCard storageType={storageType} />
-          <ChainInfoCard />
-          <Web3StorageTotalsCard />
-        </div>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          <WelcomeCard storageType={storageType} />
-          <ChainInfoCard />
-          <QuickActions />
-          <AccountSummaryCard />
-          <UsageCard />
-        </div>
-      )}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <WelcomeCard />
+        <ChainInfoCard />
+        <QuickActions />
+        <AccountSummaryCard />
+        <UsageCard />
+      </div>
     </div>
   );
 }

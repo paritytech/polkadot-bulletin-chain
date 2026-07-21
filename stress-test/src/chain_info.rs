@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use subxt::{
@@ -177,6 +180,11 @@ impl ChainLimits {
 		};
 
 		TheoreticalLimits { weight_cap, length_cap, count_cap, effective_cap, bottleneck }
+	}
+
+	/// Estimate how many store txs of `payload_size` bytes fit in one block.
+	pub fn estimate_block_capacity(&self, payload_size: usize) -> usize {
+		self.compute_theoretical_limits(payload_size).effective_cap as usize
 	}
 
 	/// Print a human-readable summary of the queried limits.

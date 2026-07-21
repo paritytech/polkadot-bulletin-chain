@@ -8,11 +8,23 @@
 # scripts/get_polkadot_binaries.sh
 /.polkadot-binaries/
 
+# OS
 .DS_Store
+Thumbs.db
 
-# direnv files
+# Editor swap files
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
 .envrc
 .direnv
+
+# IDE
 .idea
 .vscode
 
@@ -27,6 +39,11 @@ __pycache__
 
 # Local test files
 kubo/
+
+# Stress test outputs
+stress-test/results/
+stress-test/hop-results.png
+
 # `zombienet-*` (a downloaded binary) lives at the repo root; scoping the glob to `/`
 # prevents it from sweeping in unrelated files like `.github/workflows/zombienet-*.yml`.
 /zombienet-*

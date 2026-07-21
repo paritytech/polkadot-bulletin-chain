@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * End-to-end HOP demo: authorization, round-trip claim/ack, and promotion.
  *
@@ -20,14 +23,27 @@
  *   4. Post-auth: can_account_promote → true (cross-checked papi vs SDK).
  *   5. Round-trip submit → claim → ack → assert pool empty + not promoted.
  *   6. Promotion submit → wait for on-chain promotion → assert pool empty.
+ *   7. Retrieve the promoted blob over Bitswap (via the IPFS gateway) and assert
+ *      the returned bytes match the original blob.
+ *
+ * Step 7 is the canary for the transaction-index ordering bug: the node indexes
+ * the trailing `data.len()` bytes of the promote extrinsic under the blob's
+ * content hash (see the FOOTGUN note on
+ * `pallet_bulletin_transaction_storage::Pallet::do_store`). Only when `data` is
+ * the last call argument do those bytes hash to the CID, so the served Bitswap
+ * block is accepted. With the bug the indexed bytes are the wrong extrinsic
+ * tail, the gateway rejects every block on hash mismatch, and step 7 times out.
+ *
+ * Requires an IPFS gateway peered with the bulletin node over Bitswap (see
+ * examples/README.md for the Kubo setup); defaults to the local gateway.
  *
  * Promotion timing (zombienet config):
  *   --hop-retention-secs  60   → HOP pool entry expires after 60s ~ 10 blocks
  *   --hop-check-interval  10   → maintenance task fires every 10 seconds
  *
  * Usage:
- *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path]
- *   node examples/hop_round_trip.js ws://localhost:10000 //Alice
+ *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url]
+ *   node examples/hop_round_trip.js ws://localhost:10000 //Eve http://127.0.0.1:8283
  */
 
 import { createClient } from 'polkadot-api';
@@ -42,8 +58,9 @@ import {
 	ss58Address,
 	blake2b256,
 } from '@polkadot-labs/hdkd-helpers';
-import { waitForBlockProduction, toHex } from './common.js';
+import { waitForBlockProduction, toHex, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { authorizeAccount, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { cidFromBytes } from './cid_dag_metadata.js';
 import {
 	logHeader,
 	logConnection,
@@ -58,7 +75,8 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SUDO_PATH = args[1] || '//Alice';
+const SUDO_PATH = args[1] || '//Eve';
+const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const SENDER_PATH = '//CustomSigner';
 
 // ── Timing constants ─────────────────────────────────────────────────────────
@@ -66,6 +84,9 @@ const CLAIM_POLL_INTERVAL_MS = 2_000;
 const CLAIM_TIMEOUT_MS = 60_000;
 const PROMOTION_POLL_INTERVAL_MS = 6_000;   // ~1 block at 6 s/block
 const PROMOTION_TIMEOUT_MS = 300_000;       // ~50 blocks
+const BITSWAP_POLL_INTERVAL_MS = 3_000;     // gap between retrieval attempts
+const BITSWAP_TIMEOUT_MS = 120_000;         // overall deadline for retrieval
+const BITSWAP_ATTEMPT_TIMEOUT_MS = 10_000;  // per-attempt fetch timeout
 
 // HOP requires raw byte signing — never use getPolkadotSigner, which wraps the
 // payload in <Bytes>…</Bytes> and the node would reject the signature.
@@ -113,6 +134,35 @@ async function pollPromotion(hopClient, contentHash) {
 		await new Promise(r => setTimeout(r, PROMOTION_POLL_INTERVAL_MS));
 	}
 	throw new Error(`Timed out after ${PROMOTION_TIMEOUT_MS / 1000}s waiting for promotion`);
+}
+
+/**
+ * Retrieve a CID from the IPFS gateway over Bitswap, retrying until the block is
+ * served or the deadline elapses. The gateway only returns a block whose hash
+ * matches the requested CID, so a stored blob that was indexed from the wrong
+ * extrinsic bytes (the transaction-index ordering bug) can never satisfy this —
+ * the loop then times out rather than returning corrupt data.
+ */
+async function pollFetchCid(gatewayUrl, cid) {
+	const url = `${gatewayUrl}/ipfs/${cid.toString()}`;
+	const deadline = Date.now() + BITSWAP_TIMEOUT_MS;
+	let lastError;
+	while (Date.now() < deadline) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), BITSWAP_ATTEMPT_TIMEOUT_MS);
+		try {
+			const res = await fetch(url, { signal: controller.signal });
+			if (res.ok) return Buffer.from(await res.arrayBuffer());
+			lastError = new Error(`HTTP ${res.status}`);
+		} catch (err) {
+			lastError = err;
+		} finally {
+			clearTimeout(timer);
+		}
+		logInfo(`Blob not retrievable over Bitswap yet (${lastError.message}) — retrying in ${BITSWAP_POLL_INTERVAL_MS / 1000}s`);
+		await new Promise(r => setTimeout(r, BITSWAP_POLL_INTERVAL_MS));
+	}
+	throw new Error(`Timed out after ${BITSWAP_TIMEOUT_MS / 1000}s retrieving ${cid.toString()} over Bitswap`);
 }
 
 async function main() {
@@ -282,6 +332,25 @@ async function main() {
 				throw err;
 			}
 		}
+
+		// ── Step 7: retrieve promoted blob over Bitswap and verify bytes ─────
+		logStep('7️⃣', 'Retrieving promoted blob over Bitswap and verifying bytes…');
+		// RAW codec + blake2b-256 — matches `do_store(data, Blake2b256, RAW_CODEC)`.
+		const promotionCid = await cidFromBytes(promotionData);
+		logInfo(`Promotion CID  : ${promotionCid.toString()}`);
+		logInfo(`IPFS gateway   : ${IPFS_GATEWAY}`);
+		const retrieved = await pollFetchCid(IPFS_GATEWAY, promotionCid);
+		if (!retrieved.equals(Buffer.from(promotionData))) {
+			throw new Error(
+				`Bitswap blob mismatch: gateway returned ${retrieved.length} bytes that differ `
+				+ `from the ${promotionData.length}-byte promoted blob (transaction-index corruption?)`,
+			);
+		}
+		const retrievedMessage = new TextDecoder().decode(retrieved);
+		if (retrievedMessage !== promotionMessage) {
+			throw new Error(`Bitswap content mismatch: expected "${promotionMessage}", got "${retrievedMessage}"`);
+		}
+		logSuccess(`Bitswap retrieval matches the promoted blob (${retrieved.length} bytes) — transaction index is intact.`);
 
 		logTestResult(true, 'HOP End-to-End Test');
 	} catch (err) {

@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! # Bulletin SDK for Rust
 //!
@@ -177,6 +177,9 @@ pub use types::{
 // Re-export CID types from pallet
 pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, HashingAlgorithm};
 
+// Re-export the renewal entry reference from the pallet primitives
+pub use bulletin_transaction_storage_primitives::TransactionRef;
+
 // Re-export key traits
 pub use chunker::Chunker;
 pub use dag::DagBuilder;
@@ -198,6 +201,7 @@ pub mod prelude {
 		renewal::{RenewalOperation, RenewalTracker, TrackedEntry},
 		storage::{BatchStorageOperation, StorageOperation},
 		types::*,
+		TransactionRef,
 	};
 
 	#[cfg(feature = "std")]

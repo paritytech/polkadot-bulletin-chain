@@ -1,6 +1,9 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import type { CID } from "@parity/bulletin-sdk";
 import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
-import { bulletin_westend } from "@polkadot-api/descriptors";
+import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import { Binary, type HexString, type SizedHex, type TypedApi } from "polkadot-api";
 
 /** Chain truth for a single stored transaction. */
@@ -34,7 +37,7 @@ export function contentHashHex(cid: CID): string {
   return Binary.toHex(cid.multihash.digest);
 }
 
-type Api = TypedApi<typeof bulletin_westend>;
+type Api = TypedApi<typeof bulletin_paseo_next_v2>;
 
 async function locateContentHashes(
   api: Api,

@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -29,17 +27,15 @@ use super::{
 		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
-	AllowedAuthorizers, AuthorizationExtent, AuthorizationScope, AuthorizedCaller,
-	AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo, TransactionKind,
-	TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND,
-	BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED, PERMANENT_STORAGE_NEAR_CAP_PERCENT,
+	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
+	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
+	TransactionKind, TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED,
+	AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED,
+	PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
 
-use crate::{
-	migrations::{v1::OldTransactionInfo, PopulateAllowedAuthorizersIfEmpty},
-	mock::RuntimeGenesisConfig,
-};
+use crate::{migrations::v1::OldTransactionInfo, mock::RuntimeGenesisConfig};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use polkadot_sdk_frame::{
@@ -70,8 +66,8 @@ type TransactionByContentHash = super::TransactionByContentHash<Test>;
 fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
 	AuthorizerBudget {
 		quota: Some(Quota { transactions, bytes }),
-		authorization_period: None,
 		valid_until: None,
+		feeless: false,
 	}
 }
 
@@ -1430,7 +1426,7 @@ fn migration_v1_version_updated() {
 	new_test_ext().execute_with(|| {
 		StorageVersion::new(0).put::<TransactionStorage>();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(4));
+		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(5));
 
 		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
 
@@ -1991,10 +1987,16 @@ fn ensure_allowed_authorizers_origin_rules() {
 	new_test_ext().execute_with(|| {
 		let registered = 7u64;
 		AllowedAuthorizers::<Test>::insert(registered, test_budget(100, 1024));
-		// Signed by a registered account → accepted, returns the account.
+		// Signed by a registered account → accepted, returns the full
+		// `AuthorizationOrigin` carrying the authorizer, `valid_until` and `feeless`
+		// (both `None`/`false` for `test_budget`).
 		assert_eq!(
 			EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(registered)).ok(),
-			Some(registered),
+			Some(Some(AuthorizationOrigin {
+				authorizer: registered,
+				valid_until: None,
+				feeless: false,
+			})),
 		);
 		// Signed by an unregistered account, Root, and None all rejected.
 		assert!(EnsureAllowedAuthorizers::<Test>::try_origin(RuntimeOrigin::signed(99)).is_err());
@@ -2019,38 +2021,12 @@ fn genesis_populates_allowed_authorizers() {
 	.build_storage()
 	.unwrap();
 	TestExternalities::new(t).execute_with(|| {
+		// Genesis authorizers default to `feeless: true`; root can re-add them
+		// later to flip `feeless` or set a `valid_until`.
+		let expected = |tx, by| AuthorizerBudget { feeless: true, ..test_budget(tx, by) };
 		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), test_budget(100, 1024));
-		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), test_budget(200, 2048));
-	});
-}
-
-#[test]
-fn populate_allowed_authorizers_migration_behavior() {
-	parameter_types! {
-		pub Seed: Vec<u64> = vec![10, 20];
-		pub MigrationBudget: AuthorizerBudget<u64> = test_budget(500, 5000);
-	}
-
-	// 1. Empty storage → seeds the configured accounts with the configured budget.
-	new_test_ext().execute_with(|| {
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 0);
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-		assert_eq!(AllowedAuthorizers::<Test>::get(10).unwrap(), test_budget(500, 5000));
-
-		// 2. Idempotent: rerun on the now-populated storage is a no-op.
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert_eq!(AllowedAuthorizers::<Test>::iter().count(), 2);
-	});
-
-	// 3. Non-empty storage (existing unrelated entry) → migration skips entirely.
-	new_test_ext().execute_with(|| {
-		AllowedAuthorizers::<Test>::insert(99u64, test_budget(100, 1024));
-		PopulateAllowedAuthorizersIfEmpty::<Test, Seed, MigrationBudget>::on_runtime_upgrade();
-		assert!(AllowedAuthorizers::<Test>::contains_key(99));
-		assert!(!AllowedAuthorizers::<Test>::contains_key(10));
-		assert!(!AllowedAuthorizers::<Test>::contains_key(20));
+		assert_eq!(AllowedAuthorizers::<Test>::get(1).unwrap(), expected(100, 1024));
+		assert_eq!(AllowedAuthorizers::<Test>::get(2).unwrap(), expected(200, 2048));
 	});
 }
 
@@ -4053,6 +4029,85 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 	});
 }
 
+/// `post_upgrade` must accept pre-existing v4 entries (e.g. prepaid `paid=true`) that `step`
+/// leaves untouched. Regression for the summit migration check.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migrate_v3_to_v4_post_upgrade_allows_preexisting_v4_paid_entries() {
+	use crate::migrations::v4::{MigrateV3ToV4, V3AutoRenewalData};
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(3).put::<TransactionStorage>();
+
+		// A genuine v3 entry (just `{ account }`), written raw at the AutoRenewals key.
+		let v3_hash: super::ContentHash = [1u8; 32];
+		unhashed::put(&AutoRenewals::hashed_key_for(v3_hash), &V3AutoRenewalData { account: 1u64 });
+
+		// A pre-existing v4 entry with `paid=true` — the case that broke on summit.
+		let v4_hash: super::ContentHash = [2u8; 32];
+		AutoRenewals::insert(
+			v4_hash,
+			super::RenewalData { account: 2u64, recurring: true, paid: true },
+		);
+
+		let state = MigrateV3ToV4::<Test>::pre_upgrade().expect("pre_upgrade succeeds");
+
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV3ToV4<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV3ToV4::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		MigrateV3ToV4::<Test>::post_upgrade(state).expect("pre-existing v4 entries are allowed");
+
+		let migrated = AutoRenewals::get(v3_hash).expect("v3 entry migrated");
+		assert!(migrated.recurring && !migrated.paid);
+		let preexisting = AutoRenewals::get(v4_hash).expect("v4 entry preserved");
+		assert!(preexisting.paid, "pre-existing v4 paid=true entry must be left untouched");
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(4));
+	});
+}
+
+/// Re-running `step` against state already at/beyond v4 must not downgrade the storage version.
+#[test]
+fn migrate_v3_to_v4_does_not_downgrade_storage_version() {
+	use crate::migrations::v4::MigrateV3ToV4;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::SteppedMigration, weights::WeightMeter,
+	};
+
+	new_test_ext().execute_with(|| {
+		// Chain is already at v5 (e.g. summit), with a v4-format entry present.
+		StorageVersion::new(5).put::<TransactionStorage>();
+		AutoRenewals::insert(
+			[2u8; 32] as super::ContentHash,
+			super::RenewalData { account: 2u64, recurring: true, paid: true },
+		);
+
+		let mut meter = WeightMeter::new();
+		let mut cursor: Option<<MigrateV3ToV4<Test> as SteppedMigration>::Cursor> = None;
+		loop {
+			cursor = MigrateV3ToV4::<Test>::step(cursor, &mut meter).expect("step should not fail");
+			if cursor.is_none() {
+				break;
+			}
+		}
+
+		assert_eq!(
+			TransactionStorage::on_chain_storage_version(),
+			StorageVersion::new(5),
+			"migration must not downgrade the storage version",
+		);
+	});
+}
+
 /// Stale `Transactions[block]` leftovers (block < current - RetentionPeriod) — e.g. from
 /// a chain whose `RetentionPeriod` was previously longer — must be pruned by the v2→v3
 /// migration rather than carried forward, otherwise `try_state` rejects them.
@@ -4210,28 +4265,6 @@ fn remove_exhausted_authorizer_rejects_when_not_removable() {
 }
 
 #[test]
-fn add_authorizer_authorization_period_override() {
-	// Mock's `AuthorizationPeriod = 10`. Override must satisfy `0 < period < 10`.
-	new_test_ext().execute_with(|| {
-		let who = 42u64;
-		let ok = AuthorizerBudget { authorization_period: Some(5), ..test_budget(100, 1024) };
-		assert_ok!(TransactionStorage::add_authorizer(RuntimeOrigin::root(), who, ok));
-		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap().authorization_period, Some(5));
-
-		// Reject 0, 10, 11 — anything outside the strict-open `(0, 10)` interval.
-		for period in [0, 10, 11] {
-			let bad =
-				AuthorizerBudget { authorization_period: Some(period), ..test_budget(100, 1024) };
-			assert_noop!(
-				TransactionStorage::add_authorizer(RuntimeOrigin::root(), 43u64, bad),
-				Error::InvalidAuthorizationPeriodOverride,
-			);
-		}
-		assert!(!AllowedAuthorizers::<Test>::contains_key(43u64));
-	});
-}
-
-#[test]
 fn add_authorizer_valid_until() {
 	new_test_ext().execute_with(|| {
 		run_to_block(5, || None);
@@ -4375,23 +4408,19 @@ fn root_bypasses_authorizer_budget() {
 }
 
 #[test]
-fn authorization_period_override_applied_at_dispatch() {
+fn valid_until_clamps_authorization_expiry() {
+	// Mock's `AuthorizationPeriod = 10`. An authorizer with `valid_until = 6`
+	// (issued at block 1) should produce an authorization that expires at block
+	// 6, not at block 11 — a grant cannot outlive its grantor.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let authorizer = 10u64;
-		// Authorizer with custom 5-block period (default is 10)
 		AllowedAuthorizers::<Test>::insert(
 			authorizer,
-			AuthorizerBudget {
-				quota: Some(Quota { transactions: 100, bytes: 100_000 }),
-				authorization_period: Some(5),
-				valid_until: None,
-			},
+			AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 100_000) },
 		);
 
 		let who = 1u64;
-		// Dispatch signed by the authorizer — `authorize_account` reads the override
-		// directly from `AllowedAuthorizers` at dispatch time.
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::signed(authorizer),
 			who,
@@ -4399,8 +4428,7 @@ fn authorization_period_override_applied_at_dispatch() {
 			1000,
 		));
 
-		// The authorization should expire at block 1 + 5 = 6 (not 1 + 10 = 11)
-		// Check: at block 5, authorization still valid
+		// At block 5, authorization still valid.
 		run_to_block(5, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
@@ -4412,12 +4440,193 @@ fn authorization_period_override_applied_at_dispatch() {
 				transactions_allowance: 1,
 			},
 		);
-		// At block 6, authorization expired — extent reads as zeros.
+		// At block 6 (= valid_until), authorization expired — extent reads as zeros.
 		run_to_block(6, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent::default(),
 		);
+	});
+}
+
+#[test]
+fn valid_until_clamps_refresh_authorization_expiry() {
+	// Refresh must respect `valid_until` the same way `authorize` does: a refresh
+	// issued by an authorizer with `valid_until = 6` cannot extend the grant past
+	// block 6 even if `now + AuthorizationPeriod` would land later.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 100_000) },
+		);
+		let who = 1u64;
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
+
+		// At block 5: refresh would naively set expiration = 5 + 10 = 15, but
+		// must be clamped to authorizer's valid_until = 6.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::refresh_account_authorization(
+			RuntimeOrigin::signed(authorizer),
+			who,
+		));
+		// At block 6 the refreshed authorization is already expired.
+		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
+fn valid_until_beyond_default_period_does_not_clamp() {
+	// `valid_until` past `now + AuthorizationPeriod` has no effect — the grant
+	// gets the full default window.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 11u64;
+		// AuthorizationPeriod = 10, so default expiry from block 1 would be 11.
+		// `valid_until = 100` is past that — no clamping.
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget { valid_until: Some(100), ..test_budget(100, 100_000) },
+		);
+
+		let who = 2u64;
+		assert_ok!(TransactionStorage::authorize_account(
+			RuntimeOrigin::signed(authorizer),
+			who,
+			1,
+			1000,
+		));
+
+		// At block 10, still valid (default window covers 1..11).
+		run_to_block(10, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 1000,
+				transactions: 0,
+				transactions_allowance: 1,
+			},
+		);
+		// At block 11 (= default expiry), expired.
+		run_to_block(11, || None);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
+fn add_remove_authorizer_manages_system_providers() {
+	// add → inc, re-add → no double-bump, remove → dec, re-remove → no underflow,
+	// `remove_exhausted_authorizer` also dec's.
+	new_test_ext().execute_with(|| {
+		let who = 77u64;
+		let providers_of = |a| frame_system::Account::<Test>::get(a).providers;
+		assert_eq!(providers_of(who), 0);
+
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(100, 1024),
+		));
+		assert_eq!(providers_of(who), 1);
+
+		// Re-add must not double-bump.
+		assert_ok!(TransactionStorage::add_authorizer(
+			RuntimeOrigin::root(),
+			who,
+			test_budget(200, 2048),
+		));
+		assert_eq!(providers_of(who), 1);
+
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert_eq!(providers_of(who), 0);
+
+		// Re-remove must not underflow.
+		assert_ok!(TransactionStorage::remove_authorizer(RuntimeOrigin::root(), who));
+		assert_eq!(providers_of(who), 0);
+
+		// `remove_exhausted_authorizer` path also dec's.
+		AllowedAuthorizers::<Test>::insert(who, test_budget(0, 0));
+		frame_system::Pallet::<Test>::inc_providers(&who);
+		assert_ok!(TransactionStorage::remove_exhausted_authorizer(RuntimeOrigin::none(), who));
+		assert_eq!(providers_of(who), 0);
+	});
+}
+
+#[test]
+fn feeless_if_reflects_authorizer_budget_feeless_flag() {
+	// `true` only for `Signed(_)` origins whose `AllowedAuthorizers` entry has
+	// `feeless = true`. Root / None / unregistered → not feeless via this flag.
+	new_test_ext().execute_with(|| {
+		let feeless = 7u64;
+		let charged = 8u64;
+		let unregistered = 9u64;
+		AllowedAuthorizers::<Test>::insert(
+			feeless,
+			AuthorizerBudget { feeless: true, ..test_budget(10, 1000) },
+		);
+		AllowedAuthorizers::<Test>::insert(charged, test_budget(10, 1000));
+
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(feeless)));
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(charged)));
+		// Not in the allow-list → not feeless.
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(unregistered)));
+		// Root / None → not feeless (the dispatch is feeless by other means, not
+		// via this flag).
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::root()));
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::none()));
+	});
+}
+
+#[test]
+fn feeless_if_ignored_when_authorizer_budget_inactive() {
+	// An inactive budget (exhausted on either axis, or past `valid_until`)
+	// disables the `feeless` flag — so the dispatcher pays for the call instead
+	// of spamming free dispatches that would fail downstream.
+	new_test_ext().execute_with(|| {
+		let who = 21u64;
+		let insert = |b| AllowedAuthorizers::<Test>::insert(who, b);
+
+		// Exhausted on both axes.
+		insert(AuthorizerBudget { feeless: true, ..test_budget(0, 0) });
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Exhausted on bytes axis only.
+		insert(AuthorizerBudget { feeless: true, ..test_budget(0, 100) });
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Exhausted on transactions axis only.
+		insert(AuthorizerBudget { feeless: true, ..test_budget(5, 0) });
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Sanity: budget with room on both axes is still feeless.
+		insert(AuthorizerBudget { feeless: true, ..test_budget(5, 100) });
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// `quota = None` (unlimited) is never exhausted.
+		insert(AuthorizerBudget { quota: None, feeless: true, ..test_budget(0, 0) });
+		assert!(TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
+
+		// Expired authorizer is inactive even with unlimited quota.
+		// (`EnsureAllowedAuthorizers::try_origin` already rejects expired
+		// authorizers, so this also exercises that rejection.)
+		System::set_block_number(50);
+		insert(AuthorizerBudget { quota: None, valid_until: Some(10), feeless: true });
+		assert!(!TransactionStorage::is_feeless_authorizer(&RuntimeOrigin::signed(who)));
 	});
 }
 

@@ -2115,7 +2115,7 @@ dependencies = [
 
 [[package]]
 name = "bulletin-sdk-rust"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "cid",
@@ -2136,6 +2136,7 @@ dependencies = [
  "bytes",
  "cid",
  "clap",
+ "ed25519-dalek",
  "futures",
  "hex",
  "jsonrpsee",
