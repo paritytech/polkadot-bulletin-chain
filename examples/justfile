@@ -505,7 +505,7 @@ stop-services test_dir ipfs_mode="kubo-docker":
 #   test_dir - Test directory where services are running
 #   runtime - Runtime name for smoldot chainspec path resolution
 #   mode - Connection mode: "ws" (WebSocket RPC node) or "smoldot" (light client)
-#   ws_url - comma-separated WebSocket URLs; first is used to submit, the store is verified on all (ws mode only)
+#   ws_url - comma-separated WebSocket URLs; ws mode: first submits and the store is verified on all; smoldot mode: first is used for the node bitswap RPC cross-check
 #   seed - Account seed phrase or dev seed (default: //Eve, only used in ws mode)
 #   http_ipfs_api - IPFS API URL (default: http://127.0.0.1:8283)
 run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:10000,ws://127.0.0.1:12346" seed="//Eve" http_ipfs_api="http://127.0.0.1:8283":
@@ -534,7 +534,9 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
         fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}"
+        # The smoldot script takes a single node URL for the cross-check.
+        NODE_WS_URL="{{ ws_url }}"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "{{ http_ipfs_api }}" "${NODE_WS_URL%%,*}"
     else
         node $SCRIPT_NAME "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
     fi
@@ -743,7 +745,7 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
         fi
-        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283"
+        node $SCRIPT_NAME "$RELAY_CHAINSPEC_PATH" "$PARACHAIN_CHAINSPEC_PATH" "http://127.0.0.1:8283" "ws://127.0.0.1:10000"
     else
         node $SCRIPT_NAME "ws://127.0.0.1:10000" "//Eve" "http://127.0.0.1:8283"
     fi
