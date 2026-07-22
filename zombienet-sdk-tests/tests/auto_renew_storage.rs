@@ -168,17 +168,17 @@ async fn spawn_shared_harness(
 }
 
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
+	// A pruning-focused log config, NOT the full `NODE_LOG_CONFIG` firehose. The libp2p/sync
+	// trace targets (`litep2p`, `sub-libp2p`, `sync`, `request-response`) generate ~10 MB per
+	// node in a few minutes, which overwhelms the shared-network log files and gets truncated
+	// long before the failing test runs — so a pruning-eviction failure ships un-diagnosable
+	// logs. Keep only what a "bitswap still serves data after pruning" failure needs:
+	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (pruning fired)
 	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
+	//   - `transaction-storage=trace` / `bitswap=trace`: col11 indexing + the served block
 	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
+	let log_targets =
+		"transaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
