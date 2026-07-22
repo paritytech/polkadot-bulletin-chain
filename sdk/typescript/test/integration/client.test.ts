@@ -27,12 +27,26 @@ import {
   type BulletinTypedApi,
   ChunkStatus,
   CidCodec,
+  DEFAULT_CLIENT_CONFIG,
   HashAlgorithm,
 } from "../../src"
 
 const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
-describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
+// Worst case per transaction is the SDK's txTimeout (production default,
+// above PAPI's mortality window). Budgets are sized as sequential-tx-count
+// times txTimeout plus margin, so the SDK's descriptive "Transaction timed
+// out" error surfaces instead of an opaque vitest timeout.
+const TX_TIMEOUT = DEFAULT_CLIENT_CONFIG.txTimeout
+const MARGIN = 60_000
+// Non-chunked tests submit at most 2 sequential transactions.
+const DEFAULT_TEST_TIMEOUT = 2 * TX_TIMEOUT + MARGIN
+// Worst chunked test: 5 chunks + 1 manifest, submitted sequentially.
+const CHUNKED_TEST_TIMEOUT = 6 * TX_TIMEOUT + MARGIN
+
+describe("AsyncBulletinClient Integration Tests", {
+  timeout: DEFAULT_TEST_TIMEOUT,
+}, () => {
   let client: AsyncBulletinClient
   let papiClient: PolkadotClient
   let aliceAddress: string
@@ -53,13 +67,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
-    // Create client directly with api, signer, and submit function
-    // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
-    // finalization regularly takes >60s under CI load, causing flaky
-    // "Transaction timed out" failures on chunked store tests.
-    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-      txTimeout: 120_000,
-    })
+    // Use the production-default txTimeout. Tighter overrides (60s, 120s)
+    // flaked under CI load: finalization was observed taking >120s.
+    client = new AsyncBulletinClient(api, signer, papiClient.submit)
 
     // Authorize Alice's account for storage operations
     // The bulletin chain requires account authorization before storing data
@@ -72,7 +82,8 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
       .send()
     console.log("Alice authorized for storage:", aliceAddress)
-  })
+    // One transaction; the config hookTimeout (30s) is too tight for it.
+  }, TX_TIMEOUT + MARGIN)
 
   afterAll(async () => {
     if (papiClient) {
@@ -117,7 +128,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should store chunked data with progress tracking", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
@@ -159,7 +170,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire progress events in correct order during chunked upload", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
@@ -235,7 +246,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk events sequentially (each chunk submitted before next starts)", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
@@ -280,7 +291,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should include CID in chunk_completed events", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
@@ -306,7 +317,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk_completed via store() builder for large data", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
