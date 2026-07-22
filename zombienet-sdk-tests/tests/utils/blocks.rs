@@ -25,6 +25,33 @@ pub async fn current_best_block(
 		.map_err(Into::into)
 }
 
+/// Wait for the next best-block import and return its number. Bulk batches submitted right
+/// after a fresh boundary get the full block interval to enter the pool; submitting
+/// mid-interval races the author's pool snapshot and splits the batch across two blocks.
+pub async fn wait_for_next_best_block(
+	client: &OnlineClient<SubstrateConfig>,
+	timeout_secs: u64,
+) -> Result<u64> {
+	let wait = async {
+		let mut sub = client.blocks().subscribe_best().await?;
+		let current = sub
+			.next()
+			.await
+			.ok_or_else(|| anyhow!("subscribe_best stream empty"))??
+			.number() as u64;
+		loop {
+			let block =
+				sub.next().await.ok_or_else(|| anyhow!("subscribe_best stream ended"))??;
+			if (block.number() as u64) > current {
+				return anyhow::Ok(block.number() as u64);
+			}
+		}
+	};
+	tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), wait)
+		.await
+		.map_err(|_| anyhow!("no new best block within {}s", timeout_secs))?
+}
+
 /// Fetch the latest finalized block. Use this when event/storage reads must be stable —
 /// best-view can briefly follow a non-canonical branch as chainHead_v2 resolves.
 pub async fn current_finalized_block(
