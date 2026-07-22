@@ -56,6 +56,23 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
+	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
+	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:1)
+	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
+	/// The range of component `l` is `[1, 2097152]`.
+	fn store_with_cid_config(l: u32, ) -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `203`
+		//  Estimated: `45519`
+		// Minimum execution time: 8_000_000 picoseconds.
+		Weight::from_parts(49_139_002, 0)
+			.saturating_add(Weight::from_parts(0, 45519))
+			// Standard Error: 9
+			.saturating_add(Weight::from_parts(4_056, 0).saturating_mul(l.into()))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(2))
+	}
 	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
 	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
