@@ -75,7 +75,6 @@ sp-version = { version = "45.0.0", default-features = false }
 
 pallet-authorship = { version = "47.0.0", default-features = false }
 pallet-migrations = { version = "18.0.0", default-features = false }
-pallet-proxy = { version = "48.0.0", default-features = false }
 pallet-session = { version = "48.0.0", default-features = false }
 pallet-skip-feeless-payment = { version = "22.0.0", default-features = false }
 pallet-sudo = { version = "48.0.0", default-features = false }
