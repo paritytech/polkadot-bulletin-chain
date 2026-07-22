@@ -585,8 +585,9 @@ run-test-authorize-preimage-and-store test_dir ws_url="ws://127.0.0.1:10000" see
     node authorize_preimage_and_store_papi.js "{{ ws_url }}" "{{ seed }}" "{{ http_ipfs_api }}"
 
 # Run auto-renewal Chopsticks test
-# Tests enable/disable auto-renewal and verifies on_initialize scheduling.
-# Builds the Westend runtime WASM by default so auto-renewal code is included.
+# Tests enable/disable auto-renewal and drives the DataRenewal.process_pending_renewals
+# mandatory inherent over the expiry block, verifying the pending queue is drained.
+# Builds the Westend runtime WASM by default so DataRenewal code is included.
 # Parameters:
 #   endpoint - WebSocket URL of the Bulletin chain (default: wss://westend-bulletin-rpc.polkadot.io)
 #   wasm_path - Path to runtime WASM override (default: auto-built from source)
