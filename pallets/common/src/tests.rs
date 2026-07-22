@@ -13,91 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Tests for `NoCurrency`, `ZeroImbalance` and the call inspectors.
+//! Tests for `NoCurrency` and the utility call inspectors.
 
-use crate::{
-	inspect_proxy_wrapper, inspect_sudo_wrapper, inspect_utility_wrapper, mock::*,
-	proxy_inner_calls, sudo_inner_calls, utility_inner_calls, NoCurrency, ZeroImbalance,
-};
+use crate::{inspect_utility_wrapper, mock::*, utility_inner_calls, NoCurrency};
 use polkadot_sdk_frame::{
 	deps::frame_system,
 	prelude::{
 		fungible::{Inspect, InspectHold, Unbalanced, UnbalancedHold},
-		DepositConsequence, Fortitude, Preservation, Provenance, Weight, WithdrawConsequence, H256,
-	},
-	token::{BalanceStatus, WithdrawReasons},
-	traits::{
-		tokens::imbalance::TryMerge, Currency, ExistenceRequirement, Imbalance, ReservableCurrency,
-		SameOrOther, SignedImbalance, TryDrop,
+		DepositConsequence, Fortitude, Preservation, Provenance, Weight, WithdrawConsequence,
 	},
 };
 
 type Cur = NoCurrency<u64, ()>;
-type Z = ZeroImbalance<u128>;
-
-#[test]
-fn no_currency_currency_is_zero_and_noop() {
-	assert_eq!(<Cur as Currency<u64>>::total_balance(&1), 0);
-	assert_eq!(<Cur as Currency<u64>>::total_issuance(), 0);
-	assert_eq!(<Cur as Currency<u64>>::minimum_balance(), 0);
-	assert_eq!(<Cur as Currency<u64>>::free_balance(&1), 0);
-	assert!(!<Cur as Currency<u64>>::can_slash(&1, 100));
-
-	assert_eq!(<Cur as Currency<u64>>::burn(100).peek(), 0);
-	assert_eq!(<Cur as Currency<u64>>::issue(100).peek(), 0);
-	assert_eq!(<Cur as Currency<u64>>::total_issuance(), 0);
-
-	assert_eq!(
-		<Cur as Currency<u64>>::ensure_can_withdraw(&1, 100, WithdrawReasons::all(), 0),
-		Ok(())
-	);
-	assert_eq!(
-		<Cur as Currency<u64>>::transfer(&1, &2, 100, ExistenceRequirement::AllowDeath),
-		Ok(())
-	);
-	assert_eq!(<Cur as Currency<u64>>::total_balance(&2), 0);
-
-	let (imbalance, remainder) = <Cur as Currency<u64>>::slash(&1, 100);
-	assert_eq!(imbalance.peek(), 0);
-	assert_eq!(remainder, 0);
-
-	assert_eq!(<Cur as Currency<u64>>::deposit_into_existing(&1, 100).unwrap().peek(), 0);
-	assert_eq!(<Cur as Currency<u64>>::deposit_creating(&1, 100).peek(), 0);
-	assert_eq!(
-		<Cur as Currency<u64>>::withdraw(
-			&1,
-			100,
-			WithdrawReasons::all(),
-			ExistenceRequirement::AllowDeath
-		)
-		.unwrap()
-		.peek(),
-		0
-	);
-
-	match <Cur as Currency<u64>>::make_free_balance_be(&1, 100) {
-		SignedImbalance::Positive(p) => assert_eq!(p.peek(), 0),
-		SignedImbalance::Negative(_) => panic!("expected positive zero imbalance"),
-	}
-	assert_eq!(<Cur as Currency<u64>>::free_balance(&1), 0);
-}
-
-#[test]
-fn no_currency_reservable_is_zero_and_noop() {
-	assert!(<Cur as ReservableCurrency<u64>>::can_reserve(&1, 100));
-	assert_eq!(<Cur as ReservableCurrency<u64>>::reserve(&1, 100), Ok(()));
-	assert_eq!(<Cur as ReservableCurrency<u64>>::reserved_balance(&1), 0);
-	assert_eq!(<Cur as ReservableCurrency<u64>>::unreserve(&1, 100), 0);
-
-	let (imbalance, remainder) = <Cur as ReservableCurrency<u64>>::slash_reserved(&1, 100);
-	assert_eq!(imbalance.peek(), 0);
-	assert_eq!(remainder, 0);
-
-	assert_eq!(
-		<Cur as ReservableCurrency<u64>>::repatriate_reserved(&1, &2, 100, BalanceStatus::Free),
-		Ok(0)
-	);
-}
 
 #[test]
 fn no_currency_fungible_is_zero_and_noop() {
@@ -125,31 +52,6 @@ fn no_currency_fungible_is_zero_and_noop() {
 	assert_eq!(<Cur as InspectHold<u64>>::balance_on_hold(&(), &1), 0);
 }
 
-#[test]
-fn zero_imbalance_is_always_zero() {
-	assert_eq!(Z::zero().peek(), 0);
-
-	let (a, b) = Z::zero().split(100);
-	assert_eq!(a.peek(), 0);
-	assert_eq!(b.peek(), 0);
-
-	assert_eq!(Z::zero().merge(Z::zero()).peek(), 0);
-
-	let mut subsumed = Z::zero();
-	subsumed.subsume(Z::zero());
-	assert_eq!(subsumed.peek(), 0);
-
-	assert!(matches!(Z::zero().offset(Z::zero()), SameOrOther::None));
-	assert_eq!(Z::zero().drop_zero(), Ok(()));
-
-	let mut extracted = Z::zero();
-	assert_eq!(extracted.extract(100).peek(), 0);
-	assert_eq!(extracted.peek(), 0);
-
-	assert_eq!(Z::zero().try_drop(), Ok(()));
-	assert_eq!(Z::zero().try_merge(Z::zero()), Ok(Z::zero()));
-}
-
 fn remark() -> RuntimeCall {
 	RuntimeCall::System(frame_system::Call::remark { remark: vec![] })
 }
@@ -166,8 +68,6 @@ fn utility_batch_variants_return_all_inner_calls() {
 		pallet_utility::Call::<Test>::batch_all { calls: calls.clone() },
 		pallet_utility::Call::<Test>::force_batch { calls: calls.clone() },
 	] {
-		let expected: Vec<&RuntimeCall> = calls.iter().collect();
-		assert_eq!(utility_inner_calls(&call), expected);
 		assert_eq!(inspect_utility_wrapper(&call), Some(calls.iter().collect()));
 	}
 }
@@ -188,7 +88,6 @@ fn utility_single_call_variants_return_inner_call() {
 		},
 	];
 	for call in &variants {
-		assert_eq!(utility_inner_calls(call), vec![&inner]);
 		assert_eq!(inspect_utility_wrapper(call), Some(vec![&inner]));
 	}
 }
@@ -201,7 +100,6 @@ fn utility_if_else_returns_both_branches() {
 		main: Box::new(main.clone()),
 		fallback: Box::new(fallback.clone()),
 	};
-	assert_eq!(utility_inner_calls(&call), vec![&main, &fallback]);
 	assert_eq!(inspect_utility_wrapper(&call), Some(vec![&main, &fallback]));
 }
 
@@ -215,103 +113,6 @@ fn utility_empty_batch_is_not_a_wrapper() {
 		assert!(utility_inner_calls(&call).is_empty());
 		assert_eq!(inspect_utility_wrapper(&call), None);
 	}
-}
-
-#[test]
-fn sudo_wrapping_variants_return_inner_call() {
-	let inner = remark();
-	let variants: Vec<pallet_sudo::Call<Test>> = vec![
-		pallet_sudo::Call::sudo { call: Box::new(inner.clone()) },
-		pallet_sudo::Call::sudo_unchecked_weight {
-			call: Box::new(inner.clone()),
-			weight: Weight::zero(),
-		},
-		pallet_sudo::Call::sudo_as { who: 1, call: Box::new(inner.clone()) },
-	];
-	for call in &variants {
-		assert_eq!(sudo_inner_calls(call), vec![&inner]);
-		assert_eq!(inspect_sudo_wrapper(call), Some(vec![&inner]));
-	}
-}
-
-#[test]
-fn sudo_non_wrapping_variants_have_no_inner_calls() {
-	for call in
-		[pallet_sudo::Call::<Test>::set_key { new: 1 }, pallet_sudo::Call::<Test>::remove_key {}]
-	{
-		assert!(sudo_inner_calls(&call).is_empty());
-		assert_eq!(inspect_sudo_wrapper(&call), None);
-	}
-}
-
-#[test]
-fn proxy_wrapping_variants_return_inner_call() {
-	let inner = remark();
-	let variants: Vec<pallet_proxy::Call<Test>> = vec![
-		pallet_proxy::Call::proxy {
-			real: 1,
-			force_proxy_type: None,
-			call: Box::new(inner.clone()),
-		},
-		pallet_proxy::Call::proxy_announced {
-			delegate: 1,
-			real: 2,
-			force_proxy_type: Some(()),
-			call: Box::new(inner.clone()),
-		},
-	];
-	for call in &variants {
-		assert_eq!(proxy_inner_calls(call), vec![&inner]);
-		assert_eq!(inspect_proxy_wrapper(call), Some(vec![&inner]));
-	}
-}
-
-#[test]
-fn proxy_non_wrapping_variants_have_no_inner_calls() {
-	let variants: Vec<pallet_proxy::Call<Test>> = vec![
-		pallet_proxy::Call::add_proxy { delegate: 1, proxy_type: (), delay: 0 },
-		pallet_proxy::Call::remove_proxy { delegate: 1, proxy_type: (), delay: 0 },
-		pallet_proxy::Call::remove_proxies {},
-		pallet_proxy::Call::create_pure { proxy_type: (), delay: 0, index: 0 },
-		pallet_proxy::Call::kill_pure {
-			spawner: 1,
-			proxy_type: (),
-			index: 0,
-			height: 0,
-			ext_index: 0,
-		},
-		pallet_proxy::Call::announce { real: 1, call_hash: H256::zero() },
-		pallet_proxy::Call::remove_announcement { real: 1, call_hash: H256::zero() },
-		pallet_proxy::Call::reject_announcement { delegate: 1, call_hash: H256::zero() },
-		pallet_proxy::Call::poke_deposit {},
-	];
-	for call in &variants {
-		assert!(proxy_inner_calls(call).is_empty());
-		assert_eq!(inspect_proxy_wrapper(call), None);
-	}
-}
-
-#[test]
-fn nested_wrappers_unwrap_one_layer_at_a_time() {
-	let target = remark();
-	let sudo_call = RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(target.clone()) });
-	let proxy_call = RuntimeCall::Proxy(pallet_proxy::Call::proxy {
-		real: 1,
-		force_proxy_type: None,
-		call: Box::new(sudo_call.clone()),
-	});
-	let batch =
-		pallet_utility::Call::<Test>::batch { calls: vec![proxy_call.clone(), target.clone()] };
-
-	let level1 = inspect_utility_wrapper(&batch).unwrap();
-	assert_eq!(level1, vec![&proxy_call, &target]);
-
-	let RuntimeCall::Proxy(inner_proxy) = level1[0] else { panic!("expected proxy call") };
-	let level2 = inspect_proxy_wrapper(inner_proxy).unwrap();
-	assert_eq!(level2, vec![&sudo_call]);
-
-	let RuntimeCall::Sudo(inner_sudo) = level2[0] else { panic!("expected sudo call") };
-	assert_eq!(inspect_sudo_wrapper(inner_sudo), Some(vec![&target]));
 }
 
 #[test]

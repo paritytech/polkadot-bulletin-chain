@@ -13,14 +13,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Minimal test runtime wiring utility, sudo and proxy so their `Call` enums
-//! can be constructed for the inspector tests. No externalities needed: the
-//! inspectors are pure functions.
+//! Minimal test runtime wiring utility so its `Call` enum can be constructed
+//! for the inspector tests. No externalities needed: the inspectors are pure
+//! functions.
 
-use crate::NoCurrency;
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
-	prelude::*,
 	runtime::prelude::*,
 	testing_prelude::*,
 };
@@ -49,12 +47,6 @@ mod runtime {
 
 	#[runtime::pallet_index(1)]
 	pub type Utility = pallet_utility;
-
-	#[runtime::pallet_index(2)]
-	pub type Sudo = pallet_sudo;
-
-	#[runtime::pallet_index(3)]
-	pub type Proxy = pallet_proxy;
 }
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
@@ -67,26 +59,4 @@ impl pallet_utility::Config for Test {
 	type RuntimeCall = RuntimeCall;
 	type PalletsOrigin = OriginCaller;
 	type WeightInfo = ();
-}
-
-impl pallet_sudo::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type WeightInfo = ();
-}
-
-impl pallet_proxy::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeCall = RuntimeCall;
-	type Currency = NoCurrency<Self::AccountId, ()>;
-	type ProxyType = ();
-	type ProxyDepositBase = ConstUint<0>;
-	type ProxyDepositFactor = ConstUint<0>;
-	type MaxProxies = ConstU32<4>;
-	type WeightInfo = ();
-	type MaxPending = ConstU32<2>;
-	type CallHasher = BlakeTwo256;
-	type AnnouncementDepositBase = ConstUint<0>;
-	type AnnouncementDepositFactor = ConstUint<0>;
-	type BlockNumberProvider = frame_system::Pallet<Test>;
 }
