@@ -514,7 +514,7 @@ pub mod pallet {
 		///
 		/// Emits [`Stored`](Event::Stored) when successful.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::weight(T::WeightInfo::store_with_cid_config(data.len() as u32))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
 		pub fn store_with_cid_config(
 			origin: OriginFor<T>,
