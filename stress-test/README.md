@@ -38,11 +38,11 @@ The binary is at `./target/release/bulletin-stress-test`.
 
 ### Parachain Binaries (for zombienet tests)
 
-Parachain tests require two external binaries from the Polkadot SDK. These must be compatible with the SDK revision pinned in this repo's `Cargo.toml` (`f9df3236...`).
+Parachain tests require two external binaries from the Polkadot SDK. These must be compatible with the node version tracked in `.github/env` as `POLKADOT_NODE_VERSION` (`a6871c6d...`).
 
 **Option A: Download from Polkadot SDK releases**
 
-Download `polkadot` and `polkadot-parachain` from the [polkadot-sdk releases](https://github.com/paritytech/polkadot-sdk/releases) page. Pick a release whose tag matches (or is close to) the pinned revision.
+Download `polkadot` and `polkadot-parachain` from the [polkadot-sdk releases](https://github.com/paritytech/polkadot-sdk/releases) page. Pick a release whose tag matches (or is close to) that commit.
 
 ```bash
 # Example: download and make executable
@@ -54,7 +54,7 @@ chmod +x polkadot polkadot-parachain
 ```bash
 git clone https://github.com/paritytech/polkadot-sdk.git
 cd polkadot-sdk
-git checkout f9df32360c6c22747f60b3ff58243890eecafc8e
+git checkout a6871c6d1cba2be86b611ca1084bff2b28e7f16d
 
 # Build the relay chain validator
 cargo build --release -p polkadot
@@ -246,7 +246,7 @@ Before running zombienet tests, ensure you have:
 | `POLKADOT_PARACHAIN_BINARY_PATH` | `polkadot-parachain` (on PATH) | Path to the parachain omni-node binary |
 | `PARACHAIN_CHAIN_SPEC_PATH` | `./zombienet/bulletin-westend-spec.json` | Path to the parachain chain spec |
 | `RELAY_CHAIN` | `westend-local` | Relay chain identifier |
-| `PARACHAIN_ID` | `2487` | Parachain ID |
+| `PARACHAIN_ID` | `1010` | Parachain ID |
 
 ### Running Tests
 
@@ -358,10 +358,6 @@ Returns an array of `ScenarioResult` objects. Each contains:
 - `blocks`: Per-block data (number, tx count, payload bytes, prefill flag, on-chain timestamp, block hash, finalized status, block interval)
 - `chain_limits`: Runtime constants (block weight/length limits, storage limits, weight regression)
 - `environment`: Chain name, version, node role
-
-## Architecture
-
-See [DESIGN.md](DESIGN.md) for detailed architecture, data flow diagrams, and module dependency graph.
 
 ## Security
 

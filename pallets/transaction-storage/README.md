@@ -29,7 +29,7 @@ Use the `transactionStorage.store` extrinsic to store data. A CID is generated f
 
 ### Renewing data
 
-To prevent data from being removed after the retention period, use `transactionStorage.renew(block, index)` where `block` is the block number of the previous store or renew transaction, and `index` is the index of that transaction in the block.
+To prevent data from being removed after the retention period, use `transactionStorage.renew(entry)` where `entry` is a `TransactionRef` — either `Position { block, index }` (the block number and in-block index of the previous store or renew transaction) or `ContentHash(hash)`.
 
 ### Retrieving data
 

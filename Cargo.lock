@@ -2040,8 +2040,6 @@ dependencies = [
 name = "bulletin-pallets-common"
 version = "0.1.0"
 dependencies = [
- "pallet-proxy",
- "pallet-sudo",
  "pallet-utility",
  "parity-scale-codec",
  "polkadot-sdk-frame",
@@ -2125,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "bulletin-sdk-rust"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bulletin-transaction-storage-primitives",
  "cid",

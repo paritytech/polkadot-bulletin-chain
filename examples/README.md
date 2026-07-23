@@ -325,9 +325,7 @@ node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]
 
 # Rust
 cd rust/authorize-and-store
-./fetch_metadata.sh ws://localhost:10000
-cargo build --release
-./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Eve"
+cargo run --release -- --ws ws://localhost:10000 --seed "//Eve"
 ```
 
 ## Troubleshooting
@@ -336,12 +334,6 @@ cargo build --release
 ```bash
 cd examples
 npx papi add -w ws://localhost:10000 bulletin
-```
-
-**Metadata errors (Rust):**
-```bash
-cd examples/rust/authorize-and-store
-./fetch_metadata.sh ws://localhost:10000
 ```
 
 ## Security

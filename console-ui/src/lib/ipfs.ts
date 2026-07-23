@@ -1,38 +1,14 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-only
 
-/**
- * Default IPFS gateway URL for local Bulletin Chain node
- */
-export const DEFAULT_IPFS_GATEWAY = "http://127.0.0.1:8283";
-
-/**
- * IPFS gateway URLs for different networks
- */
-export const IPFS_GATEWAYS: Record<string, string> = {
-  local: "http://127.0.0.1:8283",
-  "paseo-next-v2": "https://paseo-bulletin-next-ipfs.polkadot.io",
-  previewnet: "https://previewnet.substrate.dev",
-};
-
-/**
- * Preferred download method per network.
- * Networks with a known IPFS gateway default to "gateway",
- * others default to "p2p".
- */
-export const PREFERRED_DOWNLOAD_METHOD: Record<string, "p2p" | "gateway"> = {
-  local: "p2p",
-  westend: "p2p",
-  "paseo-next-v2": "gateway",
-  previewnet: "gateway",
-};
+// Per-network gateway URLs live in `config/networks.ts` (`Network.ipfsGateway`).
 
 /**
  * Fetch content from IPFS by CID
  */
 export async function fetchFromIpfs(
   cid: string,
-  gateway: string = DEFAULT_IPFS_GATEWAY
+  gateway: string
 ): Promise<{
   data: Uint8Array;
   contentType?: string;
@@ -59,7 +35,7 @@ export async function fetchFromIpfs(
  */
 export async function checkIpfsContent(
   cid: string,
-  gateway: string = DEFAULT_IPFS_GATEWAY
+  gateway: string
 ): Promise<boolean> {
   const url = `${gateway}/ipfs/${cid}`;
 
@@ -76,7 +52,7 @@ export async function checkIpfsContent(
  */
 export async function getIpfsContentInfo(
   cid: string,
-  gateway: string = DEFAULT_IPFS_GATEWAY
+  gateway: string
 ): Promise<{
   exists: boolean;
   size?: number;
@@ -110,7 +86,7 @@ export async function getIpfsContentInfo(
  */
 export async function fetchRawBlock(
   cid: string,
-  gateway: string = DEFAULT_IPFS_GATEWAY
+  gateway: string
 ): Promise<Uint8Array> {
   const url = `${gateway}/ipfs/${cid}?format=raw`;
 
@@ -131,9 +107,6 @@ export async function fetchRawBlock(
 /**
  * Build IPFS gateway URL for a CID
  */
-export function buildIpfsUrl(
-  cid: string,
-  gateway: string = DEFAULT_IPFS_GATEWAY
-): string {
+export function buildIpfsUrl(cid: string, gateway: string): string {
   return `${gateway}/ipfs/${cid}`;
 }
