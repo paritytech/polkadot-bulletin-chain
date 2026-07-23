@@ -45,7 +45,7 @@
     },
     "external_runtime": {
       "repo": "https://github.com/x3c41a/runtimes.git",
-      "ref": "ndk/port-pr405",
+      "ref": "d5330216b6142b8019d0d2811be92f7ed2d4e62d",
       "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
   }

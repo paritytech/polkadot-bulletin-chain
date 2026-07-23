@@ -119,7 +119,12 @@ jobs:
         run: |
           REPO='${{ matrix.runtime.external_runtime.repo }}'
           REF='${{ matrix.runtime.external_runtime.ref }}'
-          SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+          # A pinned commit sha needs no resolution (ls-remote only sees refs).
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            SHA="$REF"
+          else
+            SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+          fi
           if [ -z "$SHA" ]; then
             echo "Failed to resolve $REF in $REPO"
             exit 1
