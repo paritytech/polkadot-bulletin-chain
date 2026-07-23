@@ -71,10 +71,18 @@ describe("AsyncBulletinClient Integration Tests", {
     // flaked under CI load: finalization was observed taking >120s.
     client = new AsyncBulletinClient(api, signer, papiClient.submit)
 
-    // Authorize Alice's account for storage operations
-    // The bulletin chain requires account authorization before storing data
+    // authorize_account must be signed by an authorizer; genesis seeds //Eve
+    // as the only one (//Alice passes on westend solely via its patched
+    // zombienet spec, and fails with BadSigner on paseo).
+    const eveKeyPair = derive("//Eve")
+    const eveSigner = getPolkadotSigner(
+      eveKeyPair.publicKey,
+      "Sr25519",
+      eveKeyPair.sign,
+    )
+    const authorizer = new AsyncBulletinClient(api, eveSigner, papiClient.submit)
     const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
-    await client
+    await authorizer
       .authorizeAccount(
         aliceAddress,
         estimate.transactions,
