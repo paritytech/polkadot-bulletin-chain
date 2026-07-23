@@ -19,6 +19,43 @@
 
 use codec::{Decode, Encode, MaxEncodedLen};
 
+/// Per-entry `EntryMeta` wired into the storage pallet: marks entries created by
+/// `renew`/auto-renewal as [`EntryKind::Renew`] so `handle_obsolete` can decrement
+/// the chain-wide renewed-byte counter when they age out.
+///
+/// INVARIANT: must stay identical (variant names AND 1-byte encoding, `Store = 0`,
+/// `Renew = 1`) to the storage pallet's retired `TransactionKind` — live `Transactions`
+/// entries written before the split decode through this type without migration, and
+/// metadata consumers see an unchanged enum. Locked by the
+/// `entry_kind_encoding_is_frozen` test.
+#[derive(
+	Copy, Clone, Debug, PartialEq, Eq, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
+)]
+pub enum EntryKind {
+	/// Created by `store` (temporary storage); ages out silently.
+	#[default]
+	#[codec(index = 0)]
+	Store,
+	/// Created by `renew`/auto-renewal (permanent storage); counted in the chain-wide
+	/// renewed-byte counter.
+	#[codec(index = 1)]
+	Renew,
+}
+
+/// Per-authorization `AuthorizationExtra` wired into the storage pallet: this pallet's
+/// per-window renew quota, gated against the shared `bytes_allowance`
+/// (`bytes_permanent + size <= bytes_allowance`). Reset to `0` with the other extent
+/// counters when an expired authorization is re-granted; never decremented — the
+/// chain-wide `PermanentStorageUsed` counter is the source of truth for renewed
+/// on-chain bytes.
+#[derive(
+	Copy, Clone, Debug, PartialEq, Eq, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
+)]
+pub struct PermanentExtent {
+	/// Bytes consumed by `renew` calls (permanent storage) within the current window.
+	pub bytes_permanent: u64,
+}
+
 /// Auto-renewal registration value stored in [`crate::Renewals`].
 ///
 /// `recurring` distinguishes a forever-renewing entry (`enable_auto_renew`)

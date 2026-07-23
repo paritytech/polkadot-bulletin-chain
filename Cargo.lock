@@ -8110,6 +8110,7 @@ dependencies = [
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
  "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
  "parity-scale-codec",
  "polkadot-sdk-frame",
  "scale-info",

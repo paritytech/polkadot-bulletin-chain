@@ -18,7 +18,7 @@
 //! Benchmarks for the data-renewal pallet.
 
 // `super::*` re-exports the pallet's own imports (`AuthorizationScope`,
-// `BlockTransactions`, `TransactionInfo`, `TransactionKind`, `TransactionRef`,
+// `BlockTransactions`, `TransactionInfo`, `TransactionRef`,
 // `ContentHash`, `RenewalData`, FRAME prelude, ...). Only the benchmark-only extras
 // are imported explicitly here.
 use super::{Pallet as DataRenewal, *};
@@ -214,7 +214,7 @@ mod benchmarks {
 
 		// `prepare` charged `data.len()` to the permanent-usage counter.
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.bytes_permanent, data.len() as u64);
+		assert_eq!(extent.extra.bytes_permanent, data.len() as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
@@ -255,7 +255,7 @@ mod benchmarks {
 					cid_codec: RAW_CODEC,
 					extrinsic_index: 0,
 					block_chunks: 0,
-					kind: TransactionKind::Store,
+					meta: EntryKind::Store,
 				};
 				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
 				pending

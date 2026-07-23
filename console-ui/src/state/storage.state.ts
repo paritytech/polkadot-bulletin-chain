@@ -84,7 +84,7 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
   };
 }
 
-export type TransactionKind = "Store" | "Renew";
+export type EntryKind = "Store" | "Renew";
 
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
@@ -93,10 +93,21 @@ export interface TransactionInfo {
   blockChunks: number;
 }
 
-/** Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we read. */
+/**
+ * Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we
+ * read. `meta` is the current runtime's field name; `kind` is the pre-split name still
+ * used by live chains (and by descriptors generated from them). The variant names are
+ * identical on both sides — read via [`entryKindOf`].
+ */
 export interface RawTransactionInfo {
   size: number;
-  kind: { type: TransactionKind };
+  meta?: { type: EntryKind };
+  kind?: { type: EntryKind };
+}
+
+/** Entry kind of a raw `Transactions` entry, tolerant of pre-split runtimes. */
+export function entryKindOf(info: RawTransactionInfo | undefined): EntryKind | undefined {
+  return info?.meta?.type ?? info?.kind?.type;
 }
 
 // Account authorization state

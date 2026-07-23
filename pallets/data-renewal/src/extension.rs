@@ -258,7 +258,7 @@ impl<T: Config> Pallet<T> {
 
 	/// Pre-dispatch counterpart: consumes the authorization extent so the
 	/// dispatchable runs against post-consumption state.
-	pub fn pre_dispatch_renewal_signed(
+	pub(crate) fn pre_dispatch_renewal_signed(
 		who: &T::AccountId,
 		call: &Call<T>,
 	) -> Result<(), TransactionValidityError> {
@@ -276,15 +276,14 @@ impl<T: Config> Pallet<T> {
 		match call {
 			Call::renew { entry } => {
 				let info = txs::Pallet::<T>::resolve_transaction_ref(entry)
-					.map_err(|_| txs::RENEWED_NOT_FOUND)?;
+					.map_err(|_| crate::RENEWED_NOT_FOUND)?;
 				if crate::Renewals::<T>::contains_key(info.content_hash) {
-					return Err(txs::AUTO_RENEWAL_ALREADY_ENABLED.into());
+					return Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into());
 				}
-				txs::Pallet::<T>::check_authorization(
+				Pallet::<T>::check_renew_authorization(
 					&AuthorizationScope::Account(who.clone()),
 					info.size,
 					consume,
-					true,
 				)?;
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
@@ -300,10 +299,10 @@ impl<T: Config> Pallet<T> {
 			},
 			Call::force_renew { entry } => {
 				let info = txs::Pallet::<T>::resolve_transaction_ref(entry)
-					.map_err(|_| txs::RENEWED_NOT_FOUND)?;
+					.map_err(|_| crate::RENEWED_NOT_FOUND)?;
 				// Prefer a preimage grant, fall back to the caller's account quota.
 				let scope =
-					txs::Pallet::<T>::authorize_renew(who, info.content_hash, info.size, consume)?;
+					Pallet::<T>::authorize_renew(who, info.content_hash, info.size, consume)?;
 				let valid = if want_valid {
 					match &scope {
 						// Preimage renewals are submitter-agnostic: tag on the content
@@ -327,18 +326,17 @@ impl<T: Config> Pallet<T> {
 			},
 			Call::enable_auto_renew { content_hash } => {
 				if crate::Renewals::<T>::contains_key(*content_hash) {
-					return Err(txs::AUTO_RENEWAL_ALREADY_ENABLED.into());
+					return Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into());
 				}
 				let (block, index) = txs::Pallet::<T>::lookup_by_content_hash(*content_hash)
-					.ok_or(txs::RENEWED_NOT_FOUND)?;
+					.ok_or(crate::RENEWED_NOT_FOUND)?;
 				let info = txs::Pallet::<T>::transaction_info(block, index)
-					.ok_or(txs::RENEWED_NOT_FOUND)?;
+					.ok_or(crate::RENEWED_NOT_FOUND)?;
 
-				txs::Pallet::<T>::check_authorization(
+				Pallet::<T>::check_renew_authorization(
 					&AuthorizationScope::Account(who.clone()),
 					info.size,
 					consume,
-					true,
 				)?;
 
 				let scope = AuthorizationScope::Account(who.clone());
@@ -354,13 +352,13 @@ impl<T: Config> Pallet<T> {
 				Ok((valid, Some(scope)))
 			},
 			Call::disable_auto_renew { content_hash } => {
-				let renewal_data =
-					crate::Renewals::<T>::get(content_hash).ok_or(txs::AUTO_RENEWAL_NOT_ENABLED)?;
+				let renewal_data = crate::Renewals::<T>::get(content_hash)
+					.ok_or(crate::AUTO_RENEWAL_NOT_ENABLED)?;
 				if &renewal_data.account != who {
-					return Err(txs::NOT_AUTO_RENEWAL_OWNER.into());
+					return Err(crate::NOT_AUTO_RENEWAL_OWNER.into());
 				}
 				if renewal_data.paid {
-					return Err(txs::CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.into());
+					return Err(crate::CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.into());
 				}
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {

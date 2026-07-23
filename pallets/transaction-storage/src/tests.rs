@@ -23,23 +23,23 @@
 use super::{
 	extension::ValidateStorageCalls,
 	mock::{
-		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
-		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
+		new_test_ext, run_to_block, RuntimeCall, RuntimeEvent, RuntimeOrigin, StoreRenewPriority,
+		System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
 	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
-	TransactionKind, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND,
-	BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 
-use crate::{migrations::v1::OldTransactionInfo, mock::RuntimeGenesisConfig};
+use crate::mock::RuntimeGenesisConfig;
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
 use codec::Encode;
 use polkadot_sdk_frame::{
 	deps::frame_support::{
 		storage::unhashed,
-		traits::{GetStorageVersion, Hooks, OnRuntimeUpgrade},
+		traits::{GetStorageVersion, OnRuntimeUpgrade},
 		BoundedVec,
 	},
 	hashing::blake2_256,
@@ -47,16 +47,13 @@ use polkadot_sdk_frame::{
 	testing_prelude::*,
 	traits::StorageVersion,
 };
-use sp_transaction_storage_proof::{
-	num_chunks, random_chunk, registration::build_proof, ChunkIndex, CHUNK_SIZE,
-};
+use sp_transaction_storage_proof::{random_chunk, registration::build_proof, CHUNK_SIZE};
 
 type Call = super::Call<Test>;
 type Error = super::Error<Test>;
 
 type Authorizations = super::Authorizations<Test>;
 type BlockTransactions = super::BlockTransactions<Test>;
-type PermanentStorageUsed = super::PermanentStorageUsed<Test>;
 type RetentionPeriod = super::RetentionPeriod<Test>;
 type Transactions = super::Transactions<Test>;
 type TransactionByContentHash = super::TransactionByContentHash<Test>;
@@ -107,7 +104,7 @@ fn uses_account_authorization() {
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2001,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -124,7 +121,7 @@ fn uses_account_authorization() {
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent {
 				bytes: 2000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2001,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -138,7 +135,7 @@ fn uses_account_authorization() {
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent {
 				bytes: 2002,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2001,
 				transactions: 2,
 				transactions_allowance: 0,
@@ -291,7 +288,7 @@ fn authorization_expires() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -305,7 +302,7 @@ fn authorization_expires() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -318,7 +315,7 @@ fn authorization_expires() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -339,7 +336,7 @@ fn expired_authorization_clears() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -355,7 +352,7 @@ fn expired_authorization_clears() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 1000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -406,7 +403,7 @@ fn consumed_authorization_stays_over_cap() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -420,7 +417,7 @@ fn consumed_authorization_stays_over_cap() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 1000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -432,7 +429,7 @@ fn consumed_authorization_stays_over_cap() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 2,
 				transactions_allowance: 0,
@@ -444,7 +441,7 @@ fn consumed_authorization_stays_over_cap() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 3000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 3,
 				transactions_allowance: 0,
@@ -481,7 +478,7 @@ fn stores_various_sizes_with_account_authorization() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: total_bytes,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -499,7 +496,7 @@ fn stores_various_sizes_with_account_authorization() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: total_bytes,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: total_bytes,
 				transactions: 6,
 				transactions_allowance: 0,
@@ -554,7 +551,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 4000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -571,7 +568,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			TransactionStorage::preimage_authorization_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 1,
@@ -588,7 +585,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			TransactionStorage::preimage_authorization_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 2000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 1,
 				transactions_allowance: 1,
@@ -599,7 +596,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 4000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -615,7 +612,7 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 1000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 4000,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -639,7 +636,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 4000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -661,7 +658,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 4000,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -672,7 +669,7 @@ fn signed_store_falls_back_to_account_authorization() {
 			TransactionStorage::preimage_authorization_extent(different_hash),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 1000,
 				transactions: 0,
 				transactions_allowance: 1,
@@ -774,7 +771,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -796,7 +793,7 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 4000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 2000,
 				transactions: 2,
 				transactions_allowance: 0,
@@ -834,194 +831,6 @@ fn validate_signed_account_authorization_has_provides_tag() {
 			signed_vt.provides, other_vt.provides,
 			"different signers with same preimage-authorized content must share the same tag"
 		);
-	});
-}
-
-// ---- Migration tests ----
-
-/// Write old-format `OldTransactionInfo` entries as raw bytes into the `Transactions`
-/// storage slot for `block_num`. Uses synthetic field values — the migration re-encodes
-/// fields 1:1 without validating chunk roots or content hashes.
-fn insert_old_format_transactions(block_num: u64, count: u32) {
-	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
-
-	let old_txs: Vec<OldTransactionInfo> = (0..count)
-		.map(|i| OldTransactionInfo {
-			chunk_root: BlakeTwo256::hash(&[i as u8]),
-			content_hash: BlakeTwo256::hash(&[i as u8 + 100]),
-			size: 2000,
-			block_chunks: (i + 1) * 8,
-		})
-		.collect();
-	let bounded: BoundedVec<OldTransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
-		old_txs.try_into().expect("within bounds");
-	let key = Transactions::hashed_key_for(block_num);
-	unhashed::put_raw(&key, &bounded.encode());
-}
-
-#[test]
-fn migration_v1_old_entries_only() {
-	new_test_ext().execute_with(|| {
-		// Simulate pre-migration state: on-chain version 0
-		StorageVersion::new(0).put::<TransactionStorage>();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-
-		// Insert old-format entries at blocks 1, 2, 3
-		insert_old_format_transactions(1, 2);
-		insert_old_format_transactions(2, 1);
-		insert_old_format_transactions(3, 3);
-
-		// Can't decode with new type
-		assert!(Transactions::get(1).is_none());
-		assert!(Transactions::get(2).is_none());
-		assert!(Transactions::get(3).is_none());
-
-		// But raw bytes exist
-		assert!(Transactions::contains_key(1));
-		assert!(Transactions::contains_key(2));
-		assert!(Transactions::contains_key(3));
-
-		// Chain v0→v1 → v1→v2 → v2→v3 to bring entries to the current layout:
-		// v1→v2 stamps `kind = Store` and `extrinsic_index = u32::MAX`; v2→v3 then
-		// observes the final layout and is a version-bump no-op for these entries.
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
-		drive_v2_to_v3_migration();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(3));
-
-		let txs1 = Transactions::get(1).expect("should decode after v0→v3 chain");
-		assert_eq!(txs1.len(), 2);
-		for tx in txs1.iter() {
-			assert_eq!(tx.hashing, HashingAlgorithm::Blake2b256);
-			assert_eq!(tx.cid_codec, 0x55);
-			assert_eq!(tx.size, 2000);
-			assert_eq!(tx.kind, TransactionKind::Store, "pre-v2 entries default to Store");
-			assert_eq!(tx.extrinsic_index, u32::MAX);
-		}
-
-		let txs2 = Transactions::get(2).expect("should decode");
-		assert_eq!(txs2.len(), 1);
-
-		let txs3 = Transactions::get(3).expect("should decode");
-		assert_eq!(txs3.len(), 3);
-	});
-}
-
-#[test]
-fn migration_v1_new_entries_only() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<TransactionStorage>();
-		run_to_block(1, || None);
-
-		// Store via normal (new-format) code path
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		run_to_block(2, || None);
-
-		let original = Transactions::get(1).expect("should decode");
-		assert_eq!(original.len(), 1);
-
-		// Run migration
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-
-		// Entry unchanged
-		let after = Transactions::get(1).expect("should decode");
-		assert_eq!(original, after);
-	});
-}
-
-#[test]
-fn migration_v1_mixed_entries() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<TransactionStorage>();
-
-		// Old-format entry at block 5
-		insert_old_format_transactions(5, 2);
-		assert!(Transactions::get(5).is_none());
-
-		// New-format entry at block 10
-		run_to_block(10, || None);
-		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![42u8; 500]));
-		run_to_block(11, || None);
-		let new_entry_before = Transactions::get(10).expect("new format decodes");
-
-		// Chain v0→v1 → v1→v2 → v2→v3 so all entries (old and new) reach the current
-		// `TransactionInfo` layout (kind + extrinsic_index sentinels).
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		crate::migrations::v2::MigrateV1ToV2::<Test>::on_runtime_upgrade();
-		drive_v2_to_v3_migration();
-
-		// Old entry transformed all the way to current layout — decodable as `TransactionInfo`.
-		let old_entry_after = Transactions::get(5).expect("should decode after v0→v3 chain");
-		assert_eq!(old_entry_after.len(), 2);
-		for tx in old_entry_after.iter() {
-			assert_eq!(tx.kind, TransactionKind::Store);
-			assert_eq!(tx.extrinsic_index, u32::MAX);
-		}
-
-		// New entry was already in v1 layout (it was just stored); v1→v2 tail-extended it
-		// with `kind = Store`. Field-by-field equality with the pre-migration v1 entry
-		// won't hold (the kind field is new), but the original fields must round-trip.
-		let new_entry_after = Transactions::get(10).expect("still decodes");
-		assert_eq!(new_entry_after.len(), new_entry_before.len());
-		assert_eq!(new_entry_after[0].chunk_root, new_entry_before[0].chunk_root);
-		assert_eq!(new_entry_after[0].content_hash, new_entry_before[0].content_hash);
-		assert_eq!(new_entry_after[0].size, new_entry_before[0].size);
-		assert_eq!(new_entry_after[0].kind, TransactionKind::Store);
-	});
-}
-
-#[test]
-fn migration_v1_version_updated() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<TransactionStorage>();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-		assert_eq!(TransactionStorage::in_code_storage_version(), StorageVersion::new(5));
-
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-	});
-}
-
-#[test]
-fn migration_v1_idempotent() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<TransactionStorage>();
-		insert_old_format_transactions(1, 1);
-
-		// First run: migrates old entries to v1 format
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		// v1 format is not decodable as v2 TransactionInfo, but raw bytes exist
-		let key = Transactions::hashed_key_for(1u64);
-		let raw_after_first = unhashed::get_raw(&key).expect("raw bytes exist");
-
-		// Second run: noop (version already 1)
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		let raw_after_second = unhashed::get_raw(&key).expect("raw bytes still exist");
-
-		assert_eq!(raw_after_first, raw_after_second);
-	});
-}
-
-#[test]
-fn migration_v1_empty_storage() {
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<TransactionStorage>();
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(0));
-
-		// No Transactions entries exist
-		assert_eq!(Transactions::iter().count(), 0);
-
-		// Run migration
-		crate::migrations::v1::MigrateV0ToV1::<Test>::on_runtime_upgrade();
-
-		// Version updated, no entries created
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(1));
-		assert_eq!(Transactions::iter().count(), 0);
 	});
 }
 
@@ -1092,8 +901,8 @@ fn try_state_detects_zero_authorization_allowance() {
 
 		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
 		// AuthorizationExtent SCALE layout: transactions(u32), transactions_allowance(u32),
-		// bytes(u64), bytes_permanent(u64), bytes_allowance(u64)
-		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 0u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100
+		// bytes(u64), bytes_allowance(u64), extra(`()`, zero bytes)
+		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -1126,85 +935,6 @@ fn try_state_passes_with_preimage_authorization() {
 		let hash = blake2_256(&[1u8; 32]);
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 5000));
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
-	});
-}
-
-/// Cross-pallet storage-side invariant: `PermanentStorageUsed >= Σ renewed sizes in
-/// `Transactions`. The remainder (paid auto-renewal prepayments) is reconciled
-/// inside `pallet-bulletin-transaction-storage-renewal::try_state`. A `PermanentStorageUsed`
-/// value strictly greater than the on-chain renewed sum is no longer an error
-/// here.
-#[test]
-fn try_state_tolerates_counter_above_renewed_sum() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		// Bump the counter without writing any matching renewed `Transactions` entry.
-		// Storage-side `try_state` only checks `renewed_sum <= used` and `used <= cap`.
-		PermanentStorageUsed::put(2000);
-		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
-	});
-}
-
-/// The other side of the renewed-bytes invariant: `PermanentStorageUsed` must be at
-/// least the renewed bytes recorded in `Transactions`. Replaces the pre-split
-/// `try_state_detects_permanent_used_mismatch_with_transactions`, adapted to the
-/// `renewed_sum <= used` check (the split relaxed strict equality, since paid
-/// auto-renewals are now reconciled in the data-renewal pallet's own `try_state`).
-#[test]
-fn try_state_detects_permanent_used_below_renewed_sum() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		// A 2000-byte renewed entry while the chain-wide counter is left at 0.
-		let renewed = TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 2000,
-			extrinsic_index: u32::MAX,
-			block_chunks: num_chunks(2000),
-			kind: TransactionKind::Renew,
-		};
-		Transactions::insert(
-			1u64,
-			BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap(),
-		);
-		assert_err!(
-			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed < Σ renewed sizes in Transactions"
-		);
-	});
-}
-
-/// `PermanentStorageUsed` over `MaxPermanentStorageSize` is caught.
-#[test]
-fn try_state_detects_permanent_used_exceeds_chain_cap() {
-	new_test_ext().execute_with(|| {
-		run_to_block(1, || None);
-		let who = 1;
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
-		// Seed a renewed `Transactions` entry of 2000 bytes so the counter is reconciled
-		// with stored state (matches the new invariant), then squeeze the cap below it.
-		let dummy = TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 2000,
-			extrinsic_index: u32::MAX,
-			block_chunks: num_chunks(2000),
-			kind: TransactionKind::Renew,
-		};
-		Transactions::insert(
-			1u64,
-			BoundedVec::<TransactionInfo, _>::try_from(vec![dummy]).unwrap(),
-		);
-		PermanentStorageUsed::put(2000);
-		MaxPermanentStorageSize::set(&500);
-		assert_err!(
-			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed exceeds MaxPermanentStorageSize"
-		);
 	});
 }
 
@@ -1318,7 +1048,7 @@ fn authorize_storage_extension_transforms_origin() {
 			TransactionStorage::account_authorization_extent(caller),
 			AuthorizationExtent {
 				bytes: 16,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 16,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -1554,7 +1284,7 @@ fn re_authorize_account_adds_to_allowance_and_keeps_expiry() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 3000,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1571,7 +1301,7 @@ fn re_authorize_account_adds_to_allowance_and_keeps_expiry() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1597,7 +1327,7 @@ fn re_authorize_account_preserves_used_bytes() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 5000,
 				transactions: 1,
 				transactions_allowance: 0,
@@ -1623,7 +1353,7 @@ fn re_authorize_account_after_expiry_resets() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 1500,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1650,7 +1380,7 @@ fn authorize_preimage_does_not_push_expiry() {
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 3000,
 				transactions: 0,
 				transactions_allowance: 1,
@@ -1667,7 +1397,7 @@ fn authorize_preimage_does_not_push_expiry() {
 			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1676,67 +1406,7 @@ fn authorize_preimage_does_not_push_expiry() {
 	});
 }
 
-/// `authorize_account` on an expired-but-present entry resets **all** consumed counters,
-/// including `bytes_permanent`. The new window's renew quota is independent of any
-/// renewed bytes still on chain from the old window; those are tracked by the chain-wide
-/// `PermanentStorageUsed` counter and aged out by `on_initialize`.
-#[test]
-fn authorize_account_after_expiry_resets_bytes_permanent() {
-	new_test_ext().execute_with(|| {
-		run_to_block(5, || None);
-		let who = 1;
-
-		// Authorize and seed `bytes_permanent = 2000` directly (simulates a past renew).
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
-		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
-			let auth = maybe_auth.as_mut().expect("authorization present");
-			auth.extent.bytes_permanent = 2000;
-			// Force expiry without advancing blocks.
-			auth.expiration = 1;
-		});
-
-		// Re-authorize: cap is re-granted, all consumed counters reset to 0.
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 1000));
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
-			AuthorizationExtent {
-				bytes: 0,
-				bytes_permanent: 0,
-				bytes_allowance: 1000,
-				transactions: 0,
-				transactions_allowance: 0,
-			},
-			"re-authorize after expiry resets every consumed counter",
-		);
-	});
-}
-
-/// `remove_expired_account_authorization` succeeds even when there is renewed data
-/// outstanding from the old window: the chain-wide `PermanentStorageUsed` counter and
-/// `Transactions` are the source of truth for renewed bytes; the per-account
-/// `bytes_permanent` is just a per-window quota and removing the entry is safe.
-#[test]
-fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
-	new_test_ext().execute_with(|| {
-		run_to_block(5, || None);
-		let who = 1;
-
-		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
-		Authorizations::mutate(AuthorizationScope::Account(who), |maybe_auth| {
-			let auth = maybe_auth.as_mut().expect("authorization present");
-			auth.extent.bytes_permanent = 2000;
-			auth.expiration = 1;
-		});
-
-		assert_ok!(TransactionStorage::remove_expired_account_authorization(
-			RuntimeOrigin::none(),
-			who,
-		));
-		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
-	});
-}
-
-// ---- v1 → v2 multi-block migration tests ----
+// ---- v2 → v3 multi-block migration tests ----
 
 /// Drive the v1→v2 stepped migration to completion against the test externalities.
 fn drive_v2_to_v3_migration() {
@@ -1864,96 +1534,6 @@ fn migrate_v2_to_v3_insufficient_weight_returns_err() {
 	});
 }
 
-/// `on_initialize` decrements `PermanentStorageUsed` by exactly the sum of `Renew`-kind
-/// entries when the obsolete block is removed; `Store`-kind entries do not contribute.
-#[test]
-fn on_initialize_decrements_permanent_used_when_block_obsoletes() {
-	new_test_ext().execute_with(|| {
-		// Seed `Transactions[3]` with one Store + one Renew so we can verify the kind
-		// filter on cleanup. `block_chunks` is cumulative.
-		let store_size: u32 = 1500;
-		let renew_size: u32 = 2000;
-		let store_chunks = num_chunks(store_size);
-		let store_entry = TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: store_size,
-			extrinsic_index: u32::MAX,
-			block_chunks: store_chunks,
-			kind: TransactionKind::Store,
-		};
-		let renew_entry = TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: renew_size,
-			extrinsic_index: u32::MAX,
-			block_chunks: store_chunks + num_chunks(renew_size),
-			kind: TransactionKind::Renew,
-		};
-		Transactions::insert(
-			3u64,
-			BoundedVec::<TransactionInfo, _>::try_from(vec![store_entry, renew_entry]).unwrap(),
-		);
-		PermanentStorageUsed::put(2000);
-
-		// `RetentionPeriod = 10`. At block 14, `obsolete = 14 - 11 = 3` so `Transactions[3]`
-		// is removed and the renewed 2000 bytes are subtracted.
-		System::set_block_number(14);
-		<TransactionStorage as Hooks<u64>>::on_initialize(14);
-
-		assert_eq!(PermanentStorageUsed::get(), 0, "renewed bytes must be decremented");
-		assert!(Transactions::get(3).is_none(), "obsolete block must be removed");
-	});
-}
-
-/// `on_initialize` cleanup emits a single `PermanentStorageUsedUpdated` event per obsolete
-/// block (not per renewed entry within the block) — keeps event volume bounded.
-#[test]
-fn on_initialize_emits_single_used_updated_event_per_obsolete_block() {
-	new_test_ext().execute_with(|| {
-		let renew_entry = |size: u32, block_chunks: ChunkIndex| TransactionInfo {
-			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size,
-			extrinsic_index: u32::MAX,
-			block_chunks,
-			kind: TransactionKind::Renew,
-		};
-		let chunks_per = num_chunks(500);
-		Transactions::insert(
-			3u64,
-			BoundedVec::<TransactionInfo, _>::try_from(vec![
-				renew_entry(500, chunks_per),
-				renew_entry(500, 2 * chunks_per),
-				renew_entry(500, 3 * chunks_per),
-			])
-			.unwrap(),
-		);
-		PermanentStorageUsed::put(1500);
-
-		System::set_block_number(14);
-		System::reset_events();
-		<TransactionStorage as Hooks<u64>>::on_initialize(14);
-
-		let count = System::events()
-			.iter()
-			.filter(|r| {
-				matches!(
-					r.event,
-					RuntimeEvent::TransactionStorage(Event::PermanentStorageUsedUpdated { .. })
-				)
-			})
-			.count();
-		assert_eq!(count, 1, "exactly one used-updated event per cleanup, not per entry");
-	});
-}
-
 #[cfg(feature = "try-runtime")]
 #[test]
 fn migrate_v2_to_v3_post_upgrade_allows_pruned_entries() {
@@ -1996,9 +1576,9 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 			size: 999,
 			extrinsic_index: 7, // distinct from u32::MAX so we can detect corruption
 			block_chunks: 4,
-			kind: TransactionKind::Store,
+			meta: (),
 		};
-		let v2_bounded: BoundedVec<TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		let v2_bounded: BoundedVec<TransactionInfo<()>, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
 			vec![v2_tx.clone()].try_into().unwrap();
 		Transactions::insert(2u64, v2_bounded);
 
@@ -2128,9 +1708,9 @@ fn transactions_at_handles_mixed_v2_and_v3_entries() {
 			size: 999,
 			extrinsic_index: 7,
 			block_chunks: 4,
-			kind: TransactionKind::Store,
+			meta: (),
 		};
-		let v3_bounded: BoundedVec<TransactionInfo, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
+		let v3_bounded: BoundedVec<TransactionInfo<()>, ConstU32<DEFAULT_MAX_BLOCK_TRANSACTIONS>> =
 			vec![v3_tx.clone()].try_into().unwrap();
 		Transactions::insert(2u64, v3_bounded);
 
@@ -2349,7 +1929,7 @@ fn root_bypasses_authorizer_budget() {
 			TransactionStorage::account_authorization_extent(1),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 10_000,
 				transactions: 0,
 				transactions_allowance: 10,
@@ -2385,7 +1965,7 @@ fn valid_until_clamps_authorization_expiry() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 1000,
 				transactions: 0,
 				transactions_allowance: 1,
@@ -2464,7 +2044,7 @@ fn valid_until_beyond_default_period_does_not_clamp() {
 			TransactionStorage::account_authorization_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: (),
 				bytes_allowance: 1000,
 				transactions: 0,
 				transactions_allowance: 1,
@@ -2632,7 +2212,7 @@ fn transaction_info_projects_into_upstream_runtime_api_type() {
 		size: 500,
 		extrinsic_index: 7,
 		block_chunks: 4,
-		kind: TransactionKind::Store,
+		meta: (),
 	};
 
 	let projected = IndexedTransactionInfo {

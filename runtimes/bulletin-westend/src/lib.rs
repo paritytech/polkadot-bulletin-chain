@@ -136,11 +136,10 @@ pub mod migrations {
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 		txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+		txs_renewal::migrations::v2::MigrateAuthorizationsExtra<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -977,7 +976,9 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::account_authorization(
+				account,
+			)
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
@@ -988,7 +989,9 @@ impl_runtime_apis! {
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::can_renew(
+				&account, &entry,
+			)
 		}
 	}
 

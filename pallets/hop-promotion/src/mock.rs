@@ -106,7 +106,6 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
-	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer =
@@ -115,6 +114,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type EntryMeta = txs_renewal::EntryKind;
+	type AuthorizationExtra = txs_renewal::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
@@ -124,6 +125,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 impl txs_renewal::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
+	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 }
 
 impl pallet_bulletin_hop_promotion::Config for Test {

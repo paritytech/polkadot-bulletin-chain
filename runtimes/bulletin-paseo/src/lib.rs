@@ -133,7 +133,10 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
+	pub type Unreleased = (
+		txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+		txs_renewal::migrations::v2::MigrateAuthorizationsExtra<Runtime>,
+	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -967,7 +970,9 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::account_authorization(
+				account,
+			)
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
@@ -978,7 +983,9 @@ impl_runtime_apis! {
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::can_renew(
+				&account, &entry,
+			)
 		}
 	}
 

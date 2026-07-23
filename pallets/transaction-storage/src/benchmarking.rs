@@ -36,6 +36,14 @@ pub trait BenchmarkHelper<T: Config> {
 	/// `MaxBlockTransactions` zero-filled transactions of `MaxTransactionSize` bytes,
 	/// built with `random_hash` as randomness.
 	fn encoded_check_proof(random_hash: &[u8]) -> Vec<u8>;
+
+	/// `EntryMeta` value that makes the `on_initialize` expiry sweep's
+	/// `OnObsoleteTransactions` callback do its worst-case work. Runtimes wiring the
+	/// renewal pallet should return its permanent variant so the benchmark exercises
+	/// the renewed-byte counter decrement.
+	fn worst_case_entry_meta() -> T::EntryMeta {
+		Default::default()
+	}
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
@@ -486,7 +494,7 @@ mod benchmarks {
 					let mut next = template.clone();
 					next.content_hash = unique_hash;
 					next.block_chunks = chunks_per_tx.saturating_mul(i + 1);
-					next.kind = TransactionKind::Renew;
+					next.meta = T::BenchmarkHelper::worst_case_entry_meta();
 					txns.try_push(next)
 						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));

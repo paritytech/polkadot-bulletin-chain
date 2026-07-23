@@ -101,7 +101,6 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
@@ -131,16 +130,18 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type EntryMeta = txs_renewal::EntryKind;
+	type AuthorizationExtra = txs_renewal::PermanentExtent;
 	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper =
-		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper = txs_renewal::RenewalBenchmarkHelper;
 }
 
 impl txs_renewal::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo =
 		crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
+	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
 }
 
 parameter_types! {

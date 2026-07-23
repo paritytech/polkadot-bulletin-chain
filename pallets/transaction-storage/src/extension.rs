@@ -285,13 +285,13 @@ pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
 /// `extent.bytes += size` and `extent.transactions += 1`. The boost decision
 /// then reduces to "would this leave the holder in-budget on both axes?".
 pub trait BoostStrategy: Clone + PartialEq + Eq {
-	fn boost(extent: AuthorizationExtent) -> TransactionPriority;
+	fn boost<Extra>(extent: AuthorizationExtent<Extra>) -> TransactionPriority;
 }
 
 /// Returns whether `extent` (already post-this-tx) is in-budget on both the byte
 /// counter and the transaction counter. The `bytes_allowance == 0` guard catches the
 /// "missing or empty grant" case.
-fn in_budget(extent: &AuthorizationExtent) -> bool {
+fn in_budget<Extra>(extent: &AuthorizationExtent<Extra>) -> bool {
 	if extent.bytes_allowance == 0 {
 		return false;
 	}
@@ -303,7 +303,7 @@ fn in_budget(extent: &AuthorizationExtent) -> bool {
 #[derive(Clone, PartialEq, Eq)]
 pub struct ProportionalBoost;
 impl BoostStrategy for ProportionalBoost {
-	fn boost(extent: AuthorizationExtent) -> TransactionPriority {
+	fn boost<Extra>(extent: AuthorizationExtent<Extra>) -> TransactionPriority {
 		if !in_budget(&extent) {
 			return 0;
 		}
@@ -327,7 +327,7 @@ impl BoostStrategy for ProportionalBoost {
 #[derive(Clone, PartialEq, Eq)]
 pub struct FlatBoost;
 impl BoostStrategy for FlatBoost {
-	fn boost(extent: AuthorizationExtent) -> TransactionPriority {
+	fn boost<Extra>(extent: AuthorizationExtent<Extra>) -> TransactionPriority {
 		if in_budget(&extent) {
 			ALLOWANCE_PRIORITY_BOOST
 		} else {
@@ -441,10 +441,10 @@ mod boost_tests {
 	/// Build a post-this-tx extent on the byte axis. The tx counter is parked at
 	/// `(0, u32::MAX)` so the tx axis is never the binding constraint in byte-focused
 	/// tests; tx-axis behaviour is covered by the dedicated test below.
-	fn extent(bytes: u64, allowance: u64) -> AuthorizationExtent {
+	fn extent(bytes: u64, allowance: u64) -> AuthorizationExtent<()> {
 		AuthorizationExtent {
 			bytes,
-			bytes_permanent: 0,
+			extra: (),
 			bytes_allowance: allowance,
 			transactions: 0,
 			transactions_allowance: u32::MAX,
@@ -487,7 +487,7 @@ mod boost_tests {
 		// In-budget on bytes, over on transactions → no boost.
 		let over_tx = AuthorizationExtent {
 			bytes: 0,
-			bytes_permanent: 0,
+			extra: (),
 			bytes_allowance: A,
 			transactions: 11,
 			transactions_allowance: 10,
@@ -498,7 +498,7 @@ mod boost_tests {
 		// In-budget on both axes; the tighter remainder caps the proportional share.
 		let tight_tx = AuthorizationExtent {
 			bytes: 0,
-			bytes_permanent: 0,
+			extra: (),
 			bytes_allowance: A,
 			transactions: 9,
 			transactions_allowance: 10,
