@@ -80,7 +80,11 @@ describe("AsyncBulletinClient Integration Tests", {
       "Sr25519",
       eveKeyPair.sign,
     )
-    const authorizer = new AsyncBulletinClient(api, eveSigner, papiClient.submit)
+    const authorizer = new AsyncBulletinClient(
+      api,
+      eveSigner,
+      papiClient.submit,
+    )
     const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
     await authorizer
       .authorizeAccount(
