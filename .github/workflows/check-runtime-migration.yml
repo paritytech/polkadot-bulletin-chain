@@ -206,7 +206,8 @@ jobs:
           REPO='${{ matrix.runtime.external_runtime.repo }}'
           REF='${{ matrix.runtime.external_runtime.ref }}'
           # A pinned commit sha needs no resolution (ls-remote only sees refs).
-          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+          # POSIX sh here, no [[ =~ ]].
+          if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
             SHA="$REF"
           else
             SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
