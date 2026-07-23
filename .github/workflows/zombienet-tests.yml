@@ -234,3 +234,15 @@ jobs:
           name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
           path: /tmp/zombie-*/**/*.log
           retention-days: 14
+
+  zombienet-tests-complete:
+    name: All zombienet tests passed
+    needs: [changes, zombienet-auto-renew-tests, zombienet-sync-tests, zombienet-hop-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "Zombienet tests failed or were cancelled"
+          exit 1
