@@ -17,9 +17,9 @@ use crate::{
 		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
 		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
-		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		wait_for_finalized_quiescence, wait_for_next_best_block, wait_for_session_change_on_node,
+		AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -965,7 +965,8 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		.map(|n| n != 0)
 		.unwrap_or(false);
 	let alice = dev::alice();
-	let pre_store_block = current_best_block(client).await?.number() as u64;
+	// Fresh boundary: same single-block packing assert as the worst-case test, same race.
+	let pre_store_block = wait_for_next_best_block(client, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	tracing::info!(
 		"Submitting {} stores (pre-store block={}, proof_decoy={})",
 		MANY_ITEMS_COUNT,
@@ -1634,7 +1635,10 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		.collect();
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
 
-	let pre_store_block = current_best_block(&client).await?.number() as u64;
+	// Sync to a fresh block boundary so the batch has the full 24s block interval to enter
+	// the pool. Submitting mid-interval races the author's pool snapshot and splits the
+	// stores across two blocks, tripping the single-block assert below.
+	let pre_store_block = wait_for_next_best_block(&client, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	tracing::info!(
 		"Submitting {} signed stores in parallel (pre-store block={})",
 		WORST_CASE_WORKERS,
