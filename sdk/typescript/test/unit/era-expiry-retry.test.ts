@@ -5,11 +5,8 @@ import { InvalidTxError } from "polkadot-api"
 import { describe, expect, it, vi } from "vitest"
 import { AsyncBulletinClient } from "../../src/async-client"
 
-// The node's fork-aware pool can silently lose a broadcast tx around a
-// reorg; PAPI reports it as InvalidTxError/AncientBirthBlock once the
-// 64-block era boundary finalizes. The SDK must re-sign and resubmit once
-// (safe: the expired signature can never be included), and must NOT retry
-// other invalid types.
+// Era expiry is the only invalid outcome that is safe to retry (the
+// expired signature can never be included); nothing else may be.
 
 interface Observer {
   next: (ev: unknown) => void
@@ -71,7 +68,6 @@ describe("mortality era expiry retry", () => {
     await vi.waitFor(() => expect(observers).toHaveLength(1))
     observers[0].error(invalidError("AncientBirthBlock"))
 
-    // The retry re-invokes the full sign-submit-watch cycle
     await vi.waitFor(() => expect(observers).toHaveLength(2))
     observers[1].next({
       txHash: "0x01",
