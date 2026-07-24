@@ -48,6 +48,8 @@ describe("AsyncBulletinClient Integration Tests", {
   timeout: DEFAULT_TEST_TIMEOUT,
 }, () => {
   let client: AsyncBulletinClient
+  // Signs authorize/refresh calls; //Eve is the genesis-seeded authorizer.
+  let authorizer: AsyncBulletinClient
   let papiClient: PolkadotClient
   let aliceAddress: string
 
@@ -80,11 +82,7 @@ describe("AsyncBulletinClient Integration Tests", {
       "Sr25519",
       eveKeyPair.sign,
     )
-    const authorizer = new AsyncBulletinClient(
-      api,
-      eveSigner,
-      papiClient.submit,
-    )
+    authorizer = new AsyncBulletinClient(api, eveSigner, papiClient.submit)
     const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
     await authorizer
       .authorizeAccount(
@@ -370,7 +368,7 @@ describe("AsyncBulletinClient Integration Tests", {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
 
-      const receipt = await client
+      const receipt = await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,
@@ -390,7 +388,7 @@ describe("AsyncBulletinClient Integration Tests", {
       const data = new TextEncoder().encode("Specific content to authorize")
       const contentHash = blake2b256(data)
 
-      const receipt = await client
+      const receipt = await authorizer
         .authorizePreimage(contentHash, BigInt(data.length))
         .send()
 
@@ -406,7 +404,7 @@ describe("AsyncBulletinClient Integration Tests", {
       // First authorize Bob
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
-      await client
+      await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,
@@ -415,7 +413,7 @@ describe("AsyncBulletinClient Integration Tests", {
         .send()
 
       // Now refresh Bob's authorization
-      const receipt = await client
+      const receipt = await authorizer
         .refreshAccountAuthorization(bobAddress)
         .send()
 
@@ -430,10 +428,12 @@ describe("AsyncBulletinClient Integration Tests", {
       // First authorize a preimage
       const data = new TextEncoder().encode("Content for refresh test")
       const contentHash = blake2b256(data)
-      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
+      await authorizer
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .send()
 
       // Now refresh the preimage authorization
-      const receipt = await client
+      const receipt = await authorizer
         .refreshPreimageAuthorization(contentHash)
         .send()
 
@@ -491,7 +491,9 @@ describe("AsyncBulletinClient Integration Tests", {
       const contentHash = blake2b256(data)
 
       // Authorize the preimage first
-      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
+      await authorizer
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .send()
 
       // Store with preimage auth (unsigned transaction)
       const result = await client.storeWithPreimageAuth(data)
@@ -541,7 +543,7 @@ describe("AsyncBulletinClient Integration Tests", {
 
       // 2. Authorize a new account (Bob)
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
-      const authReceipt = await client
+      const authReceipt = await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,
