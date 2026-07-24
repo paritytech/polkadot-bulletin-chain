@@ -30,7 +30,7 @@ serde_json = { version = "1.0.132", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
 testnet-parachains-constants = { version = "21.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
-tracing-subscriber = { version = "=0.3.19" }
+tracing-subscriber = { version = "=0.3.20" }
 westend-runtime-constants = { version = "28.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
