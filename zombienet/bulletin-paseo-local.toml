@@ -45,6 +45,8 @@ validator = true
 p2p_port = 10001
 rpc_port = 10000
 args = [
+	# Mixed-backend network: collator-1 rocksdb, collator-2 paritydb.
+	"--database rocksdb",
 	"--ipfs-server",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace,hop=trace",
@@ -73,6 +75,8 @@ p2p_port = 12347
 rpc_port = 12346
 args = [
 	"--ipfs-server",
+	# Mixed-backend network: collator-1 rocksdb, collator-2 paritydb.
+	"--database paritydb",
 	"--pool-kbytes 65536",
 	"-lparachain=info,runtime=debug,xcm=trace,bitswap=trace,sub-libp2p::bitswap=trace,runtime::transaction-storage=trace",
 	# Embedded relay chain args (after "--"):

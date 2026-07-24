@@ -5,7 +5,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, store, verifyStoredOnNode, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -13,7 +13,11 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Command line arguments: [ws_url] [seed] [ipfs_api_url]
 const args = process.argv.slice(2);
-const NODE_WS = args[0] || 'ws://localhost:10000';
+// Comma-separated list of node WS URLs: the first one is used to submit, the
+// stored transaction is then verified on every node in the list (collator-1
+// rocksdb and collator-2 paritydb in the mixed-backend test network).
+const NODE_WS_URLS = (args[0] || 'ws://localhost:10000').split(',');
+const NODE_WS = NODE_WS_URLS[0];
 const SEED = args[1] || '//Eve';
 const HTTP_IPFS_API = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 
@@ -48,7 +52,7 @@ async function main() {
         );
 
         // Store data.
-        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        const { cid, blockNumber } = await store(bulletinAPI, whoSigner, dataToStore);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS and the node RPC, verifying both match.
@@ -65,6 +69,21 @@ async function main() {
             '❌ dataToStore does not match downloadedContent!'
         );
         logSuccess('Verified content!');
+
+        for (const wsUrl of NODE_WS_URLS) {
+            const nodeClient = createClient(getWsProvider(wsUrl));
+            try {
+                await verifyStoredOnNode(
+                    nodeClient,
+                    nodeClient.getTypedApi(bulletin),
+                    blockNumber,
+                    cid,
+                );
+            } finally {
+                nodeClient.destroy();
+            }
+            logSuccess(`Verified stored transaction on ${wsUrl}!`);
+        }
 
         logTestResult(true, 'Authorize and Store Test');
         resultCode = 0;

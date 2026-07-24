@@ -221,6 +221,31 @@ export async function fetchCid(httpIpfsApi, cid) {
 }
 
 /**
+ * Verify a specific node imported and indexed a stored transaction: its finalized
+ * head reached `blockNumber` and the on-chain metadata at that block contains the
+ * CID's content hash. Used to assert on both collators of the mixed-backend test
+ * network (collator-1 rocksdb, collator-2 paritydb).
+ */
+export async function verifyStoredOnNode(client, typedApi, blockNumber, cid, timeoutSec = 120) {
+    const deadline = Date.now() + timeoutSec * 1000;
+    let finalized = await client.getFinalizedBlock();
+    while (finalized.number < blockNumber) {
+        assert(
+            Date.now() < deadline,
+            `❌ Node did not finalize block ${blockNumber} within ${timeoutSec}s (at #${finalized.number})`,
+        );
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        finalized = await client.getFinalizedBlock();
+    }
+    const txs = await typedApi.query.TransactionStorage.Transactions.getValue(blockNumber) ?? [];
+    const contentHash = toHex(cid.multihash.digest);
+    assert(
+        txs.some((tx) => tx.content_hash === contentHash),
+        `❌ Content hash ${contentHash} not found in Transactions(${blockNumber})`,
+    );
+}
+
+/**
  * Fetch the single raw block for `cid` from the IPFS gateway via `?format=raw`.
  *
  * Unlike `fetchCid`, this never traverses dag-pb links: for a dag-pb CID the

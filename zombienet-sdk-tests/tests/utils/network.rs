@@ -21,6 +21,22 @@ pub fn env_or_default(var: &str, default: &str) -> String {
 	std::env::var(var).unwrap_or_else(|_| default.to_string())
 }
 
+/// Insert `--database=<backend>` (from [`DB_BACKEND_ENV`]) into parachain node args,
+/// before the `--` embedded-relay separator. No-op when the env var is unset or empty.
+pub fn with_db_backend<T>(mut args: Vec<T>) -> Vec<T>
+where
+	T: for<'a> From<&'a str> + PartialEq,
+{
+	if let Ok(backend) = std::env::var(DB_BACKEND_ENV) {
+		if !backend.is_empty() {
+			let separator = T::from("--");
+			let pos = args.iter().position(|a| *a == separator).unwrap_or(args.len());
+			args.insert(pos, T::from(format!("--database={backend}").as_str()));
+		}
+	}
+	args
+}
+
 pub fn get_relay_binary_path() -> String {
 	let path_str = env_or_default(RELAY_BINARY_PATH_ENV, DEFAULT_RELAY_BINARY);
 	resolve_binary_path(&path_str)
@@ -128,6 +144,7 @@ pub fn build_parachain_network_config_three_relay_validators(
 	let relay_args2 = relay_args.clone();
 	let relay_args3 = relay_args.clone();
 
+	let para_node_args = with_db_backend(para_node_args);
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
 
 	let relay_chain = get_relay_chain();
@@ -179,6 +196,7 @@ pub fn build_parachain_network_config_three_collators(
 	let relay_args2 = relay_args.clone();
 	let relay_args3 = relay_args.clone();
 
+	let para_node_args = with_db_backend(para_node_args);
 	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
 	let para_args2 = para_args.clone();
 	let para_args3 = para_args.clone();
@@ -228,4 +246,29 @@ pub fn build_parachain_network_config_three_collators(
 			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	// Single test: it mutates the process-wide env var.
+	#[test]
+	fn with_db_backend_inserts_before_relay_separator() {
+		std::env::set_var(DB_BACKEND_ENV, "paritydb");
+		let args: Vec<String> =
+			vec!["--ipfs-server".into(), "--".into(), "--network-backend=libp2p".into()];
+		assert_eq!(
+			with_db_backend(args),
+			vec!["--ipfs-server", "--database=paritydb", "--", "--network-backend=libp2p"]
+		);
+
+		let no_separator: Vec<String> = vec!["--sync=warp".into()];
+		assert_eq!(with_db_backend(no_separator), vec!["--sync=warp", "--database=paritydb"]);
+
+		std::env::set_var(DB_BACKEND_ENV, "");
+		let args: Vec<String> = vec!["--ipfs-server".into()];
+		assert_eq!(with_db_backend(args), vec!["--ipfs-server"]);
+		std::env::remove_var(DB_BACKEND_ENV);
+	}
 }

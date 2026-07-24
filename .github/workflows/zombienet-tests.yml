@@ -123,13 +123,74 @@ jobs:
           path: /tmp/zombie-*/**/*.log
           retention-days: 14
 
+  # ParityDb legs for the DB-sensitive auto-renew groups (pruning of indexed
+  # transactions is where the backends diverge; archive is backend-invisible).
+  # Backend behavior only changes via node-version bumps, so PRs run these only
+  # when DB-relevant files change; main pushes and dispatch always run them.
+  zombienet-auto-renew-tests-paritydb:
+    if: github.event_name != 'pull_request' || needs.changes.outputs.db-files-changed == 'true'
+    needs: [changes, set-image, prepare-binaries]
+    name: auto-renew / westend / ${{ matrix.group }} / paritydb
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        group:
+          - pruning
+          - restart
+          - mixed-1
+          - mixed-2
+          - mixed-3
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-auto-renew-tests-westend"
+          save-if: false
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet auto-renew tests
+        env:
+          PARACHAIN_ID: 1010
+          BULLETIN_DB_BACKEND: paritydb
+        run: just test-zombienet-auto-renew westend ${{ matrix.group }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-auto-renew-test-logs-westend-${{ matrix.group }}-paritydb
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
+
   zombienet-sync-tests:
     # Sync suite is ~120 min; gate behind dispatch / `zombienet-sync-tests` label.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
     needs: [set-image, prepare-binaries]
-    name: sync / ${{ matrix.runtime.name }}
+    name: sync / ${{ matrix.runtime.name }}${{ matrix.runtime.db == 'paritydb' && ' / paritydb' || '' }}
     runs-on: parity-large
     container:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
@@ -142,6 +203,12 @@ jobs:
             para_id: 1010
           - name: paseo
             para_id: 1501
+          # The sync suite is the most DB-backend-sensitive one (sync modes, pruning,
+          # bitswap all read/write the indexed-transaction column), so it gets a
+          # paritydb leg. One runtime is enough: the backend is runtime-agnostic.
+          - name: westend
+            para_id: 1010
+            db: paritydb
     steps:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,6 +238,7 @@ jobs:
       - name: Run zombienet sync tests
         env:
           PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+          BULLETIN_DB_BACKEND: ${{ matrix.runtime.db || '' }}
         # parachain_ldb_storage_verification_test needs rocksdb's `ldb` CLI (not in the CI
         # image) — skipped by the just recipe.
         run: just test-zombienet-sync ${{ matrix.runtime.name }}
@@ -179,7 +247,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
+          name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}${{ matrix.runtime.db == 'paritydb' && '-paritydb' || '' }}
           path: /tmp/zombie-*/**/*.log
           retention-days: 14
 

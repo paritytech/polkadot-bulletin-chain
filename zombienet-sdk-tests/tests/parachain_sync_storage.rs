@@ -117,7 +117,7 @@ use crate::{
 		verify_all_items_bitswap, verify_col11, verify_ldb_tool, verify_node_bitswap,
 		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
 		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
-		wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
+		wait_for_relay_chain_to_sync, wait_for_session_change_on_node, with_db_backend,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
 		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
@@ -212,13 +212,13 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=fast".into(),
 			"--ipfs-server".into(),
 			NODE_LOG_CONFIG.into(),
 			"--".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -306,14 +306,14 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=fast".into(),
 			"--ipfs-server".into(),
 			format!("--blocks-pruning={}", PRUNING_BLOCKS).as_str().into(),
 			NODE_LOG_CONFIG.into(),
 			"--".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -414,13 +414,13 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
 			"--relay-chain-rpc-url".into(),
 			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -519,13 +519,13 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
 			"--relay-chain-rpc-url".into(),
 			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -610,13 +610,13 @@ async fn parachain_full_sync_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=full".into(),
 			"--ipfs-server".into(),
 			NODE_LOG_CONFIG.into(),
 			"--".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -699,14 +699,14 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=full".into(),
 			"--ipfs-server".into(),
 			format!("--blocks-pruning={}", PRUNING_BLOCKS).as_str().into(),
 			NODE_LOG_CONFIG.into(),
 			"--".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -808,7 +808,7 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let sync_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=full".into(),
 			"--ipfs-server".into(),
 			NODE_LOG_CONFIG.into(),
@@ -816,7 +816,7 @@ async fn parachain_full_sync_relay_warp_sync_test() -> Result<()> {
 			"--".into(),
 			"--sync=warp".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};
@@ -921,13 +921,13 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 	let para_binary = get_parachain_binary_path();
 	let rpc_node_opts = AddCollatorOptions {
 		command: Some(para_binary.as_str().try_into()?),
-		args: vec![
+		args: with_db_backend(vec![
 			"--sync=full".into(),
 			"--ipfs-server".into(),
 			NODE_LOG_CONFIG.into(),
 			"--".into(),
 			"--network-backend=libp2p".into(),
-		],
+		]),
 		is_validator: false,
 		..Default::default()
 	};

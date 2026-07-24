@@ -125,6 +125,7 @@ These allow running parachain tests against a different relay chain or deploymen
 | `RELAY_CHAIN` | Relay chain spec name | `westend-local` |
 | `PARACHAIN_ID` | Parachain ID | `1010` |
 | `PARACHAIN_CHAIN_ID` | Chain ID for DB path resolution | `bulletin-westend` |
+| `BULLETIN_DB_BACKEND` | Database backend for bulletin nodes (`rocksdb` \| `paritydb`) | unset (node default, rocksdb) |
 
 Example with a custom relay chain:
 
