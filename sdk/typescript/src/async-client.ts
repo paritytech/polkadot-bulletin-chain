@@ -752,7 +752,12 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       const cleanup = () => {
         clearTimeout(timerId)
-        subscription.unsubscribe()
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // The transport may already be gone (client destroyed while a
+          // background watch was alive); teardown must not throw.
+        }
       }
 
       const finish = (
