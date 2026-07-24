@@ -755,9 +755,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         try {
           subscription.unsubscribe()
         } catch {
-          // Unsubscribing sends transaction_v1_stop; if the client was
-          // destroyed while a background watch was still alive, the transport
-          // is gone and the send throws. Teardown must not.
+          // The transport may already be gone (client destroyed while a
+          // background watch was alive); teardown must not throw.
         }
       }
 

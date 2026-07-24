@@ -117,8 +117,7 @@ describe("chunked upload tx subscription lifecycle", () => {
           observers.push(obs)
           return {
             unsubscribe: () => {
-              // client.destroy() closes the socket; transaction_v1_stop then
-              // rejects exactly like PAPI's raw client does.
+              // What PAPI's raw client throws once the socket is closed.
               throw new Error("Not connected")
             },
           }
