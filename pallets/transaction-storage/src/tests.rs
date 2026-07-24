@@ -1474,6 +1474,103 @@ fn migration_v1_empty_storage() {
 	});
 }
 
+// ---- SetRetentionPeriodIfZero tests ----
+
+#[test]
+fn set_retention_period_if_zero_sets_zero_value() {
+	use crate::migrations::SetRetentionPeriodIfZero;
+
+	new_test_ext().execute_with(|| {
+		RetentionPeriod::set(0);
+
+		SetRetentionPeriodIfZero::<Test, ConstU64<77>>::on_runtime_upgrade();
+
+		assert_eq!(RetentionPeriod::get(), 77);
+	});
+}
+
+#[test]
+fn set_retention_period_if_zero_leaves_nonzero_untouched() {
+	use crate::migrations::SetRetentionPeriodIfZero;
+
+	new_test_ext().execute_with(|| {
+		// Genesis retention period is 10; the migration must not overwrite it.
+		assert_eq!(RetentionPeriod::get(), 10);
+
+		SetRetentionPeriodIfZero::<Test, ConstU64<77>>::on_runtime_upgrade();
+
+		assert_eq!(RetentionPeriod::get(), 10);
+	});
+}
+
+#[cfg(feature = "try-runtime")]
+#[test]
+fn set_retention_period_if_zero_post_upgrade() {
+	use crate::migrations::SetRetentionPeriodIfZero;
+
+	new_test_ext().execute_with(|| {
+		RetentionPeriod::set(0);
+
+		SetRetentionPeriodIfZero::<Test, ConstU64<77>>::on_runtime_upgrade();
+
+		SetRetentionPeriodIfZero::<Test, ConstU64<77>>::post_upgrade(Vec::new())
+			.expect("retention period is non-zero after migration");
+	});
+}
+
+// ---- v1 → v2 migration tests ----
+
+#[test]
+fn migrate_v1_to_v2_translates_seeded_v1_authorizations() {
+	use crate::migrations::v2::{MigrateV1ToV2, V1Authorization, V1AuthorizationExtent};
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(1).put::<TransactionStorage>();
+		System::set_block_number(10);
+
+		let seed = |scope: AuthorizationScope<u64>, transactions: u32, bytes: u64, expiration| {
+			unhashed::put(
+				&Authorizations::hashed_key_for(scope),
+				&V1Authorization::<u64> {
+					extent: V1AuthorizationExtent { transactions, bytes },
+					expiration,
+				},
+			);
+		};
+
+		let active = AuthorizationScope::Account(1u64);
+		let empty = AuthorizationScope::Account(2u64);
+		let expired = AuthorizationScope::Preimage([3u8; 32]);
+		seed(active.clone(), 7, 5000, 30);
+		seed(empty.clone(), 5, 0, 30);
+		seed(expired.clone(), 1, 1000, 10); // now >= expiration
+
+		// v1 blobs are shorter than the current `Authorization` layout and don't decode as it.
+		assert!(Authorizations::get(&active).is_none());
+
+		MigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		// Old remaining quota becomes the new allowance; consumed counters reset to 0.
+		let auth = Authorizations::get(&active).expect("active entry survives");
+		assert_eq!(
+			auth.extent,
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 5000,
+				transactions: 0,
+				transactions_allowance: 7,
+			},
+		);
+		assert_eq!(auth.expiration, 30);
+
+		assert!(!Authorizations::contains_key(&empty), "bytes == 0 entry must be dropped");
+		assert!(!Authorizations::contains_key(&expired), "expired entry must be dropped");
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+	});
+}
+
 // ---- try_state tests ----
 
 #[test]
@@ -4105,6 +4202,107 @@ fn migrate_v3_to_v4_does_not_downgrade_storage_version() {
 			StorageVersion::new(5),
 			"migration must not downgrade the storage version",
 		);
+	});
+}
+
+// ---- v4 → v5 migration tests ----
+
+/// Write a raw v4-format `AuthorizerBudget` under the `AllowedAuthorizers` key for `who`.
+fn insert_v4_authorizer_budget(
+	who: u64,
+	quota: Option<Quota>,
+	authorization_period: Option<u64>,
+	valid_until: Option<u64>,
+) {
+	use crate::migrations::v5::V4AuthorizerBudget;
+	unhashed::put(
+		&AllowedAuthorizers::<Test>::hashed_key_for(who),
+		&V4AuthorizerBudget::<u64> { quota, authorization_period, valid_until },
+	);
+}
+
+#[test]
+fn migrate_v4_to_v5_translates_budgets_and_bumps_providers() {
+	use crate::migrations::v5::MigrateV4ToV5;
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(4).put::<TransactionStorage>();
+
+		let limited = 10u64;
+		let unlimited = 20u64;
+		insert_v4_authorizer_budget(
+			limited,
+			Some(Quota { transactions: 5, bytes: 1000 }),
+			Some(50),
+			Some(25),
+		);
+		insert_v4_authorizer_budget(unlimited, None, None, None);
+		assert!(System::providers(&limited).is_zero());
+		assert!(System::providers(&unlimited).is_zero());
+
+		MigrateV4ToV5::<Test>::on_runtime_upgrade();
+
+		// `authorization_period` dropped, `quota`/`valid_until` preserved, `feeless`
+		// defaults to true.
+		assert_eq!(
+			AllowedAuthorizers::<Test>::get(limited).unwrap(),
+			AuthorizerBudget {
+				quota: Some(Quota { transactions: 5, bytes: 1000 }),
+				valid_until: Some(25),
+				feeless: true,
+			},
+		);
+		assert_eq!(
+			AllowedAuthorizers::<Test>::get(unlimited).unwrap(),
+			AuthorizerBudget { quota: None, valid_until: None, feeless: true },
+		);
+
+		// Pre-v5 authorizers get their System provider ref bumped, matching `add_authorizer`.
+		assert_eq!(System::providers(&limited), 1);
+		assert_eq!(System::providers(&unlimited), 1);
+
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(5));
+	});
+}
+
+/// Re-run safety comes from the `VersionedMigration` wrapper: a second run against
+/// version-5 state must not touch budgets or double-bump providers.
+#[test]
+fn migrate_v4_to_v5_rerun_is_noop() {
+	use crate::migrations::v5::MigrateV4ToV5;
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(4).put::<TransactionStorage>();
+		let who = 10u64;
+		insert_v4_authorizer_budget(who, Some(Quota { transactions: 5, bytes: 1000 }), None, None);
+
+		MigrateV4ToV5::<Test>::on_runtime_upgrade();
+		let after_first = AllowedAuthorizers::<Test>::get(who).unwrap();
+		assert_eq!(System::providers(&who), 1);
+
+		MigrateV4ToV5::<Test>::on_runtime_upgrade();
+		assert_eq!(AllowedAuthorizers::<Test>::get(who).unwrap(), after_first);
+		assert_eq!(System::providers(&who), 1, "re-run must not double-bump providers");
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(5));
+	});
+}
+
+#[cfg(feature = "try-runtime")]
+#[test]
+fn migrate_v4_to_v5_pre_post_upgrade() {
+	use crate::migrations::v5::{MigrateV4ToV5, VersionUncheckedMigrateV4ToV5};
+	use polkadot_sdk_frame::deps::frame_support::traits::UncheckedOnRuntimeUpgrade;
+
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(4).put::<TransactionStorage>();
+		insert_v4_authorizer_budget(10u64, None, Some(50), None);
+		insert_v4_authorizer_budget(20u64, Some(Quota { transactions: 1, bytes: 100 }), None, None);
+
+		let state =
+			VersionUncheckedMigrateV4ToV5::<Test>::pre_upgrade().expect("pre_upgrade succeeds");
+		MigrateV4ToV5::<Test>::on_runtime_upgrade();
+		VersionUncheckedMigrateV4ToV5::<Test>::post_upgrade(state)
+			.expect("entry count is preserved");
 	});
 }
 
