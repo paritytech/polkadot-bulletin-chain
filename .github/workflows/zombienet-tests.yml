@@ -2,6 +2,9 @@ name: Zombienet SDK Tests
 
 on:
   workflow_dispatch:
+  # Weekly off-peak run of the sync suite; other jobs skip schedule events.
+  schedule:
+    - cron: "0 3 * * 1"
   # Populate the binaries cache under main's scope so PRs can read it.
   push:
     branches: [main]
@@ -11,7 +14,8 @@ on:
     types: [opened, synchronize, reopened, labeled]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Event name keeps scheduled runs out of the push/dispatch group on main.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -63,6 +67,8 @@ jobs:
           just chain-spec paseo
 
   zombienet-auto-renew-tests:
+    # Already runs on every push/PR; a weekly scheduled repeat is waste.
+    if: github.event_name != 'schedule'
     needs: [set-image, prepare-binaries]
     name: auto-renew / ${{ matrix.runtime.name }} / ${{ matrix.group }}
     runs-on: parity-large
@@ -124,9 +130,10 @@ jobs:
           retention-days: 14
 
   zombienet-sync-tests:
-    # Sync suite is ~120 min; gate behind dispatch / `zombienet-sync-tests` label.
+    # Sync suite is ~120 min; gate behind dispatch / weekly schedule / `zombienet-sync-tests` label.
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'zombienet-sync-tests'))
     needs: [set-image, prepare-binaries]
     name: sync / ${{ matrix.runtime.name }}
@@ -184,6 +191,8 @@ jobs:
           retention-days: 14
 
   zombienet-hop-tests:
+    # Already runs on every push/PR; a weekly scheduled repeat is waste.
+    if: github.event_name != 'schedule'
     needs: [set-image, prepare-binaries]
     name: hop / ${{ matrix.runtime.name }}
     runs-on: parity-large
