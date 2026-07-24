@@ -19,6 +19,12 @@ permissions:
 
 jobs:
   changes:
+    # `zombienet-sync-tests` is the only label that changes what runs, so ignore
+    # every other `labeled` event — otherwise labelling races `opened` and the
+    # duplicate run gets cancelled by `cancel-in-progress`.
+    if: >-
+      github.event.action != 'labeled' ||
+      github.event.label.name == 'zombienet-sync-tests'
     uses: ./.github/workflows/check-changed-files.yml
     permissions:
       contents: read
