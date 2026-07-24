@@ -2030,8 +2030,6 @@ dependencies = [
 name = "bulletin-pallets-common"
 version = "0.1.0"
 dependencies = [
- "pallet-proxy",
- "pallet-sudo",
  "pallet-utility",
  "parity-scale-codec",
  "polkadot-sdk-frame",
@@ -2179,7 +2177,11 @@ dependencies = [
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",
+ "pallet-bulletin-transaction-storage",
+ "pallet-message-queue",
+ "pallet-xcm",
  "parachains-common",
+ "parity-scale-codec",
  "polkadot-primitives",
  "sc-consensus-grandpa",
  "sp-authority-discovery",
