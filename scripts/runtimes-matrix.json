@@ -32,5 +32,21 @@
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
     }
+  },
+  {
+    "name": "bulletin-polkadot",
+    "package": "bulletin-polkadot-runtime",
+    "integration_tests": true,
+    "try_runtime": {
+      "extra_flags": "--blocktime 24000 --disable-spec-version-check",
+      "instances": [
+        { "name": "polkadot", "uris": ["wss://bulletin-rpc.polkadot.io"] }
+      ]
+    },
+    "external_runtime": {
+      "repo": "https://github.com/x3c41a/runtimes.git",
+      "ref": "d5330216b6142b8019d0d2811be92f7ed2d4e62d",
+      "path": "./system-parachains/bulletin/bulletin-polkadot"
+    }
   }
 ]
