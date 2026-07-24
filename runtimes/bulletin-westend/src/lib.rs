@@ -15,7 +15,7 @@ pub mod fast_runtime_binary {
 	include!(concat!(env!("OUT_DIR"), "/fast_runtime_binary.rs"));
 }
 
-mod genesis_config_presets;
+pub mod genesis_config_presets;
 pub mod storage;
 mod weights;
 pub mod xcm_config;
