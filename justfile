@@ -125,6 +125,15 @@ test-zombienet-auto-renew runtime="westend" group="all":
             filter_args=("{{group}}")
             ;;
     esac
+    # A filter matching zero tests exits 0; fail loudly instead (e.g. a stale
+    # group name from another branch would otherwise go silently green).
+    matched=$(cargo test --release -p bulletin-chain-zombienet-sdk-tests \
+        --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
+        -- --list "${filter_args[@]}" | grep -c ': test$' || true)
+    if [ "$matched" -eq 0 ]; then
+        echo "group '{{group}}' matched no tests" >&2
+        exit 1
+    fi
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
         -- --test-threads=1 --nocapture "${filter_args[@]}"
