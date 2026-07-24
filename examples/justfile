@@ -607,7 +607,7 @@ run-test-auto-renew-chopsticks endpoint="wss://westend-bulletin-rpc.polkadot.io"
         echo "✅ WASM built: $WASM_PATH"
     fi
 
-    node check_auto_renew_papi.js "{{ endpoint }}" "$WASM_PATH"
+    node check_auto_renew_chopsticks.js "{{ endpoint }}" "$WASM_PATH"
 
 # Run Chopsticks compatibility check (services must already be running or use a live endpoint)
 # Parameters:
