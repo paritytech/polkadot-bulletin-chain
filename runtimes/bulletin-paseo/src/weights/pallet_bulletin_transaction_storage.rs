@@ -19,7 +19,7 @@
 //! THIS FILE WAS AUTO-GENERATED USING THE SUBSTRATE BENCHMARK CLI VERSION 54.0.0
 //! DATE: 2026-07-23, STEPS: `50`, REPEAT: `20`, LOW RANGE: `[]`, HIGH RANGE: `[]`
 //! WORST CASE MAP SIZE: `1000000`
-//! HOSTNAME: `873ca4f7fda3`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
+//! HOSTNAME: `a88011c297ce`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
 //! WASM-EXECUTION: `Compiled`, CHAIN: `None`, DB CACHE: 1024
 
 // Executed Command:
@@ -59,11 +59,11 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `203`
 		//  Estimated: `45519`
-		// Minimum execution time: 15_946_000 picoseconds.
-		Weight::from_parts(16_153_000, 0)
+		// Minimum execution time: 15_924_000 picoseconds.
+		Weight::from_parts(16_415_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 19
-			.saturating_add(Weight::from_parts(6_958, 0).saturating_mul(l.into()))
+			// Standard Error: 17
+			.saturating_add(Weight::from_parts(7_062, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
@@ -76,45 +76,13 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `203`
 		//  Estimated: `45519`
-		// Minimum execution time: 15_882_000 picoseconds.
-		Weight::from_parts(16_221_000, 0)
+		// Minimum execution time: 15_896_000 picoseconds.
+		Weight::from_parts(17_207_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 13
-			.saturating_add(Weight::from_parts(6_666, 0).saturating_mul(l.into()))
+			// Standard Error: 12
+			.saturating_add(Weight::from_parts(6_773, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(2))
-	}
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:1)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	fn force_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 31_845_000 picoseconds.
-		Weight::from_parts(34_362_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(2))
-	}
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:0)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
-	fn renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 31_166_000 picoseconds.
-		Weight::from_parts(33_259_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(1))
 	}
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
@@ -122,8 +90,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
 		//  Estimated: `3550`
-		// Minimum execution time: 16_730_000 picoseconds.
-		Weight::from_parts(17_705_000, 0)
+		// Minimum execution time: 16_835_000 picoseconds.
+		Weight::from_parts(17_859_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -134,8 +102,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `292`
 		//  Estimated: `3532`
-		// Minimum execution time: 18_315_000 picoseconds.
-		Weight::from_parts(19_376_000, 0)
+		// Minimum execution time: 18_405_000 picoseconds.
+		Weight::from_parts(19_584_000, 0)
 			.saturating_add(Weight::from_parts(0, 3532))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -146,8 +114,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `330`
 		//  Estimated: `3532`
-		// Minimum execution time: 17_840_000 picoseconds.
-		Weight::from_parts(18_813_000, 0)
+		// Minimum execution time: 17_981_000 picoseconds.
+		Weight::from_parts(18_943_000, 0)
 			.saturating_add(Weight::from_parts(0, 3532))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -158,8 +126,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
-		// Minimum execution time: 13_362_000 picoseconds.
-		Weight::from_parts(14_185_000, 0)
+		// Minimum execution time: 13_635_000 picoseconds.
+		Weight::from_parts(14_439_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -170,8 +138,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
 		//  Estimated: `3550`
-		// Minimum execution time: 12_089_000 picoseconds.
-		Weight::from_parts(12_958_000, 0)
+		// Minimum execution time: 12_248_000 picoseconds.
+		Weight::from_parts(13_110_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -182,8 +150,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
-		// Minimum execution time: 13_082_000 picoseconds.
-		Weight::from_parts(13_877_000, 0)
+		// Minimum execution time: 13_118_000 picoseconds.
+		Weight::from_parts(13_949_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -194,8 +162,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `3550`
-		// Minimum execution time: 18_961_000 picoseconds.
-		Weight::from_parts(20_069_000, 0)
+		// Minimum execution time: 19_124_000 picoseconds.
+		Weight::from_parts(20_215_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -206,8 +174,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `315`
 		//  Estimated: `3550`
-		// Minimum execution time: 14_140_000 picoseconds.
-		Weight::from_parts(15_046_000, 0)
+		// Minimum execution time: 14_259_000 picoseconds.
+		Weight::from_parts(15_083_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -218,8 +186,8 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `330`
 		//  Estimated: `3532`
-		// Minimum execution time: 21_262_000 picoseconds.
-		Weight::from_parts(24_848_000, 0)
+		// Minimum execution time: 21_838_000 picoseconds.
+		Weight::from_parts(24_583_000, 0)
 			.saturating_add(Weight::from_parts(0, 3532))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -237,61 +205,13 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `316`
 		//  Estimated: `45519`
-		// Minimum execution time: 23_385_000 picoseconds.
-		Weight::from_parts(23_979_000, 0)
+		// Minimum execution time: 22_749_000 picoseconds.
+		Weight::from_parts(23_166_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 16
-			.saturating_add(Weight::from_parts(2_879, 0).saturating_mul(l.into()))
+			// Standard Error: 18
+			.saturating_add(Weight::from_parts(2_937, 0).saturating_mul(l.into()))
 			.saturating_add(T::DbWeight::get().reads(5))
 			.saturating_add(T::DbWeight::get().writes(2))
-	}
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
-	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Storage: `TransactionStorage::Authorizations` (r:2 w:2)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	fn validate_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `533`
-		//  Estimated: `47519`
-		// Minimum execution time: 46_999_000 picoseconds.
-		Weight::from_parts(49_500_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(6))
-			.saturating_add(T::DbWeight::get().writes(3))
-	}
-	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:1 w:0)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::Transactions` (r:1 w:0)
-	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	fn enable_auto_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `412`
-		//  Estimated: `47519`
-		// Minimum execution time: 30_828_000 picoseconds.
-		Weight::from_parts(33_230_000, 0)
-			.saturating_add(Weight::from_parts(0, 47519))
-			.saturating_add(T::DbWeight::get().reads(3))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
-	/// Storage: `TransactionStorage::AutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
-	fn disable_auto_renew() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `375`
-		//  Estimated: `3547`
-		// Minimum execution time: 19_193_000 picoseconds.
-		Weight::from_parts(20_374_000, 0)
-			.saturating_add(Weight::from_parts(0, 3547))
-			.saturating_add(T::DbWeight::get().reads(1))
-			.saturating_add(T::DbWeight::get().writes(1))
 	}
 	/// Storage: `TransactionStorage::ProofChecked` (r:1 w:1)
 	/// Proof: `TransactionStorage::ProofChecked` (`max_values`: Some(1), `max_size`: Some(1), added: 496, mode: `MaxEncodedLen`)
@@ -301,33 +221,15 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
 	/// Storage: `System::ParentHash` (r:1 w:0)
 	/// Proof: `System::ParentHash` (`max_values`: Some(1), `max_size`: Some(32), added: 527, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(77826), added: 78321, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:1)
-	/// Proof: `TransactionStorage::BlockTransactions` (`max_values`: Some(1), `max_size`: Some(44034), added: 44529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
-	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
-	/// Storage: `TransactionStorage::Authorizations` (r:512 w:512)
-	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::TransactionByContentHash` (r:0 w:512)
-	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// The range of component `n` is `[0, 512]`.
-	fn apply_block_inherents(n: u32, ) -> Weight {
+	fn apply_block_inherents() -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `44333 + n * (244 ±0)`
-		//  Estimated: `79311 + n * (2560 ±0)`
-		// Minimum execution time: 69_661_000 picoseconds.
-		Weight::from_parts(73_477_000, 0)
-			.saturating_add(Weight::from_parts(0, 79311))
-			// Standard Error: 16_502
-			.saturating_add(Weight::from_parts(15_776_246, 0).saturating_mul(n.into()))
-			.saturating_add(T::DbWeight::get().reads(8))
-			.saturating_add(T::DbWeight::get().reads((1_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(4))
-			.saturating_add(T::DbWeight::get().writes((2_u64).saturating_mul(n.into())))
-			.saturating_add(Weight::from_parts(0, 2560).saturating_mul(n.into()))
+		//  Measured:  `44334`
+		//  Estimated: `47519`
+		// Minimum execution time: 70_653_000 picoseconds.
+		Weight::from_parts(77_200_000, 0)
+			.saturating_add(Weight::from_parts(0, 47519))
+			.saturating_add(T::DbWeight::get().reads(4))
+			.saturating_add(T::DbWeight::get().writes(1))
 	}
 	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
 	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
@@ -335,29 +237,29 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 	/// Proof: `TransactionStorage::RetentionPeriod` (`max_values`: Some(1), `max_size`: Some(4), added: 499, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::Transactions` (r:1 w:1)
 	/// Proof: `TransactionStorage::Transactions` (`max_values`: None, `max_size`: Some(44054), added: 46529, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::PendingAutoRenewals` (r:1 w:1)
-	/// Proof: `TransactionStorage::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(77826), added: 78321, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::TransactionByContentHash` (r:512 w:512)
 	/// Proof: `TransactionStorage::TransactionByContentHash` (`max_values`: None, `max_size`: Some(56), added: 2531, mode: `MaxEncodedLen`)
-	/// Storage: `TransactionStorage::AutoRenewals` (r:512 w:0)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
 	/// Storage: `TransactionStorage::PermanentStorageUsed` (r:1 w:1)
 	/// Proof: `TransactionStorage::PermanentStorageUsed` (`max_values`: Some(1), `max_size`: Some(8), added: 503, mode: `MaxEncodedLen`)
 	/// Storage: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
 	/// Proof: UNKNOWN KEY `0xc20bbe95ae9a16ecbfcfef6c5ccc7871` (r:1 w:0)
+	/// Storage: `DataRenewal::PendingAutoRenewals` (r:1 w:0)
+	/// Proof: `DataRenewal::PendingAutoRenewals` (`max_values`: Some(1), `max_size`: Some(77826), added: 78321, mode: `MaxEncodedLen`)
+	/// Storage: `DataRenewal::Renewals` (r:512 w:0)
+	/// Proof: `DataRenewal::Renewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
 	/// The range of component `n` is `[0, 512]`.
 	fn on_initialize_with_expiry(n: u32, ) -> Weight {
 		// Proof Size summary in bytes:
-		//  Measured:  `201 + n * (237 ±0)`
+		//  Measured:  `226 + n * (147 ±0)`
 		//  Estimated: `79311 + n * (2557 ±0)`
-		// Minimum execution time: 7_537_000 picoseconds.
-		Weight::from_parts(7_949_000, 0)
+		// Minimum execution time: 7_430_000 picoseconds.
+		Weight::from_parts(7_573_000, 0)
 			.saturating_add(Weight::from_parts(0, 79311))
-			// Standard Error: 16_157
-			.saturating_add(Weight::from_parts(11_600_349, 0).saturating_mul(n.into()))
+			// Standard Error: 4_162
+			.saturating_add(Weight::from_parts(8_192_152, 0).saturating_mul(n.into()))
 			.saturating_add(T::DbWeight::get().reads(6))
 			.saturating_add(T::DbWeight::get().reads((2_u64).saturating_mul(n.into())))
-			.saturating_add(T::DbWeight::get().writes(3))
+			.saturating_add(T::DbWeight::get().writes(2))
 			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
 			.saturating_add(Weight::from_parts(0, 2557).saturating_mul(n.into()))
 	}
@@ -371,24 +273,10 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		// Proof Size summary in bytes:
 		//  Measured:  `41812`
 		//  Estimated: `94048`
-		// Minimum execution time: 138_456_000 picoseconds.
-		Weight::from_parts(145_148_000, 0)
+		// Minimum execution time: 137_343_000 picoseconds.
+		Weight::from_parts(143_211_000, 0)
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(4))
-			.saturating_add(T::DbWeight::get().writes(1))
-	}
-	/// Storage: `TransactionStorage::AutoRenewals` (r:2 w:1)
-	/// Proof: `TransactionStorage::AutoRenewals` (`max_values`: None, `max_size`: Some(82), added: 2557, mode: `MaxEncodedLen`)
-	/// Storage: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
-	/// Proof: UNKNOWN KEY `0x0e7b504e5df47062be129a8958a7a1274e7b9012096b41c4eb3aaf947f6ea429` (r:1 w:0)
-	fn migrate_v3_to_v4_step() -> Weight {
-		// Proof Size summary in bytes:
-		//  Measured:  `394`
-		//  Estimated: `6104`
-		// Minimum execution time: 13_804_000 picoseconds.
-		Weight::from_parts(14_652_000, 0)
-			.saturating_add(Weight::from_parts(0, 6104))
-			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }

@@ -18,6 +18,7 @@
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::AsAuthorizer;
+use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -56,6 +57,9 @@ mod runtime {
 
 	#[runtime::pallet_index(3)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+
+	#[runtime::pallet_index(4)]
+	pub type DataRenewal = pallet_bulletin_transaction_storage_renewal;
 }
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
@@ -111,9 +115,15 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type OnObsoleteTransactions = DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+}
+
+impl txs_renewal::Config for Test {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = ();
 }
 
 impl pallet_bulletin_hop_promotion::Config for Test {

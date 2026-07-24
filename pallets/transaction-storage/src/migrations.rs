@@ -640,192 +640,40 @@ pub mod v3 {
 	}
 }
 
-/// V3 → V4 migration: re-encode each [`AutoRenewals`] entry from
-/// `{ account }` (v3) to `{ account, recurring: true, paid: false }` (v4).
+/// V3 → V4 migration: storage-version bump only.
 ///
-/// All existing entries were written by the old fee-paying `enable_auto_renew`,
-/// which:
-///
-/// - is the forever-renewal path, so the entries map to `recurring: true`;
-/// - did **not** pre-pay the next cycle against the owner's authorization, so they map to `paid:
-///   false` — `do_process_auto_renewals` will charge them per-cycle, preserving their on-chain
-///   behaviour across the upgrade.
-///
-/// The new one-shot path (`recurring: false`) and the new prepaid path
-/// (`paid: true`, set by both `renew` and the new `enable_auto_renew`) are only
-/// reachable through the v4 extrinsics, which can't have written any entries
-/// before this migration runs.
+/// On `main` this reshaped `AutoRenewals` (`{ account }` →
+/// `{ account, recurring, paid }`). The renewal split moved `AutoRenewals` out of
+/// this pallet into `pallet-bulletin-transaction-storage-renewal`, so that reshape now happens
+/// there, during relocation (see
+/// [`pallet_bulletin_transaction_storage_renewal::migrations::RelocateFromTransactionStorage`]).
+/// This migration is kept as a no-op solely to keep the storage-version chain
+/// continuous (3 → 4) so [`v5::MigrateV4ToV5`] — gated on on-chain version `== 4` —
+/// still runs on a chain that is only at 3.
 pub mod v4 {
 	use super::*;
-	use crate::{
-		pallet::{AutoRenewals, Pallet},
-		RenewalData, WeightInfo,
-	};
-	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::{
-		frame_support::{
-			migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
-			weights::WeightMeter,
-		},
-		sp_io,
+	use crate::pallet::Pallet;
+	use polkadot_sdk_frame::deps::frame_support::{
+		migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade,
 	};
 
-	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+	pub struct VersionUncheckedMigrateV3ToV4<T>(PhantomData<T>);
 
-	/// `AutoRenewalData` layout at v3 (no `recurring` field). Used only for
-	/// decoding pre-migration entries; never written.
-	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
-	pub(crate) struct V3AutoRenewalData<AccountId> {
-		pub account: AccountId,
-	}
-
-	/// Stepped migration from storage version 3 to 4.
-	pub struct MigrateV3ToV4<T: Config>(PhantomData<T>);
-
-	impl<T: Config> SteppedMigration for MigrateV3ToV4<T> {
-		type Cursor = ContentHash;
-		type Identifier = MigrationId<24>;
-
-		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 3, version_to: 4 }
-		}
-
-		fn step(
-			mut cursor: Option<Self::Cursor>,
-			meter: &mut WeightMeter,
-		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
-			let required = T::WeightInfo::migrate_v3_to_v4_step();
-			if meter.remaining().any_lt(required) {
-				return Err(SteppedMigrationError::InsufficientWeight { required });
-			}
-
-			loop {
-				if meter.try_consume(required).is_err() {
-					break;
-				}
-
-				let mut iter = match cursor.as_ref() {
-					None => AutoRenewals::<T>::iter_keys(),
-					Some(last) =>
-						AutoRenewals::<T>::iter_keys_from(AutoRenewals::<T>::hashed_key_for(last)),
-				};
-
-				let Some(content_hash) = iter.next() else {
-					// Never downgrade — this MBM can be re-run against state already
-					// at/beyond v4 (e.g. by try-runtime, whose id isn't in `Historic`).
-					use polkadot_sdk_frame::prelude::{GetStorageVersion, StorageVersion};
-					if Pallet::<T>::on_chain_storage_version() < 4 {
-						StorageVersion::new(4).put::<Pallet<T>>();
-					}
-					cursor = None;
-					break;
-				};
-
-				let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
-
-				let Some(raw) = sp_io::storage::get(&raw_key) else {
-					cursor = Some(content_hash);
-					continue;
-				};
-
-				// Idempotent: if it's already v4, skip.
-				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_ok() {
-					cursor = Some(content_hash);
-					continue;
-				}
-
-				let v3 = V3AutoRenewalData::<T::AccountId>::decode(&mut &raw[..])
-					.map_err(|_| SteppedMigrationError::Failed)?;
-
-				AutoRenewals::<T>::insert(
-					content_hash,
-					RenewalData { account: v3.account, recurring: true, paid: false },
-				);
-				cursor = Some(content_hash);
-			}
-
-			Ok(cursor)
-		}
-
-		#[cfg(feature = "try-runtime")]
-		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
-			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
-			let prefix = AutoRenewals::<T>::final_prefix();
-			let mut previous_key = prefix.to_vec();
-			let mut count: u64 = 0;
-			// `step` only converts entries still in the v3 layout; pre-existing v4 entries
-			// (e.g. prepaid `paid=true`) are left untouched, so `post_upgrade` asserts only
-			// on the converted ones.
-			let mut to_migrate: Vec<Vec<u8>> = Vec::new();
-			while let Some(key) =
-				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
-			{
-				previous_key = key.clone();
-				count += 1;
-				let raw = sp_io::storage::get(&key)
-					.ok_or("v3->v4 pre_upgrade: missing AutoRenewals entry")?;
-				if RenewalData::<T::AccountId>::decode(&mut &raw[..]).is_err() {
-					to_migrate.push(key);
-				}
-			}
-			tracing::info!(
-				target: LOG_TARGET,
-				count,
-				to_migrate = to_migrate.len(),
-				"v3->v4 pre_upgrade: AutoRenewals entries"
-			);
-			Ok((count, to_migrate).encode())
-		}
-
-		#[cfg(feature = "try-runtime")]
-		fn post_upgrade(
-			state: Vec<u8>,
-		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
-			use polkadot_sdk_frame::deps::frame_support::storage::StoragePrefixedMap;
-
-			let (old_count, to_migrate) = <(u64, Vec<Vec<u8>>)>::decode(&mut &state[..])
-				.map_err(|_| "Failed to decode pre_upgrade state")?;
-
-			// Each converted entry must now be v4, recurring, and unpaid.
-			for key in &to_migrate {
-				let raw = sp_io::storage::get(key)
-					.ok_or("v3->v4 post_upgrade: migrated entry missing")?;
-				let decoded = RenewalData::<T::AccountId>::decode(&mut &raw[..])
-					.map_err(|_| "v3->v4 post_upgrade: migrated entry is not v4")?;
-				polkadot_sdk_frame::prelude::ensure!(
-					decoded.recurring,
-					"v3->v4 post_upgrade: migrated entry must have recurring=true",
-				);
-				polkadot_sdk_frame::prelude::ensure!(
-					!decoded.paid,
-					"v3->v4 post_upgrade: migrated entry must have paid=false",
-				);
-			}
-
-			let prefix = AutoRenewals::<T>::final_prefix();
-			let mut previous_key = prefix.to_vec();
-			let mut new_count: u64 = 0;
-			while let Some(key) =
-				sp_io::storage::next_key(&previous_key).filter(|k| k.starts_with(&prefix))
-			{
-				previous_key = key;
-				new_count += 1;
-			}
-
-			polkadot_sdk_frame::prelude::ensure!(
-				new_count == old_count,
-				"v3->v4 post_upgrade: entry count changed",
-			);
-			tracing::info!(
-				target: LOG_TARGET,
-				old_count,
-				new_count,
-				migrated = to_migrate.len(),
-				"v3->v4 post_upgrade: valid"
-			);
-			Ok(())
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV3ToV4<T> {
+		fn on_runtime_upgrade() -> Weight {
+			// No data change: `AutoRenewals` left this pallet in the renewal split.
+			Weight::zero()
 		}
 	}
+
+	/// Versioned no-op v3→v4: storage-version bump only (see module docs).
+	pub type MigrateV3ToV4<T> = VersionedMigration<
+		3,
+		4,
+		VersionUncheckedMigrateV3ToV4<T>,
+		Pallet<T>,
+		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
+	>;
 }
 
 /// V4 → V5 migration for `AllowedAuthorizers`.

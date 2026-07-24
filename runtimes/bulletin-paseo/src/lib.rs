@@ -48,6 +48,7 @@ use frame_system::{
 	limits::{BlockLength, BlockWeights},
 	EnsureRoot,
 };
+use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use pallet_xcm::{EnsureXcm, IsVoiceOfBody};
 use parachains_common::{
 	impls::DealWithFees,
@@ -113,10 +114,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
-			Runtime,
-			storage::StorageCallInspector,
-		>,
+		txs_renewal::extension::ValidateBulletinCalls<Runtime, storage::StorageCallInspector>,
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -135,7 +133,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased = (txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -546,28 +544,30 @@ where
 	RuntimeCall: From<C>,
 {
 	fn create_extension() -> Self::Extension {
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
-			frame_system::AuthorizeCall::<Runtime>::new(),
-			frame_system::CheckNonZeroSender::<Runtime>::new(),
-			frame_system::CheckSpecVersion::<Runtime>::new(),
-			frame_system::CheckTxVersion::<Runtime>::new(),
-			frame_system::CheckGenesis::<Runtime>::new(),
-			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
-			frame_system::CheckNonce::<Runtime>::from(0),
-			frame_system::CheckWeight::<Runtime>::new(),
-			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new(
+			(
+				frame_system::AuthorizeCall::<Runtime>::new(),
+				frame_system::CheckNonZeroSender::<Runtime>::new(),
+				frame_system::CheckSpecVersion::<Runtime>::new(),
+				frame_system::CheckTxVersion::<Runtime>::new(),
+				frame_system::CheckGenesis::<Runtime>::new(),
+				frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+				frame_system::CheckNonce::<Runtime>::from(0),
+				frame_system::CheckWeight::<Runtime>::new(),
+				pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+					pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
+				),
+				txs_renewal::extension::ValidateBulletinCalls::<
+					Runtime,
+					storage::StorageCallInspector,
+				>::default(),
+				pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+					Runtime,
+					pallet_bulletin_transaction_storage::extension::FlatBoost,
+				>::default(),
+				frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
-				Runtime,
-				storage::StorageCallInspector,
-			>::default(),
-			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
-				Runtime,
-				pallet_bulletin_transaction_storage::extension::FlatBoost,
-			>::default(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-		))
+		)
 	}
 }
 
@@ -618,6 +618,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_transaction_storage_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -658,6 +660,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_transaction_storage_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]

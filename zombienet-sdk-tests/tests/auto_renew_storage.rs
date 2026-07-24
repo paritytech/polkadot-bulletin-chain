@@ -168,17 +168,17 @@ async fn spawn_shared_harness(
 }
 
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
+	// A pruning-focused log config, NOT the full `NODE_LOG_CONFIG` firehose. The libp2p/sync
+	// trace targets (`litep2p`, `sub-libp2p`, `sync`, `request-response`) generate ~10 MB per
+	// node in a few minutes, which overwhelms the shared-network log files and gets truncated
+	// long before the failing test runs — so a pruning-eviction failure ships un-diagnosable
+	// logs. Keep only what a "bitswap still serves data after pruning" failure needs:
+	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (pruning fired)
 	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
+	//   - `transaction-storage=trace` / `bitswap=trace`: col11 indexing + the served block
 	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
+	let log_targets =
+		"transaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
@@ -884,6 +884,25 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	)?;
 	tracing::info!("✓ data_renewed still served via bitswap");
 
+	// `data_not_renewed` was stored a few blocks after `data_renewed`, so its store block
+	// crosses the `--blocks-pruning` boundary later than the `wait_until` above (which is
+	// anchored to `data_renewed`). Wait for FINALIZED to pass it before asserting eviction,
+	// otherwise the DONT_HAVE poll also has to absorb the finality-lag gap and races under
+	// slower finalization.
+	let not_renewed_pruned_finalized =
+		data_not_renewed_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	tracing::info!(
+		"Waiting for FINALIZED block {} so data_not_renewed's store block {} is past the pruning boundary",
+		not_renewed_pruned_finalized,
+		data_not_renewed_block
+	);
+	wait_for_finalized_height(
+		collator1,
+		not_renewed_pruned_finalized,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
+
 	expect_bitswap_dont_have(
 		collator1,
 		&data_not_renewed,
@@ -1100,7 +1119,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -1144,7 +1163,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 				.iter()
 				.filter_map(|e| e.ok())
 				.filter(|e| {
-					e.pallet_name() == "TransactionStorage" && e.variant_name() == "RenewalEnabled"
+					e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalEnabled"
 				})
 				.count();
 			if current.number() == 0 {
@@ -1304,16 +1323,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -1720,8 +1735,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (worker, hash) in workers.iter().zip(content_hashes.iter()) {
-		let call =
-			tx("TransactionStorage", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
+		let call = tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(1).immortal().build();
 		let signer = worker.clone();
 		let cli = client.clone();
@@ -1834,16 +1848,12 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -2125,7 +2135,7 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2319,7 +2329,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2353,8 +2363,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
 			for ev in events.iter().filter_map(|e| e.ok()) {
-				if ev.pallet_name() == "TransactionStorage" && ev.variant_name() == "RenewalEnabled"
-				{
+				if ev.pallet_name() == "DataRenewal" && ev.variant_name() == "RenewalEnabled" {
 					enabled_count += 1;
 					if block_n > latest_enable_block {
 						latest_enable_block = block_n;
@@ -2502,16 +2511,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let auto_renewed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 		.count() as u32;
 	let auto_renewal_failed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 		.count() as u32;
 	assert_eq!(
 		auto_renewed, ON_INIT_CLEANUP_ITEMS_PER_SET,
@@ -2968,7 +2973,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let idx = candidates[(pseudo_random(block_n + 1) as usize) % candidates.len()];
 				let hash = stored[idx].content_hash;
 				let renew_call = tx(
-					"TransactionStorage",
+					"DataRenewal",
 					"force_renew",
 					vec![Value::unnamed_variant(
 						"ContentHash",
@@ -3439,8 +3444,8 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
 	// lags ~10s behind best on cumulus).
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
-		"AutoRenewals",
+		"DataRenewal",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r3_hash).fetch(&auto_renewals_addr).await?;
@@ -3622,8 +3627,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
-		"AutoRenewals",
+		"DataRenewal",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r2_hash).fetch(&auto_renewals_addr).await?;

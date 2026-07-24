@@ -120,7 +120,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-sync-tests:
@@ -180,7 +182,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-hop-tests:
@@ -234,7 +238,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-tests-complete:
