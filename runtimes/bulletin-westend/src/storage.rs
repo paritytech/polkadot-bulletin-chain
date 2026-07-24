@@ -58,7 +58,7 @@ parameter_types! {
 	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
-/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
 /// storage calls inside wrapper extrinsics so it can recursively validate and consume
 /// authorization.
 ///

@@ -15,30 +15,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Single transaction extension that validates both storage- and renewal-pallet
-//! calls in one pass.
+//! This pallet's [`LeafValidator`] plug-in for the storage pallet's
+//! [`ValidateAuthorizedCalls`] extension, plus the renewal-side validators it
+//! delegates to.
 //!
-//! `validate` walks the call tree once through
-//! [`CallInspector::inspect_wrapper`], visiting every direct `Call<T>` leaf and
-//! dispatching it to the matching pallet's `validate_signed` /
-//! `validate_renewal_signed`. `prepare` repeats the walk to consume the
-//! authorization. The origin is rewritten to
-//! [`pallet_bulletin_transaction_storage::Origin::Authorized`] once, after the
-//! walk. Wrapped `store` / `store_with_cid_config` and any renewal dispatchable
-//! are rejected at depth > 0 — those must be direct extrinsics.
+//! The runtime wires `ValidateAuthorizedCalls<Runtime, Inspector, (StorageLeaves,
+//! RenewalLeaves)>`: one walk over the call tree offers every leaf to each
+//! validator; [`RenewalLeaves`] claims this pallet's dispatchables. All four are
+//! direct-only (rejected at wrapper depth > 0) — their pool tags and prepaid
+//! charges assume one leaf per extrinsic.
 
 use crate::{Call, Config, Pallet, WeightInfo as _};
-use codec::{Decode, DecodeWithMemTracking, Encode};
-use core::{fmt, marker::PhantomData};
+use core::marker::PhantomData;
 use pallet_bulletin_transaction_storage::{
-	self as txs, extension::MAX_WRAPPER_DEPTH, AuthorizationScope, CallInspector,
-	Origin as TxStorageOrigin, WeightInfo as _,
+	self as txs, extension::LeafValidator, AuthorizationScope,
 };
-use polkadot_sdk_frame::{
-	deps::*,
-	prelude::*,
-	traits::{AsSystemOriginSigner, Implication, OriginTrait},
-};
+use polkadot_sdk_frame::{deps::*, prelude::*};
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
@@ -48,201 +40,58 @@ type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 pub type RenewalValidation<T> =
 	(ValidTransaction, Option<AuthorizationScope<<T as frame_system::Config>::AccountId>>);
 
-/// Single extension that validates both storage- and renewal-pallet calls. The
-/// `I` type parameter supplies the wrapper inspector (e.g. `Utility::batch`
-/// unwrap) used by both validators in a single tree walk.
-#[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking, scale_info::TypeInfo)]
-#[codec(encode_bound())]
-#[codec(decode_bound())]
-#[codec(mel_bound())]
-#[scale_info(skip_type_params(T, I))]
-pub struct ValidateBulletinCalls<T, I = ()>(PhantomData<(T, I)>);
+/// [`LeafValidator`] for this pallet's calls. All four renewal dispatchables are
+/// direct-only: their pool `provides` tags and the prepaid charge accounting
+/// assume exactly one leaf per extrinsic.
+pub struct RenewalLeaves<T>(PhantomData<T>);
 
-impl<T, I> Default for ValidateBulletinCalls<T, I> {
-	fn default() -> Self {
-		Self(PhantomData)
-	}
-}
-
-impl<T: Config + Send + Sync, I: Send + Sync + 'static> fmt::Debug for ValidateBulletinCalls<T, I> {
-	#[cfg(feature = "std")]
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ValidateBulletinCalls")
-	}
-
-	#[cfg(not(feature = "std"))]
-	fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
-		Ok(())
-	}
-}
-
-impl<T: Config + Send + Sync, I: CallInspector<T> + Send + Sync + 'static>
-	TransactionExtension<RuntimeCallOf<T>> for ValidateBulletinCalls<T, I>
+impl<T: Config> LeafValidator<T> for RenewalLeaves<T>
 where
 	RuntimeCallOf<T>: IsSubType<txs::Call<T>> + IsSubType<Call<T>>,
-	T::RuntimeOrigin: OriginTrait + AsSystemOriginSigner<T::AccountId> + From<TxStorageOrigin<T>>,
-	<T::RuntimeOrigin as OriginTrait>::PalletsOrigin:
-		From<TxStorageOrigin<T>> + TryInto<TxStorageOrigin<T>>,
 {
-	const IDENTIFIER: &'static str = "ValidateBulletinCalls";
-
-	type Implicit = ();
-	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
-		Ok(())
+	fn validate_leaf(
+		who: &T::AccountId,
+		call: &RuntimeCallOf<T>,
+		depth: u32,
+	) -> Result<txs::extension::LeafValidation<T>, TransactionValidityError> {
+		let Some(inner_call) = <_ as IsSubType<Call<T>>>::is_sub_type(call) else {
+			return Ok(None);
+		};
+		if depth > 0 {
+			return Err(InvalidTransaction::Call.into());
+		}
+		Pallet::<T>::validate_renewal_signed(who, inner_call).map(Some)
 	}
 
-	/// Signer (when the tx is signed and any pallet call was visited); drives
-	/// `prepare`'s second walk.
-	type Val = Option<T::AccountId>;
-	type Pre = ();
-
-	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
-		if let Some(inner) = <_ as IsSubType<txs::Call<T>>>::is_sub_type(call) {
-			return match inner {
-				txs::Call::store { data, .. } | txs::Call::store_with_cid_config { data, .. } =>
-					<T as txs::Config>::WeightInfo::validate_store(data.len() as u32),
-				_ => Weight::zero(),
-			};
+	fn prepare_leaf(
+		who: &T::AccountId,
+		call: &RuntimeCallOf<T>,
+		depth: u32,
+	) -> Result<bool, TransactionValidityError> {
+		let Some(inner_call) = <_ as IsSubType<Call<T>>>::is_sub_type(call) else {
+			return Ok(false);
+		};
+		if depth > 0 {
+			return Err(InvalidTransaction::Call.into());
 		}
-		if let Some(inner) = <_ as IsSubType<Call<T>>>::is_sub_type(call) {
-			return match inner {
+		Pallet::<T>::pre_dispatch_renewal_signed(who, inner_call).map(|_| true)
+	}
+
+	fn leaf_weight(call: &RuntimeCallOf<T>) -> Weight {
+		match <_ as IsSubType<Call<T>>>::is_sub_type(call) {
+			Some(
 				Call::renew { .. } |
 				Call::force_renew { .. } |
 				Call::enable_auto_renew { .. } |
-				Call::disable_auto_renew { .. } => <T as Config>::WeightInfo::validate_renew(),
-				_ => Weight::zero(),
-			};
+				Call::disable_auto_renew { .. },
+			) => <T as Config>::WeightInfo::validate_renew(),
+			_ => Weight::zero(),
 		}
-		Weight::zero()
-	}
-
-	fn validate(
-		&self,
-		mut origin: T::RuntimeOrigin,
-		call: &RuntimeCallOf<T>,
-		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
-		_len: usize,
-		_self_implicit: Self::Implicit,
-		_inherited_implication: &impl Implication,
-		_source: TransactionSource,
-	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
-		// Unsigned + non-system origins pass through.
-		let who = match origin.as_system_origin_signer() {
-			Some(w) => w.clone(),
-			None => return Ok((ValidTransaction::default(), None, origin)),
-		};
-
-		let mut combined = ValidTransaction::default();
-		let mut last_scope: Option<AuthorizationScope<T::AccountId>> = None;
-		let mut visited_any = false;
-
-		Self::walk::<I, _>(call, 0, &mut |leaf, depth| {
-			if let Some(c) = <_ as IsSubType<txs::Call<T>>>::is_sub_type(leaf) {
-				if depth > 0 && Self::is_direct_only_storage_call(c) {
-					return Err(InvalidTransaction::Call.into());
-				}
-				let (vt, maybe_scope) = txs::Pallet::<T>::validate_signed(&who, c)?;
-				combined = core::mem::take(&mut combined).combine_with(vt);
-				if let Some(s) = maybe_scope {
-					last_scope = Some(s);
-				}
-				visited_any = true;
-				return Ok(());
-			}
-			if let Some(c) = <_ as IsSubType<Call<T>>>::is_sub_type(leaf) {
-				if depth > 0 {
-					// All four renewal dispatchables must be direct extrinsics.
-					return Err(InvalidTransaction::Call.into());
-				}
-				let (vt, maybe_scope) = Pallet::<T>::validate_renewal_signed(&who, c)?;
-				combined = core::mem::take(&mut combined).combine_with(vt);
-				if let Some(s) = maybe_scope {
-					last_scope = Some(s);
-				}
-				visited_any = true;
-				return Ok(());
-			}
-			Ok(())
-		})?;
-
-		if let Some(scope) = last_scope {
-			origin.set_caller_from(TxStorageOrigin::<T>::Authorized { who: who.clone(), scope });
-		}
-		Ok((combined, visited_any.then_some(who), origin))
-	}
-
-	fn prepare(
-		self,
-		val: Self::Val,
-		_origin: &T::RuntimeOrigin,
-		call: &RuntimeCallOf<T>,
-		_info: &DispatchInfoOf<RuntimeCallOf<T>>,
-		_len: usize,
-	) -> Result<Self::Pre, TransactionValidityError> {
-		let Some(who) = val else { return Ok(()) };
-		Self::walk::<I, _>(call, 0, &mut |leaf, depth| {
-			if let Some(c) = <_ as IsSubType<txs::Call<T>>>::is_sub_type(leaf) {
-				if depth > 0 && Self::is_direct_only_storage_call(c) {
-					return Err(InvalidTransaction::Call.into());
-				}
-				return txs::Pallet::<T>::pre_dispatch_signed(&who, c).map(|_| ());
-			}
-			if let Some(c) = <_ as IsSubType<Call<T>>>::is_sub_type(leaf) {
-				if depth > 0 {
-					return Err(InvalidTransaction::Call.into());
-				}
-				return Pallet::<T>::pre_dispatch_renewal_signed(&who, c);
-			}
-			Ok(())
-		})
-	}
-}
-
-impl<T: Config, I> ValidateBulletinCalls<T, I> {
-	/// Storage-pallet calls that must arrive as direct extrinsics (rejected at
-	/// any wrapper depth > 0). Management calls (`authorize_*`, `refresh_*`,
-	/// `remove_*`) are intentionally allowed inside wrappers.
-	fn is_direct_only_storage_call(call: &txs::Call<T>) -> bool {
-		matches!(call, txs::Call::store { .. } | txs::Call::store_with_cid_config { .. })
-	}
-
-	/// Visit each direct storage- or renewal-pallet `Call` in the tree exactly
-	/// once. Unwraps wrappers (e.g. `Utility::batch`) through
-	/// [`CallInspector::inspect_wrapper`]; bails out at [`MAX_WRAPPER_DEPTH`]
-	/// with `ExhaustsResources`. The visitor receives the leaf and its current
-	/// wrapper depth so it can apply direct-only restrictions.
-	fn walk<II, F>(
-		call: &RuntimeCallOf<T>,
-		depth: u32,
-		visitor: &mut F,
-	) -> Result<(), TransactionValidityError>
-	where
-		II: CallInspector<T>,
-		RuntimeCallOf<T>: IsSubType<txs::Call<T>> + IsSubType<Call<T>>,
-		F: FnMut(&RuntimeCallOf<T>, u32) -> Result<(), TransactionValidityError>,
-	{
-		let is_storage_leaf = <_ as IsSubType<txs::Call<T>>>::is_sub_type(call).is_some();
-		let is_renewal_leaf = <_ as IsSubType<Call<T>>>::is_sub_type(call).is_some();
-		if is_storage_leaf || is_renewal_leaf {
-			return visitor(call, depth);
-		}
-		if depth >= MAX_WRAPPER_DEPTH {
-			// Fail-safe: refuse rather than risk letting a hidden direct-only
-			// call slip through. Matches the legacy storage extension's
-			// behaviour for the same case.
-			return Err(InvalidTransaction::Call.into());
-		}
-		if let Some(inner_calls) = II::inspect_wrapper(call) {
-			for inner in inner_calls {
-				Self::walk::<II, F>(inner, depth + 1, visitor)?;
-			}
-		}
-		Ok(())
 	}
 }
 
 // -----------------------------------------------------------------------------
-// Renewal-pallet validators (called by the combined extension above).
+// Renewal-pallet validators (called by RenewalLeaves above).
 // -----------------------------------------------------------------------------
 
 impl<T: Config> Pallet<T> {

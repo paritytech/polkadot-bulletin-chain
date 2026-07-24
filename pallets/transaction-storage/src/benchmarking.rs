@@ -16,7 +16,7 @@
 //! Benchmarks for transaction-storage Pallet
 
 use super::{Pallet as TransactionStorage, *};
-use crate::extension::ValidateStorageCalls;
+use crate::extension::ValidateAuthorizedCalls;
 use alloc::vec;
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
@@ -363,7 +363,7 @@ mod benchmarks {
 		)
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		let ext = ValidateStorageCalls::<T>::default();
+		let ext = ValidateAuthorizedCalls::<T>::default();
 		let call: RuntimeCallOf<T> = Call::<T>::store { data }.into();
 		let info = DispatchInfo::default();
 		let len = 0_usize;

@@ -22,11 +22,14 @@
 // `ContentHash`, `RenewalData`, FRAME prelude, ...). Only the benchmark-only extras
 // are imported explicitly here.
 use super::{Pallet as DataRenewal, *};
-use crate::extension::ValidateBulletinCalls;
+use crate::extension::RenewalLeaves;
 use alloc::vec;
 use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
 use pallet_bulletin_transaction_storage::{
-	self as txs, pallet::Origin, Pallet as TransactionStorage,
+	self as txs,
+	extension::{StorageLeaves, ValidateAuthorizedCalls},
+	pallet::Origin,
+	Pallet as TransactionStorage,
 };
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
@@ -195,7 +198,7 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_account(origin, caller.clone(), 0, bytes_allowance)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		let ext = ValidateBulletinCalls::<T, ()>::default();
+		let ext = ValidateAuthorizedCalls::<T, (), (StorageLeaves<T>, RenewalLeaves<T>)>::default();
 		let call: RuntimeCallOf<T> = Call::<T>::force_renew {
 			entry: TransactionRef::Position { block: BlockNumberFor::<T>::zero(), index: 0 },
 		}

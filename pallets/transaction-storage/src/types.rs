@@ -99,7 +99,7 @@ pub type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Confi
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum AuthorizedCaller<AccountId> {
 	/// A signed transaction whose origin was transformed to
-	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateStorageCalls`].
+	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateAuthorizedCalls`].
 	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
 	/// A root call (e.g. via `sudo`).
 	Root,

@@ -20,6 +20,7 @@ cumulus-primitives-core = { version = "0.25.0", default-features = false }
 cumulus-primitives-utility = { version = "0.28.0", default-features = false }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
+impl-trait-for-tuples = "0.2.3"
 jsonrpsee = { version = "0.24.3" }
 litep2p = { version = "0.13" }
 parachain-info = { version = "0.27.0", package = "staging-parachain-info", default-features = false }

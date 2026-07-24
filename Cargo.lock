@@ -8094,6 +8094,7 @@ dependencies = [
  "array-bytes 6.2.3",
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
+ "impl-trait-for-tuples",
  "pallet-bulletin-transaction-storage-runtime-api",
  "parity-scale-codec",
  "polkadot-sdk-frame",

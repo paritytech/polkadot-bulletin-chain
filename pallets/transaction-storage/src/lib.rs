@@ -249,7 +249,7 @@ pub mod pallet {
 
 	/// Custom origin for authorized signed transaction storage operations.
 	///
-	/// This origin is set by the [`extension::ValidateStorageCalls`] transaction extension
+	/// This origin is set by the [`extension::ValidateAuthorizedCalls`] transaction extension
 	/// for signed transactions that pass authorization checks. Unsigned transactions
 	/// do not use this origin (they are validated via [`ValidateUnsigned`]).
 	#[pallet::origin]
@@ -997,7 +997,7 @@ pub mod pallet {
 		///
 		/// Accepted origins:
 		///
-		/// - [`Origin::Authorized`] (set by [`extension::ValidateStorageCalls`]) →
+		/// - [`Origin::Authorized`] (set by [`extension::ValidateAuthorizedCalls`]) →
 		///   [`AuthorizedCaller::Signed`]
 		/// - Root → [`AuthorizedCaller::Root`]
 		/// - None (unsigned) → [`AuthorizedCaller::Unsigned`]
@@ -1007,7 +1007,7 @@ pub mod pallet {
 		pub fn ensure_authorized(
 			origin: OriginFor<T>,
 		) -> Result<AuthorizedCallerFor<T>, DispatchError> {
-			// 1. Try pallet::Origin::Authorized (set by ValidateStorageCalls extension)
+			// 1. Try pallet::Origin::Authorized (set by ValidateAuthorizedCalls extension)
 			if let Ok(Origin::Authorized { who, scope }) = origin.clone().into_caller().try_into() {
 				return Ok(AuthorizedCaller::Signed { who, scope });
 			}
