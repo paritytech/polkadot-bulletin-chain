@@ -17,6 +17,11 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+mod mock;
+#[cfg(test)]
+mod tests;
+
 use alloc::{vec, vec::Vec};
 use codec::{Decode, Encode};
 use polkadot_sdk_frame::{
