@@ -108,4 +108,56 @@ describe("chunked upload tx subscription lifecycle", () => {
     finalized(2)
     expect(unsubscribed).toEqual([true, true, true])
   })
+
+  it("tolerates unsubscribe failing after the transport is gone", async () => {
+    const observers: Observer[] = []
+    const makeTx = () => ({
+      signSubmitAndWatch: () => ({
+        subscribe: (obs: Observer) => {
+          observers.push(obs)
+          return {
+            unsubscribe: () => {
+              // client.destroy() closes the socket; transaction_v1_stop then
+              // rejects exactly like PAPI's raw client does.
+              throw new Error("Not connected")
+            },
+          }
+        },
+      }),
+      getBareTx: async () => new Uint8Array(),
+      decodedCall: {},
+      signAndSubmit: async () => ({ txHash: "0x01" }),
+    })
+    const api = {
+      tx: { TransactionStorage: { store: makeTx } },
+    }
+    const client = new AsyncBulletinClient(
+      // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
+      api as any,
+      // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
+      signer as any,
+      submitFn,
+    )
+
+    const pending = client.storeWithOptions(new Uint8Array([1, 2]), {
+      waitFor: "in_block",
+    })
+
+    await vi.waitFor(() => expect(observers).toHaveLength(1))
+    observers[0].next({
+      txHash: "0x00",
+      type: "txBestBlocksState",
+      found: true,
+      block: { hash: "0xbe57", number: 10, index: 0 },
+    })
+    await expect(pending).resolves.toBeDefined()
+
+    // Finalized after the socket died: release path must swallow the throw.
+    expect(() =>
+      observers[0].next({
+        type: "finalized",
+        block: { hash: "0xf1a1", number: 10, index: 0 },
+      }),
+    ).not.toThrow()
+  })
 })
