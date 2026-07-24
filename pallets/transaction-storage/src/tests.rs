@@ -30,7 +30,7 @@ use super::{
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
 	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
 	TransactionKind, TransactionRef, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED,
-	AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
+	AUTHORIZATION_NOT_FOUND, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE, CHAIN_PERMANENT_CAP_REACHED,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE, PERMANENT_ALLOWANCE_EXCEEDED,
 	PERMANENT_STORAGE_NEAR_CAP_PERCENT,
 };
@@ -514,6 +514,67 @@ fn expired_authorization_clears() {
 		// No longer in storage
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
 		assert!(System::providers(&who).is_zero());
+	});
+}
+
+/// Preimage twin of `expired_authorization_clears`: `remove_expired_preimage_authorization`
+/// rejects while the authorization is live and removes it once expired.
+#[test]
+fn expired_preimage_authorization_clears() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![2u8; 2000];
+		let hash = blake2_256(&data);
+		// Authorized at block 1: expires at block 1 + 10 = 11.
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2000));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent {
+				bytes: 0,
+				bytes_permanent: 0,
+				bytes_allowance: 2000,
+				transactions: 0,
+				transactions_allowance: 1,
+			},
+		);
+
+		// Can't remove too early
+		run_to_block(10, || None);
+		let remove_call = Call::remove_expired_preimage_authorization { content_hash: hash };
+		assert_noop!(TransactionStorage::pre_dispatch(&remove_call), AUTHORIZATION_NOT_EXPIRED);
+		assert_noop!(
+			Into::<RuntimeCall>::into(remove_call.clone()).dispatch(RuntimeOrigin::none()),
+			Error::AuthorizationNotExpired,
+		);
+
+		// Expired at block 11: still in storage but unusable
+		run_to_block(11, || None);
+		assert!(Authorizations::contains_key(AuthorizationScope::Preimage(hash)));
+		let store_call = Call::store { data };
+		assert_noop!(TransactionStorage::pre_dispatch(&store_call), InvalidTransaction::Payment);
+
+		// Anyone can remove it
+		assert_ok!(TransactionStorage::pre_dispatch(&remove_call));
+		assert_ok!(Into::<RuntimeCall>::into(remove_call).dispatch(RuntimeOrigin::none()));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::ExpiredPreimageAuthorizationRemoved { content_hash: hash },
+		));
+		assert!(!Authorizations::contains_key(AuthorizationScope::Preimage(hash)));
+	});
+}
+
+#[test]
+fn remove_expired_preimage_authorization_not_found() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let hash = blake2_256(&[1u8; 8]);
+		// Missing entry: rejected at pool ingress and at dispatch.
+		let call = Call::remove_expired_preimage_authorization { content_hash: hash };
+		assert_noop!(TransactionStorage::pre_dispatch(&call), AUTHORIZATION_NOT_FOUND);
+		assert_noop!(
+			TransactionStorage::remove_expired_preimage_authorization(RuntimeOrigin::none(), hash),
+			Error::AuthorizationNotFound,
+		);
 	});
 }
 
@@ -3387,6 +3448,97 @@ fn refresh_does_not_reset_consumed_counters() {
 	});
 }
 
+/// Preimage twin of `refresh_does_not_reset_consumed_counters`:
+/// `refresh_preimage_authorization` only extends expiration — consumed counters and
+/// granted caps are left untouched.
+#[test]
+fn refresh_preimage_does_not_reset_consumed_counters() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let data = vec![2u8; 2000];
+		let hash = blake2_256(&data);
+
+		// Authorized at block 1: expires at block 1 + 10 = 11.
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2002));
+
+		// Charge the authorization via the unsigned preimage path: bumps `bytes` and
+		// `transactions`. `pre_dispatch` alone does the charging; skip the dispatch so
+		// no data is stored and the run past block 11 needs no retention proof.
+		let store_call = Call::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
+		let consumed = AuthorizationExtent {
+			bytes: 2000,
+			bytes_permanent: 0,
+			bytes_allowance: 2002,
+			transactions: 1,
+			transactions_allowance: 1,
+		};
+		assert_eq!(TransactionStorage::preimage_authorization_extent(hash), consumed);
+
+		// Refresh at block 5: expiry moves to 5 + 10 = 15, counters untouched.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::refresh_preimage_authorization(RuntimeOrigin::root(), hash));
+		System::assert_has_event(RuntimeEvent::TransactionStorage(
+			Event::PreimageAuthorizationRefreshed { content_hash: hash },
+		));
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			consumed,
+			"refresh must not reset any consumed counters"
+		);
+
+		// Still live past the original expiry (11)...
+		run_to_block(14, || None);
+		assert_eq!(TransactionStorage::preimage_authorization_extent(hash), consumed);
+		// ...and expires at the refreshed boundary (15).
+		run_to_block(15, || None);
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
+fn refresh_preimage_authorization_not_found() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let hash = blake2_256(&[1u8; 8]);
+		assert_noop!(
+			TransactionStorage::refresh_preimage_authorization(RuntimeOrigin::root(), hash),
+			Error::AuthorizationNotFound,
+		);
+	});
+}
+
+#[test]
+fn refresh_preimage_authorization_requires_authorizer_origin() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let hash = blake2_256(&[1u8; 8]);
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2000));
+
+		// Not an authorizer: rejected at dispatch and at pool validation.
+		assert_noop!(
+			TransactionStorage::refresh_preimage_authorization(RuntimeOrigin::signed(99), hash),
+			DispatchError::BadOrigin,
+		);
+		let call = Call::refresh_preimage_authorization { content_hash: hash };
+		assert_noop!(
+			TransactionStorage::validate_signed(&99, &call),
+			InvalidTransaction::BadSigner
+		);
+
+		// A registered authorizer can refresh.
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(authorizer, test_budget(5, 10_000));
+		assert_ok!(TransactionStorage::refresh_preimage_authorization(
+			RuntimeOrigin::signed(authorizer),
+			hash,
+		));
+	});
+}
+
 /// `authorize_account` on an expired-but-present entry resets **all** consumed counters,
 /// including `bytes_permanent`. The new window's renew quota is independent of any
 /// renewed bytes still on chain from the old window; those are tracked by the chain-wide
@@ -3444,6 +3596,28 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 			who,
 		));
 		assert!(!Authorizations::contains_key(AuthorizationScope::Account(who)));
+	});
+}
+
+/// Preimage twin of `remove_expired_account_authorization_succeeds_with_outstanding_renewals`.
+#[test]
+fn remove_expired_preimage_authorization_succeeds_with_outstanding_renewals() {
+	new_test_ext().execute_with(|| {
+		run_to_block(5, || None);
+		let hash = blake2_256(&[1u8; 8]);
+
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 4000));
+		Authorizations::mutate(AuthorizationScope::Preimage(hash), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("authorization present");
+			auth.extent.bytes_permanent = 2000;
+			auth.expiration = 1;
+		});
+
+		assert_ok!(TransactionStorage::remove_expired_preimage_authorization(
+			RuntimeOrigin::none(),
+			hash,
+		));
+		assert!(!Authorizations::contains_key(AuthorizationScope::Preimage(hash)));
 	});
 }
 
@@ -4480,6 +4654,41 @@ fn valid_until_clamps_refresh_authorization_expiry() {
 		run_to_block(6, || None);
 		assert_eq!(
 			TransactionStorage::account_authorization_extent(who),
+			AuthorizationExtent::default(),
+		);
+	});
+}
+
+#[test]
+fn valid_until_clamps_refresh_preimage_authorization_expiry() {
+	// Preimage twin of `valid_until_clamps_refresh_authorization_expiry`: a refresh
+	// issued by an authorizer with `valid_until = 6` cannot extend the grant past
+	// block 6 even if `now + AuthorizationPeriod` would land later.
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let authorizer = 10u64;
+		AllowedAuthorizers::<Test>::insert(
+			authorizer,
+			AuthorizerBudget { valid_until: Some(6), ..test_budget(100, 100_000) },
+		);
+		let hash = blake2_256(&[1u8; 8]);
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::signed(authorizer),
+			hash,
+			1000,
+		));
+
+		// At block 5: refresh would naively set expiration = 5 + 10 = 15, but
+		// must be clamped to authorizer's valid_until = 6.
+		run_to_block(5, || None);
+		assert_ok!(TransactionStorage::refresh_preimage_authorization(
+			RuntimeOrigin::signed(authorizer),
+			hash,
+		));
+		// At block 6 the refreshed authorization is already expired.
+		run_to_block(6, || None);
+		assert_eq!(
+			TransactionStorage::preimage_authorization_extent(hash),
 			AuthorizationExtent::default(),
 		);
 	});
