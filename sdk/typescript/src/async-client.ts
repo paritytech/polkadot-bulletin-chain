@@ -237,6 +237,23 @@ interface MappedTxStatus {
   }
 }
 
+interface SignSubmitResult {
+  blockHash: string
+  txHash: string
+  blockNumber?: number
+  txIndex?: number
+  events?: RuntimeEvent[]
+}
+
+// Shape-matched (not instanceof) to work across polkadot-api instances;
+// narrow on purpose: no other invalid type is safe to retry.
+function isAncientBirthBlockError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const e = (err as { error?: { type?: unknown; value?: { type?: unknown } } })
+    .error
+  return e?.type === "Invalid" && e?.value?.type === "AncientBirthBlock"
+}
+
 /**
  * Map a raw PAPI transaction status event to SDK progress events.
  *
@@ -730,6 +747,11 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * transaction stays broadcast and watched in the background until it
    * finalizes, so a reorg cannot silently drop it.
    *
+   * Retries once on mortality-era expiry (AncientBirthBlock): the node's
+   * pool can silently lose a broadcast tx around a reorg, surfacing only as
+   * era expiry. Safe: past the finalized era boundary the original
+   * signature can never be included, so re-signing cannot double-store.
+   *
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
    * @param waitFor - What to wait for: "in_block" (faster) or "finalized" (safer, default)
@@ -739,20 +761,48 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
-  ): Promise<{
-    blockHash: string
-    txHash: string
-    blockNumber?: number
-    txIndex?: number
-    events?: RuntimeEvent[]
-  }> {
+  ): Promise<SignSubmitResult> {
+    try {
+      return await this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        true,
+      )
+    } catch (err) {
+      if (!isAncientBirthBlockError(err)) throw err
+      return this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        false,
+      )
+    }
+  }
+
+  // One sign-submit-watch cycle. `willRetryEraExpiry` keeps a retried
+  // attempt from emitting a misleading Invalid signal.
+  private signAndSubmitAttempt(
+    tx: PapiTransaction,
+    progressCallback: ProgressCallback | undefined,
+    waitFor: "in_block" | "finalized",
+    chunkIndex: number | undefined,
+    willRetryEraExpiry: boolean,
+  ): Promise<SignSubmitResult> {
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
 
       const cleanup = () => {
         clearTimeout(timerId)
-        subscription.unsubscribe()
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // The transport may already be gone (client destroyed while a
+          // background watch was alive); teardown must not throw.
+        }
       }
 
       const finish = (
@@ -798,7 +848,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           }
           resolved = true
           cleanup()
-          if (progressCallback) {
+          if (
+            progressCallback &&
+            !(willRetryEraExpiry && isAncientBirthBlockError(err))
+          ) {
             const errorMsg = err instanceof Error ? err.message : String(err)
             // Distinguish pool-related drops from other transaction errors
             const isDropped =
