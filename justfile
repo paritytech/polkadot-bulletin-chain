@@ -69,8 +69,8 @@ test-pallets:
 #   archive  — collator in archive mode, RP=10 (shared network)
 #   pruning  — collator with --blocks-pruning=15, RP=10 (shared network)
 #   restart  — scenarios that change pruning args across collator restarts
-#   mixed    — heterogeneous standalone tests (each spawns its own network);
-#              CI runs the mixed-1/2/3 slices in parallel, `mixed` is the union
+#   mixed-1/2/3 — heterogeneous standalone tests (each spawns its own network),
+#              sliced into three groups so CI can run them in parallel
 #   <substr> — any other value is treated as a cargo-test substring filter
 test-zombienet-auto-renew runtime="westend" group="all":
     #!/usr/bin/env bash
@@ -104,15 +104,6 @@ test-zombienet-auto-renew runtime="westend" group="all":
             ;;
         restart)
             filter_args=(parachain_restart_)
-            ;;
-        mixed)
-            filter_args=(--exact \
-                auto_renew_storage::parachain_check_proof_fails_under_pruning_test \
-                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test \
-                auto_renew_storage::parachain_auto_renew_many_items_worst_case_test \
-                auto_renew_storage::parachain_auto_renew_many_items_prune_eviction_test \
-                auto_renew_storage::parachain_on_initialize_cleanup_test \
-                auto_renew_storage::parachain_on_initialize_no_renewals_weight_test)
             ;;
         # Slices balanced by runtime: worst_case alone is ~17 min.
         mixed-1)
