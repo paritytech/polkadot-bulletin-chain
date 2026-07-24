@@ -41,12 +41,23 @@ mod mock;
 mod tests;
 pub mod weights;
 
-/// Domain separator for `hop_submit` signatures. Must remain byte-identical
+/// Domain separator for V1 `hop_submit` signatures. Must remain byte-identical
 /// to the constant in `sc-hop` (`substrate/client/hop/src/types.rs`).
 pub const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
 
-/// Reconstructs the signing payload that the user signed at submit time, given
-/// the precomputed blake2_256 hash of the data.
+/// Domain separator for V2 `hop_submit` signatures. V2 binds the chain's
+/// genesis hash and the recipients list to prevent cross-chain replay and
+/// rebinding of recipients. Must remain byte-identical to the matching constant
+/// in `sc-hop`.
+pub const HOP_SUBMIT_CONTEXT_V2: &[u8] = b"hop-submit-v2:";
+
+/// Maximum number of recipients carried in a V2 `promote_v2` extrinsic. Must
+/// match `sc-hop`'s `MAX_RECIPIENTS` (`substrate/client/hop/src/types.rs`)
+/// so any submission accepted by the RPC can also be promoted on chain.
+pub const MAX_RECIPIENTS: u32 = 256;
+
+/// Reconstructs the V1 signing payload that the user signed at submit time,
+/// given the precomputed blake2_256 hash of the data.
 ///
 /// The bytes must remain identical to the SDK-side construction in `sc-hop`,
 /// otherwise valid promotions will be rejected on chain.
@@ -59,9 +70,38 @@ pub fn signing_payload(data_hash: &[u8; 32], submit_timestamp: u64) -> [u8; 32] 
 	sp_io::hashing::blake2_256(&buf)
 }
 
+/// Reconstructs the V2 signing payload. Extends V1 with the chain's genesis
+/// hash and a hash of the SCALE-encoded recipients list.
+///
+/// Byte layout (pre-hash):
+/// `HOP_SUBMIT_CONTEXT_V2 || data_hash || submit_timestamp.to_le_bytes()
+///  || genesis_hash || recipients_hash`
+///
+/// Must remain byte-identical to the SDK-side construction in `sc-hop`.
+pub fn signing_payload_v2(
+	data_hash: &[u8; 32],
+	submit_timestamp: u64,
+	genesis_hash: &[u8; 32],
+	recipients_hash: &[u8; 32],
+) -> [u8; 32] {
+	const CTX_LEN: usize = HOP_SUBMIT_CONTEXT_V2.len();
+	let mut buf = [0u8; CTX_LEN + 32 + 8 + 32 + 32];
+	let mut offset = 0;
+	buf[offset..offset + CTX_LEN].copy_from_slice(HOP_SUBMIT_CONTEXT_V2);
+	offset += CTX_LEN;
+	buf[offset..offset + 32].copy_from_slice(data_hash);
+	offset += 32;
+	buf[offset..offset + 8].copy_from_slice(&submit_timestamp.to_le_bytes());
+	offset += 8;
+	buf[offset..offset + 32].copy_from_slice(genesis_hash);
+	offset += 32;
+	buf[offset..offset + 32].copy_from_slice(recipients_hash);
+	sp_io::hashing::blake2_256(&buf)
+}
+
 #[frame_support::pallet]
 pub mod pallet {
-	use super::signing_payload;
+	use super::{signing_payload, signing_payload_v2, MAX_RECIPIENTS};
 	use crate::WeightInfo;
 	use alloc::vec::Vec;
 	use bulletin_transaction_storage_primitives::{
@@ -71,17 +111,23 @@ pub mod pallet {
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 	use pallet_bulletin_transaction_storage::WeightInfo as _;
+	use sp_core::H256;
 	use sp_runtime::{
-		traits::{IdentifyAccount, Verify},
+		traits::{IdentifyAccount, Verify, Zero},
 		AccountId32, MultiSignature, MultiSigner,
 	};
+
+	/// Bound on the `recipients` parameter of [`Call::promote_v2`], used both at
+	/// the call boundary (SCALE decode caps the vec length) and as a fan-out
+	/// limit on the V2 signature-verification path.
+	pub type RecipientsBound = ConstU32<MAX_RECIPIENTS>;
 
 	#[pallet::pallet]
 	pub struct Pallet<T>(_);
 
 	#[pallet::config]
 	pub trait Config:
-		frame_system::Config<AccountId = AccountId32>
+		frame_system::Config<AccountId = AccountId32, Hash = H256>
 		+ pallet_bulletin_transaction_storage::Config
 		+ pallet_timestamp::Config<Moment = u64>
 	{
@@ -176,6 +222,67 @@ pub mod pallet {
 				Weight::zero(),
 			))
 		}
+
+		/// Authorizes a [`Call::promote_v2`] dispatch in the tx pool: identical
+		/// pre-checks to [`Self::authorize_promote`], but verifies the user's
+		/// signature against the V2 payload, which additionally binds the chain's
+		/// genesis hash (cross-chain replay) and the recipients list (rebinding
+		/// to a different audience).
+		#[allow(clippy::ptr_arg)]
+		pub fn authorize_promote_v2(
+			source: TransactionSource,
+			signer: &MultiSigner,
+			signature: &MultiSignature,
+			submit_timestamp: &u64,
+			recipients: &BoundedVec<MultiSigner, RecipientsBound>,
+			data: &Vec<u8>,
+		) -> Result<(ValidTransaction, Weight), TransactionValidityError> {
+			if matches!(source, TransactionSource::External) {
+				return Err(InvalidTransaction::Call.into());
+			}
+			if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(data.len()) {
+				return Err(InvalidTransaction::Custom(0).into());
+			}
+
+			if pallet_bulletin_transaction_storage::Pallet::<T>::block_transactions_full() {
+				return Err(InvalidTransaction::ExhaustsResources.into());
+			}
+
+			let now_ms = pallet_timestamp::Pallet::<T>::get();
+			let skew = now_ms.abs_diff(*submit_timestamp);
+			if skew > T::SubmitTimestampTolerance::get() {
+				return Err(InvalidTransaction::Stale.into());
+			}
+
+			let account_id = signer.clone().into_account();
+			if !Self::can_account_promote(&account_id, data.len() as u32) {
+				return Err(InvalidTransaction::BadSigner.into());
+			}
+
+			let data_hash = sp_io::hashing::blake2_256(data);
+			let genesis_hash = frame_system::Pallet::<T>::block_hash(BlockNumberFor::<T>::zero());
+			let recipients_hash = sp_io::hashing::blake2_256(&recipients.encode());
+			let payload = signing_payload_v2(
+				&data_hash,
+				*submit_timestamp,
+				genesis_hash.as_fixed_bytes(),
+				&recipients_hash,
+			);
+			if !signature.verify(&payload[..], &account_id) {
+				return Err(InvalidTransaction::BadProof.into());
+			}
+
+			Ok((
+				ValidTransaction::with_tag_prefix("HopPromotion")
+					.priority(0)
+					.longevity(5)
+					.propagate(false)
+					.and_provides(data_hash)
+					.build()
+					.expect("builder always succeeds; qed"),
+				Weight::zero(),
+			))
+		}
 	}
 
 	#[pallet::call]
@@ -201,6 +308,40 @@ pub mod pallet {
 			data: Vec<u8>,
 		) -> DispatchResult {
 			ensure_authorized(origin)?;
+			pallet_bulletin_transaction_storage::Pallet::<T>::do_store(
+				data,
+				HashingAlgorithm::Blake2b256,
+				RAW_CODEC,
+			)
+		}
+
+		/// V2 variant of [`Self::promote`]: identical body, but the authorize hook
+		/// requires the user's signature to additionally cover the chain genesis
+		/// hash and the recipients list.
+		#[pallet::call_index(1)]
+		#[pallet::weight(
+			<T as pallet_bulletin_transaction_storage::Config>::WeightInfo::store(data.len() as u32)
+		)]
+		#[pallet::authorize(Pallet::<T>::authorize_promote_v2)]
+		#[pallet::weight_of_authorize(
+			<T as Config>::WeightInfo::authorize_promote_v2(data.len() as u32, recipients.len() as u32)
+		)]
+		// `data` MUST be the last argument — see the FOOTGUN note on
+		// `pallet_bulletin_transaction_storage::Pallet::do_store`: the trailing
+		// `data.len()` bytes of the encoded extrinsic get indexed, so any field
+		// encoded after `data` corrupts the stored blob.
+		pub fn promote_v2(
+			origin: OriginFor<T>,
+			_signer: MultiSigner,
+			_signature: MultiSignature,
+			_submit_timestamp: u64,
+			recipients: BoundedVec<MultiSigner, RecipientsBound>,
+			data: Vec<u8>,
+		) -> DispatchResult {
+			ensure_authorized(origin)?;
+			// `recipients` is read by `#[pallet::weight_of_authorize]` above; the dispatch
+			// body itself only needs `data`.
+			let _ = recipients;
 			pallet_bulletin_transaction_storage::Pallet::<T>::do_store(
 				data,
 				HashingAlgorithm::Blake2b256,
