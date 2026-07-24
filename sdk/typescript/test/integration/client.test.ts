@@ -27,13 +27,29 @@ import {
   type BulletinTypedApi,
   ChunkStatus,
   CidCodec,
+  DEFAULT_CLIENT_CONFIG,
   HashAlgorithm,
 } from "../../src"
 
 const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
-describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
+// Worst case per transaction is the SDK's txTimeout (production default,
+// above PAPI's mortality window). Budgets are sized as sequential-tx-count
+// times txTimeout plus margin, so the SDK's descriptive "Transaction timed
+// out" error surfaces instead of an opaque vitest timeout.
+const TX_TIMEOUT = DEFAULT_CLIENT_CONFIG.txTimeout
+const MARGIN = 60_000
+// Non-chunked tests submit at most 2 sequential transactions.
+const DEFAULT_TEST_TIMEOUT = 2 * TX_TIMEOUT + MARGIN
+// Worst chunked test: 5 chunks + 1 manifest, submitted sequentially.
+const CHUNKED_TEST_TIMEOUT = 6 * TX_TIMEOUT + MARGIN
+
+describe("AsyncBulletinClient Integration Tests", {
+  timeout: DEFAULT_TEST_TIMEOUT,
+}, () => {
   let client: AsyncBulletinClient
+  // Signs authorize/refresh calls; //Eve is the genesis-seeded authorizer.
+  let authorizer: AsyncBulletinClient
   let papiClient: PolkadotClient
   let aliceAddress: string
 
@@ -53,18 +69,22 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     )
     aliceAddress = ss58Address(aliceKeyPair.publicKey, 42)
 
-    // Create client directly with api, signer, and submit function
-    // Per-tx timeout for CI zombienet nodes. 60s was too aggressive —
-    // finalization regularly takes >60s under CI load, causing flaky
-    // "Transaction timed out" failures on chunked store tests.
-    client = new AsyncBulletinClient(api, signer, papiClient.submit, {
-      txTimeout: 120_000,
-    })
+    // Use the production-default txTimeout. Tighter overrides (60s, 120s)
+    // flaked under CI load: finalization was observed taking >120s.
+    client = new AsyncBulletinClient(api, signer, papiClient.submit)
 
-    // Authorize Alice's account for storage operations
-    // The bulletin chain requires account authorization before storing data
+    // authorize_account must be signed by an authorizer; genesis seeds //Eve
+    // as the only one (//Alice passes on westend solely via its patched
+    // zombienet spec, and fails with BadSigner on paseo).
+    const eveKeyPair = derive("//Eve")
+    const eveSigner = getPolkadotSigner(
+      eveKeyPair.publicKey,
+      "Sr25519",
+      eveKeyPair.sign,
+    )
+    authorizer = new AsyncBulletinClient(api, eveSigner, papiClient.submit)
     const estimate = client.estimateAuthorization(50 * 1024 * 1024) // 50 MB budget
-    await client
+    await authorizer
       .authorizeAccount(
         aliceAddress,
         estimate.transactions,
@@ -72,7 +92,8 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
       .send()
     console.log("Alice authorized for storage:", aliceAddress)
-  })
+    // One transaction; the config hookTimeout (30s) is too tight for it.
+  }, TX_TIMEOUT + MARGIN)
 
   afterAll(async () => {
     if (papiClient) {
@@ -117,7 +138,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should store chunked data with progress tracking", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       // Create 5 MiB test data
       const data = new Uint8Array(5 * 1024 * 1024).fill(0x42)
@@ -159,7 +180,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire progress events in correct order during chunked upload", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xaa) // 3 MiB → 3 chunks
 
@@ -235,7 +256,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk events sequentially (each chunk submitted before next starts)", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xbb) // 2 MiB → 2 chunks
 
@@ -280,7 +301,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should include CID in chunk_completed events", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(2 * 1024 * 1024).fill(0xcc) // 2 MiB → 2 chunks
 
@@ -306,7 +327,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
     })
 
     it("should fire chunk_completed via store() builder for large data", {
-      timeout: 180_000,
+      timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
       const data = new Uint8Array(3 * 1024 * 1024).fill(0xdd) // 3 MiB, above default threshold
 
@@ -347,7 +368,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
 
-      const receipt = await client
+      const receipt = await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,
@@ -367,7 +388,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const data = new TextEncoder().encode("Specific content to authorize")
       const contentHash = blake2b256(data)
 
-      const receipt = await client
+      const receipt = await authorizer
         .authorizePreimage(contentHash, BigInt(data.length))
         .send()
 
@@ -383,7 +404,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // First authorize Bob
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
       const estimate = client.estimateAuthorization(1_000_000)
-      await client
+      await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,
@@ -392,7 +413,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
         .send()
 
       // Now refresh Bob's authorization
-      const receipt = await client
+      const receipt = await authorizer
         .refreshAccountAuthorization(bobAddress)
         .send()
 
@@ -407,10 +428,12 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       // First authorize a preimage
       const data = new TextEncoder().encode("Content for refresh test")
       const contentHash = blake2b256(data)
-      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
+      await authorizer
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .send()
 
       // Now refresh the preimage authorization
-      const receipt = await client
+      const receipt = await authorizer
         .refreshPreimageAuthorization(contentHash)
         .send()
 
@@ -468,7 +491,9 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
       const contentHash = blake2b256(data)
 
       // Authorize the preimage first
-      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
+      await authorizer
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .send()
 
       // Store with preimage auth (unsigned transaction)
       const result = await client.storeWithPreimageAuth(data)
@@ -518,7 +543,7 @@ describe("AsyncBulletinClient Integration Tests", { timeout: 120_000 }, () => {
 
       // 2. Authorize a new account (Bob)
       const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
-      const authReceipt = await client
+      const authReceipt = await authorizer
         .authorizeAccount(
           bobAddress,
           estimate.transactions,

@@ -237,6 +237,23 @@ interface MappedTxStatus {
   }
 }
 
+interface SignSubmitResult {
+  blockHash: string
+  txHash: string
+  blockNumber?: number
+  txIndex?: number
+  events?: RuntimeEvent[]
+}
+
+// Shape-matched (not instanceof) to work across polkadot-api instances;
+// narrow on purpose: no other invalid type is safe to retry.
+function isAncientBirthBlockError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const e = (err as { error?: { type?: unknown; value?: { type?: unknown } } })
+    .error
+  return e?.type === "Invalid" && e?.value?.type === "AncientBirthBlock"
+}
+
 /**
  * Map a raw PAPI transaction status event to SDK progress events.
  *
@@ -726,6 +743,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Uses PAPI's signSubmitAndWatch which provides real-time status updates
    * as the transaction progresses through the network.
    *
+   * With "in_block" the promise resolves at first inclusion, but the
+   * transaction stays broadcast and watched in the background until it
+   * finalizes, so a reorg cannot silently drop it.
+   *
+   * Retries once on mortality-era expiry (AncientBirthBlock): the node's
+   * pool can silently lose a broadcast tx around a reorg, surfacing only as
+   * era expiry. Safe: past the finalized era boundary the original
+   * signature can never be included, so re-signing cannot double-store.
+   *
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
    * @param waitFor - What to wait for: "in_block" (faster) or "finalized" (safer, default)
@@ -735,20 +761,48 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
-  ): Promise<{
-    blockHash: string
-    txHash: string
-    blockNumber?: number
-    txIndex?: number
-    events?: RuntimeEvent[]
-  }> {
+  ): Promise<SignSubmitResult> {
+    try {
+      return await this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        true,
+      )
+    } catch (err) {
+      if (!isAncientBirthBlockError(err)) throw err
+      return this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        false,
+      )
+    }
+  }
+
+  // One sign-submit-watch cycle. `willRetryEraExpiry` keeps a retried
+  // attempt from emitting a misleading Invalid signal.
+  private signAndSubmitAttempt(
+    tx: PapiTransaction,
+    progressCallback: ProgressCallback | undefined,
+    waitFor: "in_block" | "finalized",
+    chunkIndex: number | undefined,
+    willRetryEraExpiry: boolean,
+  ): Promise<SignSubmitResult> {
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
 
       const cleanup = () => {
         clearTimeout(timerId)
-        subscription.unsubscribe()
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // The transport may already be gone (client destroyed while a
+          // background watch was alive); teardown must not throw.
+        }
       }
 
       const finish = (
@@ -757,7 +811,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ) => {
         if (resolved) return
         resolved = true
-        cleanup()
         resolve({
           blockHash: block.hash,
           txHash: txHash || "",
@@ -769,33 +822,47 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
         next: (ev: TxStatusEvent) => {
-          const result = mapPapiEventToProgress(
-            ev,
-            txHash,
-            progressCallback,
-            chunkIndex,
-            waitFor,
-          )
-          if (result.txHash) txHash = result.txHash
-          if (result.finish) finish(result.finish.block, result.finish.events)
+          if (!resolved) {
+            const result = mapPapiEventToProgress(
+              ev,
+              txHash,
+              progressCallback,
+              chunkIndex,
+              waitFor,
+            )
+            if (result.txHash) txHash = result.txHash
+            if (result.finish) finish(result.finish.block, result.finish.events)
+          }
+          // An in_block resolution keeps the subscription alive until the tx
+          // finalizes: unsubscribing stops the node-side broadcast
+          // (transaction_v1_stop), and a stopped tx is not re-included if its
+          // block is reorged out, losing the data and stranding any
+          // follow-up tx already signed with the next nonce (it then dies at
+          // its mortality boundary with AncientBirthBlock).
+          if (resolved && ev.type === "finalized") cleanup()
         },
         error: (err: unknown) => {
-          if (!resolved) {
-            resolved = true
+          if (resolved) {
             cleanup()
-            if (progressCallback) {
-              const errorMsg = err instanceof Error ? err.message : String(err)
-              // Distinguish pool-related drops from other transaction errors
-              const isDropped =
-                errorMsg.includes("dropped") || errorMsg.includes("pool")
-              progressCallback({
-                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
-                error: errorMsg,
-                chunkIndex,
-              })
-            }
-            reject(err)
+            return
           }
+          resolved = true
+          cleanup()
+          if (
+            progressCallback &&
+            !(willRetryEraExpiry && isAncientBirthBlockError(err))
+          ) {
+            const errorMsg = err instanceof Error ? err.message : String(err)
+            // Distinguish pool-related drops from other transaction errors
+            const isDropped =
+              errorMsg.includes("dropped") || errorMsg.includes("pool")
+            progressCallback({
+              type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+              error: errorMsg,
+              chunkIndex,
+            })
+          }
+          reject(err)
         },
         complete: () => {
           // PAPI can complete the Observable without a finalized/in_block
@@ -803,32 +870,38 @@ export class AsyncBulletinClient implements BulletinClientInterface {
           // reorg or node restart, causing the internal continueWith() to
           // map to rxjs.EMPTY which completes immediately). Without this
           // handler the Promise hangs until the defensive timeout fires.
-          if (!resolved) {
-            resolved = true
+          if (resolved) {
             cleanup()
-            progressCallback?.({
-              type: TxStatus.Dropped,
-              error:
-                "Transaction subscription ended before reaching the expected status",
-              chunkIndex,
-            })
-            reject(
-              new BulletinError(
-                "Transaction subscription ended before reaching the expected status. " +
-                  "This usually means the transaction was dropped from the best block " +
-                  "(e.g. due to a chain reorganization or node restart).",
-                ErrorCode.TRANSACTION_FAILED,
-              ),
-            )
+            return
           }
+          resolved = true
+          cleanup()
+          progressCallback?.({
+            type: TxStatus.Dropped,
+            error:
+              "Transaction subscription ended before reaching the expected status",
+            chunkIndex,
+          })
+          reject(
+            new BulletinError(
+              "Transaction subscription ended before reaching the expected status. " +
+                "This usually means the transaction was dropped from the best block " +
+                "(e.g. due to a chain reorganization or node restart).",
+              ErrorCode.TRANSACTION_FAILED,
+            ),
+          )
         },
       })
 
       // Defensive timeout: PAPI handles reconnects and mortality, so this
-      // should rarely fire. If it does, it likely indicates a bug. Default:
-      // 7 min (above PAPI's 64-block mortality window).
+      // should rarely fire. If it does, it likely indicates a bug. Also caps
+      // the background watch of an already-resolved in_block submission.
+      // Default: 7 min (above PAPI's 64-block mortality window).
       const timerId = setTimeout(() => {
-        if (resolved) return
+        if (resolved) {
+          cleanup()
+          return
+        }
         resolved = true
         cleanup()
         reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
