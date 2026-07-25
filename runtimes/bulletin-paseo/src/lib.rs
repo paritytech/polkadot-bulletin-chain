@@ -114,7 +114,14 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		txs_renewal::extension::ValidateBulletinCalls<Runtime, storage::StorageCallInspector>,
+		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls<
+			Runtime,
+			storage::StorageCallInspector,
+			(
+				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+				txs_renewal::extension::RenewalLeaves<Runtime>,
+			),
+		>,
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
@@ -548,30 +555,32 @@ where
 	RuntimeCall: From<C>,
 {
 	fn create_extension() -> Self::Extension {
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new(
-			(
-				frame_system::AuthorizeCall::<Runtime>::new(),
-				frame_system::CheckNonZeroSender::<Runtime>::new(),
-				frame_system::CheckSpecVersion::<Runtime>::new(),
-				frame_system::CheckTxVersion::<Runtime>::new(),
-				frame_system::CheckGenesis::<Runtime>::new(),
-				frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
-				frame_system::CheckNonce::<Runtime>::from(0),
-				frame_system::CheckWeight::<Runtime>::new(),
-				pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-					pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
-				),
-				txs_renewal::extension::ValidateBulletinCalls::<
-					Runtime,
-					storage::StorageCallInspector,
-				>::default(),
-				pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
-					Runtime,
-					pallet_bulletin_transaction_storage::extension::FlatBoost,
-				>::default(),
-				frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
+			frame_system::AuthorizeCall::<Runtime>::new(),
+			frame_system::CheckNonZeroSender::<Runtime>::new(),
+			frame_system::CheckSpecVersion::<Runtime>::new(),
+			frame_system::CheckTxVersion::<Runtime>::new(),
+			frame_system::CheckGenesis::<Runtime>::new(),
+			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+			frame_system::CheckNonce::<Runtime>::from(0),
+			frame_system::CheckWeight::<Runtime>::new(),
+			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-		)
+			pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
+				Runtime,
+				storage::StorageCallInspector,
+				(
+					pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+					txs_renewal::extension::RenewalLeaves<Runtime>,
+				),
+			>::default(),
+			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+				Runtime,
+				pallet_bulletin_transaction_storage::extension::FlatBoost,
+			>::default(),
+			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		))
 	}
 }
 
@@ -975,7 +984,9 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::account_authorization(
+				account,
+			)
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
@@ -986,7 +997,9 @@ impl_runtime_apis! {
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
+			pallet_bulletin_transaction_storage_renewal::Pallet::<Runtime>::can_renew(
+				&account, &entry,
+			)
 		}
 	}
 

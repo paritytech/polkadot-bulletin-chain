@@ -18,15 +18,18 @@
 //! Benchmarks for the data-renewal pallet.
 
 // `super::*` re-exports the pallet's own imports (`AuthorizationScope`,
-// `BlockTransactions`, `TransactionInfo`, `TransactionKind`, `TransactionRef`,
+// `BlockTransactions`, `TransactionInfo`, `TransactionRef`,
 // `ContentHash`, `RenewalData`, FRAME prelude, ...). Only the benchmark-only extras
 // are imported explicitly here.
 use super::{Pallet as DataRenewal, *};
-use crate::extension::ValidateBulletinCalls;
+use crate::extension::RenewalLeaves;
 use alloc::vec;
 use bulletin_transaction_storage_primitives::cids::{HashingAlgorithm, RAW_CODEC};
 use pallet_bulletin_transaction_storage::{
-	self as txs, pallet::Origin, Pallet as TransactionStorage,
+	self as txs,
+	extension::{StorageLeaves, ValidateAuthorizedCalls},
+	pallet::Origin,
+	Pallet as TransactionStorage,
 };
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
@@ -195,7 +198,7 @@ mod benchmarks {
 		TransactionStorage::<T>::authorize_account(origin, caller.clone(), 0, bytes_allowance)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		let ext = ValidateBulletinCalls::<T, ()>::default();
+		let ext = ValidateAuthorizedCalls::<T, (), (StorageLeaves<T>, RenewalLeaves<T>)>::default();
 		let call: RuntimeCallOf<T> = Call::<T>::force_renew {
 			entry: TransactionRef::Position { block: BlockNumberFor::<T>::zero(), index: 0 },
 		}
@@ -214,7 +217,7 @@ mod benchmarks {
 
 		// `prepare` charged `data.len()` to the permanent-usage counter.
 		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
-		assert_eq!(extent.bytes_permanent, data.len() as u64);
+		assert_eq!(extent.extra.bytes_permanent, data.len() as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
 	}
@@ -255,7 +258,7 @@ mod benchmarks {
 					cid_codec: RAW_CODEC,
 					extrinsic_index: 0,
 					block_chunks: 0,
-					kind: TransactionKind::Store,
+					meta: EntryKind::Store,
 				};
 				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
 				pending

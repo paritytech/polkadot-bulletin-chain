@@ -18,6 +18,7 @@ scale-info = { features = ["derive"], workspace = true }
 tracing = { workspace = true }
 bulletin-transaction-storage-primitives = { workspace = true }
 pallet-bulletin-transaction-storage = { workspace = true }
+pallet-bulletin-transaction-storage-runtime-api = { workspace = true }
 
 polkadot-sdk-frame = { workspace = true, default-features = false, features = [
 	"runtime",
@@ -39,6 +40,7 @@ std = [
 	"bulletin-pallets-common/std",
 	"bulletin-transaction-storage-primitives/std",
 	"codec/std",
+	"pallet-bulletin-transaction-storage-runtime-api/std",
 	"pallet-bulletin-transaction-storage/std",
 	"polkadot-sdk-frame/std",
 	"scale-info/std",
