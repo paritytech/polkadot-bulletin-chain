@@ -14,11 +14,11 @@
  *  7. Verifies PendingAutoRenewals was populated (proven by on_finalize panic)
  *
  * Usage:
- *   node check_auto_renew_papi.js [endpoint] [wasm_path]
+ *   node check_auto_renew_chopsticks.js [endpoint] [wasm_path]
  *
  * Example:
  *   cargo build --release -p bulletin-westend-runtime
- *   node check_auto_renew_papi.js wss://westend-bulletin-rpc.polkadot.io \
+ *   node check_auto_renew_chopsticks.js wss://westend-bulletin-rpc.polkadot.io \
  *     ../target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm
  */
 
