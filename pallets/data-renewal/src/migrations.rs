@@ -40,7 +40,6 @@ use polkadot_sdk_frame::deps::{
 const LOG_TARGET: &str = "runtime::data-renewal::migrations";
 
 const OLD_PALLET: &[u8] = b"TransactionStorage";
-const NEW_PALLET: &[u8] = b"DataRenewal";
 
 /// One-shot migration relocating `AutoRenewals`, `PendingAutoRenewals`, and the
 /// `PermanentStorageUsed` counter from the `TransactionStorage` pallet prefix to the
@@ -104,7 +103,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// `PendingAutoRenewals` (StorageValue): transient per-block scratch, normally
 		// empty across an upgrade. Move verbatim if present.
 		let old_pending_key = storage_prefix(OLD_PALLET, b"PendingAutoRenewals");
-		let new_pending_key = storage_prefix(NEW_PALLET, b"PendingAutoRenewals");
+		let new_pending_key = crate::PendingAutoRenewals::<T>::hashed_key();
 		if let Some(raw) = sp_io::storage::get(&old_pending_key) {
 			sp_io::storage::set(&new_pending_key, &raw);
 			sp_io::storage::clear(&old_pending_key);
@@ -204,7 +203,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 
 		// Every relocated entry must live under the new prefix and decode as the
 		// current `RenewalData` layout (catches a pre-v4 entry that wasn't reshaped).
-		let new_auto_prefix = storage_prefix(NEW_PALLET, b"Renewals");
+		let new_auto_prefix = crate::Renewals::<T>::final_prefix();
 		let mut previous = new_auto_prefix.to_vec();
 		let mut post: u64 = 0;
 		while let Some(key) =
