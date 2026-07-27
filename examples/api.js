@@ -22,7 +22,8 @@ export async function authorizeAccount(
     whos,
     transactions,
     bytes,
-    txMode = TX_MODE_IN_BLOCK
+    txMode = TX_MODE_IN_BLOCK,
+    txOpts = {}
 ) {
     const accounts = Array.isArray(whos) ? whos : [whos];
 
@@ -70,7 +71,7 @@ export async function authorizeAccount(
         calls: authorizeCalls
     });
 
-    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode);
+    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode, undefined, undefined, txOpts);
 }
 
 export async function authorizePreimage(
@@ -106,7 +107,7 @@ export async function authorizePreimage(
     }
 }
 
-export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
+export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null, txOpts = {}) {
     console.log('⬆️ Storing data with length=', data.length);
 
     let expectedCid;
@@ -125,7 +126,7 @@ export async function store(typedApi, signer, data, cidCodec = null, mhCode = nu
         tx = typedApi.tx.TransactionStorage.store({ data: toBytes(data) });
     }
 
-    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
+    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client, txOpts);
     return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
 }
 
@@ -133,6 +134,12 @@ const UTILITY_BATCH_SIZE = 20;
 export const TX_MODE_IN_BLOCK = "in-block";
 export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
 export const TX_MODE_IN_POOL = "in-tx-pool";
+
+// Immortal-era tx options. The mortal-era implicit is the hash of a recent block;
+// over a light client (smoldot) that anchor block can still be reorged, so the
+// runtime recomputes a different implicit and rejects the signature (BadProof).
+// Immortal uses the genesis hash instead, which is stable.
+export const IMMORTAL_TX = { mortality: { mortal: false } };
 
 const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
 
