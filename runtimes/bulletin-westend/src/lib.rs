@@ -142,7 +142,6 @@ pub mod migrations {
 		>,
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
@@ -188,7 +187,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_017,
+	spec_version: 1_000_016,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -349,7 +348,6 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
 	type RelayParentOffset = ConstU32<0>;
-	type SchedulingSignatureVerifier = ();
 }
 
 type ConsensusHook = cumulus_pallet_aura_ext::FixedVelocityConsensusHook<
@@ -706,10 +704,6 @@ impl_runtime_apis! {
 	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn relay_parent_offset() -> u32 {
 			0
-		}
-
-		fn max_claim_queue_offset() -> u8 {
-			cumulus_pallet_parachain_system::Pallet::<Runtime>::max_claim_queue_offset()
 		}
 	}
 

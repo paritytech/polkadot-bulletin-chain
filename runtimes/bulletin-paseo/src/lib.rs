@@ -140,10 +140,8 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (
-		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
-		txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
-	);
+	pub type Unreleased =
+		(txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -183,7 +181,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_022,
+	spec_version: 1_000_021,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -344,7 +342,6 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
 	type RelayParentOffset = ConstU32<0>;
-	type SchedulingSignatureVerifier = ();
 }
 
 type ConsensusHook = cumulus_pallet_aura_ext::FixedVelocityConsensusHook<
@@ -700,10 +697,6 @@ impl_runtime_apis! {
 	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn relay_parent_offset() -> u32 {
 			0
-		}
-
-		fn max_claim_queue_offset() -> u8 {
-			cumulus_pallet_parachain_system::Pallet::<Runtime>::max_claim_queue_offset()
 		}
 	}
 
