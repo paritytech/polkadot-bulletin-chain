@@ -479,10 +479,9 @@ where
 		let Some(inner_call) = call.is_sub_type() else {
 			return Ok((ValidTransaction::default(), (), origin));
 		};
-		// Only `store` / `store_with_cid_config` get the boost. `renew` also carries
-		// `Origin::Authorized` and does consume allowance, but it operates on
-		// already-stored data and shouldn't compete for the same priority slots as
-		// new submissions.
+		// Only `store` / `store_with_cid_config` get the boost. Renewals are another
+		// pallet's calls, so they never reach this match, and they price themselves via
+		// `RenewPriority`.
 		let this_tx_bytes = match inner_call {
 			Call::store { data } | Call::store_with_cid_config { data, .. } => data.len() as u64,
 			_ => return Ok((ValidTransaction::default(), (), origin)),

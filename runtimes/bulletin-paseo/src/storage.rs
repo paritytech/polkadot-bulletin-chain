@@ -29,17 +29,20 @@ parameter_types! {
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
-	// Priorities and longevities used by the transaction storage pallet extrinsics.
+	// Priorities and longevities for the storage and renewal pallet extrinsics.
 	//
 	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
 	// runs before stores compete for blockspace.
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	// Base priority for `store` / `renew`. Picked well below `TransactionPriority::MAX` so
+	// Base priority for `store`. Picked well below `TransactionPriority::MAX` so
 	// `AllowanceBasedPriority` can add its boost without saturating `u64`, while still
 	// leaving plenty of headroom above generic transactions.
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
-	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+	pub const StorePriority: TransactionPriority = TransactionPriority::MAX / 4;
+	pub const StoreLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+	// Renewals price separately from `store`; equal for now, so behaviour is unchanged.
+	pub const RenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
+	pub const RenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
 }
 
 /// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
@@ -98,8 +101,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		// `add_authorizer` / `remove_authorizer`).
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
+	type StorePriority = StorePriority;
+	type StoreLongevity = StoreLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	type EntryMeta = txs_renewal::EntryKind;
@@ -114,6 +117,8 @@ impl txs_renewal::Config for Runtime {
 	type WeightInfo =
 		crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
+	type RenewPriority = RenewPriority;
+	type RenewLongevity = RenewLongevity;
 }
 
 parameter_types! {

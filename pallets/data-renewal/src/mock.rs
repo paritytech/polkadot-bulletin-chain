@@ -81,8 +81,10 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
+	pub const StorePriority: TransactionPriority = TransactionPriority::MAX;
+	pub const StoreLongevity: TransactionLongevity = 10;
+	pub const RenewPriority: TransactionPriority = TransactionPriority::MAX;
+	pub const RenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
@@ -103,8 +105,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
+	type StorePriority = StorePriority;
+	type StoreLongevity = StoreLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	type EntryMeta = crate::EntryKind;
@@ -119,6 +121,8 @@ impl pallet_bulletin_transaction_storage_renewal::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
+	type RenewPriority = RenewPriority;
+	type RenewLongevity = RenewLongevity;
 }
 
 pub fn new_test_ext() -> TestExternalities {

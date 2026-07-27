@@ -130,6 +130,13 @@ pub mod pallet {
 		/// all authorizations. Tracks chain-wide capacity for permanent data.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
+		/// Priority of renewal transactions. A `store` and a `force_renew` of the same
+		/// preimage share one pool tag, so the higher of this and `StorePriority` wins.
+		#[pallet::constant]
+		type RenewPriority: Get<TransactionPriority>;
+		/// Longevity of renewal transactions.
+		#[pallet::constant]
+		type RenewLongevity: Get<TransactionLongevity>;
 	}
 
 	#[pallet::error]
@@ -705,8 +712,10 @@ impl<T: Config> Pallet<T> {
 			context.consume_authorization(),
 		)?;
 		Ok(context.want_valid_transaction().then(|| {
-			pallet_bulletin_transaction_storage::Pallet::<T>::preimage_store_renew_valid_transaction(
+			pallet_bulletin_transaction_storage::Pallet::<T>::preimage_valid_transaction(
 				info.content_hash,
+				<T as Config>::RenewPriority::get(),
+				<T as Config>::RenewLongevity::get(),
 			)
 		}))
 	}

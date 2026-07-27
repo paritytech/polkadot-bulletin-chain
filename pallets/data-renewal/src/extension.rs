@@ -138,8 +138,8 @@ impl<T: Config> Pallet<T> {
 				let valid = if want_valid {
 					ValidTransaction::with_tag_prefix("DataRenewalRenew")
 						.and_provides((who.clone(), info.content_hash))
-						.priority(<T as txs::Config>::StoreRenewPriority::get())
-						.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+						.priority(<T as Config>::RenewPriority::get())
+						.longevity(<T as Config>::RenewLongevity::get())
 						.into()
 				} else {
 					ValidTransaction::default()
@@ -159,13 +159,13 @@ impl<T: Config> Pallet<T> {
 						AuthorizationScope::Preimage(hash) =>
 							ValidTransaction::with_tag_prefix("DataRenewalForceRenewPreimage")
 								.and_provides(*hash)
-								.priority(<T as txs::Config>::StoreRenewPriority::get())
-								.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+								.priority(<T as Config>::RenewPriority::get())
+								.longevity(<T as Config>::RenewLongevity::get())
 								.into(),
 						_ => ValidTransaction::with_tag_prefix("DataRenewalForceRenew")
 							.and_provides((who.clone(), info.content_hash))
-							.priority(<T as txs::Config>::StoreRenewPriority::get())
-							.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+							.priority(<T as Config>::RenewPriority::get())
+							.longevity(<T as Config>::RenewLongevity::get())
 							.into(),
 					}
 				} else {
@@ -192,8 +192,8 @@ impl<T: Config> Pallet<T> {
 				let valid = if want_valid {
 					ValidTransaction::with_tag_prefix("DataRenewalEnable")
 						.and_provides((who.clone(), info.content_hash))
-						.priority(<T as txs::Config>::StoreRenewPriority::get())
-						.longevity(<T as txs::Config>::StoreRenewLongevity::get())
+						.priority(<T as Config>::RenewPriority::get())
+						.longevity(<T as Config>::RenewLongevity::get())
 						.into()
 				} else {
 					ValidTransaction::default()
@@ -212,8 +212,8 @@ impl<T: Config> Pallet<T> {
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
 					ValidTransaction {
-						priority: <T as txs::Config>::StoreRenewPriority::get(),
-						longevity: <T as txs::Config>::StoreRenewLongevity::get(),
+						priority: <T as Config>::RenewPriority::get(),
+						longevity: <T as Config>::RenewLongevity::get(),
 						..Default::default()
 					}
 				} else {

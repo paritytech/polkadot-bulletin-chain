@@ -79,8 +79,8 @@ parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	// `static` rather than `const` so a test can lower it and assert that
 	// `HopPromotion::integrity_test` rejects the inverted ordering.
-	pub static StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
+	pub static StorePriority: TransactionPriority = TransactionPriority::MAX;
+	pub const StoreLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
 }
@@ -108,8 +108,8 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
+	type StorePriority = StorePriority;
+	type StoreLongevity = StoreLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
 	// This pallet's tests never exercise renewal, so the storage pallet's opaque

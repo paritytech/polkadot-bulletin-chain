@@ -150,12 +150,12 @@ pub mod pallet {
 			Self::RuntimeOrigin,
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
 		>;
-		/// Priority of store/renew transactions.
+		/// Priority of `store` transactions.
 		#[pallet::constant]
-		type StoreRenewPriority: Get<TransactionPriority>;
-		/// Longevity of store/renew transactions.
+		type StorePriority: Get<TransactionPriority>;
+		/// Longevity of `store` transactions.
 		#[pallet::constant]
-		type StoreRenewLongevity: Get<TransactionLongevity>;
+		type StoreLongevity: Get<TransactionLongevity>;
 		/// Priority of unsigned transactions to remove expired authorizations.
 		#[pallet::constant]
 		type RemoveExpiredAuthorizationPriority: Get<TransactionPriority>;
@@ -1580,18 +1580,33 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// `ValidTransaction` for preimage-authorized store/renew: tagged on the content
-		/// hash alone (submitter-agnostic) with the shared `TransactionStorageStoreRenew`
-		/// prefix, so unsigned stores and the renewal pallet's unsigned `force_renew` of
-		/// the same preimage dedup against each other in the pool.
-		pub fn preimage_store_renew_valid_transaction(
+		/// `ValidTransaction` for a preimage-authorized call, tagged on the content hash
+		/// alone (submitter-agnostic). Every caller shares this one tag, so an unsigned
+		/// `store` and the renewal pallet's unsigned `force_renew` of the same preimage
+		/// conflict in the pool and the higher priority wins.
+		///
+		/// The tag is the shared part and stays here; pricing is the caller's, since store
+		/// and renew have separate constants. The prefix keeps its name for pool
+		/// continuity across upgrades.
+		pub fn preimage_valid_transaction(
 			content_hash: ContentHash,
+			priority: TransactionPriority,
+			longevity: TransactionLongevity,
 		) -> ValidTransaction {
 			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
 				.and_provides(content_hash)
-				.priority(T::StoreRenewPriority::get())
-				.longevity(T::StoreRenewLongevity::get())
+				.priority(priority)
+				.longevity(longevity)
 				.into()
+		}
+
+		/// [`Self::preimage_valid_transaction`] at `store` pricing.
+		fn preimage_store_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+			Self::preimage_valid_transaction(
+				content_hash,
+				T::StorePriority::get(),
+				T::StoreLongevity::get(),
+			)
 		}
 
 		fn check_store_unsigned(
@@ -1617,7 +1632,7 @@ pub mod pallet {
 
 			Ok(context
 				.want_valid_transaction()
-				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
+				.then(|| Self::preimage_store_valid_transaction(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1706,8 +1721,8 @@ pub mod pallet {
 						.map_err(|_| InvalidTransaction::BadSigner)?;
 					return Ok((
 						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
+							priority: T::StorePriority::get(),
+							longevity: T::StoreLongevity::get(),
 							..Default::default()
 						}),
 						None,
@@ -1758,15 +1773,15 @@ pub mod pallet {
 			let (valid_tx, scope) = if context.want_valid_transaction() {
 				let (valid_tx, scope) = if used_preimage_auth {
 					(
-						Self::preimage_store_renew_valid_transaction(content_hash),
+						Self::preimage_store_valid_transaction(content_hash),
 						AuthorizationScope::Preimage(content_hash),
 					)
 				} else {
 					(
 						ValidTransaction::with_tag_prefix("TransactionStorageStore")
 							.and_provides((who, content_hash))
-							.priority(T::StoreRenewPriority::get())
-							.longevity(T::StoreRenewLongevity::get())
+							.priority(T::StorePriority::get())
+							.longevity(T::StoreLongevity::get())
 							.into(),
 						AuthorizationScope::Account(who.clone()),
 					)
