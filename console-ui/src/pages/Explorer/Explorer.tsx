@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect, useCallback } from "react";
 import { Search, ChevronLeft, ChevronRight, RefreshCw, Box, Hash, ChevronDown, ChevronUp, Zap, FileText, Database } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -65,7 +68,7 @@ export function Explorer() {
   const api = useApi();
   const client = useClient();
   const currentBlockNumber = useBlockNumber();
-  const { storageType, network } = useChainState();
+  const { network } = useChainState();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -285,13 +288,9 @@ export function Explorer() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          {storageType === "web3storage" ? "Web3 Storage Explorer" : "Block Explorer"}
-        </h1>
+        <h1 className="text-3xl font-bold tracking-tight">Block Explorer</h1>
         <p className="text-muted-foreground">
-          {storageType === "web3storage"
-            ? "Browse blocks and storage transactions on Web3 Storage"
-            : "Browse blocks and storage transactions on the Bulletin Chain"}
+          Browse blocks and storage transactions on the Bulletin Chain
         </p>
       </div>
 

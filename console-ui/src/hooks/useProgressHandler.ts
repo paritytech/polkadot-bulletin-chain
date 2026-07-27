@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useCallback } from "react";
 import type { ProgressEvent } from "@parity/bulletin-sdk";
 import { TxStatus } from "@parity/bulletin-sdk";

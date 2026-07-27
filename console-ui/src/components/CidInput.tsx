@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useCallback, useEffect } from "react";
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/utils/cn";

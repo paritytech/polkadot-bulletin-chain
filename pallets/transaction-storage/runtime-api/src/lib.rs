@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Runtime API for the Bulletin Chain transaction-storage pallet.
 //!
 //! Exposes one summary call and two boolean predicates that mirror the

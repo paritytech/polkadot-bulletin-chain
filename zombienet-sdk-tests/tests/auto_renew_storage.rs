@@ -7,17 +7,19 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
-		blake2_256, build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		count_event, disable_auto_renew, enable_auto_renew,
+		assert_proof_checked_at, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
+		authorize_and_store_data, blake2_256, block_hash_at,
+		build_parachain_network_config_three_relay_validators, content_hash_and_cid, count_event,
+		current_best_block, current_finalized_block, disable_auto_renew, enable_auto_renew,
 		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
-		generate_test_data, get_alice_nonce, initialize_network, override_alice_authorization,
-		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
-		submit_renew_pair, submit_store_signed, top_up_alice_authorization,
-		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
-		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
-		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		override_alice_authorization, resolve_canonical_store_block, set_retention_period,
+		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
+		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
+		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
+		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -32,28 +34,6 @@ use subxt_signer::{
 	sr25519::{dev, Keypair},
 	SecretUri,
 };
-
-/// Fetch the latest best block. `at_latest()` returns the latest finalized block via
-/// chainHead_v2 — on cumulus, finality lags ~10s behind production, so it can be stuck at
-/// block 0 well after the chain is producing.
-async fn current_best_block(
-	client: &OnlineClient<SubstrateConfig>,
-) -> Result<subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>> {
-	let mut sub = client.blocks().subscribe_best().await?;
-	let block = sub
-		.next()
-		.await
-		.ok_or_else(|| anyhow::anyhow!("subscribe_best stream empty"))??;
-	Ok(block)
-}
-
-/// Fetch the latest finalized block. Use this when event/storage reads must be stable —
-/// best-view can briefly follow a non-canonical branch as chainHead_v2 resolves.
-async fn current_finalized_block(
-	client: &OnlineClient<SubstrateConfig>,
-) -> Result<subxt::blocks::Block<SubstrateConfig, OnlineClient<SubstrateConfig>>> {
-	Ok(client.blocks().at_latest().await?)
-}
 
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
@@ -3473,66 +3453,6 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	tracing::info!("✓ AutoRenewals[{}] removed at block {}", hash_hex, r3);
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Quota Exhaustion Test PASSED ===");
-	Ok(())
-}
-
-async fn block_hash_at(
-	client: &OnlineClient<SubstrateConfig>,
-	target: u64,
-) -> Result<subxt::utils::H256> {
-	let mut current = current_best_block(client).await?;
-	while (current.number() as u64) > target {
-		let parent_hash = current.header().parent_hash;
-		current = client.blocks().at(parent_hash).await?;
-	}
-	if (current.number() as u64) != target {
-		anyhow::bail!("could not locate block {} (best chain at {})", target, current.number());
-	}
-	Ok(current.hash())
-}
-
-/// Locate the canonical block at `target` by walking back from the latest finalized block.
-/// Polls until finality reaches `target` so callers can chain it directly after a best-block
-/// wait without manually re-waiting on finality.
-async fn finalized_block_hash_at(
-	client: &OnlineClient<SubstrateConfig>,
-	target: u64,
-) -> Result<subxt::utils::H256> {
-	const POLL_INTERVAL_SECS: u64 = 2;
-	const POLL_TIMEOUT_SECS: u64 = 120;
-	let start = std::time::Instant::now();
-	let mut current = current_finalized_block(client).await?;
-	while (current.number() as u64) < target {
-		if start.elapsed().as_secs() > POLL_TIMEOUT_SECS {
-			anyhow::bail!(
-				"finalized height {} did not reach target {} within {}s",
-				current.number(),
-				target,
-				POLL_TIMEOUT_SECS
-			);
-		}
-		tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
-		current = current_finalized_block(client).await?;
-	}
-	while (current.number() as u64) > target {
-		let parent_hash = current.header().parent_hash;
-		current = client.blocks().at(parent_hash).await?;
-	}
-	Ok(current.hash())
-}
-
-/// Assert exactly one `ProofChecked` event at the given block; verifies the storage-proof
-/// step of `apply_block_inherents` actually ran for `Transactions[block - RetentionPeriod]`.
-/// Reads at the canonical (finalized) block — caller must ensure finality has reached `block`.
-async fn assert_proof_checked_at(
-	client: &OnlineClient<SubstrateConfig>,
-	block: u64,
-	context: &str,
-) -> Result<()> {
-	let hash = finalized_block_hash_at(client, block).await?;
-	let events = client.blocks().at(hash).await?.events().await?;
-	let count = count_event(&events, "ProofChecked");
-	assert_eq!(count, 1, "{}: expected 1 ProofChecked at block {}, saw {}", context, block, count);
 	Ok(())
 }
 

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 /**
  * Smoke tests — read-only checks that run in parallel.
  *
@@ -67,6 +70,10 @@ test.describe("Smoke Tests", () => {
     await expect(gatewayInput).toHaveValue("http://127.0.0.1:8283", {
       timeout: 10_000,
     });
+
+    // Bitswap RPC tab should report the node connection
+    await page.getByRole("tab", { name: /Bitswap RPC/i }).click();
+    await expect(page.getByText("bitswap_v1_get")).toBeVisible();
   });
 
   test("upload button disabled without authorization", async ({

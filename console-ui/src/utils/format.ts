@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 export function formatBytes(bytes: number | bigint): string {
   const b = typeof bytes === "bigint" ? Number(bytes) : bytes;
   if (b === 0) return "0 B";

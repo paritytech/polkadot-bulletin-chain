@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { type HTMLAttributes } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/utils/cn";

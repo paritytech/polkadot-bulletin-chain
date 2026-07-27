@@ -42,6 +42,8 @@ The renew-family extrinsics:
 
 `store`, `store_with_cid_config`, `force_renew`, `renew`, `enable_auto_renew`, and `disable_auto_renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
+`authorize_account` / `authorize_preimage` (and their `_window` variants) and `refresh_*_authorization` are feeless only when the dispatching authorizer's `AuthorizerBudget.feeless` flag is set and its budget is still active — see `is_feeless_authorizer`.
+
 Each `TransactionInfo` is stamped with `kind: TransactionKind { Store, Renew }`. The kind is what `on_initialize`'s obsolete-block cleanup uses to tell which entries should decrement the chain-wide renewed-bytes counter when they age out — see [Hard limit on renewed storage](#hard-limit-on-renewed-storage).
 
 ## Authorization model: slots
@@ -275,11 +277,15 @@ A single account, even via stacked `_window` grants, cannot push concurrent on-c
 
 ## Migration
 
-`STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring.
+`STORAGE_VERSION = 7`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, ..., v7}` modules for the wiring.
 
-`v3 → v4` (`migrations::v4::MigrateV3ToV4`, a `SteppedMigration`) translates each legacy `Authorizations[scope]` entry into a single-slot `Authorizations[scope] = Authorization { slots: [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }] }` in place (shared storage prefix), dropping zero-allowance or already-expired entries. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
+`v3 → v4` (`migrations::v4::MigrateV3ToV4`, a `SteppedMigration`) re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring: true, paid: false }`. All pre-existing entries were written by the old fee-paying `enable_auto_renew`, which is the forever-renewal path and did **not** pre-pay against the owner's authorization — so `do_process_auto_renewals` charges them per-cycle, preserving their on-chain behaviour across the upgrade. New one-shot (`recurring: false`) and new prepaid (`paid: true`) entries are only reachable through the newer extrinsics, which can't have written any entries before the migration runs.
 
-`v4 → v5` (`migrations::v5::MigrateV4ToV5`, a `SteppedMigration`) re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring: true, paid: false }`. All pre-existing entries were written by the old fee-paying `enable_auto_renew`, which is the forever-renewal path and did **not** pre-pay against the owner's authorization — so they migrate as `{ recurring: true, paid: false }` and `do_process_auto_renewals` charges them per-cycle, preserving their on-chain behaviour across the upgrade. New one-shot (`recurring: false`) and new prepaid (`paid: true`) entries are only reachable through the v5 extrinsics, which can't have written any entries before the migration runs.
+`v4 → v5` (`migrations::v5::MigrateV4ToV5`, single-block) re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping the pre-slots `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
+
+`v5 → v6` (`migrations::v6::MigrateV5ToV6`, single-block) re-adds `authorization_period: Option<u32>` (now in relay blocks, as a per-authorizer cap on slot windows) to `AuthorizerBudget`, defaulting existing entries to `None`.
+
+`v6 → v7` (`migrations::v7::MigrateV6ToV7`, a `SteppedMigration`) translates each legacy `Authorizations[scope]` entry into a single-slot `Authorization { slots: [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }] }` in place (shared storage prefix), dropping zero-allowance or already-expired entries. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
 
 ## Capacity planning operational steps
 

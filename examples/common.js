@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Keyring } from '@polkadot/keyring';
 import { getPolkadotSigner } from '@polkadot-api/signer';
 import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'

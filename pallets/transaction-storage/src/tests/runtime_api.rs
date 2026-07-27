@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 //! Tests for the pallet-side helpers backing
 //! [`pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi`].
 

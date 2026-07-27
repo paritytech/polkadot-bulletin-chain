@@ -19,6 +19,12 @@ permissions:
 
 jobs:
   changes:
+    # `zombienet-sync-tests` is the only label that changes what runs, so ignore
+    # every other `labeled` event — otherwise labelling races `opened` and the
+    # duplicate run gets cancelled by `cancel-in-progress`.
+    if: >-
+      github.event.action != 'labeled' ||
+      github.event.label.name == 'zombienet-sync-tests'
     uses: ./.github/workflows/check-changed-files.yml
     permissions:
       contents: read
@@ -38,7 +44,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -49,7 +55,7 @@ jobs:
       # Keyed by commit SHA: the spec embeds the bulletin runtime WASM.
       - name: Cache bulletin chain specs
         id: cache-specs
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
@@ -81,10 +87,12 @@ jobs:
           - archive
           - pruning
           - restart
-          - mixed
+          - mixed-1
+          - mixed-2
+          - mixed-3
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -100,7 +108,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore bulletin chain specs cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
@@ -142,7 +150,7 @@ jobs:
             para_id: 1501
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -158,7 +166,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore bulletin chain specs cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
@@ -180,3 +188,69 @@ jobs:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
           path: /tmp/zombie-*/**/*.log
           retention-days: 14
+
+  zombienet-hop-tests:
+    needs: [set-image, prepare-binaries]
+    name: hop / ${{ matrix.runtime.name }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-hop-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet HOP tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        run: just test-zombienet-hop ${{ matrix.runtime.name }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
+          path: /tmp/zombie-*/**/*.log
+          retention-days: 14
+
+  zombienet-tests-complete:
+    name: All zombienet tests passed
+    needs: [changes, zombienet-auto-renew-tests, zombienet-sync-tests, zombienet-hop-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "Zombienet tests failed or were cancelled"
+          exit 1

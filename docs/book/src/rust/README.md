@@ -1,5 +1,13 @@
 # Rust SDK
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 The `bulletin-sdk-rust` crate provides a robust client for interacting with the Bulletin Chain. It is designed to be:
 
 - **Type-Safe**: Leverages Rust's type system to prevent common errors.
@@ -10,7 +18,7 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 - **Direct Transaction Submission**: `TransactionClient` handles all chain interactions out of the box
 - **Offline Preparation**: `BulletinClient` prepares operations (CID calculation, chunking, DAG building) without network access
-- **Builder Pattern**: Fluent API for configuring store operations
+- **Configurable Stores**: `StoreOptions` for CID codec, hash algorithm, and confirmation level
 - **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
 - **Structured Errors**: Error codes, retryable detection, and recovery hints consistent with TypeScript SDK
 - **Progress Tracking**: Callback-based progress events for uploads
@@ -140,7 +148,8 @@ let options = StoreOptions::default();
 
 // Prepare the operation (calculates CID, no network calls)
 let operation = client.prepare_store(data, options)?;
-println!("CID: {:?}", operation.cid_bytes);
+let cid = cid_to_bytes(&operation.calculate_cid()?)?;
+println!("CID: {:?}", cid);
 
 // Then submit via your own subxt client...
 ```
@@ -164,3 +173,13 @@ let signer = Keypair::from_uri("//Alice")
 ```
 
 Proceed to [Installation](./installation.md) to get started.
+
+## Security
+
+See the [root README](../../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

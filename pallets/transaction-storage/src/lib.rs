@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -183,8 +181,15 @@ pub mod pallet {
 		type RelayChainBlockNumberProvider: BlockNumberProvider<BlockNumber = u32>;
 		/// The origin that manages the authorizer list.
 		type AuthorizerRegistrarOrigin: EnsureOrigin<Self::RuntimeOrigin>;
-		/// The origin that can authorize data storage.
-		type Authorizer: EnsureOrigin<Self::RuntimeOrigin>;
+		/// The origin that can authorize data storage. `Success` is
+		/// `Some(AuthorizationOrigin { .. })` when the dispatcher is an
+		/// [`AllowedAuthorizers`] entry — carrying the budget owner and the
+		/// authorizer's `valid_until` and `feeless` flag. `None` for Root / XCM /
+		/// other non-account authorizers, which have no budget.
+		type Authorizer: EnsureOrigin<
+			Self::RuntimeOrigin,
+			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
+		>;
 		/// Priority of store/renew transactions.
 		#[pallet::constant]
 		type StoreRenewPriority: Get<TransactionPriority>;
@@ -279,7 +284,7 @@ pub mod pallet {
 		InvalidAuthorizationPeriodOverride,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(5);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(7);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -541,7 +546,7 @@ pub mod pallet {
 		///
 		/// Emits [`Stored`](Event::Stored) when successful.
 		#[pallet::call_index(9)]
-		#[pallet::weight(T::WeightInfo::store(data.len() as u32))]
+		#[pallet::weight(T::WeightInfo::store_with_cid_config(data.len() as u32))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _cid: &CidConfig, _data: &Vec<u8>| -> bool { true })]
 		pub fn store_with_cid_config(
 			origin: OriginFor<T>,
@@ -646,6 +651,11 @@ pub mod pallet {
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
 		#[pallet::call_index(3)]
 		#[pallet::weight(T::WeightInfo::authorize_account())]
+		#[pallet::feeless_if(
+			|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64| -> bool {
+				Pallet::<T>::is_feeless_authorizer(origin)
+			}
+		)]
 		pub fn authorize_account(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -667,10 +677,10 @@ pub mod pallet {
 		///
 		/// The origin must be the pallet's `Authorizer`. Emits
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
-		#[pallet::call_index(7)]
+		#[pallet::call_index(18)]
 		#[pallet::weight(T::WeightInfo::authorize_account_window())]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId, _transactions: &u32, _bytes: &u64, _starts_at: &Option<u32>, _expiration: &u32| -> bool {
-			T::Authorizer::try_origin(origin.clone()).is_ok()
+			Pallet::<T>::is_feeless_authorizer(origin)
 		})]
 		pub fn authorize_account_window(
 			origin: OriginFor<T>,
@@ -717,10 +727,10 @@ pub mod pallet {
 		/// window. Same validation rules as [`Self::authorize_account_window`].
 		///
 		/// Emits [`PreimageAuthorized`](Event::PreimageAuthorized) when successful.
-		#[pallet::call_index(8)]
+		#[pallet::call_index(19)]
 		#[pallet::weight(T::WeightInfo::authorize_preimage_window())]
 		#[pallet::feeless_if(|origin: &OriginFor<T>, _content_hash: &ContentHash, _max_size: &u64, _starts_at: &Option<u32>, _expiration: &u32| -> bool {
-			T::Authorizer::try_origin(origin.clone()).is_ok()
+			Pallet::<T>::is_feeless_authorizer(origin)
 		})]
 		pub fn authorize_preimage_window(
 			origin: OriginFor<T>,
@@ -780,8 +790,11 @@ pub mod pallet {
 		///
 		/// Fails with [`Error::AuthorizationNotFound`] when no slot remains after the
 		/// lazy prune.
-		#[pallet::call_index(18)]
+		#[pallet::call_index(7)]
 		#[pallet::weight(T::WeightInfo::refresh_account_authorization())]
+		#[pallet::feeless_if(|origin: &OriginFor<T>, _who: &T::AccountId| -> bool {
+			Pallet::<T>::is_feeless_authorizer(origin)
+		})]
 		pub fn refresh_account_authorization(
 			origin: OriginFor<T>,
 			who: T::AccountId,
@@ -794,7 +807,7 @@ pub mod pallet {
 
 		/// Refresh the latest-expiring slot of an existing authorization for a preimage
 		/// content hash. See [`Self::refresh_account_authorization`] for semantics.
-		#[pallet::call_index(19)]
+		#[pallet::call_index(8)]
 		#[pallet::weight(T::WeightInfo::refresh_preimage_authorization())]
 		pub fn refresh_preimage_authorization(
 			origin: OriginFor<T>,
@@ -951,7 +964,7 @@ pub mod pallet {
 		///
 		/// `budget` constraints:
 		///
-		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`; the entry stops authorizing
+		/// - `valid_until`: when `Some(t)`, must satisfy `t > now`. The entry stops authorizing
 		///   once `now >= t` and becomes eligible for permissionless cleanup via
 		///   [`remove_exhausted_authorizer`](Self::remove_exhausted_authorizer).
 		///
@@ -972,7 +985,11 @@ pub mod pallet {
 					Error::<T>::InvalidAuthorizationPeriodOverride,
 				);
 			}
+			let is_new = !AllowedAuthorizers::<T>::contains_key(&who);
 			AllowedAuthorizers::<T>::insert(&who, budget);
+			if is_new {
+				Self::inc_authorizer_providers(&who);
+			}
 			Self::deposit_event(Event::AuthorizerAdded { who });
 			Ok(())
 		}
@@ -996,6 +1013,7 @@ pub mod pallet {
 			// `take` returns the previous value; only emit the event when an entry
 			// actually existed so observers don't see phantom "removed" events.
 			if AllowedAuthorizers::<T>::take(&who).is_some() {
+				Self::dec_authorizer_providers(&who);
 				Self::deposit_event(Event::AuthorizerRemoved { who });
 			}
 			Ok(())
@@ -1016,15 +1034,11 @@ pub mod pallet {
 			_origin: OriginFor<T>,
 			who: T::AccountId,
 		) -> DispatchResult {
-			AllowedAuthorizers::<T>::try_mutate_exists(&who, |maybe_budget| {
-				let budget = maybe_budget.as_ref().ok_or(Error::<T>::AuthorizerNotFound)?;
-				ensure!(
-					Self::authorizer_removable(budget),
-					Error::<T>::AuthorizerBudgetNotExhausted,
-				);
-				*maybe_budget = None;
-				Ok::<_, DispatchError>(())
-			})?;
+			let budget =
+				AllowedAuthorizers::<T>::get(&who).ok_or(Error::<T>::AuthorizerNotFound)?;
+			ensure!(budget.is_inactive(Self::now()), Error::<T>::AuthorizerBudgetNotExhausted,);
+			AllowedAuthorizers::<T>::remove(&who);
+			Self::dec_authorizer_providers(&who);
 			Self::deposit_event(Event::ExhaustedAuthorizerRemoved { who });
 			Ok(())
 		}
@@ -1239,6 +1253,7 @@ pub mod pallet {
 				.expect("genesis preimage authorization fits in MaxAuthorizationSlots; qed");
 			}
 			for (account, transactions, bytes) in &self.allowed_authorizers {
+				let is_new = !AllowedAuthorizers::<T>::contains_key(account);
 				AllowedAuthorizers::<T>::insert(
 					account,
 					AuthorizerBudget {
@@ -1247,10 +1262,14 @@ pub mod pallet {
 						// them later to set a custom `authorization_period` if needed.
 						authorization_period: None,
 						// Genesis authorizers never expire; root can re-add them later to set
-						// a `valid_until` if needed.
+						// a `valid_until` or flip `feeless`.
 						valid_until: None,
+						feeless: true,
 					},
 				);
+				if is_new {
+					Pallet::<T>::inc_authorizer_providers(account);
+				}
 			}
 		}
 	}
@@ -1540,6 +1559,15 @@ pub mod pallet {
 
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
+		///
+		/// FOOTGUN: `sp_io::transaction_index::index` (called below) indexes the
+		/// *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
+		/// encodes as `preamble ++ call`, `data` must be the LAST field of any
+		/// dispatchable that funnels into `do_store` (e.g. [`store`](Self::store),
+		/// [`store_with_cid_config`](Self::store_with_cid_config),
+		/// `pallet-bulletin-hop-promotion::promote`). A field encoded after `data`
+		/// shifts the indexed window onto the wrong bytes and corrupts the stored
+		/// blob — without any dispatch error to flag it.
 		pub fn do_store(
 			data: Vec<u8>,
 			hashing: HashingAlgorithm,
@@ -1579,6 +1607,8 @@ pub mod pallet {
 				TransactionKind::Store,
 			)?;
 			// Index after the runtime mutation — index ops aren't rolled back on dispatch error.
+			// Indexes the trailing `data_len` bytes of the extrinsic, so `data` must be the
+			// caller's last call argument (see the FOOTGUN note on `do_store`).
 			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			Self::deposit_event(Event::Stored {
@@ -1845,6 +1875,22 @@ pub mod pallet {
 					}
 				},
 				AuthorizationScope::Preimage(_) => (),
+			}
+		}
+
+		/// Keep `who` alive in System while it's registered in [`AllowedAuthorizers`],
+		/// so a `feeless` authorizer with no balance doesn't get reaped between
+		/// dispatches (which would reset its replay-protection nonce).
+		pub(crate) fn inc_authorizer_providers(who: &T::AccountId) {
+			frame_system::Pallet::<T>::inc_providers(who);
+		}
+
+		pub(crate) fn dec_authorizer_providers(who: &T::AccountId) {
+			if let Err(err) = frame_system::Pallet::<T>::dec_providers(who) {
+				tracing::warn!(
+					target: LOG_TARGET, error=?err, ?who,
+					"dec_providers failed for allowed authorizer; leaking reference",
+				);
 			}
 		}
 
@@ -2499,7 +2545,7 @@ pub mod pallet {
 				},
 				Call::<T>::remove_exhausted_authorizer { who } => {
 					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
-					ensure!(Self::authorizer_removable(&budget), AUTHORIZATION_NOT_EXHAUSTED);
+					ensure!(budget.is_inactive(Self::now()), AUTHORIZATION_NOT_EXHAUSTED);
 					Ok(context.want_valid_transaction().then(|| {
 						ValidTransaction::with_tag_prefix(
 							"TransactionStorageRemoveExhaustedAuthorizer",
@@ -2772,21 +2818,32 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// `true` if the authorizer entry is eligible for permissionless cleanup —
-		/// either its budget is zero on at least one axis, or its `valid_until` has
-		/// elapsed.
-		fn authorizer_removable(budget: &AuthorizerBudgetFor<T>) -> bool {
-			budget.is_exhausted() || budget.is_expired(Self::now())
+		/// Backs `#[pallet::feeless_if]` on `authorize_account` and
+		/// `refresh_account_authorization`. Goes through `T::Authorizer::ensure_origin`
+		/// so Root / XCM (`Ok(None)`) are not feeless via this flag.
+		///
+		/// Also requires the authorizer's budget to be active (not exhausted or
+		/// expired). An inactive authorizer would fail downstream anyway; gating
+		/// `feeless` on it prevents spamming free, failing dispatches.
+		pub(crate) fn is_feeless_authorizer(origin: &OriginFor<T>) -> bool {
+			let Ok(Some(ctx)) = T::Authorizer::ensure_origin(origin.clone()) else {
+				return false;
+			};
+			if !ctx.feeless {
+				return false;
+			}
+			AllowedAuthorizers::<T>::get(&ctx.authorizer)
+				.is_some_and(|b| !b.is_inactive(Self::now()))
 		}
 
 		/// Atomically decrement `who`'s [`AllowedAuthorizers`] budget by
 		/// `transactions` / `bytes`. Returns [`Error::InsufficientAuthorizerBudget`]
 		/// when either axis would go negative; on failure the budget is unchanged.
 		///
-		/// A missing entry (Root/XCM origins not in [`AllowedAuthorizers`]) is a no-op:
-		/// they have no budget to track. Callers should invoke this *after*
-		/// [`Config::Authorizer::ensure_origin`] to ensure unrelated signers can't
-		/// trigger arbitrary budget reads.
+		/// A missing entry is a no-op: callers reach this only via [`authorize`]
+		/// once `T::Authorizer::ensure_origin` has already accepted the dispatch,
+		/// so `who` is necessarily an `AllowedAuthorizers` entry — but the storage
+		/// could have been removed between the origin check and here.
 		fn consume_authorizer_budget(
 			who: &T::AccountId,
 			transactions: u32,

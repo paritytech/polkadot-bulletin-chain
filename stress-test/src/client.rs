@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{Context, Result};
 use subxt::{
 	config::{
@@ -49,6 +52,16 @@ impl BulletinExtrinsicParamsBuilder {
 
 	pub fn nonce(mut self, nonce: u64) -> Self {
 		self.0 = self.0.nonce(nonce);
+		self
+	}
+
+	pub fn mortal(mut self, period: u64) -> Self {
+		self.0 = self.0.mortal(period);
+		self
+	}
+
+	pub fn immortal(mut self) -> Self {
+		self.0 = self.0.immortal();
 		self
 	}
 

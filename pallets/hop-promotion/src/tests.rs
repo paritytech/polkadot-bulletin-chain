@@ -80,7 +80,7 @@ fn promote_succeeds_with_valid_data() {
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 		let data = vec![42u8; 100];
 		let (signer, sig) = dummy_signer_and_sig();
-		assert_ok!(HopPromotion::promote(authorized_origin(), data, signer, sig, 0));
+		assert_ok!(HopPromotion::promote(authorized_origin(), signer, sig, 0, data));
 	});
 }
 
@@ -91,7 +91,7 @@ fn promote_rejects_empty_data() {
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 		let (signer, sig) = dummy_signer_and_sig();
 		assert_noop!(
-			HopPromotion::promote(authorized_origin(), vec![], signer, sig, 0),
+			HopPromotion::promote(authorized_origin(), signer, sig, 0, vec![]),
 			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
 	});
@@ -106,10 +106,10 @@ fn promote_rejects_oversized_data() {
 		assert_noop!(
 			HopPromotion::promote(
 				authorized_origin(),
-				vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1],
 				signer,
 				sig,
 				0,
+				vec![0u8; TEST_MAX_TRANSACTION_SIZE as usize + 1],
 			),
 			pallet_bulletin_transaction_storage::Error::<Test>::BadDataSize,
 		);
@@ -125,25 +125,25 @@ fn promote_rejects_non_authorized_origins() {
 		assert_noop!(
 			HopPromotion::promote(
 				RuntimeOrigin::none(),
-				data.clone(),
 				signer.clone(),
 				sig.clone(),
-				0
+				0,
+				data.clone(),
 			),
 			sp_runtime::traits::BadOrigin,
 		);
 		assert_noop!(
 			HopPromotion::promote(
 				RuntimeOrigin::signed(Sr25519Keyring::Alice.to_account_id()),
-				data.clone(),
 				signer.clone(),
 				sig.clone(),
 				0,
+				data.clone(),
 			),
 			sp_runtime::traits::BadOrigin,
 		);
 		assert_noop!(
-			HopPromotion::promote(RuntimeOrigin::root(), data, signer, sig, 0),
+			HopPromotion::promote(RuntimeOrigin::root(), signer, sig, 0, data),
 			sp_runtime::traits::BadOrigin,
 		);
 	});
@@ -305,8 +305,10 @@ fn authorize_rejects_expired_account_authorization() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		// Run past the auth period (10 blocks in mock).
+		// Slot expiry runs on the relay clock: move it past the mock's
+		// `DefaultAuthorizationWindow` (10 relay blocks from relay block 1).
 		run_to_block(20);
+		MockRelayBlockNumber::set(&20);
 
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);

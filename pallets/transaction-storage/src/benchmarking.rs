@@ -1,5 +1,3 @@
-// This file is part of Substrate.
-
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
@@ -135,6 +133,7 @@ fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 		quota: Some(Quota { transactions: 100, bytes: 10 * 1024 * 1024 }),
 		authorization_period: None,
 		valid_until: None,
+		feeless: false,
 	}
 }
 
@@ -160,6 +159,25 @@ mod benchmarks {
 
 		#[extrinsic_call]
 		_(RawOrigin::None, data);
+
+		assert!(!BlockTransactions::<T>::get().is_empty());
+		assert_last_event::<T>(Event::Stored { index: 0, content_hash, cid }.into());
+		Ok(())
+	}
+
+	#[benchmark]
+	fn store_with_cid_config(
+		l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>,
+	) -> Result<(), BenchmarkError> {
+		// Worst-case CID config: SHA2-256 is the slowest supported hash. The codec is
+		// stored as-is and has no cost impact.
+		let config = CidConfig { codec: RAW_CODEC, hashing: HashingAlgorithm::Sha2_256 };
+		let data = vec![0u8; l as usize];
+		let content_hash = sp_io::hashing::sha2_256(&data);
+		let cid = calculate_cid(&data, config.clone()).unwrap().to_bytes();
+
+		#[extrinsic_call]
+		_(RawOrigin::None, config, data);
 
 		assert!(!BlockTransactions::<T>::get().is_empty());
 		assert_last_event::<T>(Event::Stored { index: 0, content_hash, cid }.into());
@@ -391,6 +409,7 @@ mod benchmarks {
 				quota: Some(Quota { transactions: 0, bytes: 0 }),
 				authorization_period: None,
 				valid_until: None,
+				feeless: false,
 			},
 		);
 
@@ -842,15 +861,15 @@ mod benchmarks {
 		Ok(())
 	}
 
-	/// Benchmarks one inner-loop iteration of the v3→v4 multi-block migration:
+	/// Benchmarks one inner-loop iteration of the v6→v7 multi-block migration:
 	/// `translate_next` reads one legacy entry, the closure translates it into
 	/// an `Authorization<T>` with a single fresh slot, and the value is
 	/// overwritten in place under the shared `"Authorizations"` prefix. An
 	/// active+non-empty entry exercises the translate branch.
 	#[benchmark]
-	fn migrate_v3_to_v4_step() -> Result<(), BenchmarkError> {
+	fn migrate_v6_to_v7_step() -> Result<(), BenchmarkError> {
 		use crate::{
-			migrations::v4::{LegacyAuthorization, LegacyAuthorizations, MigrateV3ToV4},
+			migrations::v7::{LegacyAuthorization, LegacyAuthorizations, MigrateV6ToV7},
 			AuthorizationScope,
 		};
 		use polkadot_sdk_frame::deps::frame_support::{
@@ -882,11 +901,11 @@ mod benchmarks {
 
 		#[block]
 		{
-			MigrateV3ToV4::<T>::step(None, &mut meter).expect("step must succeed");
+			MigrateV6ToV7::<T>::step(None, &mut meter).expect("step must succeed");
 		}
 
 		// Entry rewritten in place: the legacy decoder no longer sees it, and
-		// the v4 decoder reads back the translated `Authorization` with the
+		// the v7 decoder reads back the translated `Authorization` with the
 		// original allowance preserved on its single slot.
 		assert!(LegacyAuthorizations::<T>::get(&scope).is_none());
 		let auth = crate::pallet::Authorizations::<T>::get(&scope).expect("auth exists");
@@ -896,33 +915,33 @@ mod benchmarks {
 		Ok(())
 	}
 
-	/// Benchmarks one outer-loop iteration of the v4→v5 multi-block migration:
-	/// fetch one pre-v5 `AutoRenewals` entry, decode, re-encode as v5 with
+	/// Benchmarks one outer-loop iteration of the v3→v4 multi-block migration:
+	/// fetch one pre-v4 `AutoRenewals` entry, decode, re-encode as v4 with
 	/// `recurring: true, paid: false`, and re-insert.
 	#[benchmark]
-	fn migrate_v4_to_v5_step() -> Result<(), BenchmarkError> {
-		use crate::migrations::v5::{MigrateV4ToV5, PreV5AutoRenewalData};
+	fn migrate_v3_to_v4_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v4::{MigrateV3ToV4, V3AutoRenewalData};
 		use polkadot_sdk_frame::deps::{
 			frame_support::{migrations::SteppedMigration, weights::WeightMeter},
 			sp_runtime::traits::{BlakeTwo256, Hash},
 		};
 
 		let caller: T::AccountId = whitelisted_caller();
-		let content_hash: ContentHash = BlakeTwo256::hash(b"v4-to-v5-bench").into();
+		let content_hash: ContentHash = BlakeTwo256::hash(b"v3-to-v4-bench").into();
 		let raw_key = AutoRenewals::<T>::hashed_key_for(content_hash);
-		sp_io::storage::set(&raw_key, &PreV5AutoRenewalData { account: caller.clone() }.encode());
+		sp_io::storage::set(&raw_key, &V3AutoRenewalData { account: caller.clone() }.encode());
 
 		let mut meter = WeightMeter::new();
 
 		#[block]
 		{
-			MigrateV4ToV5::<T>::step(None, &mut meter).expect("step must succeed");
+			MigrateV3ToV4::<T>::step(None, &mut meter).expect("step must succeed");
 		}
 
-		let v5 = AutoRenewals::<T>::get(content_hash).expect("entry exists");
-		assert_eq!(v5.account, caller);
-		assert!(v5.recurring);
-		assert!(!v5.paid);
+		let v4 = AutoRenewals::<T>::get(content_hash).expect("entry exists");
+		assert_eq!(v4.account, caller);
+		assert!(v4.recurring);
+		assert!(!v4.paid);
 
 		Ok(())
 	}

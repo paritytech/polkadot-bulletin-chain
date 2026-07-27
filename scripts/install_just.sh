@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 # Install `just` from $JUST_VERSION (read from .github/env). Sha256-verified against
 # $JUST_<PLATFORM>_SHA256 when set.
 # Usage: scripts/install_just.sh [install_dir]   (default: /usr/local/bin)

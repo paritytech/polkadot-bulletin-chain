@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Zombienet-sdk tests for Polkadot Bulletin Chain"
 authors.workspace = true
 edition.workspace = true
+license = "Apache-2.0"
 publish = false
 autotests = false
 
@@ -44,6 +45,7 @@ pallet-bulletin-transaction-storage = { path = "../pallets/transaction-storage",
 [features]
 zombie-sync-tests = []
 zombie-auto-renew-tests = []
+zombie-hop-tests = []
 
 [build-dependencies]
 prost-build = "0.13"

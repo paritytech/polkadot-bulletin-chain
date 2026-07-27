@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import * as multihash from 'multiformats/hashes/digest';
 import { getContentHash } from './common.js';
 import { CID } from 'multiformats/cid';

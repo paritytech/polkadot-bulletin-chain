@@ -1,17 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -150,6 +138,8 @@ pub mod migrations {
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -168,7 +158,7 @@ pub mod migrations {
 	pub type MbmMigrations = (
 		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v7::MigrateV6ToV7<Runtime>,
 	);
 }
 
@@ -194,7 +184,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_015,
+	spec_version: 1_000_016,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,

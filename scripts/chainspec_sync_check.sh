@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright (C) Parity Technologies (UK) Ltd.
+# SPDX-License-Identifier: Apache-2.0
+
 # Boot `polkadot-omni-node` against a chainspec and wait until the parachain
 # imports a few blocks.
 #

@@ -81,10 +81,18 @@ pub fn verify_data_matches(fetched: &[u8], expected: &[u8]) -> Result<bool> {
 		tracing::info!("Bitswap fetch successful - data matches ({} bytes)", fetched.len());
 		Ok(true)
 	} else {
+		let expected_hex = hex::encode(expected);
+		let fetched_hex = hex::encode(fetched);
 		tracing::error!(
-			"Bitswap fetch data mismatch: expected {} bytes, got {} bytes",
+			"Bitswap fetch data mismatch: \
+			 expected.len={} (hex.len={}), got.len={} (hex.len={}), \
+			 expected=0x{}, got=0x{}",
 			expected.len(),
-			fetched.len()
+			expected_hex.len(),
+			fetched.len(),
+			fetched_hex.len(),
+			expected_hex,
+			fetched_hex,
 		);
 		Ok(false)
 	}

@@ -1,5 +1,13 @@
 # pallet-bulletin-hop-promotion
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Promotes near-expiry HOP pool data to permanent chain storage on the Polkadot Bulletin Chain.
 
 ## Overview
@@ -8,4 +16,12 @@ HOP submissions are short-lived by default. This pallet lets near-expiry data be
 
 The authorize closure verifies the user's submit-time signature and the freshness of the submit timestamp, and rejects promotion for accounts whose Bulletin authorization is missing or expired.
 
-License: Apache-2.0
+## Security
+
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0
