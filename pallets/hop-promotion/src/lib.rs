@@ -17,7 +17,7 @@
 //!
 //! Promotes near-expiry HOP pool data to permanent chain storage via
 //! `pallet-transaction-storage`. Uses general transactions with
-//! `#[pallet::authorize]` — no signature, no fees, priority 0, and no
+//! `#[pallet::authorize]` — no signature, no fees, [`PROMOTE_PRIORITY`], and no
 //! debit of the submitter's Bulletin allowance: promotion only lands in
 //! blockspace that would otherwise be unused, so charging the user
 //! would just leave that space empty for no benefit.
@@ -44,6 +44,15 @@ pub mod weights;
 /// Domain separator for `hop_submit` signatures. Must remain byte-identical
 /// to the constant in `sc-hop` (`substrate/client/hop/src/types.rs`).
 pub const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
+
+/// Pool priority of a [`Call::promote`] transaction.
+///
+/// Promotion only fills blockspace that would otherwise go unused, so it must never
+/// outbid a user's own `store` or renewal. Both of those take
+/// `pallet_bulletin_transaction_storage::Config::StoreRenewPriority`, and the
+/// ordering is enforced at runtime-construction time by this pallet's
+/// `integrity_test`.
+pub const PROMOTE_PRIORITY: sp_runtime::transaction_validity::TransactionPriority = 0;
 
 /// Reconstructs the signing payload that the user signed at submit time, given
 /// the precomputed blake2_256 hash of the data.
@@ -92,6 +101,27 @@ pub mod pallet {
 
 		/// Weight information for this pallet.
 		type WeightInfo: crate::WeightInfo;
+	}
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Promotion must never outbid a user's own traffic for blockspace.
+		///
+		/// `store` (storage pallet) and every renewal call (renewal pallet) are both
+		/// validated at `StoreRenewPriority`, so comparing against that one constant
+		/// covers both — and does so without this pallet needing to know the renewal
+		/// pallet exists.
+		fn integrity_test() {
+			let store_renew =
+				<T as pallet_bulletin_transaction_storage::Config>::StoreRenewPriority::get();
+			assert!(
+				crate::PROMOTE_PRIORITY < store_renew,
+				"promote priority ({}) must be strictly below StoreRenewPriority ({}), \
+				 otherwise promotion competes with user stores and renewals",
+				crate::PROMOTE_PRIORITY,
+				store_renew,
+			);
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -167,7 +197,7 @@ pub mod pallet {
 
 			Ok((
 				ValidTransaction::with_tag_prefix("HopPromotion")
-					.priority(0)
+					.priority(crate::PROMOTE_PRIORITY)
 					.longevity(5)
 					.propagate(false)
 					.and_provides(data_hash)

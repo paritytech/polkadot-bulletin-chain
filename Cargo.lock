@@ -8080,7 +8080,6 @@ dependencies = [
  "frame-support",
  "frame-system",
  "pallet-bulletin-transaction-storage",
- "pallet-bulletin-transaction-storage-renewal",
  "pallet-timestamp",
  "parity-scale-codec",
  "polkadot-sdk-frame",

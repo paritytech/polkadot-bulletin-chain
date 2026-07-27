@@ -18,7 +18,6 @@
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::AsAuthorizer;
-use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -57,9 +56,6 @@ mod runtime {
 
 	#[runtime::pallet_index(3)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
-
-	#[runtime::pallet_index(4)]
-	pub type DataRenewal = pallet_bulletin_transaction_storage_renewal;
 }
 
 #[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
@@ -81,7 +77,9 @@ impl pallet_timestamp::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
+	// `static` rather than `const` so a test can lower it and assert that
+	// `HopPromotion::integrity_test` rejects the inverted ordering.
+	pub static StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const StoreRenewLongevity: TransactionLongevity = 10;
 	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
 	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
@@ -114,18 +112,15 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type StoreRenewLongevity = StoreRenewLongevity;
 	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
 	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
-	type EntryMeta = txs_renewal::EntryKind;
-	type AuthorizationExtra = txs_renewal::PermanentExtent;
-	type OnObsoleteTransactions = DataRenewal;
+	// This pallet's tests never exercise renewal, so the storage pallet's opaque
+	// payloads stay at the `()` no-op wiring it documents. Keeps hop-promotion's test
+	// runtime independent of `pallet-bulletin-transaction-storage-renewal`.
+	type EntryMeta = ();
+	type AuthorizationExtra = ();
+	type OnObsoleteTransactions = ();
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
-}
-
-impl txs_renewal::Config for Test {
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = ();
-	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 }
 
 impl pallet_bulletin_hop_promotion::Config for Test {

@@ -18,7 +18,6 @@
 use crate::{mock::*, signing_payload};
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
-use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -415,6 +414,14 @@ fn authorize_valid_transaction_properties() {
 	});
 }
 
+/// End-to-end check that the priority `authorize_promote` actually emits is below the
+/// one the storage pallet gives `store`.
+///
+/// Renewals are covered by the same guarantee without being exercised here: every
+/// renewal call is validated at `StoreRenewPriority`, the same constant `store` uses,
+/// and this pallet's `integrity_test` asserts `PROMOTE_PRIORITY` sits below it. That
+/// keeps this pallet's test runtime free of a dependency on
+/// `pallet-bulletin-transaction-storage-renewal`.
 #[test]
 fn promote_has_lower_priority_than_store_and_renew() {
 	new_test_ext().execute_with(|| {
@@ -422,7 +429,7 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		System::run_to_block::<AllPalletsWithSystem>(1);
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 
-		// Authorize Alice for store + renew + promote.
+		// Authorize Alice for store + promote.
 		let alice = Sr25519Keyring::Alice.to_account_id();
 		let data = vec![2u8; 100];
 		authorize_account(alice.clone(), 2, 2 * data.len() as u64);
@@ -431,47 +438,58 @@ fn promote_has_lower_priority_than_store_and_renew() {
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
+		assert_eq!(promote_tx.priority, crate::PROMOTE_PRIORITY);
 
 		// Get store priority via the storage pallet's signed-call validation.
-		let store_call =
-			pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
 		let (store_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
 			&alice,
 			&store_call,
 		)
 		.unwrap();
 
-		// Store data so we can renew it.
-		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::store(
-			RuntimeOrigin::none(),
-			data,
-		));
-
-		// Advance so the stored transaction is available for renew.
-		run_to_block(3);
-
-		// Renew now lives in `pallet-bulletin-transaction-storage-renewal`; validate
-		// through that pallet's own extension entry point to get the renew priority.
-		let renew_call = txs_renewal::Call::<Test>::renew {
-			entry: pallet_bulletin_transaction_storage::TransactionRef::Position {
-				block: 1,
-				index: 0,
-			},
-		};
-		let (renew_tx, _) =
-			txs_renewal::Pallet::<Test>::validate_renewal_signed(&alice, &renew_call).unwrap();
-
+		// `store` and every renewal call share `StoreRenewPriority`, so this one
+		// comparison is the renew comparison too.
+		assert_eq!(
+			store_tx.priority,
+			<Test as pallet_bulletin_transaction_storage::Config>::StoreRenewPriority::get(),
+		);
 		assert!(
 			promote_tx.priority < store_tx.priority,
-			"promote priority ({}) must be strictly less than store priority ({})",
+			"promote priority ({}) must be strictly less than store/renew priority ({})",
 			promote_tx.priority,
 			store_tx.priority,
 		);
+	});
+}
+
+/// The runtime-construction integrity check must reject a runtime that configures
+/// `StoreRenewPriority` at or below [`crate::PROMOTE_PRIORITY`], since promotion would
+/// then compete with (or outbid) user stores and renewals.
+///
+/// The passing direction is covered for free: `#[frame_support::runtime]` generates a
+/// test that runs `integrity_test` for every pallet in this mock runtime.
+#[test]
+fn integrity_test_rejects_promote_priority_at_or_above_store_renew() {
+	use frame_support::traits::IntegrityTest;
+
+	new_test_ext().execute_with(|| {
+		// Sanity: the mock is configured the right way round.
 		assert!(
-			promote_tx.priority < renew_tx.priority,
-			"promote priority ({}) must be strictly less than renew priority ({})",
-			promote_tx.priority,
-			renew_tx.priority,
+			crate::PROMOTE_PRIORITY <
+				<Test as pallet_bulletin_transaction_storage::Config>::StoreRenewPriority::get(),
+		);
+		HopPromotion::integrity_test();
+
+		// Now flip it: promotion at the same priority as store/renew must be rejected.
+		StoreRenewPriority::set(crate::PROMOTE_PRIORITY);
+		let prev_hook = std::panic::take_hook();
+		std::panic::set_hook(Box::new(|_| {}));
+		let outcome = std::panic::catch_unwind(HopPromotion::integrity_test);
+		std::panic::set_hook(prev_hook);
+		assert!(
+			outcome.is_err(),
+			"integrity_test must reject StoreRenewPriority <= PROMOTE_PRIORITY",
 		);
 	});
 }
