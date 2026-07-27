@@ -140,8 +140,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased =
-		(txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
+	pub type Unreleased = (txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
