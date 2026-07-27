@@ -319,6 +319,7 @@ See the justfile for full setup details. At minimum you need:
 cd examples
 
 # JavaScript
+# ws_url may be a comma-separated list: first node submits, all are verified
 node authorize_and_store_papi.js [ws_url] [seed] [http_ipfs_api]
 node store_chunked_data.js [ws_url] [seed] [http_ipfs_api]
 node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]

@@ -46,6 +46,10 @@ pub const DEFAULT_PARA_ID: u32 = 1010;
 pub const PARACHAIN_CHAIN_ID_ENV: &str = "PARACHAIN_CHAIN_ID";
 pub const DEFAULT_PARACHAIN_CHAIN_ID: &str = "bulletin-westend";
 
+/// Database backend for bulletin nodes (`rocksdb` | `paritydb`); unset/empty
+/// keeps the node default (rocksdb).
+pub const DB_BACKEND_ENV: &str = "BULLETIN_DB_BACKEND";
+
 pub const PARACHAIN_TEST_DATA_PATTERN: &[u8] = b"ZOMBIENET_PARACHAIN_TEST_DATA_";
 
 // LDB tool
