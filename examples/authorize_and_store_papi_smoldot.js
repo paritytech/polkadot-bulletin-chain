@@ -8,7 +8,7 @@ import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, smoldotRpcSource, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, IMMORTAL_TX, nodeRpcSource, smoldotRpcSource, store, TX_MODE_FINALIZED_BLOCK, TX_MODE_IN_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -152,7 +152,8 @@ async function main() {
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
         let expectedCid = await cidFromBytes(dataToStore);
 
-        // Authorize an account.
+        // Authorize an account. Immortal era: smoldot may still reorg the mortal-era
+        // anchor block, which would make the runtime reject the signature (BadProof).
         await authorizeAccount(
             bulletinAPI,
             authorizationSigner,
@@ -160,10 +161,11 @@ async function main() {
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
             TX_MODE_FINALIZED_BLOCK,
+            IMMORTAL_TX,
         );
 
         // Store data.
-        const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
+        const { cid } = await store(bulletinAPI, whoSigner, dataToStore, null, null, TX_MODE_IN_BLOCK, null, IMMORTAL_TX);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
         // Read back from IPFS, smoldot's bitswap_v1_get (forwarded to peers
