@@ -168,6 +168,139 @@ fn relocation_migration_reshapes_legacy_v3_layout() {
 	});
 }
 
+/// The `PermanentStorageUsed` counter is relocated to the key the pallet actually reads.
+///
+/// Asserted through the storage item rather than a hand-built prefix: the whole failure
+/// mode being guarded against is the migration writing to a key the pallet never reads,
+/// which a prefix-vs-prefix comparison cannot detect.
+#[test]
+fn relocation_migration_moves_permanent_storage_used() {
+	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<crate::Pallet<Test>>();
+		let old_key = storage_prefix(b"TransactionStorage", b"PermanentStorageUsed");
+		sp_io::storage::set(&old_key, &4_096u64.encode());
+
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+
+		assert_eq!(
+			crate::PermanentStorageUsed::<Test>::get(),
+			4_096,
+			"counter must be readable through the storage item after relocation",
+		);
+		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
+	});
+}
+
+/// `PendingAutoRenewals` is relocated byte-exactly to the key the pallet reads.
+///
+/// The value is produced by encoding through the storage item itself and then moved to the
+/// legacy prefix, so the test never has to name the (`Config`-dependent) value type.
+#[test]
+fn relocation_migration_moves_pending_auto_renewals() {
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::{
+		frame_support::traits::StorageVersion,
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+	new_test_ext().execute_with(|| {
+		let content_hash: ContentHash = BlakeTwo256::hash(b"pending-relocation").into();
+		let info = TransactionInfo {
+			chunk_root: BlakeTwo256::hash(b"chunk-root"),
+			content_hash,
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 16,
+			extrinsic_index: 0,
+			block_chunks: 1,
+			meta: EntryKind::Renew,
+		};
+		PendingAutoRenewals::<Test>::mutate(|pending| {
+			pending
+				.try_push((
+					content_hash,
+					info,
+					RenewalData { account: 5, recurring: true, paid: false },
+				))
+				.expect("bound is >= 1");
+		});
+
+		// Relocate the encoded value back to the legacy prefix to build the pre-migration
+		// state, then reset the version gate.
+		let new_key = PendingAutoRenewals::<Test>::hashed_key();
+		let raw = sp_io::storage::get(&new_key).expect("just written").to_vec();
+		sp_io::storage::clear(&new_key);
+		let old_key = storage_prefix(b"TransactionStorage", b"PendingAutoRenewals");
+		sp_io::storage::set(&old_key, &raw);
+		StorageVersion::new(0).put::<crate::Pallet<Test>>();
+
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+
+		let pending = PendingAutoRenewals::<Test>::get();
+		assert_eq!(pending.len(), 1, "pending entry must be readable through the storage item");
+		assert_eq!(pending[0].0, content_hash);
+		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
+	});
+}
+
+/// `pre_upgrade`/`post_upgrade` accept a full legacy state: an `AutoRenewals` entry, both
+/// relocated `StorageValue`s, and an old-layout `Authorizations` entry. Exercises the
+/// try-runtime checks themselves, which are otherwise compiled out.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn relocation_migration_try_runtime_checks_pass() {
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::{
+		frame_support::traits::StorageVersion,
+		sp_runtime::traits::{BlakeTwo256, Hash},
+	};
+	new_test_ext().execute_with(|| {
+		StorageVersion::new(0).put::<crate::Pallet<Test>>();
+
+		// Legacy `AutoRenewals` entry.
+		let hash: ContentHash = BlakeTwo256::hash(b"try-runtime-relocation").into();
+		let auto_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
+		let mut auto_key = auto_prefix.to_vec();
+		auto_key.extend_from_slice(&sp_io::hashing::blake2_128(hash.as_ref()));
+		auto_key.extend_from_slice(hash.as_ref());
+		sp_io::storage::set(
+			&auto_key,
+			&RenewalData::<u64> { account: 3, recurring: false, paid: true }.encode(),
+		);
+
+		// Both relocated `StorageValue`s. `PendingAutoRenewals` is left absent, which is
+		// the real-world case the `on_finalize` drain invariant guarantees.
+		sp_io::storage::set(
+			&storage_prefix(b"TransactionStorage", b"PermanentStorageUsed"),
+			&512u64.encode(),
+		);
+
+		// Old-layout authorization: extent { transactions, transactions_allowance, bytes,
+		// bytes_permanent, bytes_allowance } + expiration.
+		let scope = AuthorizationScope::Account(3u64);
+		sp_io::storage::set(
+			&txs::Authorizations::<Test>::hashed_key_for(&scope),
+			&(1u32, 5u32, 100u64, 700u64, 900u64, 50u64).encode(),
+		);
+
+		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
+			.expect("pre_upgrade must accept legacy state");
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
+			.expect("post_upgrade checks must pass");
+
+		// The reshape moved `bytes_permanent` rather than zeroing it.
+		assert_eq!(
+			txs::Authorizations::<Test>::get(&scope)
+				.expect("still present")
+				.extent
+				.extra
+				.bytes_permanent,
+			700,
+		);
+	});
+}
+
 /// `enable_auto_renew` is a feeless registration: the extension's
 /// `pre_dispatch` charges one tx slot, `bytes_permanent`, and the chain-wide
 /// `PermanentStorageUsed`; the dispatchable then inserts an `AutoRenewals`
@@ -1582,6 +1715,9 @@ fn renew_rejects_unsigned_and_root_origin() {
 /// inherent ran, asserting that the storage is empty. The mock's `run_to_block` always
 /// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
 /// the assert actually fires when an auto-renewal is pending and the inherent is missing.
+// Under `try-runtime` the assert is replaced by a warn-and-clear, so there is nothing to
+// catch.
+#[cfg(not(feature = "try-runtime"))]
 #[test]
 #[should_panic(
 	expected = "All pending auto-renewals must be processed by process_pending_renewals"

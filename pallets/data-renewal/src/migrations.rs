@@ -39,7 +39,27 @@ use polkadot_sdk_frame::deps::{
 
 const LOG_TARGET: &str = "runtime::data-renewal::migrations";
 
-const OLD_PALLET: &[u8] = b"TransactionStorage";
+/// Per-collection entry budget for the single-block relocation.
+///
+/// This migration cannot be converted to an MBM (see the struct docs), so both the
+/// `AutoRenewals` scan and the `Authorizations` reshape must fit in one block. Each entry
+/// costs 2 reads + 2 writes, so a few thousand is comfortably inside a parachain block's
+/// ref-time and PoV budget while leaving room for the rest of the upgrade.
+///
+/// This is a tripwire, not a hard limit: `pre_upgrade` fails outright when either
+/// collection exceeds it, so a dry-run catches the problem before the runtime ships, and
+/// `on_runtime_upgrade` logs an error. Exceeding it means the `Authorizations` reshape
+/// needs a different strategy (e.g. a version tag on the value so reads can migrate
+/// lazily and the relocation can be stepped).
+const MAX_SINGLE_BLOCK_ENTRIES: u64 = 5_000;
+
+/// Source prefixes, derived from the storage pallet's registered name rather than a
+/// literal: the runtime is free to register it under any name, and a mismatch here
+/// would silently scan an empty prefix and migrate nothing — which would still bump the
+/// storage version, permanently locking the migration out via the idempotency gate.
+fn old_prefix<T: Config>(item: &[u8]) -> [u8; 32] {
+	storage_prefix(<txs::Pallet<T> as PalletInfoAccess>::name().as_bytes(), item)
+}
 
 /// One-shot migration relocating `AutoRenewals`, `PendingAutoRenewals`, and the
 /// `PermanentStorageUsed` counter from the `TransactionStorage` pallet prefix to the
@@ -49,7 +69,10 @@ const OLD_PALLET: &[u8] = b"TransactionStorage";
 ///
 /// Must run single-block: the old and new `Authorization` encodings are the same byte
 /// length (all fixed-width fields), so a stale value read through the new type decodes
-/// *successfully* with shifted fields. Idempotent via the storage-version gate.
+/// *successfully* with shifted fields. An MBM would leave that window open across blocks
+/// with the pallet live, so the whole reshape has to land at once — which in turn means
+/// both iterated collections are bounded only by [`MAX_SINGLE_BLOCK_ENTRIES`], enforced by
+/// `pre_upgrade`. Idempotent via the storage-version gate.
 pub struct RelocateFromTransactionStorage<T: Config>(PhantomData<T>);
 
 impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
@@ -64,15 +87,17 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// values into the current `RenewalData` layout (a plain `move_prefix` would
 		// leave them undecodable). The Blake2_128Concat key suffix is identical
 		// across prefixes, so only the prefix is rewritten.
-		let old_pallet = <txs::Pallet<T> as PalletInfoAccess>::name().as_bytes();
-		let old_auto_prefix = storage_prefix(old_pallet, b"AutoRenewals");
+		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
 		let new_auto_prefix = crate::Renewals::<T>::final_prefix();
 		let mut moved: u64 = 0;
+		// Every key the scan touches, moved or not — each cost a `next_key` + a `get`.
+		let mut visited: u64 = 0;
 		let mut previous = old_auto_prefix.to_vec();
 		while let Some(key) =
 			sp_io::storage::next_key(&previous).filter(|k| k.starts_with(&old_auto_prefix))
 		{
 			previous = key.clone();
+			visited = visited.saturating_add(1);
 			let Some(raw) = sp_io::storage::get(&key) else { continue };
 
 			// Already current layout? carry the bytes over unchanged. Otherwise the
@@ -100,21 +125,28 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			moved = moved.saturating_add(1);
 		}
 
-		// `PendingAutoRenewals` (StorageValue): transient per-block scratch, normally
-		// empty across an upgrade. Move verbatim if present.
-		let old_pending_key = storage_prefix(OLD_PALLET, b"PendingAutoRenewals");
+		// Number of `StorageValue`s actually relocated below; each costs a set + a clear.
+		let mut values_moved: u64 = 0;
+
+		// `PendingAutoRenewals` (StorageValue): transient per-block scratch. The pre-split
+		// `on_finalize` asserts it is drained every block, so it is always absent here —
+		// the move is belt-and-braces, kept so the relocation is complete by construction
+		// rather than by relying on an invariant in the pallet being split apart.
+		let old_pending_key = old_prefix::<T>(b"PendingAutoRenewals");
 		let new_pending_key = crate::PendingAutoRenewals::<T>::hashed_key();
 		if let Some(raw) = sp_io::storage::get(&old_pending_key) {
 			sp_io::storage::set(&new_pending_key, &raw);
 			sp_io::storage::clear(&old_pending_key);
+			values_moved = values_moved.saturating_add(1);
 		}
 
 		// `PermanentStorageUsed` (StorageValue<u64>): move verbatim if present.
-		let old_used_key = storage_prefix(OLD_PALLET, b"PermanentStorageUsed");
-		let new_used_key = storage_prefix(NEW_PALLET, b"PermanentStorageUsed");
+		let old_used_key = old_prefix::<T>(b"PermanentStorageUsed");
+		let new_used_key = crate::PermanentStorageUsed::<T>::hashed_key();
 		if let Some(raw) = sp_io::storage::get(&old_used_key) {
 			sp_io::storage::set(&new_used_key, &raw);
 			sp_io::storage::clear(&old_used_key);
+			values_moved = values_moved.saturating_add(1);
 		}
 
 		// `Authorizations` reshape: `bytes_permanent` moves into the opaque `extra`.
@@ -137,51 +169,100 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 
 		StorageVersion::new(1).put::<crate::pallet::Pallet<T>>();
 
-		tracing::info!(target: LOG_TARGET, moved, reshaped, "split migration complete");
+		// Cannot abort past this point: the runtime is already live with the new
+		// `Authorization` type, and leaving entries un-reshaped would silently misdecode.
+		// `pre_upgrade` fails on the same condition, so a dry-run catches it first.
+		if visited > MAX_SINGLE_BLOCK_ENTRIES || reshaped > MAX_SINGLE_BLOCK_ENTRIES {
+			tracing::error!(
+				target: LOG_TARGET,
+				visited,
+				reshaped,
+				budget = MAX_SINGLE_BLOCK_ENTRIES,
+				"single-block entry budget exceeded; block may exceed its weight or PoV limit",
+			);
+		}
 
-		// One read + one write per moved `AutoRenewals` entry and per reshaped
-		// `Authorizations` entry, plus the `PendingAutoRenewals` / counter moves and
-		// the storage-version write.
-		T::DbWeight::get().reads_writes(
-			moved.saturating_add(reshaped).saturating_add(1),
-			moved.saturating_mul(2).saturating_add(reshaped).saturating_add(2),
-		)
+		tracing::info!(
+			target: LOG_TARGET,
+			moved,
+			visited,
+			values_moved,
+			reshaped,
+			"split migration complete",
+		);
+
+		// Reads: the version gate, a `next_key` + `get` per visited `AutoRenewals` key, the
+		// terminal `next_key`, one `get` per relocated `StorageValue`, and one per reshaped
+		// `Authorizations` entry.
+		let reads = visited.saturating_mul(2).saturating_add(reshaped).saturating_add(4);
+		// Writes: a set + a clear per moved `AutoRenewals` entry and per relocated
+		// `StorageValue`, one per reshaped `Authorizations` entry, and the version bump.
+		let writes = moved
+			.saturating_add(values_moved)
+			.saturating_mul(2)
+			.saturating_add(reshaped)
+			.saturating_add(1);
+		T::DbWeight::get().reads_writes(reads, writes)
 	}
 
 	#[cfg(feature = "try-runtime")]
 	fn pre_upgrade(
 	) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+		use polkadot_sdk_frame::prelude::ensure;
+
 		// Mirror the runtime gate: already migrated → no-op, post checks skipped.
 		let current = <crate::pallet::Pallet<T> as GetStorageVersion>::on_chain_storage_version();
 		if current >= StorageVersion::new(1) {
-			return Ok(None::<(u64, Option<u64>, u64, u64)>.encode());
+			return Ok(None::<PreUpgradeState>.encode());
 		}
 
-		let old_auto_prefix = storage_prefix(OLD_PALLET, b"AutoRenewals");
+		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
 		let mut previous = old_auto_prefix.to_vec();
-		let mut count: u64 = 0;
+		let mut renewals: u64 = 0;
 		while let Some(key) =
 			sp_io::storage::next_key(&previous).filter(|k| k.starts_with(&old_auto_prefix))
 		{
 			previous = key;
-			count = count.saturating_add(1);
+			renewals = renewals.saturating_add(1);
 		}
-		let old_used = sp_io::storage::get(&storage_prefix(OLD_PALLET, b"PermanentStorageUsed"))
+		let permanent_used = sp_io::storage::get(&old_prefix::<T>(b"PermanentStorageUsed"))
 			.and_then(|raw| u64::decode(&mut &raw[..]).ok());
+		// Raw bytes, not the decoded vec: the move must be byte-exact, and the value type
+		// is only nameable through this pallet's `Config`.
+		let pending =
+			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).map(|raw| raw.to_vec());
 
 		// Old-layout count + Σ bytes_permanent: the reshape must move, never zero.
-		let mut auth_count: u64 = 0;
-		let mut auth_perm_sum: u64 = 0;
+		let mut authorizations: u64 = 0;
+		let mut permanent_sum: u64 = 0;
 		for key in txs::Authorizations::<T>::iter_keys() {
 			let raw_key = txs::Authorizations::<T>::hashed_key_for(&key);
 			let raw = sp_io::storage::get(&raw_key).ok_or("authorization value missing")?;
 			let decoded = OldAuthorization::<BlockNumberFor<T>>::decode(&mut &raw[..])
 				.map_err(|_| "pre-migration authorization is not the old layout")?;
-			auth_count = auth_count.saturating_add(1);
-			auth_perm_sum = auth_perm_sum.saturating_add(decoded.extent.bytes_permanent);
+			authorizations = authorizations.saturating_add(1);
+			permanent_sum = permanent_sum.saturating_add(decoded.extent.bytes_permanent);
 		}
 
-		Ok(Some((count, old_used, auth_count, auth_perm_sum)).encode())
+		// Fail the dry-run rather than the block: the migration cannot be stepped, so an
+		// oversized collection has to be caught before the runtime ships.
+		ensure!(
+			renewals <= MAX_SINGLE_BLOCK_ENTRIES,
+			"AutoRenewals exceeds the single-block entry budget",
+		);
+		ensure!(
+			authorizations <= MAX_SINGLE_BLOCK_ENTRIES,
+			"Authorizations exceeds the single-block entry budget",
+		);
+
+		Ok(Some(PreUpgradeState {
+			renewals,
+			permanent_used,
+			pending,
+			authorizations,
+			permanent_sum,
+		})
+		.encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -189,9 +270,8 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		state: alloc::vec::Vec<u8>,
 	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 		use polkadot_sdk_frame::prelude::ensure;
-		let Some((pre, pre_used, pre_auth_count, pre_auth_perm_sum)) =
-			<Option<(u64, Option<u64>, u64, u64)>>::decode(&mut &state[..])
-				.map_err(|_| "pre_upgrade state decode failed")?
+		let Some(pre) = <Option<PreUpgradeState>>::decode(&mut &state[..])
+			.map_err(|_| "pre_upgrade state decode failed")?
 		else {
 			// Already migrated before this run — the gate made the migration a no-op;
 			// only the version invariant is checkable.
@@ -216,10 +296,10 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 				.map_err(|_| "relocated AutoRenewals entry is not current RenewalData layout")?;
 			post = post.saturating_add(1);
 		}
-		ensure!(post == pre, "AutoRenewals entry count changed across migration");
+		ensure!(post == pre.renewals, "AutoRenewals entry count changed across migration");
 
 		// No `AutoRenewals` must remain under the old `TransactionStorage` prefix.
-		let old_auto_prefix = storage_prefix(OLD_PALLET, b"AutoRenewals");
+		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
 		ensure!(
 			sp_io::storage::next_key(&old_auto_prefix)
 				.filter(|k| k.starts_with(&old_auto_prefix))
@@ -229,15 +309,29 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 
 		// The counter value captured under the old prefix must now live under the new
 		// prefix, and the old key must be gone.
-		if let Some(pre_used) = pre_used {
+		if let Some(pre_used) = pre.permanent_used {
 			ensure!(
 				crate::PermanentStorageUsed::<T>::get() == pre_used,
 				"PermanentStorageUsed value not preserved across relocation"
 			);
 		}
 		ensure!(
-			sp_io::storage::get(&storage_prefix(OLD_PALLET, b"PermanentStorageUsed")).is_none(),
+			sp_io::storage::get(&old_prefix::<T>(b"PermanentStorageUsed")).is_none(),
 			"PermanentStorageUsed remains under the old prefix after relocation"
+		);
+
+		// `PendingAutoRenewals`: byte-exact at the key the pallet reads, old key gone.
+		// Compared as raw bytes so a value present only at the wrong prefix is caught even
+		// though `ValueQuery` would read it back as an empty vec either way.
+		ensure!(
+			sp_io::storage::get(&crate::PendingAutoRenewals::<T>::hashed_key())
+				.map(|raw| raw.to_vec()) ==
+				pre.pending,
+			"PendingAutoRenewals not relocated byte-exactly"
+		);
+		ensure!(
+			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
+			"PendingAutoRenewals remains under the old prefix after relocation"
 		);
 
 		// Reshape: every entry decodes as the new layout, count unchanged, and
@@ -249,9 +343,9 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			post_auth_perm_sum =
 				post_auth_perm_sum.saturating_add(authorization.extent.extra.bytes_permanent);
 		}
-		ensure!(post_auth_count == pre_auth_count, "Authorizations entry count changed");
+		ensure!(post_auth_count == pre.authorizations, "Authorizations entry count changed");
 		ensure!(
-			post_auth_perm_sum == pre_auth_perm_sum,
+			post_auth_perm_sum == pre.permanent_sum,
 			"Σ bytes_permanent not preserved across the Authorizations reshape"
 		);
 
@@ -259,6 +353,19 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		ensure!(current >= StorageVersion::new(1), "storage version must be >= 1 after migration");
 		Ok(())
 	}
+}
+
+/// State captured by `pre_upgrade` for `post_upgrade` to check against.
+#[cfg(feature = "try-runtime")]
+#[derive(Encode, Decode)]
+struct PreUpgradeState {
+	renewals: u64,
+	permanent_used: Option<u64>,
+	/// Raw `PendingAutoRenewals` bytes, so the move can be checked byte-exactly.
+	pending: Option<alloc::vec::Vec<u8>>,
+	authorizations: u64,
+	/// Σ `bytes_permanent`, which the reshape must move rather than zero.
+	permanent_sum: u64,
 }
 
 /// `AuthorizationExtent` layout before the split (`bytes_permanent` inline).
