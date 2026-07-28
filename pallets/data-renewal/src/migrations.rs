@@ -17,21 +17,23 @@
 
 //! One-shot split migration: moves `AutoRenewals`, `PendingAutoRenewals`, and
 //! `PermanentStorageUsed` from the legacy `TransactionStorage::*` storage prefix to
-//! `DataRenewal::*`, and reshapes `TransactionStorage::Authorizations` to the
-//! `AuthorizationExtra` layout.
+//! `DataRenewal::*`.
+//!
+//! `TransactionStorage::Authorizations` is deliberately *not* touched:
+//! `AuthorizationExtent::extra` occupies the slot the pre-split `bytes_permanent` field had,
+//! so existing values already decode as the new layout.
 
 extern crate alloc;
 
-use crate::{Config, PermanentExtent, RenewalData};
+use crate::{Config, RenewalData};
 use codec::{Decode, Encode};
 use pallet_bulletin_transaction_storage as txs;
-use polkadot_sdk_frame::prelude::BlockNumberFor;
 
 use polkadot_sdk_frame::deps::{
 	frame_support::{
 		pallet_prelude::PhantomData,
 		storage::{storage_prefix, StoragePrefixedMap},
-		traits::{Get, GetStorageVersion, OnRuntimeUpgrade, PalletInfoAccess, StorageVersion},
+		traits::{Get, OnRuntimeUpgrade, PalletInfoAccess},
 		weights::Weight,
 	},
 	sp_io,
@@ -39,18 +41,14 @@ use polkadot_sdk_frame::deps::{
 
 const LOG_TARGET: &str = "runtime::data-renewal::migrations";
 
-/// Per-collection entry budget for the single-block relocation.
+/// Entry budget for the single-block `AutoRenewals` scan.
 ///
-/// This migration cannot be converted to an MBM (see the struct docs), so both the
-/// `AutoRenewals` scan and the `Authorizations` reshape must fit in one block. Each entry
-/// costs 2 reads + 2 writes, so a few thousand is comfortably inside a parachain block's
-/// ref-time and PoV budget while leaving room for the rest of the upgrade.
+/// Each entry costs 2 reads + 2 writes, so a few thousand is comfortably inside a parachain
+/// block's ref-time and PoV budget while leaving room for the rest of the upgrade.
 ///
-/// This is a tripwire, not a hard limit: `pre_upgrade` fails outright when either
-/// collection exceeds it, so a dry-run catches the problem before the runtime ships, and
-/// `on_runtime_upgrade` logs an error. Exceeding it means the `Authorizations` reshape
-/// needs a different strategy (e.g. a version tag on the value so reads can migrate
-/// lazily and the relocation can be stepped).
+/// This is a tripwire, not a hard limit: `pre_upgrade` fails outright when the collection
+/// exceeds it, so a dry-run catches the problem before the runtime ships, and
+/// `on_runtime_upgrade` logs an error.
 const MAX_SINGLE_BLOCK_ENTRIES: u64 = 5_000;
 
 /// Source prefixes, derived from the storage pallet's registered name rather than a
@@ -63,26 +61,21 @@ fn old_prefix<T: Config>(item: &[u8]) -> [u8; 32] {
 
 /// One-shot migration relocating `AutoRenewals`, `PendingAutoRenewals`, and the
 /// `PermanentStorageUsed` counter from the `TransactionStorage` pallet prefix to the
-/// `DataRenewal` pallet prefix, and reshaping every `TransactionStorage::Authorizations`
-/// value to the `AuthorizationExtra` layout — **moving** `bytes_permanent` into
-/// [`PermanentExtent`]. Bumps the renewal pallet's storage version from 0 to 1.
+/// `DataRenewal` pallet prefix.
 ///
-/// Must run single-block: the old and new `Authorization` encodings are the same byte
-/// length (all fixed-width fields), so a stale value read through the new type decodes
-/// *successfully* with shifted fields. An MBM would leave that window open across blocks
-/// with the pallet live, so the whole reshape has to land at once — which in turn means
-/// both iterated collections are bounded only by [`MAX_SINGLE_BLOCK_ENTRIES`], enforced by
-/// `pre_upgrade`. Idempotent via the storage-version gate.
+/// Idempotent by construction — every step is conditional on the *old* key still existing,
+/// which is false on any later run. Deliberately not gated on a storage version: this pallet
+/// is introduced by the same runtime upgrade that runs the migration, and FRAME initializes
+/// a brand-new pallet's on-chain version to the in-code `STORAGE_VERSION` in
+/// `before_all_runtime_migrations` — i.e. before any migration runs — so a version gate here
+/// is always already satisfied and would skip the relocation entirely.
+///
+/// Runs single-block: `AutoRenewals` is bounded by [`MAX_SINGLE_BLOCK_ENTRIES`], enforced by
+/// `pre_upgrade`, and the other two items are single `StorageValue`s.
 pub struct RelocateFromTransactionStorage<T: Config>(PhantomData<T>);
 
 impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 	fn on_runtime_upgrade() -> Weight {
-		let current = <crate::pallet::Pallet<T> as GetStorageVersion>::on_chain_storage_version();
-		if current >= StorageVersion::new(1) {
-			tracing::info!(target: LOG_TARGET, "already migrated; skipping");
-			return Weight::zero();
-		}
-
 		// `AutoRenewals`: re-key from the old prefix, reshaping pre-v4 `{ account }`
 		// values into the current `RenewalData` layout (a plain `move_prefix` would
 		// leave them undecodable). The Blake2_128Concat key suffix is identical
@@ -149,34 +142,10 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			values_moved = values_moved.saturating_add(1);
 		}
 
-		// `Authorizations` reshape: `bytes_permanent` moves into the opaque `extra`.
-		let mut reshaped: u64 = 0;
-		txs::Authorizations::<T>::translate::<OldAuthorization<BlockNumberFor<T>>, _>(
-			|_scope, old| {
-				reshaped = reshaped.saturating_add(1);
-				Some(txs::Authorization {
-					extent: txs::AuthorizationExtent {
-						transactions: old.extent.transactions,
-						transactions_allowance: old.extent.transactions_allowance,
-						bytes: old.extent.bytes,
-						bytes_allowance: old.extent.bytes_allowance,
-						extra: PermanentExtent { bytes_permanent: old.extent.bytes_permanent },
-					},
-					expiration: old.expiration,
-				})
-			},
-		);
-
-		StorageVersion::new(1).put::<crate::pallet::Pallet<T>>();
-
-		// Cannot abort past this point: the runtime is already live with the new
-		// `Authorization` type, and leaving entries un-reshaped would silently misdecode.
-		// `pre_upgrade` fails on the same condition, so a dry-run catches it first.
-		if visited > MAX_SINGLE_BLOCK_ENTRIES || reshaped > MAX_SINGLE_BLOCK_ENTRIES {
+		if visited > MAX_SINGLE_BLOCK_ENTRIES {
 			tracing::error!(
 				target: LOG_TARGET,
 				visited,
-				reshaped,
 				budget = MAX_SINGLE_BLOCK_ENTRIES,
 				"single-block entry budget exceeded; block may exceed its weight or PoV limit",
 			);
@@ -187,21 +156,15 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			moved,
 			visited,
 			values_moved,
-			reshaped,
 			"split migration complete",
 		);
 
-		// Reads: the version gate, a `next_key` + `get` per visited `AutoRenewals` key, the
-		// terminal `next_key`, one `get` per relocated `StorageValue`, and one per reshaped
-		// `Authorizations` entry.
-		let reads = visited.saturating_mul(2).saturating_add(reshaped).saturating_add(4);
+		// Reads: a `next_key` + `get` per visited `AutoRenewals` key, the terminal `next_key`,
+		// and one `get` per relocated `StorageValue`.
+		let reads = visited.saturating_mul(2).saturating_add(3);
 		// Writes: a set + a clear per moved `AutoRenewals` entry and per relocated
-		// `StorageValue`, one per reshaped `Authorizations` entry, and the version bump.
-		let writes = moved
-			.saturating_add(values_moved)
-			.saturating_mul(2)
-			.saturating_add(reshaped)
-			.saturating_add(1);
+		// `StorageValue`.
+		let writes = moved.saturating_add(values_moved).saturating_mul(2);
 		T::DbWeight::get().reads_writes(reads, writes)
 	}
 
@@ -209,12 +172,6 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 	fn pre_upgrade(
 	) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 		use polkadot_sdk_frame::prelude::ensure;
-
-		// Mirror the runtime gate: already migrated → no-op, post checks skipped.
-		let current = <crate::pallet::Pallet<T> as GetStorageVersion>::on_chain_storage_version();
-		if current >= StorageVersion::new(1) {
-			return Ok(None::<PreUpgradeState>.encode());
-		}
 
 		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
 		let mut previous = old_auto_prefix.to_vec();
@@ -232,37 +189,14 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		let pending =
 			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).map(|raw| raw.to_vec());
 
-		// Old-layout count + Σ bytes_permanent: the reshape must move, never zero.
-		let mut authorizations: u64 = 0;
-		let mut permanent_sum: u64 = 0;
-		for key in txs::Authorizations::<T>::iter_keys() {
-			let raw_key = txs::Authorizations::<T>::hashed_key_for(&key);
-			let raw = sp_io::storage::get(&raw_key).ok_or("authorization value missing")?;
-			let decoded = OldAuthorization::<BlockNumberFor<T>>::decode(&mut &raw[..])
-				.map_err(|_| "pre-migration authorization is not the old layout")?;
-			authorizations = authorizations.saturating_add(1);
-			permanent_sum = permanent_sum.saturating_add(decoded.extent.bytes_permanent);
-		}
-
 		// Fail the dry-run rather than the block: the migration cannot be stepped, so an
 		// oversized collection has to be caught before the runtime ships.
 		ensure!(
 			renewals <= MAX_SINGLE_BLOCK_ENTRIES,
 			"AutoRenewals exceeds the single-block entry budget",
 		);
-		ensure!(
-			authorizations <= MAX_SINGLE_BLOCK_ENTRIES,
-			"Authorizations exceeds the single-block entry budget",
-		);
 
-		Ok(Some(PreUpgradeState {
-			renewals,
-			permanent_used,
-			pending,
-			authorizations,
-			permanent_sum,
-		})
-		.encode())
+		Ok(PreUpgradeState { renewals, permanent_used, pending }.encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -270,16 +204,8 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		state: alloc::vec::Vec<u8>,
 	) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 		use polkadot_sdk_frame::prelude::ensure;
-		let Some(pre) = <Option<PreUpgradeState>>::decode(&mut &state[..])
-			.map_err(|_| "pre_upgrade state decode failed")?
-		else {
-			// Already migrated before this run — the gate made the migration a no-op;
-			// only the version invariant is checkable.
-			let current =
-				<crate::pallet::Pallet<T> as GetStorageVersion>::on_chain_storage_version();
-			ensure!(current >= StorageVersion::new(1), "storage version must be >= 1");
-			return Ok(());
-		};
+		let pre = PreUpgradeState::decode(&mut &state[..])
+			.map_err(|_| "pre_upgrade state decode failed")?;
 
 		// Every relocated entry must live under the new prefix and decode as the
 		// current `RenewalData` layout (catches a pre-v4 entry that wasn't reshaped).
@@ -334,23 +260,6 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			"PendingAutoRenewals remains under the old prefix after relocation"
 		);
 
-		// Reshape: every entry decodes as the new layout, count unchanged, and
-		// Σ bytes_permanent preserved into `extra`.
-		let mut post_auth_count: u64 = 0;
-		let mut post_auth_perm_sum: u64 = 0;
-		for (_, authorization) in txs::Authorizations::<T>::iter() {
-			post_auth_count = post_auth_count.saturating_add(1);
-			post_auth_perm_sum =
-				post_auth_perm_sum.saturating_add(authorization.extent.extra.bytes_permanent);
-		}
-		ensure!(post_auth_count == pre.authorizations, "Authorizations entry count changed");
-		ensure!(
-			post_auth_perm_sum == pre.permanent_sum,
-			"Σ bytes_permanent not preserved across the Authorizations reshape"
-		);
-
-		let current = <crate::pallet::Pallet<T> as GetStorageVersion>::on_chain_storage_version();
-		ensure!(current >= StorageVersion::new(1), "storage version must be >= 1 after migration");
 		Ok(())
 	}
 }
@@ -363,24 +272,4 @@ struct PreUpgradeState {
 	permanent_used: Option<u64>,
 	/// Raw `PendingAutoRenewals` bytes, so the move can be checked byte-exactly.
 	pending: Option<alloc::vec::Vec<u8>>,
-	authorizations: u64,
-	/// Σ `bytes_permanent`, which the reshape must move rather than zero.
-	permanent_sum: u64,
-}
-
-/// `AuthorizationExtent` layout before the split (`bytes_permanent` inline).
-#[derive(Encode, Decode)]
-struct OldAuthorizationExtent {
-	transactions: u32,
-	transactions_allowance: u32,
-	bytes: u64,
-	bytes_permanent: u64,
-	bytes_allowance: u64,
-}
-
-/// `Authorization` layout before the split.
-#[derive(Encode, Decode)]
-struct OldAuthorization<BlockNumber> {
-	extent: OldAuthorizationExtent,
-	expiration: BlockNumber,
 }

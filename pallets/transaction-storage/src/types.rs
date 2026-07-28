@@ -45,6 +45,13 @@ pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Conf
 /// - `bytes_allowance` / `transactions_allowance` — caps set at grant time. `bytes_allowance` is
 ///   shared with the consumer pallet's `extra` accounting.
 /// - `extra` — opaque consumer-pallet state; this pallet only stores and resets it.
+///
+/// FIELD ORDER IS LOAD-BEARING. Before the renewal split this struct held a `bytes_permanent:
+/// u64` where `extra` now sits, and live chains carry tens of thousands of authorizations
+/// written at that layout which nothing reshapes — `extra` keeps that slot so the encodings
+/// stay byte-identical. Reordering (or wiring an `Extra` that is not 8 bytes) silently
+/// reinterprets every one of them. Pinned by
+/// `pallet_bulletin_transaction_storage_renewal::tests::authorization_encoding_matches_pre_split_layout`.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
@@ -55,11 +62,12 @@ pub struct AuthorizationExtent<Extra> {
 	pub transactions_allowance: u32,
 	/// Bytes consumed by `store` calls (temporary storage).
 	pub bytes: u64,
+	/// Opaque consumer-pallet state, mutated only through
+	/// [`crate::Pallet::try_mutate_active_authorization`]. Occupies the pre-split
+	/// `bytes_permanent` slot — see the struct docs.
+	pub extra: Extra,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
-	/// Opaque consumer-pallet state, mutated only through
-	/// [`crate::Pallet::try_mutate_active_authorization`].
-	pub extra: Extra,
 }
 
 /// [`AuthorizationExtent`] bound to a runtime's [`crate::Config::AuthorizationExtra`].
@@ -105,8 +113,7 @@ pub enum AuthorizedCaller<AccountId> {
 /// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
 pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
 
-/// An authorization to store data. The value shape is tracked by the renewal
-/// pallet's storage version, not this pallet's.
+/// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct Authorization<BlockNumber, Extra> {
 	/// Extent of the authorization (number of transactions/bytes).

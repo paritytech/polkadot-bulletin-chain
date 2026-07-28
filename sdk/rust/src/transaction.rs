@@ -440,7 +440,7 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
 		let entry = entry.into();
-		let tx = bulletin::tx().transaction_storage().renew(to_runtime_ref(&entry));
+		let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -462,7 +462,7 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
 		let entry = entry.into();
-		let tx = bulletin::tx().transaction_storage().force_renew(to_runtime_ref(&entry));
+		let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {

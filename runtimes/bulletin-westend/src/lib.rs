@@ -143,6 +143,10 @@ pub mod migrations {
 		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
+		// Westend Bulletin is still on `TransactionStorage` storage version 1 (Paseo is on 5),
+		// so the whole chain from v0→v1 up has to stay wired here.
+		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 		txs_renewal::migrations::RelocateFromTransactionStorage<Runtime>,

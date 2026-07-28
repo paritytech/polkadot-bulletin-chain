@@ -132,9 +132,10 @@ fn relocation_migration_moves_legacy_entries_under_new_prefix() {
 
 		assert!(sp_io::storage::get(&key).is_none());
 		assert_eq!(Renewals::<Test>::iter().count(), 1);
-		let weight =
-			crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-		assert_eq!(weight, polkadot_sdk_frame::deps::frame_support::weights::Weight::zero());
+		// Idempotent: re-running finds nothing left under the old prefix.
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		assert_eq!(Renewals::<Test>::iter().count(), 1);
+		assert_eq!(Renewals::<Test>::get(hash), Some(value));
 	});
 }
 
@@ -244,19 +245,14 @@ fn relocation_migration_moves_pending_auto_renewals() {
 }
 
 /// `pre_upgrade`/`post_upgrade` accept a full legacy state: an `AutoRenewals` entry, both
-/// relocated `StorageValue`s, and an old-layout `Authorizations` entry. Exercises the
+/// relocated `StorageValue`s, and a pre-split `Authorizations` entry. Exercises the
 /// try-runtime checks themselves, which are otherwise compiled out.
 #[cfg(feature = "try-runtime")]
 #[test]
 fn relocation_migration_try_runtime_checks_pass() {
 	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::{
-		frame_support::traits::StorageVersion,
-		sp_runtime::traits::{BlakeTwo256, Hash},
-	};
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-
 		// Legacy `AutoRenewals` entry.
 		let hash: ContentHash = BlakeTwo256::hash(b"try-runtime-relocation").into();
 		let auto_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
@@ -275,8 +271,8 @@ fn relocation_migration_try_runtime_checks_pass() {
 			&512u64.encode(),
 		);
 
-		// Old-layout authorization: extent { transactions, transactions_allowance, bytes,
-		// bytes_permanent, bytes_allowance } + expiration.
+		// Pre-split authorization: extent { transactions, transactions_allowance, bytes,
+		// bytes_permanent, bytes_allowance } + expiration. The migration must leave it alone.
 		let scope = AuthorizationScope::Account(3u64);
 		sp_io::storage::set(
 			&txs::Authorizations::<Test>::hashed_key_for(&scope),
@@ -289,16 +285,36 @@ fn relocation_migration_try_runtime_checks_pass() {
 		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
 			.expect("post_upgrade checks must pass");
 
-		// The reshape moved `bytes_permanent` rather than zeroing it.
-		assert_eq!(
-			txs::Authorizations::<Test>::get(&scope)
-				.expect("still present")
-				.extent
-				.extra
-				.bytes_permanent,
-			700,
-		);
+		let extent = txs::Authorizations::<Test>::get(&scope).expect("still present").extent;
+		assert_eq!(extent.extra.bytes_permanent, 700);
+		assert_eq!(extent.bytes_allowance, 900);
 	});
+}
+
+/// Live chains carry tens of thousands of authorizations written before the renewal split,
+/// and nothing reshapes them: `AuthorizationExtent::extra` was placed in the slot the old
+/// `bytes_permanent` field occupied so the two encodings coincide. Reordering the struct —
+/// or wiring an `Extra` that is not 8 bytes — silently reinterprets every one of them, so
+/// pin the encoding here rather than discovering it against a snapshot.
+#[test]
+fn authorization_encoding_matches_pre_split_layout() {
+	// extent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }
+	// followed by `expiration`.
+	let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u64).encode();
+
+	let current = txs::Authorization::<u64, PermanentExtent> {
+		extent: txs::AuthorizationExtent {
+			transactions: 1,
+			transactions_allowance: 5,
+			bytes: 100,
+			extra: PermanentExtent { bytes_permanent: 700 },
+			bytes_allowance: 900,
+		},
+		expiration: 50,
+	}
+	.encode();
+
+	assert_eq!(current, pre_split);
 }
 
 /// `enable_auto_renew` is a feeless registration: the extension's
@@ -3001,56 +3017,26 @@ fn can_renew_rejects_when_chain_wide_cap_reached() {
 	});
 }
 
-/// The relocation migration reshapes pre-split `Authorization` values, **moving**
-/// `bytes_permanent` into `extent.extra` — never zeroing it. The old and new encodings
-/// are the same byte length, so this also guards against a silent misdecode of stale
-/// values (the reason the migration must run single-block in the upgrade block).
+/// A pre-split `Authorization` — written when `bytes_permanent` was an inline field —
+/// decodes through the current type with every field in the right place. This is what makes
+/// the relocation migration able to leave `Authorizations` untouched.
 #[test]
-fn authorizations_extra_migration_moves_bytes_permanent() {
-	use polkadot_sdk_frame::deps::frame_support::traits::{
-		GetStorageVersion, OnRuntimeUpgrade, StorageVersion,
-	};
-
+fn pre_split_authorization_decodes_as_current_layout() {
 	new_test_ext().execute_with(|| {
-		let who: u64 = 7;
-		let scope = AuthorizationScope::Account(who);
+		let scope = AuthorizationScope::Account(7u64);
 
-		// Write a value in the frozen pre-split layout: extent {transactions u32,
-		// transactions_allowance u32, bytes u64, bytes_permanent u64, bytes_allowance
-		// u64} + expiration u64.
-		let old_value = (3u32, 10u32, 500u64, 2000u64, 4000u64, 99u64);
+		// extent { transactions u32, transactions_allowance u32, bytes u64,
+		// bytes_permanent u64, bytes_allowance u64 } + expiration u64.
 		let raw_key = txs::Authorizations::<Test>::hashed_key_for(&scope);
-		sp_io::storage::set(&raw_key, &old_value.encode());
+		sp_io::storage::set(&raw_key, &(3u32, 10u32, 500u64, 2000u64, 4000u64, 99u64).encode());
 
-		// Reading through the new type before the reshape decodes *successfully* with
-		// shifted fields — the hazard that forces the single-block migration.
-		let misdecoded = txs::Authorizations::<Test>::get(&scope).expect("same length decodes");
-		assert_ne!(misdecoded.extent.extra.bytes_permanent, 2000);
-
-		// Run the split migration (version-gated below 1; fresh chains in tests are
-		// genesis-stamped at the current version, so reset to the pre-split state).
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-		crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-
-		let migrated = txs::Authorizations::<Test>::get(&scope).expect("still present");
-		assert_eq!(migrated.extent.transactions, 3);
-		assert_eq!(migrated.extent.transactions_allowance, 10);
-		assert_eq!(migrated.extent.bytes, 500);
-		assert_eq!(migrated.extent.bytes_allowance, 4000);
-		assert_eq!(
-			migrated.extent.extra,
-			PermanentExtent { bytes_permanent: 2000 },
-			"bytes_permanent must be moved, not zeroed",
-		);
-		assert_eq!(migrated.expiration, 99);
-		assert_eq!(crate::Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(1));
-
-		// Idempotent: a second run is version-gated to a no-op.
-		crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-		assert_eq!(
-			txs::Authorizations::<Test>::get(&scope).expect("still present").extent.extra,
-			PermanentExtent { bytes_permanent: 2000 },
-		);
+		let read = txs::Authorizations::<Test>::get(&scope).expect("decodes");
+		assert_eq!(read.extent.transactions, 3);
+		assert_eq!(read.extent.transactions_allowance, 10);
+		assert_eq!(read.extent.bytes, 500);
+		assert_eq!(read.extent.extra, PermanentExtent { bytes_permanent: 2000 });
+		assert_eq!(read.extent.bytes_allowance, 4000);
+		assert_eq!(read.expiration, 99);
 	});
 }
 
@@ -3101,8 +3087,9 @@ fn try_state_holds_across_renew_lifecycle() {
 	});
 }
 
-/// Equality is violated in both directions: a counter above the on-chain sums and a
-/// counter below them are both caught.
+/// A counter above the on-chain sums is caught; a counter below them is tolerated, which
+/// is the state of a chain that renewed before the counter existed — those entries were
+/// never charged and the counter catches up as they age out.
 #[test]
 fn try_state_detects_counter_drift() {
 	new_test_ext().execute_with(|| {
@@ -3112,10 +3099,10 @@ fn try_state_detects_counter_drift() {
 		crate::PermanentStorageUsed::<Test>::put(2000);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+			"PermanentStorageUsed exceeds Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 
-		// Counter below the on-chain renewed sum.
+		// Counter below the on-chain renewed sum: uncharged legacy entries, allowed.
 		crate::PermanentStorageUsed::<Test>::put(0);
 		let renewed = TransactionInfo {
 			chunk_root: Default::default(),
@@ -3131,10 +3118,7 @@ fn try_state_detects_counter_drift() {
 			1u64,
 			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renewed]).unwrap(),
 		);
-		assert_err!(
-			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
-		);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
 	});
 }
 

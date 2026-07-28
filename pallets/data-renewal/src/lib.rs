@@ -748,7 +748,7 @@ impl<T: Config> Pallet<T> {
 
 impl<T: Config> Pallet<T> {
 	/// try-state invariants:
-	/// - `PermanentStorageUsed == Σ Renew entry sizes + Σ paid registration sizes` (prepaid
+	/// - `PermanentStorageUsed <= Σ Renew entry sizes + Σ paid registration sizes` (prepaid
 	///   registrations are charged before their `Renew` entry exists).
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	#[cfg(any(feature = "try-runtime", test))]
@@ -783,9 +783,13 @@ impl<T: Config> Pallet<T> {
 			prepaid_sum = prepaid_sum.saturating_add(info.size as u64);
 		}
 
+		// Upper bound, not equality: a chain that renewed before this counter existed carries
+		// `Renew` entries it never charged, so the counter lags until they age out of the
+		// retention window (`handle_obsolete` saturates at 0). Over-counting is the direction
+		// that would breach `MaxPermanentStorageSize`, so only that is an error.
 		ensure!(
-			renewed_sum.saturating_add(prepaid_sum) == used,
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+			used <= renewed_sum.saturating_add(prepaid_sum),
+			"PermanentStorageUsed exceeds Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 		ensure!(
 			used <= T::MaxPermanentStorageSize::get(),

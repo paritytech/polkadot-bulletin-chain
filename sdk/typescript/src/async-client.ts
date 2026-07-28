@@ -112,6 +112,17 @@ export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
 type RenewShape = "transactionRef" | "legacy"
 
 /**
+ * Minimal shape of the pallet namespace carrying the renewal extrinsics, so the
+ * lookup in `renewalPallet` does not need the generated per-pallet types.
+ */
+type RenewalPallet = {
+  renew(
+    args: { block: number; index: number } | { entry: TransactionRef },
+  ): PapiTransaction
+  force_renew?(args: { entry: TransactionRef }): PapiTransaction
+}
+
+/**
  * Minimal interface for the PAPI typed API.
  *
  * Describes the pallets and extrinsics the SDK interacts with.
@@ -153,6 +164,11 @@ export interface BulletinTypedApi {
         content_hash: string
       }): PapiTransaction
     }
+    /**
+     * Renewal extrinsics. The renewal split moved `renew` / `force_renew` here
+     * from `TransactionStorage`; absent on pre-split runtimes.
+     */
+    DataRenewal?: RenewalPallet
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
     }
@@ -1265,10 +1281,19 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   private renewShapePromise?: Promise<RenewShape>
 
   /**
+   * Pallet holding the renewal extrinsics. The renewal split moved `renew` and
+   * `force_renew` out of `TransactionStorage` into `DataRenewal`; pre-split
+   * runtimes (and hand-rolled mocks) still expose them on the old pallet.
+   */
+  private get renewalPallet(): RenewalPallet {
+    return this.api.tx.DataRenewal ?? this.api.tx.TransactionStorage
+  }
+
+  /**
    * Resolve which call shape the runtime's renewal extrinsics take, once per
    * client.
    *
-   * On a real PAPI `TypedApi`, `tx.TransactionStorage.force_renew` is a proxy
+   * On a real PAPI `TypedApi`, `tx.DataRenewal.force_renew` is a proxy
    * entry that is truthy for *any* name, so presence alone proves nothing; the
    * entry's `getCompatibilityLevel()` compares descriptors against the live
    * runtime and returns `CompatibilityLevel.Incompatible` (0) when the runtime
@@ -1282,7 +1307,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   private resolveRenewShape(): Promise<RenewShape> {
     this.renewShapePromise ??= (async (): Promise<RenewShape> => {
-      const forceRenew = this.api.tx.TransactionStorage.force_renew
+      const forceRenew = this.renewalPallet.force_renew
       if (!forceRenew) return "legacy"
       const probe = (
         forceRenew as unknown as {
@@ -1320,7 +1345,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       const entry = toTransactionRef(ref)
-      const ts = this.api.tx.TransactionStorage
+      const ts = this.renewalPallet
       let tx: PapiTransaction
       if ((await this.resolveRenewShape()) === "transactionRef") {
         tx = ts.renew({ entry })
@@ -1349,7 +1374,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    */
   forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
-      const ts = this.api.tx.TransactionStorage
+      const ts = this.renewalPallet
       if (
         (await this.resolveRenewShape()) !== "transactionRef" ||
         !ts.force_renew
