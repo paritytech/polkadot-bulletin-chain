@@ -16,6 +16,7 @@
 //! Tests for hop-promotion pallet.
 
 use crate::{mock::*, signing_payload};
+use bulletin_transaction_storage_primitives::ValidTransactionParams;
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
 use sp_io::hashing::blake2_256;
@@ -404,79 +405,30 @@ fn authorize_valid_transaction_properties() {
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (valid_tx, weight) = call.authorize(TransactionSource::Local).unwrap().unwrap();
-		assert_eq!(valid_tx.priority, 0);
-		assert_eq!(valid_tx.longevity, 5);
+		let params = PromoteTxParams::get();
+		assert_eq!(valid_tx.priority, params.priority);
+		assert_eq!(valid_tx.longevity, params.longevity);
 		assert!(!valid_tx.propagate);
 		assert_eq!(weight, frame_support::weights::Weight::zero());
 		let hash = sp_io::hashing::blake2_256(&data);
-		let expected_tag = ("HopPromotion", hash).encode();
+		let expected_tag = (params.tag_prefix, hash).encode();
 		assert!(valid_tx.provides.contains(&expected_tag));
 	});
 }
 
-/// The priority `authorize_promote` emits is below `store`'s. Renew is the renewal
-/// pallet's own params, checked in the runtime tests.
+/// `integrity_test` rejects a `store` priority at or below `promote`'s. The passing
+/// direction is covered by the `#[frame_support::runtime]`-generated integrity test, and
+/// the emitted priority by `authorize_valid_transaction_properties`.
 #[test]
-fn promote_has_lower_priority_than_store() {
-	new_test_ext().execute_with(|| {
-		set_now(TEST_TIMESTAMP_MS);
-		System::run_to_block::<AllPalletsWithSystem>(1);
-		frame_system::Pallet::<Test>::set_extrinsic_index(0);
-
-		// Authorize Alice for store + promote.
-		let alice = Sr25519Keyring::Alice.to_account_id();
-		let data = vec![2u8; 100];
-		authorize_account(alice.clone(), 2, 2 * data.len() as u64);
-
-		// Get promote priority.
-		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
-		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
-		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
-		assert_eq!(promote_tx.priority, PromoteTxParams::get().priority);
-
-		// Get store priority via the storage pallet's signed-call validation.
-		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
-		let (store_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
-			&alice,
-			&store_call,
-		)
-		.unwrap();
-
-		assert_eq!(
-			store_tx.priority,
-			<Test as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().priority,
-		);
-		assert!(
-			promote_tx.priority < store_tx.priority,
-			"promote priority ({}) must be strictly less than store priority ({})",
-			promote_tx.priority,
-			store_tx.priority,
-		);
-	});
-}
-
-/// `integrity_test` must reject a `store` priority at or below `promote`'s. The
-/// passing direction is covered by the
-/// `#[frame_support::runtime]`-generated integrity test.
-#[test]
+#[should_panic(expected = "must be strictly below store priority")]
 fn integrity_test_rejects_promote_priority_at_or_above_store() {
 	use frame_support::traits::IntegrityTest;
 
 	new_test_ext().execute_with(|| {
-		// Sanity: the mock is configured the right way round.
-		assert!(
-			PromoteTxParams::get().priority <
-				<Test as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get()
-					.priority,
-		);
+		StoreTxParams::set(ValidTransactionParams {
+			priority: PromoteTxParams::get().priority,
+			..StoreTxParams::get()
+		});
 		HopPromotion::integrity_test();
-
-		// Now flip it: promotion at the same priority as store must be rejected.
-		StoreTxParams::set(StoreTxParams::get().with_priority(PromoteTxParams::get().priority));
-		let prev_hook = std::panic::take_hook();
-		std::panic::set_hook(Box::new(|_| {}));
-		let outcome = std::panic::catch_unwind(HopPromotion::integrity_test);
-		std::panic::set_hook(prev_hook);
-		assert!(outcome.is_err(), "integrity_test must reject store priority <= promote's",);
 	});
 }
