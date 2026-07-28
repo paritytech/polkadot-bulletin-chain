@@ -74,7 +74,7 @@ use bulletin_transaction_storage_primitives::ContentHash;
 use pallet_bulletin_transaction_storage::{
 	AuthorizationScope, AuthorizationScopeFor, AuthorizedCaller, BlockTransactions, CheckContext,
 	OnObsoleteTransactions, TransactionByContentHash, TransactionInfo, TransactionInfoFor,
-	TransactionRef, BAD_DATA_SIZE,
+	TransactionRef, ValidTransactionParams, BAD_DATA_SIZE,
 };
 use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{deps::*, prelude::*};
@@ -130,6 +130,11 @@ pub mod pallet {
 		/// all authorizations. Tracks chain-wide capacity for permanent data.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
+		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
+		/// `force_renew` and `enable_auto_renew` per account and content hash is queued at
+		/// a time. Preimage `force_renew` tags on the content hash alone, so it dedups
+		/// separately.
+		type RenewTxParams: Get<ValidTransactionParams>;
 	}
 
 	#[pallet::error]
@@ -237,6 +242,16 @@ pub mod pallet {
 		#[cfg(feature = "try-runtime")]
 		fn try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
 			Pallet::<T>::do_try_state(n)
+		}
+
+		/// Renewals tag like the storage pallet's families — signed `renew` like signed
+		/// `store`, preimage `force_renew` like preimage `store` — so they must not share a
+		/// prefix with them.
+		fn integrity_test() {
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
+				"RenewTxParams",
+				<T as Config>::RenewTxParams::get(),
+			)]);
 		}
 	}
 
@@ -704,11 +719,9 @@ impl<T: Config> Pallet<T> {
 			info.size,
 			context.consume_authorization(),
 		)?;
-		Ok(context.want_valid_transaction().then(|| {
-			pallet_bulletin_transaction_storage::Pallet::<T>::preimage_store_renew_valid_transaction(
-				info.content_hash,
-			)
-		}))
+		Ok(context
+			.want_valid_transaction()
+			.then(|| <T as Config>::RenewTxParams::get().provides(info.content_hash)))
 	}
 
 	/// Active-authorization summary for the `BulletinTransactionStorageApi` runtime

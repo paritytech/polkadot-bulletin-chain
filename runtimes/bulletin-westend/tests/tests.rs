@@ -890,6 +890,30 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		})
 }
 
+/// Promotion must lose to both `store` and renewals; only the runtime sees all three.
+#[test]
+fn promote_priority_is_below_store_and_renew() {
+	let promote =
+		<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams::get().priority;
+	let store = <Runtime as TxStorageConfig>::StoreTxParams::get().priority;
+	let renew = <Runtime as txs_renewal::Config>::RenewTxParams::get().priority;
+	assert!(promote < store, "promote ({promote}) must be below store priority ({store})");
+	assert!(promote < renew, "promote ({promote}) must be below renew priority ({renew})");
+}
+
+/// Both tag on the bare content hash, and no pallet sees the other's params — the storage
+/// pallet's `integrity_test` covers every other pair.
+#[test]
+fn renew_and_promote_tag_prefixes_differ() {
+	pallet_bulletin_transaction_storage::assert_distinct_tag_prefixes(&[
+		("RenewTxParams", <Runtime as txs_renewal::Config>::RenewTxParams::get()),
+		(
+			"PromoteTxParams",
+			<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams::get(),
+		),
+	]);
+}
+
 /// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {

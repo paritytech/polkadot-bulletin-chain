@@ -16,9 +16,9 @@
 //! Tests for hop-promotion pallet.
 
 use crate::{mock::*, signing_payload};
+use bulletin_transaction_storage_primitives::ValidTransactionParams;
 use codec::Encode;
 use frame_support::{assert_noop, assert_ok, traits::Authorize};
-use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -405,73 +405,45 @@ fn authorize_valid_transaction_properties() {
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (valid_tx, weight) = call.authorize(TransactionSource::Local).unwrap().unwrap();
-		assert_eq!(valid_tx.priority, 0);
-		assert_eq!(valid_tx.longevity, 5);
+		let params = PromoteTxParams::get();
+		assert_eq!(valid_tx.priority, params.priority);
+		assert_eq!(valid_tx.longevity, params.longevity);
 		assert!(!valid_tx.propagate);
 		assert_eq!(weight, frame_support::weights::Weight::zero());
 		let hash = sp_io::hashing::blake2_256(&data);
-		let expected_tag = ("HopPromotion", hash).encode();
+		let expected_tag = (params.tag_prefix, hash).encode();
 		assert!(valid_tx.provides.contains(&expected_tag));
 	});
 }
 
+/// `integrity_test` rejects a `store` priority at or below `promote`'s. The passing
+/// direction is covered by the `#[frame_support::runtime]`-generated integrity test, and
+/// the emitted priority by `authorize_valid_transaction_properties`.
 #[test]
-fn promote_has_lower_priority_than_store_and_renew() {
+#[should_panic(expected = "must be strictly below store priority")]
+fn integrity_test_rejects_promote_priority_at_or_above_store() {
+	use frame_support::traits::IntegrityTest;
+
 	new_test_ext().execute_with(|| {
-		set_now(TEST_TIMESTAMP_MS);
-		System::run_to_block::<AllPalletsWithSystem>(1);
-		frame_system::Pallet::<Test>::set_extrinsic_index(0);
+		StoreTxParams::set(ValidTransactionParams {
+			priority: PromoteTxParams::get().priority,
+			..StoreTxParams::get()
+		});
+		HopPromotion::integrity_test();
+	});
+}
 
-		// Authorize Alice for store + renew + promote.
-		let alice = Sr25519Keyring::Alice.to_account_id();
-		let data = vec![2u8; 100];
-		authorize_account(alice.clone(), 2, 2 * data.len() as u64);
+/// `integrity_test` rejects a `promote` prefix shared with a storage-pallet family.
+#[test]
+#[should_panic(expected = "PromoteTxParams and StoreTxParams must not share the tag prefix")]
+fn integrity_test_rejects_promote_prefix_shared_with_store() {
+	use frame_support::traits::IntegrityTest;
 
-		// Get promote priority.
-		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
-		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
-		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
-
-		// Get store priority via the storage pallet's signed-call validation.
-		let store_call =
-			pallet_bulletin_transaction_storage::Call::<Test>::store { data: data.clone() };
-		let (store_tx, _) = pallet_bulletin_transaction_storage::Pallet::<Test>::validate_signed(
-			&alice,
-			&store_call,
-		)
-		.unwrap();
-
-		// Store data so we can renew it.
-		assert_ok!(pallet_bulletin_transaction_storage::Pallet::<Test>::store(
-			RuntimeOrigin::none(),
-			data,
-		));
-
-		// Advance so the stored transaction is available for renew.
-		run_to_block(3);
-
-		// Renew now lives in `pallet-bulletin-transaction-storage-renewal`; validate
-		// through that pallet's own extension entry point to get the renew priority.
-		let renew_call = txs_renewal::Call::<Test>::renew {
-			entry: pallet_bulletin_transaction_storage::TransactionRef::Position {
-				block: 1,
-				index: 0,
-			},
-		};
-		let (renew_tx, _) =
-			txs_renewal::Pallet::<Test>::validate_renewal_signed(&alice, &renew_call).unwrap();
-
-		assert!(
-			promote_tx.priority < store_tx.priority,
-			"promote priority ({}) must be strictly less than store priority ({})",
-			promote_tx.priority,
-			store_tx.priority,
-		);
-		assert!(
-			promote_tx.priority < renew_tx.priority,
-			"promote priority ({}) must be strictly less than renew priority ({})",
-			promote_tx.priority,
-			renew_tx.priority,
-		);
+	new_test_ext().execute_with(|| {
+		StoreTxParams::set(ValidTransactionParams {
+			tag_prefix: PromoteTxParams::get().tag_prefix,
+			..StoreTxParams::get()
+		});
+		HopPromotion::integrity_test();
 	});
 }

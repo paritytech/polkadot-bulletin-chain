@@ -136,11 +136,7 @@ impl<T: Config> Pallet<T> {
 				)?;
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					ValidTransaction::with_tag_prefix("DataRenewalRenew")
-						.and_provides((who.clone(), info.content_hash))
-						.priority(<T as txs::Config>::StoreRenewPriority::get())
-						.longevity(<T as txs::Config>::StoreRenewLongevity::get())
-						.into()
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};
@@ -157,16 +153,8 @@ impl<T: Config> Pallet<T> {
 						// Preimage renewals are submitter-agnostic: tag on the content
 						// hash alone so they don't dedup against the account path.
 						AuthorizationScope::Preimage(hash) =>
-							ValidTransaction::with_tag_prefix("DataRenewalForceRenewPreimage")
-								.and_provides(*hash)
-								.priority(<T as txs::Config>::StoreRenewPriority::get())
-								.longevity(<T as txs::Config>::StoreRenewLongevity::get())
-								.into(),
-						_ => ValidTransaction::with_tag_prefix("DataRenewalForceRenew")
-							.and_provides((who.clone(), info.content_hash))
-							.priority(<T as txs::Config>::StoreRenewPriority::get())
-							.longevity(<T as txs::Config>::StoreRenewLongevity::get())
-							.into(),
+							<T as Config>::RenewTxParams::get().provides(*hash),
+						_ => <T as Config>::RenewTxParams::get().provides((who, info.content_hash)),
 					}
 				} else {
 					ValidTransaction::default()
@@ -190,11 +178,7 @@ impl<T: Config> Pallet<T> {
 
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					ValidTransaction::with_tag_prefix("DataRenewalEnable")
-						.and_provides((who.clone(), info.content_hash))
-						.priority(<T as txs::Config>::StoreRenewPriority::get())
-						.longevity(<T as txs::Config>::StoreRenewLongevity::get())
-						.into()
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};
@@ -211,11 +195,7 @@ impl<T: Config> Pallet<T> {
 				}
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					ValidTransaction {
-						priority: <T as txs::Config>::StoreRenewPriority::get(),
-						longevity: <T as txs::Config>::StoreRenewLongevity::get(),
-						..Default::default()
-					}
+					<T as Config>::RenewTxParams::get().untagged()
 				} else {
 					ValidTransaction::default()
 				};

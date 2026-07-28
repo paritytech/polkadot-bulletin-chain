@@ -23,7 +23,7 @@
 use crate as pallet_bulletin_transaction_storage_renewal;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::{
-	AsAuthorizer, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	AsAuthorizer, EnsureAllowedAuthorizers, ValidTransactionParams, DEFAULT_MAX_BLOCK_TRANSACTIONS,
 	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use polkadot_sdk_frame::{
@@ -81,10 +81,17 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	// `integrity_test` requires distinct prefixes; no test compares the pricing.
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredAccountAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredPreimageAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExhaustedAuthorizer", TransactionPriority::MAX, 10);
+	pub const RenewTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Renew", TransactionPriority::MAX, 10);
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 }
 
@@ -103,10 +110,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	type EntryMeta = crate::EntryKind;
 	type AuthorizationExtra = crate::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;
@@ -119,6 +126,7 @@ impl pallet_bulletin_transaction_storage_renewal::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
+	type RenewTxParams = RenewTxParams;
 }
 
 pub fn new_test_ext() -> TestExternalities {
