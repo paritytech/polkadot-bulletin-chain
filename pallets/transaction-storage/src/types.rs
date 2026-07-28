@@ -108,7 +108,7 @@ pub enum AuthorizedCaller<AccountId> {
 	/// A root call (e.g. via `sudo`).
 	Root,
 	/// An unsigned transaction validated by [`ValidateUnsigned`].
-	/// TODO: replaced by https://github.com/paritytech/polkadot-bulletin-chain/pull/194
+	/// TODO: replaced by <https://github.com/paritytech/polkadot-bulletin-chain/pull/194>
 	Unsigned,
 }
 

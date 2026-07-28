@@ -70,7 +70,7 @@ fn old_prefix<T: Config>(item: &[u8]) -> [u8; 32] {
 /// `before_all_runtime_migrations` — i.e. before any migration runs — so a version gate here
 /// is always already satisfied and would skip the relocation entirely.
 ///
-/// Runs single-block: `AutoRenewals` is bounded by [`MAX_SINGLE_BLOCK_ENTRIES`], enforced by
+/// Runs single-block: `AutoRenewals` is bounded by `MAX_SINGLE_BLOCK_ENTRIES`, enforced by
 /// `pre_upgrade`, and the other two items are single `StorageValue`s.
 pub struct RelocateFromTransactionStorage<T: Config>(PhantomData<T>);
 

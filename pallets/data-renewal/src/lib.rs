@@ -40,7 +40,7 @@
 //! - **Up ← storage:** [`OnObsoleteTransactions::handle_obsolete`] fires at the `RetentionPeriod`
 //!   boundary — it decrements [`PermanentStorageUsed`] for aged-out `Renew` entries and queues
 //!   registered entries into [`PendingAutoRenewals`] for the same block's inherent.
-//! - **Per-cycle accounting** is charged by [`Pallet::check_renew_authorization`].
+//! - **Per-cycle accounting** is charged by `Pallet::check_renew_authorization`.
 //!
 //! ## Prepayment model
 //!
@@ -48,7 +48,7 @@
 //! transaction-extension's `pre_dispatch` charges one tx slot + `size` bytes
 //! up front. The first cycle then fires free (`paid = true` on the inserted
 //! [`RenewalData`]), and every subsequent recurring cycle charges per-cycle in
-//! [`Pallet::do_process_auto_renewals`].
+//! `Pallet::do_process_auto_renewals`.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -166,7 +166,7 @@ pub mod pallet {
 	#[pallet::storage_version(STORAGE_VERSION)]
 	pub struct Pallet<T>(_);
 
-	/// Maps content hash to the account that registered it for renewal.
+	/// Renewal registrations by content hash.
 	#[pallet::storage]
 	pub type Renewals<T: Config> =
 		StorageMap<_, Blake2_128Concat, ContentHash, RenewalData<T::AccountId>, OptionQuery>;
@@ -323,7 +323,7 @@ pub mod pallet {
 
 		/// Register recurring auto-renewal for `content_hash`. First cycle is
 		/// prepaid at registration (`paid = true`); subsequent cycles charge
-		/// the owner's authorization in [`Self::do_process_auto_renewals`] and
+		/// the owner's authorization in `do_process_auto_renewals` and
 		/// drop the registration on quota exhaustion with
 		/// [`Event::AutoRenewalFailed`].
 		#[pallet::call_index(2)]

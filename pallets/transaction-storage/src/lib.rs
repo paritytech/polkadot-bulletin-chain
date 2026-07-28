@@ -1352,7 +1352,7 @@ pub mod pallet {
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,
 		/// regardless of how much of the extent remains. The entry is only cleared when
 		/// its expiration is reached and someone calls
-		/// [`remove_expired_account_authorization`], so a fully-consumed-but-in-window
+		/// [`Pallet::remove_expired_account_authorization`], so a fully-consumed-but-in-window
 		/// account still counts as active here. HOP promotion uses this to keep
 		/// promoting blobs for an account that has spent all of its store/renew quota.
 		pub fn account_has_active_authorization(who: &T::AccountId) -> bool {

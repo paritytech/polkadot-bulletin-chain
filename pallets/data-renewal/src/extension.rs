@@ -16,8 +16,8 @@
 // limitations under the License.
 
 //! This pallet's [`LeafValidator`] plug-in for the storage pallet's
-//! [`ValidateAuthorizedCalls`] extension, plus the renewal-side validators it
-//! delegates to.
+//! [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] extension,
+//! plus the renewal-side validators it delegates to.
 //!
 //! The runtime wires `ValidateAuthorizedCalls<Runtime, Inspector, (StorageLeaves,
 //! RenewalLeaves)>`: one walk over the call tree offers every leaf to each
@@ -34,7 +34,7 @@ use polkadot_sdk_frame::{deps::*, prelude::*};
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
 
-/// Output of [`Pallet::validate_renewal_signed`] / [`Pallet::check_renewal_signed`]:
+/// Output of [`Pallet::validate_renewal_signed`] / `check_renewal_signed`:
 /// the pool-side `ValidTransaction` plus the [`AuthorizationScope`] consumed (if
 /// any), to be carried via an `Origin::Authorized` rewrite by the extension.
 pub type RenewalValidation<T> =
