@@ -17,7 +17,8 @@
 
 use crate::{
 	self as pallet_bulletin_transaction_storage, AsAuthorizer, EnsureAllowedAuthorizers,
-	TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	TransactionStorageProof, ValidTransactionParams, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
@@ -74,17 +75,14 @@ impl frame_system::Config for Test {
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	// `integrity_test` requires distinct prefixes; no test compares the pricing.
-	pub const StoreTxParams: crate::ValidTransactionParams = mock_params("Store");
-	pub const RemoveExpiredAccountAuthorizationTxParams: crate::ValidTransactionParams =
-		mock_params("ExpiredAccountAuthorization");
-	pub const RemoveExpiredPreimageAuthorizationTxParams: crate::ValidTransactionParams =
-		mock_params("ExpiredPreimageAuthorization");
-	pub const RemoveExhaustedAuthorizerTxParams: crate::ValidTransactionParams =
-		mock_params("ExhaustedAuthorizer");
-}
-
-const fn mock_params(tag_prefix: &'static str) -> crate::ValidTransactionParams {
-	crate::ValidTransactionParams::new(tag_prefix, TransactionPriority::MAX, 10)
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredAccountAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredPreimageAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExhaustedAuthorizer", TransactionPriority::MAX, 10);
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {

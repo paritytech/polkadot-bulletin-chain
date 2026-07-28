@@ -84,15 +84,11 @@ parameter_types! {
 		ValidTransactionParams::new("HopPromotion", 0, 5);
 	// Never exercised here; only their prefixes matter, which `integrity_test` checks.
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
-		mock_params("ExpiredAccountAuthorization");
+		ValidTransactionParams::new("ExpiredAccountAuth", TransactionPriority::MAX, 10);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
-		mock_params("ExpiredPreimageAuthorization");
+		ValidTransactionParams::new("ExpiredPreimageAuth", TransactionPriority::MAX, 10);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
-		mock_params("ExhaustedAuthorizer");
-}
-
-const fn mock_params(tag_prefix: &'static str) -> ValidTransactionParams {
-	ValidTransactionParams::new(tag_prefix, TransactionPriority::MAX, 10)
+		ValidTransactionParams::new("ExhaustedAuthorizer", TransactionPriority::MAX, 10);
 }
 
 /// Use a small max transaction size for test efficiency.

@@ -82,19 +82,17 @@ impl frame_system::Config for Test {
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	// `integrity_test` requires distinct prefixes; no test compares the pricing.
-	pub const StoreTxParams: ValidTransactionParams = mock_params("Store");
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
-		mock_params("ExpiredAccountAuthorization");
+		ValidTransactionParams::new("ExpiredAccountAuth", TransactionPriority::MAX, 10);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
-		mock_params("ExpiredPreimageAuthorization");
+		ValidTransactionParams::new("ExpiredPreimageAuth", TransactionPriority::MAX, 10);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
-		mock_params("ExhaustedAuthorizer");
-	pub const RenewTxParams: ValidTransactionParams = mock_params("Renew");
+		ValidTransactionParams::new("ExhaustedAuthorizer", TransactionPriority::MAX, 10);
+	pub const RenewTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Renew", TransactionPriority::MAX, 10);
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
-}
-
-const fn mock_params(tag_prefix: &'static str) -> ValidTransactionParams {
-	ValidTransactionParams::new(tag_prefix, TransactionPriority::MAX, 10)
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
