@@ -133,10 +133,8 @@ pub mod pallet {
 		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
 		/// `force_renew` and `enable_auto_renew` is queued per account and content hash:
 		/// the two registrations can never both succeed, and a `force_renew` next to
-		/// either is a duplicate request. Preimage `force_renew` uses it too, so setting
-		/// this prefix to the storage pallet's `StoreTxParams` prefix — which both
-		/// runtimes do — is what makes a `store` and a `force_renew` of one preimage
-		/// conflict. `ensure_preimage_tag_shared` asserts that wiring.
+		/// either is a duplicate request. Preimage `force_renew` uses it too, tagging on
+		/// the bare content hash.
 		type RenewTxParams: Get<ValidTransactionParams>;
 	}
 
@@ -861,18 +859,4 @@ impl<T: Config> txs_benchmarking::BenchmarkHelper<T> for RenewalBenchmarkHelper 
 	fn worst_case_entry_meta() -> T::EntryMeta {
 		EntryKind::Renew
 	}
-}
-
-/// Asserts the runtime shares one dedup prefix between `store` and renewals, which is what
-/// makes an unsigned `store` and a preimage `force_renew` of the same preimage conflict in
-/// the pool. The pallets are configured independently and cannot check it themselves, so
-/// runtimes exercise this from a test.
-pub fn ensure_preimage_tag_shared<T: Config>() {
-	let store = <T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().tag_prefix;
-	let renew = <T as Config>::RenewTxParams::get().tag_prefix;
-	assert_eq!(
-		store, renew,
-		"RenewTxParams prefix must equal StoreTxParams prefix, else a store and a \
-		 force_renew of one preimage stop deduping",
-	);
 }

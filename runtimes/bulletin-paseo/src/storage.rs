@@ -37,7 +37,7 @@ parameter_types! {
 	// `force_renew` of one preimage conflict. Signed `store` shares it harmlessly: it tags
 	// on `(who, content_hash)`, not the bare hash.
 	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageStoreRenew",
+		"TransactionStorageStore",
 		TransactionPriority::MAX / 4,
 		crate::DAYS as TransactionLongevity,
 	);
@@ -59,11 +59,8 @@ parameter_types! {
 			TransactionPriority::MAX,
 			crate::DAYS as TransactionLongevity,
 		);
-	// Shares `StoreTxParams`' prefix on purpose: that is what makes an unsigned `store`
-	// and a preimage `force_renew` of one preimage conflict. Asserted by
-	// `ensure_preimage_tag_shared`.
 	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageStoreRenew",
+		"TransactionStorageRenew",
 		TransactionPriority::MAX / 4,
 		crate::DAYS as TransactionLongevity,
 	);

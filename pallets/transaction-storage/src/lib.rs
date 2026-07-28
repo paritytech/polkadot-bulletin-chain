@@ -151,9 +151,7 @@ pub mod pallet {
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
 		>;
 		/// Pool params for signed and preimage-authorized `store`. One prefix is safe
-		/// because they tag on `(who, content_hash)` and `content_hash` respectively. The
-		/// renewal pallet borrows this prefix so a `force_renew` conflicts with a `store`
-		/// of the same preimage.
+		/// because they tag on `(who, content_hash)` and `content_hash` respectively.
 		type StoreTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_account_authorization`. Separate items for the
 		/// three cleanup calls because they share pricing but need distinct prefixes: two
