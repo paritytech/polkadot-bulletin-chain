@@ -72,7 +72,7 @@ function QuickActions() {
 }
 
 function ChainInfoCard() {
-  const { status, chainName, specVersion, tokenSymbol, blockNumber, network } = useChainState();
+  const { status, chainName, specVersion, tokenSymbol, blockNumber, network, connectedEndpoint } = useChainState();
 
   return (
     <Card>
@@ -90,10 +90,29 @@ function ChainInfoCard() {
               <span className="text-sm text-muted-foreground">Network</span>
               <Badge variant="secondary">{network.name}</Badge>
             </div>
-            {network.endpoints[0] && (
-              <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
-                {network.endpoints[0]}
-              </p>
+            {network.endpoints.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {network.endpoints.map((endpoint) => {
+                  const isActive = endpoint === connectedEndpoint;
+                  return (
+                    <p
+                      key={endpoint}
+                      className={`text-xs font-mono text-right break-all ${
+                        isActive ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {isActive && (
+                        <span
+                          className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                            status === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"
+                          }`}
+                        />
+                      )}
+                      {endpoint}
+                    </p>
+                  );
+                })}
+              </div>
             )}
           </div>
           <div className="flex items-center justify-between">

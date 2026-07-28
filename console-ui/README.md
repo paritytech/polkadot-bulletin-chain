@@ -80,7 +80,7 @@ Select "Bulletin Polkadot" from the network dropdown. The UI connects to `wss://
 
 ### Paseo Testnet
 
-Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.tunastaking.eu`.
+Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
 
 ## IPFS Gateway
 
