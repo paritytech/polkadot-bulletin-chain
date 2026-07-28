@@ -1943,13 +1943,50 @@ impl<T: Config> Pallet<T> {
 ///
 /// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
 ///   Solochains should pass `None`.
+/// - `extra_mandatory`: mandatory weight other pallets add to the worst-case expiry block —
+///   `Weight::zero()` for a store-only runtime, otherwise the consumer pallet's inherent (e.g.
+///   `process_pending_renewals(MaxBlockTransactions)`). Only the runtime sees both pallets.
 ///
 /// # Panics
 ///
 /// Panics with a descriptive message if any check fails.
+/// The normal-class budget actually available to extrinsics: `max_total` minus FRAME's
+/// `on_initialize` reservation, with the proof size capped at the collator's PoV limit for
+/// parachains. Shared with the consumer pallets' own weight-sanity checks, which price their
+/// dispatchables against the same budget.
 #[cfg(any(test, feature = "std"))]
-pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
+pub fn effective_normal_budget<T: Config>(
+	collator_pov_percent: Option<u64>,
+) -> frame_support::weights::Weight {
 	use frame_support::{dispatch::DispatchClass, weights::Weight};
+
+	let block_weights = <T as frame_system::Config>::BlockWeights::get();
+	let normal = block_weights.get(DispatchClass::Normal);
+	let normal_max_total = normal.max_total.expect("Normal class must have a max_total weight");
+	let max_extrinsic =
+		normal.max_extrinsic.expect("Normal class must have a max_extrinsic weight");
+	let init_weight = normal_max_total
+		.saturating_sub(max_extrinsic)
+		.saturating_sub(normal.base_extrinsic);
+
+	let after_init = normal_max_total.saturating_sub(init_weight);
+	match collator_pov_percent {
+		// Collators cap the PoV to reserve headroom for the relay-chain state proof.
+		// Reference: cumulus/client/consensus/aura/src/collators/lookahead.rs
+		Some(pov_percent) => {
+			let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
+			Weight::from_parts(after_init.ref_time(), after_init.proof_size().min(pov_limit))
+		},
+		None => after_init,
+	}
+}
+
+#[cfg(any(test, feature = "std"))]
+pub fn ensure_weight_sanity<T: Config>(
+	collator_pov_percent: Option<u64>,
+	extra_mandatory: frame_support::weights::Weight,
+) {
+	use frame_support::dispatch::DispatchClass;
 
 	let block_weights = <T as frame_system::Config>::BlockWeights::get();
 	let normal_length =
@@ -1968,15 +2005,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	// reservation that FRAME sets aside for on_initialize hooks).
 	let init_weight = normal_max_total.saturating_sub(max_extrinsic).saturating_sub(base_extrinsic);
 
-	let after_init = normal_max_total.saturating_sub(init_weight);
-	let effective_normal = if let Some(pov_percent) = collator_pov_percent {
-		// Collators cap the PoV to reserve headroom for the relay-chain state proof.
-		// Reference: cumulus/client/consensus/aura/src/collators/lookahead.rs
-		let pov_limit = block_weights.max_block.proof_size() * pov_percent / 100;
-		Weight::from_parts(after_init.ref_time(), after_init.proof_size().min(pov_limit))
-	} else {
-		after_init
-	};
+	let effective_normal = effective_normal_budget::<T>(collator_pov_percent);
 
 	// 1. MaxTransactionSize must fit within the normal block length limit.
 	assert!(
@@ -2008,8 +2037,8 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 		init_weight.ref_time(),
 	);
 
-	// 4. Renew-call ref-time fit is no longer checked here: the renew dispatchables moved to
-	//    `pallet-bulletin-data-renewal`.
+	// 4. Renew-call ref-time fit lives with the dispatchables, in
+	//    `pallet_bulletin_data_renewal::ensure_weight_sanity`.
 
 	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
 	// in max block at worst case (proof check over a full `MaxBlockTransactions` block).
@@ -2022,16 +2051,18 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 
 	// 6. on_initialize at the worst-case expiry block (taking
 	// `MaxBlockTransactions` items out of `Transactions[obsolete]` and looking up
-	// `TransactionByContentHash` + `AutoRenewals` for each) must fit alongside
-	// `apply_block_inherents` within `max_block`. Both run on the same block in
-	// the mandatory class; their sum is the floor of the mandatory budget for
-	// that block.
+	// `TransactionByContentHash` + the consumer pallet's state for each) must fit
+	// alongside `apply_block_inherents` and `extra_mandatory` within `max_block`. All
+	// run on that one block in the mandatory class, which cannot be refused, so their
+	// sum is the floor of the mandatory budget for that block.
 	let on_init_with_expiry_weight = T::WeightInfo::on_initialize_with_expiry(max_block_txs);
-	let mandatory_floor = on_init_with_expiry_weight.saturating_add(apply_inherents_weight);
+	let mandatory_floor = on_init_with_expiry_weight
+		.saturating_add(apply_inherents_weight)
+		.saturating_add(extra_mandatory);
 	assert!(
 		mandatory_floor.all_lte(block_weights.max_block),
 		"on_initialize_with_expiry({max_block_txs}) + apply_block_inherents() \
-		 = {mandatory_floor:?} exceeds max block {:?}",
+		 + extra_mandatory {extra_mandatory:?} = {mandatory_floor:?} exceeds max block {:?}",
 		block_weights.max_block,
 	);
 
@@ -2063,6 +2094,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	println!("  block_weights.max_block:    {:?}", block_weights.max_block);
 	println!("  apply_block_inherents wt:   {apply_inherents_weight:?}");
 	println!("  on_initialize_with_expiry:  {on_init_with_expiry_weight:?}");
+	println!("  extra mandatory:            {extra_mandatory:?}");
 	println!("  Mandatory floor (sum):      {mandatory_floor:?}");
 	println!("  Max store txs by weight:    {max_txs_by_weight}");
 	println!("  Max store txs by length:    {}", normal_length / per_tx_size);

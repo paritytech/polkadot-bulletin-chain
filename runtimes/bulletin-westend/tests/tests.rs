@@ -14,7 +14,7 @@ use bulletin_westend_runtime::{
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
-use pallet_bulletin_data_renewal::Call as DataRenewalCall;
+use pallet_bulletin_data_renewal::{Call as DataRenewalCall, WeightInfo as _};
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
@@ -917,11 +917,21 @@ fn renew_and_promote_tag_prefixes_differ() {
 /// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
+	// Collator-side PoV cap: default 85% of max_pov_size.
+	// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
+	const POV_PERCENT: Option<u64> = Some(85);
+	// The renewal drain is mandatory on the same worst-case expiry block as the storage
+	// pallet's own mandatory work, so it belongs in that pallet's floor check. Only the
+	// runtime sees both pallets.
+	let renewal_drain =
+		<Runtime as pallet_bulletin_data_renewal::Config>::WeightInfo::process_pending_renewals(
+			<Runtime as TxStorageConfig>::MaxBlockTransactions::get(),
+		);
 	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(
-		// Collator-side PoV cap: default 85% of max_pov_size.
-		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
-		Some(85),
+		POV_PERCENT,
+		renewal_drain,
 	);
+	pallet_bulletin_data_renewal::ensure_weight_sanity::<Runtime>(POV_PERCENT);
 }
 
 // ============================================================================

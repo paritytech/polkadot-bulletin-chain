@@ -849,6 +849,56 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, EntryKind> for Pallet<
 }
 
 /// Storage-pallet [`BenchmarkHelper`](txs_benchmarking::BenchmarkHelper) for runtimes
+/// Sanity-check this pallet's weights against the block limits, alongside
+/// [`pallet_bulletin_transaction_storage::ensure_weight_sanity`] — which owns the checks for
+/// `store` and for the mandatory floor, and takes this pallet's inherent weight as its
+/// `extra_mandatory` argument.
+///
+/// `collator_pov_percent` is the collator-side PoV cap (e.g. `Some(85)` for a parachain);
+/// solochains pass `None`.
+///
+/// # Panics
+///
+/// Panics with a descriptive message if any check fails.
+#[cfg(any(test, feature = "std"))]
+pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
+	use frame_support::dispatch::DispatchClass;
+
+	let block_weights = <T as frame_system::Config>::BlockWeights::get();
+	let base_extrinsic = block_weights.get(DispatchClass::Normal).base_extrinsic;
+	let max_block_txs =
+		<T as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions::get();
+	let effective_normal =
+		pallet_bulletin_transaction_storage::effective_normal_budget::<T>(collator_pov_percent);
+
+	// A full block of `renew` calls must fit the normal budget by ref_time. `renew` is the
+	// heaviest of the renewal dispatchables, so it bounds the others.
+	let renew_weight = <T as Config>::WeightInfo::renew().saturating_add(base_extrinsic);
+	let total_renew_ref_time = renew_weight.ref_time().saturating_mul(max_block_txs as u64);
+	assert!(
+		total_renew_ref_time <= effective_normal.ref_time(),
+		"MaxBlockTransactions ({max_block_txs}) renew calls: total ref_time \
+		 {total_renew_ref_time} exceeds effective normal limit {}",
+		effective_normal.ref_time(),
+	);
+
+	// The drain inherent alone must fit `max_block`. Its sum with the storage pallet's
+	// mandatory work is checked by that pallet, which is the only side that can see both.
+	let drain_weight = <T as Config>::WeightInfo::process_pending_renewals(max_block_txs);
+	assert!(
+		drain_weight.all_lte(block_weights.max_block),
+		"process_pending_renewals({max_block_txs}) weight {drain_weight:?} exceeds \
+		 max block {:?}",
+		block_weights.max_block,
+	);
+
+	println!("--- data_renewal weight sanity ---");
+	println!("  renew + base:               {renew_weight:?}");
+	println!("  full block of renews:       {total_renew_ref_time} ref_time");
+	println!("  process_pending_renewals:   {drain_weight:?}");
+	println!("  Effective normal budget:    {effective_normal:?}");
+}
+
 /// wiring this pallet: delegates the pre-computed check proof to
 /// `DefaultCheckProofHelper` and marks worst-case expiry-sweep entries `Renew` so
 /// the `on_initialize_with_expiry` benchmark exercises the counter decrement in
