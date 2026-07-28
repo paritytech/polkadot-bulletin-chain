@@ -203,7 +203,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
   "products-devnet": {
     id: "products-devnet",
     name: "Products Devnet",
-    endpoints: ["wss://bullet.sik.rocks"],
+    endpoints: ["wss://bullet.tunastaking.eu", "wss://bullet.sik.rocks"],
     lightClient: false,
     descriptor: bulletin_products_devnet,
     peerMultiaddrs: [
@@ -218,7 +218,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
-      polkadotJs: polkadotJsAppsLink("wss://bullet.sik.rocks"),
+      polkadotJs: polkadotJsAppsLink("wss://bullet.tunastaking.eu"),
     },
     hopNodes: [
       "wss://bullet.sik.rocks",
