@@ -131,10 +131,9 @@ pub mod pallet {
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
 		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
-		/// `force_renew` and `enable_auto_renew` is queued per account and content hash:
-		/// the two registrations can never both succeed, and a `force_renew` next to
-		/// either is a duplicate request. Preimage `force_renew` uses it too, tagging on
-		/// the bare content hash.
+		/// `force_renew` and `enable_auto_renew` per account and content hash is queued at
+		/// a time. Preimage `force_renew` tags on the content hash alone, so it dedups
+		/// separately.
 		type RenewTxParams: Get<ValidTransactionParams>;
 	}
 

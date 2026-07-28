@@ -80,14 +80,11 @@ parameter_types! {
 	// `static` so a test can lower the priority and check `integrity_test` rejects it.
 	pub static StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
-	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExpiredAccountAuth", TransactionPriority::MAX, 10);
-	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExpiredPreimageAuth", TransactionPriority::MAX, 10);
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);
-	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExhaustedAuthorizer", TransactionPriority::MAX, 10);
+	// The cleanup families are never exercised here, so one item covers all three.
+	pub const MockTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Mock", TransactionPriority::MAX, 10);
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -114,9 +111,9 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
 	type StoreTxParams = StoreTxParams;
-	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
-	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
-	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = MockTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = MockTxParams;
+	type RemoveExhaustedAuthorizerTxParams = MockTxParams;
 	// No renewal here, so the storage pallet's opaque payloads stay at the documented
 	// `()`. Keeps this test runtime independent of the renewal pallet.
 	type EntryMeta = ();

@@ -32,10 +32,8 @@ parameter_types! {
 	// Pool params per family. Cleanup sits at `MAX` so it always runs before stores
 	// compete for blockspace; store and renew sit well below it so
 	// `AllowanceBasedPriority` can add its boost without saturating `u64`. Renew prices
-	// separately from store, equal for now.
-	// Keeps the pre-split preimage prefix, which is what makes a `store` and a
-	// `force_renew` of one preimage conflict. Signed `store` shares it harmlessly: it tags
-	// on `(who, content_hash)`, not the bare hash.
+	// separately from store, equal for now. Distinct prefixes keep the two from deduping
+	// against each other.
 	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
 		"TransactionStorageStore",
 		TransactionPriority::MAX / 4,
