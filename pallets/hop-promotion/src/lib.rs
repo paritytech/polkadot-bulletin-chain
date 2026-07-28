@@ -66,11 +66,11 @@ pub mod pallet {
 	use alloc::vec::Vec;
 	use bulletin_transaction_storage_primitives::{
 		cids::{HashingAlgorithm, RAW_CODEC},
-		ContentHash,
+		ContentHash, ValidTransactionParams,
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_bulletin_transaction_storage::{ValidTransactionParams, WeightInfo as _};
+	use pallet_bulletin_transaction_storage::WeightInfo as _;
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner,

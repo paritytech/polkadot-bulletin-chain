@@ -1581,18 +1581,6 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Tagged on the content hash alone under [`Config::StoreTxParams`]'s prefix, so
-		/// an unsigned `store` and the renewal pallet's `force_renew` of one preimage
-		/// conflict. `pricing` is the caller's, so each pallet prices its own half.
-		pub fn preimage_valid_transaction(
-			content_hash: ContentHash,
-			pricing: ValidTransactionParams,
-		) -> ValidTransaction {
-			pricing
-				.with_tag_prefix(T::StoreTxParams::get().tag_prefix)
-				.provides(content_hash)
-		}
-
 		fn check_store_unsigned(
 			size: usize,
 			content_hash: impl FnOnce() -> ContentHash,

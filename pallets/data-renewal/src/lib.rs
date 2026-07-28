@@ -710,12 +710,18 @@ impl<T: Config> Pallet<T> {
 			info.size,
 			context.consume_authorization(),
 		)?;
-		Ok(context.want_valid_transaction().then(|| {
-			pallet_bulletin_transaction_storage::Pallet::<T>::preimage_valid_transaction(
-				info.content_hash,
-				<T as Config>::RenewTxParams::get(),
-			)
-		}))
+		Ok(context
+			.want_valid_transaction()
+			.then(|| Self::preimage_renew_valid_transaction(info.content_hash)))
+	}
+
+	/// Pool entry for a preimage-authorized renewal: this pallet's pricing under the
+	/// storage pallet's `store` prefix, so it conflicts with a `store` of one preimage.
+	pub(crate) fn preimage_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
+		let tag_prefix =
+			<T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().tag_prefix;
+		ValidTransactionParams { tag_prefix, ..<T as Config>::RenewTxParams::get() }
+			.provides(content_hash)
 	}
 
 	/// Active-authorization summary for the `BulletinTransactionStorageApi` runtime

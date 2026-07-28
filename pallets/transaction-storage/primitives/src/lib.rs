@@ -34,7 +34,7 @@ pub type ContentHash = [u8; 32];
 ///
 /// Transactions sharing a `tag_prefix` *and* a `provides` tag conflict, so families that
 /// must not evict each other need distinct prefixes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct ValidTransactionParams {
 	pub tag_prefix: &'static str,
 	pub priority: TransactionPriority,
@@ -50,16 +50,7 @@ impl ValidTransactionParams {
 		Self { tag_prefix, priority, longevity }
 	}
 
-	/// Same pricing under a different dedup prefix.
-	pub const fn with_tag_prefix(self, tag_prefix: &'static str) -> Self {
-		Self { tag_prefix, ..self }
-	}
-
-	pub const fn with_priority(self, priority: TransactionPriority) -> Self {
-		Self { priority, ..self }
-	}
-
-	pub fn provides(&self, provides: impl Encode) -> ValidTransaction {
+	pub fn provides(self, provides: impl Encode) -> ValidTransaction {
 		ValidTransaction::with_tag_prefix(self.tag_prefix)
 			.and_provides(provides)
 			.priority(self.priority)
@@ -68,7 +59,7 @@ impl ValidTransactionParams {
 	}
 
 	/// Pricing only, for calls that need no dedup tag.
-	pub fn untagged(&self) -> ValidTransaction {
+	pub fn untagged(self) -> ValidTransaction {
 		ValidTransaction {
 			priority: self.priority,
 			longevity: self.longevity,

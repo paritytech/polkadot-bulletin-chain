@@ -81,14 +81,13 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
+	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new("a", 7, 3);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExpiredAccountAuth", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("b", 11, 4);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExpiredPreimageAuth", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("c", 13, 5);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("RemoveExhaustedAuthorizer", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("d", 17, 6);
 	pub const RenewTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Renew", TransactionPriority::MAX, 10);
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;

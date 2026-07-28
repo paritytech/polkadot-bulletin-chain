@@ -136,7 +136,7 @@ impl<T: Config> Pallet<T> {
 				)?;
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					<T as Config>::RenewTxParams::get().provides((who.clone(), info.content_hash))
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};
@@ -153,12 +153,8 @@ impl<T: Config> Pallet<T> {
 						// Preimage renewals are submitter-agnostic: tag on the content
 						// hash alone so they don't dedup against the account path.
 						AuthorizationScope::Preimage(hash) =>
-							txs::Pallet::<T>::preimage_valid_transaction(
-								*hash,
-								<T as Config>::RenewTxParams::get(),
-							),
-						_ => <T as Config>::RenewTxParams::get()
-							.provides((who.clone(), info.content_hash)),
+							Pallet::<T>::preimage_renew_valid_transaction(*hash),
+						_ => <T as Config>::RenewTxParams::get().provides((who, info.content_hash)),
 					}
 				} else {
 					ValidTransaction::default()
@@ -182,7 +178,7 @@ impl<T: Config> Pallet<T> {
 
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					<T as Config>::RenewTxParams::get().provides((who.clone(), info.content_hash))
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};
