@@ -81,10 +81,21 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const MockTxParams: ValidTransactionParams = ValidTransactionParams::new("Mock", 1, 1);
-	pub const RenewTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("Renew", TransactionPriority::MAX, 10);
+	// Only the prefixes differ — `integrity_test` requires them pairwise distinct. No test
+	// compares pricing across families, so it is shared.
+	pub const StoreTxParams: ValidTransactionParams = mock_params("Store");
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		mock_params("ExpiredAccountAuthorization");
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		mock_params("ExpiredPreimageAuthorization");
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		mock_params("ExhaustedAuthorizer");
+	pub const RenewTxParams: ValidTransactionParams = mock_params("Renew");
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
+}
+
+const fn mock_params(tag_prefix: &'static str) -> ValidTransactionParams {
+	ValidTransactionParams::new(tag_prefix, TransactionPriority::MAX, 10)
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -102,10 +113,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreTxParams = MockTxParams;
-	type RemoveExpiredAccountAuthorizationTxParams = MockTxParams;
-	type RemoveExpiredPreimageAuthorizationTxParams = MockTxParams;
-	type RemoveExhaustedAuthorizerTxParams = MockTxParams;
+	type StoreTxParams = StoreTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	type EntryMeta = crate::EntryKind;
 	type AuthorizationExtra = crate::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;

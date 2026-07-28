@@ -68,6 +68,24 @@ impl ValidTransactionParams {
 	}
 }
 
+/// Panics if any two of `params` share a `tag_prefix`. For `integrity_test`.
+///
+/// Distinctness is required pairwise, not just within a `provides` shape: `ContentHash` and
+/// `AccountId32` both encode to 32 bytes, so any two families tagging on a single one of
+/// them collide. Naming each item makes the panic point at the runtime's mis-wiring.
+pub fn assert_distinct_tag_prefixes(params: &[(&str, ValidTransactionParams)]) {
+	for (i, (name, one)) in params.iter().enumerate() {
+		for (other_name, other) in params.iter().skip(i + 1) {
+			assert!(
+				one.tag_prefix != other.tag_prefix,
+				"{name} and {other_name} must not share the tag prefix `{}`: their pool tags \
+				 would dedup against each other",
+				one.tag_prefix,
+			);
+		}
+	}
+}
+
 /// Identifies a previously-stored entry in the pallet's `Transactions` map.
 #[derive(
 	Clone,
@@ -94,5 +112,26 @@ impl<BlockNumber> From<(BlockNumber, u32)> for TransactionRef<BlockNumber> {
 impl<BlockNumber> From<ContentHash> for TransactionRef<BlockNumber> {
 	fn from(hash: ContentHash) -> Self {
 		Self::ContentHash(hash)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	const A: ValidTransactionParams = ValidTransactionParams::new("a", 1, 1);
+	const B: ValidTransactionParams = ValidTransactionParams::new("b", 2, 2);
+	// Same prefix as `A`, different pricing: pricing is irrelevant to deduping.
+	const A_AGAIN: ValidTransactionParams = ValidTransactionParams::new("a", 3, 3);
+
+	#[test]
+	fn distinct_tag_prefixes_pass() {
+		assert_distinct_tag_prefixes(&[("A", A), ("B", B)]);
+	}
+
+	#[test]
+	#[should_panic(expected = "A and A_AGAIN must not share the tag prefix `a`")]
+	fn shared_tag_prefix_panics() {
+		assert_distinct_tag_prefixes(&[("A", A), ("B", B), ("A_AGAIN", A_AGAIN)]);
 	}
 }

@@ -432,3 +432,19 @@ fn integrity_test_rejects_promote_priority_at_or_above_store() {
 		HopPromotion::integrity_test();
 	});
 }
+
+/// `integrity_test` rejects a `promote` prefix taken from a storage-pallet family — both
+/// `promote` and preimage `store` tag on the bare data hash.
+#[test]
+#[should_panic(expected = "PromoteTxParams and StoreTxParams must not share the tag prefix")]
+fn integrity_test_rejects_promote_prefix_shared_with_store() {
+	use frame_support::traits::IntegrityTest;
+
+	new_test_ext().execute_with(|| {
+		StoreTxParams::set(ValidTransactionParams {
+			tag_prefix: PromoteTxParams::get().tag_prefix,
+			..StoreTxParams::get()
+		});
+		HopPromotion::integrity_test();
+	});
+}

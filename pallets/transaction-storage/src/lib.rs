@@ -155,7 +155,8 @@ pub mod pallet {
 		type StoreTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_account_authorization`. Separate items for the
 		/// three cleanup calls because they share pricing but need distinct prefixes: two
-		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`.
+		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`. `integrity_test`
+		/// enforces that, here and across the dependent pallets' families.
 		type RemoveExpiredAccountAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_preimage_authorization`.
 		type RemoveExpiredPreimageAuthorizationTxParams: Get<ValidTransactionParams>;
@@ -381,6 +382,7 @@ pub mod pallet {
 				!T::AuthorizationPeriod::get().is_zero(),
 				"AuthorizationPeriod must be greater than zero"
 			);
+			assert_distinct_tag_prefixes(&Self::tx_params());
 		}
 	}
 
@@ -985,6 +987,35 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
+		/// This pallet's pool families, named for panic messages.
+		fn tx_params() -> [(&'static str, ValidTransactionParams); 4] {
+			[
+				("StoreTxParams", T::StoreTxParams::get()),
+				(
+					"RemoveExpiredAccountAuthorizationTxParams",
+					T::RemoveExpiredAccountAuthorizationTxParams::get(),
+				),
+				(
+					"RemoveExpiredPreimageAuthorizationTxParams",
+					T::RemoveExpiredPreimageAuthorizationTxParams::get(),
+				),
+				("RemoveExhaustedAuthorizerTxParams", T::RemoveExhaustedAuthorizerTxParams::get()),
+			]
+		}
+
+		/// Panics if `params` shares a tag prefix with any family of this pallet. For the
+		/// `integrity_test` of pallets that add a pool family of their own.
+		pub fn assert_tag_prefix_unused(name: &'static str, params: ValidTransactionParams) {
+			let [store, expired_account, expired_preimage, exhausted] = Self::tx_params();
+			assert_distinct_tag_prefixes(&[
+				(name, params),
+				store,
+				expired_account,
+				expired_preimage,
+				exhausted,
+			]);
+		}
+
 		/// Validate that `origin` is one of the accepted caller types for store/renew
 		/// extrinsics, and return a typed description of the caller.
 		///

@@ -101,14 +101,21 @@ pub mod pallet {
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-		/// Promotion must not outbid the `store` traffic it shares blockspace with.
 		fn integrity_test() {
+			// Promotion must not outbid the `store` traffic it shares blockspace with.
 			let promote = T::PromoteTxParams::get().priority;
 			let store =
 				<T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().priority;
 			assert!(
 				promote < store,
 				"promote priority ({promote}) must be strictly below store priority ({store})",
+			);
+
+			// `promote` tags on the bare data hash, as do preimage `store` and the
+			// preimage-authorization cleanup.
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefix_unused(
+				"PromoteTxParams",
+				T::PromoteTxParams::get(),
 			);
 		}
 	}

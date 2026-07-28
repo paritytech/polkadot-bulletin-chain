@@ -73,9 +73,19 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	// No test compares tags across pool families, so one item for all of them.
-	pub const MockTxParams: crate::ValidTransactionParams =
-		crate::ValidTransactionParams::new("Mock", TransactionPriority::MAX, 10);
+	// Only the prefixes differ — `integrity_test` requires them pairwise distinct. No test
+	// compares pricing across families, so it is shared.
+	pub const StoreTxParams: crate::ValidTransactionParams = mock_params("Store");
+	pub const RemoveExpiredAccountAuthorizationTxParams: crate::ValidTransactionParams =
+		mock_params("ExpiredAccountAuthorization");
+	pub const RemoveExpiredPreimageAuthorizationTxParams: crate::ValidTransactionParams =
+		mock_params("ExpiredPreimageAuthorization");
+	pub const RemoveExhaustedAuthorizerTxParams: crate::ValidTransactionParams =
+		mock_params("ExhaustedAuthorizer");
+}
+
+const fn mock_params(tag_prefix: &'static str) -> crate::ValidTransactionParams {
+	crate::ValidTransactionParams::new(tag_prefix, TransactionPriority::MAX, 10)
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -93,10 +103,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreTxParams = MockTxParams;
-	type RemoveExpiredAccountAuthorizationTxParams = MockTxParams;
-	type RemoveExpiredPreimageAuthorizationTxParams = MockTxParams;
-	type RemoveExhaustedAuthorizerTxParams = MockTxParams;
+	type StoreTxParams = StoreTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	type EntryMeta = ();
 	type AuthorizationExtra = ();
 	type OnObsoleteTransactions = ();

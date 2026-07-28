@@ -901,6 +901,20 @@ fn promote_priority_is_below_store_and_renew() {
 	assert!(promote < renew, "promote ({promote}) must be below renew priority ({renew})");
 }
 
+/// Each pallet's `integrity_test` checks its own prefix against the storage pallet's, so
+/// this pair is the one the runtime has to check itself: preimage `force_renew` and
+/// `promote` both tag on the bare content hash.
+#[test]
+fn renew_and_promote_tag_prefixes_differ() {
+	pallet_bulletin_transaction_storage::assert_distinct_tag_prefixes(&[
+		("RenewTxParams", <Runtime as txs_renewal::Config>::RenewTxParams::get()),
+		(
+			"PromoteTxParams",
+			<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams::get(),
+		),
+	]);
+}
+
 /// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
