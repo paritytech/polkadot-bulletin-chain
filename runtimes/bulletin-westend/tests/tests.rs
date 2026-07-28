@@ -890,6 +890,12 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		})
 }
 
+/// See [`txs_renewal::ensure_preimage_tag_shared`].
+#[test]
+fn store_and_renew_share_a_pool_tag() {
+	txs_renewal::ensure_preimage_tag_shared::<Runtime>();
+}
+
 /// Promotion must lose to both `store` and renewals; only the runtime sees all three.
 #[test]
 fn promote_priority_is_below_store_and_renew() {

@@ -59,8 +59,11 @@ parameter_types! {
 			TransactionPriority::MAX,
 			crate::DAYS as TransactionLongevity,
 		);
+	// Shares `StoreTxParams`' prefix on purpose: that is what makes an unsigned `store`
+	// and a preimage `force_renew` of one preimage conflict. Asserted by
+	// `ensure_preimage_tag_shared`.
 	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"DataRenewalRenew",
+		"TransactionStorageStoreRenew",
 		TransactionPriority::MAX / 4,
 		crate::DAYS as TransactionLongevity,
 	);
