@@ -1606,7 +1606,7 @@ fn migrate_v2_to_v3_skips_already_v3_entries() {
 }
 
 /// The no-op v3→v4 migration bumps the storage version 3 → 4 (the `AutoRenewals` reshape
-/// moved to `pallet-bulletin-transaction-storage-renewal`).
+/// moved to `pallet-bulletin-data-renewal`).
 #[test]
 fn migrate_v3_to_v4_bumps_storage_version() {
 	use crate::migrations::v4::MigrateV3ToV4;

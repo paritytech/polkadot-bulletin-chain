@@ -50,16 +50,19 @@ fn assert_last_event<T: Config>(generic_event: <T as Config>::RuntimeEvent) {
 	assert_eq!(event, &system_event);
 }
 
-/// Advance the block, running both pallets' `on_initialize` / `on_finalize` so the
-/// storage pallet flushes `BlockTransactions` into `Transactions[block]`.
+/// Advance to block `n`, running both pallets' hooks so the storage pallet flushes
+/// `BlockTransactions` into `Transactions[block]`. Only valid inside the retention window:
+/// past it `on_finalize` needs a real storage proof.
 fn run_to_block<T: Config>(n: BlockNumberFor<T>) {
-	while System::<T>::block_number() < n {
-		DataRenewal::<T>::on_finalize(System::<T>::block_number());
-		TransactionStorage::<T>::on_finalize(System::<T>::block_number());
-		System::<T>::on_finalize(System::<T>::block_number());
-		System::<T>::set_block_number(System::<T>::block_number() + One::one());
-		System::<T>::on_initialize(System::<T>::block_number());
-		TransactionStorage::<T>::on_initialize(System::<T>::block_number());
+	let mut block = System::<T>::block_number();
+	while block < n {
+		DataRenewal::<T>::on_finalize(block);
+		TransactionStorage::<T>::on_finalize(block);
+		System::<T>::on_finalize(block);
+		block += One::one();
+		System::<T>::set_block_number(block);
+		System::<T>::on_initialize(block);
+		TransactionStorage::<T>::on_initialize(block);
 	}
 }
 

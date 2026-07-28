@@ -90,7 +90,7 @@ pub const AUTHORIZER_NOT_FOUND: InvalidTransaction = InvalidTransaction::Custom(
 /// Authorizer budget has not been exhausted.
 pub const AUTHORIZATION_NOT_EXHAUSTED: InvalidTransaction = InvalidTransaction::Custom(8);
 // NOTE: `Custom` codes 2, 5, 6 and 9-12 belong to
-// `pallet-bulletin-transaction-storage-renewal` (shared `u8` namespace); do not reuse.
+// `pallet-bulletin-data-renewal` (shared `u8` namespace); do not reuse.
 
 pub use extension::{CallInspector, MAX_WRAPPER_DEPTH};
 
@@ -178,7 +178,7 @@ pub mod pallet {
 			+ Default;
 		/// Callback invoked from `on_initialize` with the entries being aged out by the
 		/// obsolete-block sweep. Default `()` for runtimes that omit the renewal pallet;
-		/// wire to `pallet-bulletin-transaction-storage-renewal::Pallet<Runtime>` to enable manual
+		/// wire to `pallet-bulletin-data-renewal::Pallet<Runtime>` to enable manual
 		/// / auto-renewal.
 		type OnObsoleteTransactions: crate::OnObsoleteTransactions<
 			BlockNumberFor<Self>,
@@ -310,7 +310,7 @@ pub mod pallet {
 					// in the storage/renewal split). It decrements the chain-wide
 					// renewed-byte counter for aged-out permanent entries. Wired to `()`
 					// for runtimes that omit
-					// `pallet-bulletin-transaction-storage-renewal`; in that case this is
+					// `pallet-bulletin-data-renewal`; in that case this is
 					// a no-op.
 					T::OnObsoleteTransactions::handle_obsolete(obsolete, &pairs);
 				}
@@ -411,9 +411,9 @@ pub mod pallet {
 		}
 
 		// Retired call_index(1): renew(origin, entry: TransactionRef<BlockNumberFor<T>>)
-		//   — moved to pallet-bulletin-transaction-storage-renewal. Do not reuse this index.
+		//   — moved to pallet-bulletin-data-renewal. Do not reuse this index.
 		// Retired call_index(2): force_renew(origin, entry: TransactionRef<BlockNumberFor<T>>)
-		//   — moved to pallet-bulletin-transaction-storage-renewal. Do not reuse this index.
+		//   — moved to pallet-bulletin-data-renewal. Do not reuse this index.
 
 		/// Index and store data off chain with an explicit CID configuration.
 		///
@@ -436,11 +436,11 @@ pub mod pallet {
 		// Retired call_index(10): renew_content_hash(origin, content_hash: ContentHash)
 		//   — unified into `renew` via `TransactionRef`. Do not reuse this index.
 		// Retired call_index(11): process_auto_renewals(origin)
-		//   — folded into `on_initialize` of pallet-bulletin-transaction-storage-renewal. Do not
+		//   — folded into `on_initialize` of pallet-bulletin-data-renewal. Do not
 		// reuse this index. Retired call_index(12): enable_auto_renew(origin, content_hash:
-		// ContentHash)   — moved to pallet-bulletin-transaction-storage-renewal. Do not reuse
+		// ContentHash)   — moved to pallet-bulletin-data-renewal. Do not reuse
 		// this index. Retired call_index(13): disable_auto_renew(origin, content_hash:
-		// ContentHash)   — moved to pallet-bulletin-transaction-storage-renewal. Do not reuse
+		// ContentHash)   — moved to pallet-bulletin-data-renewal. Do not reuse
 		// this index.
 
 		/// Authorize an account to store up to `bytes` of arbitrary data in `transactions`
@@ -632,7 +632,7 @@ pub mod pallet {
 		///
 		/// `proof` is `Some` when the inherent data provider supplied one; otherwise the
 		/// proof step is skipped (early or empty blocks). The companion drain of pending
-		/// auto-renewals lives in `pallet-bulletin-transaction-storage-renewal`'s own inherent.
+		/// auto-renewals lives in `pallet-bulletin-data-renewal`'s own inherent.
 		#[pallet::call_index(14)]
 		#[pallet::weight((T::WeightInfo::apply_block_inherents(), DispatchClass::Mandatory))]
 		pub fn apply_block_inherents(
@@ -760,7 +760,7 @@ pub mod pallet {
 	}
 
 	/// Authorizations, keyed by scope. `pub` for cross-pallet read access from
-	/// `pallet-bulletin-transaction-storage-renewal`'s tests (consumed via `check_authorization`
+	/// `pallet-bulletin-data-renewal`'s tests (consumed via `check_authorization`
 	/// in production).
 	#[pallet::storage]
 	pub type Authorizations<T: Config> =
@@ -800,7 +800,7 @@ pub mod pallet {
 
 	// Intermediates
 	//
-	// `pub` so `pallet-bulletin-transaction-storage-renewal` can mutate while applying renewals
+	// `pub` so `pallet-bulletin-data-renewal` can mutate while applying renewals
 	// (the batched drain inherent amortizes a single read/write across the per-block pending
 	// vec). Direct access by other crates is not part of the public API contract.
 	#[pallet::storage]
@@ -809,7 +809,7 @@ pub mod pallet {
 
 	/// Maps content hash to its most recent (block_number, tx_index) location.
 	///
-	/// `pub` for cross-pallet writes from `pallet-bulletin-transaction-storage-renewal` (each
+	/// `pub` for cross-pallet writes from `pallet-bulletin-data-renewal` (each
 	/// renewal updates the mapping to the new `(block, index)`). Reads outside this pallet should
 	/// go through [`Pallet::lookup_by_content_hash`].
 	#[pallet::storage]
@@ -917,7 +917,7 @@ pub mod pallet {
 		fn create_inherent(data: &InherentData) -> Option<Self::Call> {
 			// Emit the proof inherent only when the inherent data provider supplied a proof;
 			// otherwise no inherent is needed (early/empty blocks). The companion drain of
-			// pending auto-renewals lives in `pallet-bulletin-transaction-storage-renewal`'s own
+			// pending auto-renewals lives in `pallet-bulletin-data-renewal`'s own
 			// `ProvideInherent`.
 			let proof = data
 				.get_data::<TransactionStorageProof>(&Self::INHERENT_IDENTIFIER)
@@ -1454,7 +1454,7 @@ pub mod pallet {
 
 		/// Look up the most-recent `(block, index)` location of a content hash, if any.
 		///
-		/// Cross-pallet read for `pallet-bulletin-transaction-storage-renewal` (registration flow:
+		/// Cross-pallet read for `pallet-bulletin-data-renewal` (registration flow:
 		/// `enable_auto_renew` validates that the hash points to an extant stored
 		/// transaction before inserting an `AutoRenewals` entry).
 		pub fn lookup_by_content_hash(hash: ContentHash) -> Option<(BlockNumberFor<T>, u32)> {
@@ -2007,7 +2007,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	);
 
 	// 4. Renew-call ref-time fit is no longer checked here: the renew dispatchables moved to
-	//    `pallet-bulletin-transaction-storage-renewal`.
+	//    `pallet-bulletin-data-renewal`.
 
 	// 5. apply_block_inherents (DispatchClass::Mandatory, once per block) must fit
 	// in max block at worst case (proof check over a full `MaxBlockTransactions` block).

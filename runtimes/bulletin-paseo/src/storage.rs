@@ -16,7 +16,6 @@ use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, ValidTransactionParams,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
-use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use pallet_xcm::EnsureXcm;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
 
@@ -124,17 +123,16 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
-	type EntryMeta = txs_renewal::EntryKind;
-	type AuthorizationExtra = txs_renewal::PermanentExtent;
+	type EntryMeta = pallet_bulletin_data_renewal::EntryKind;
+	type AuthorizationExtra = pallet_bulletin_data_renewal::PermanentExtent;
 	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper = txs_renewal::RenewalBenchmarkHelper;
+	type BenchmarkHelper = pallet_bulletin_data_renewal::RenewalBenchmarkHelper;
 }
 
-impl txs_renewal::Config for Runtime {
+impl pallet_bulletin_data_renewal::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo =
-		crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
+	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type RenewTxParams = RenewTxParams;
 }

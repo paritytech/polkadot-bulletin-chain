@@ -4,7 +4,7 @@
 //! Tests for the pallet-side helpers backing
 //! [`pallet_bulletin_transaction_storage_runtime_api::BulletinTransactionStorageApi`].
 //! `account_authorization` and `can_renew` moved to
-//! `pallet-bulletin-transaction-storage-renewal` and are tested there.
+//! `pallet-bulletin-data-renewal` and are tested there.
 
 use crate::{
 	mock::{new_test_ext, run_to_block, RuntimeOrigin, Test, TransactionStorage},

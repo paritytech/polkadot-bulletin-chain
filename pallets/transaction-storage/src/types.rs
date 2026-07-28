@@ -53,7 +53,7 @@ pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Conf
 /// written at that layout which nothing reshapes — `extra` keeps that slot so the encodings
 /// stay byte-identical. Reordering (or wiring an `Extra` that is not 8 bytes) silently
 /// reinterprets every one of them. Pinned by
-/// `pallet_bulletin_transaction_storage_renewal::tests::authorization_encoding_matches_pre_split_layout`.
+/// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
@@ -166,7 +166,7 @@ impl<T: Config> ActiveAuthorization<'_, T> {
 /// entry (whether [`crate::TransactionByContentHash`] still points at this `(block, index)`),
 /// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
 /// resulting slice to this trait. Implementers — typically
-/// `pallet-bulletin-transaction-storage-renewal` — inspect each entry's opaque `meta` to
+/// `pallet-bulletin-data-renewal` — inspect each entry's opaque `meta` to
 /// maintain chain-wide renewed-byte counters and queue auto-renewals.
 ///
 /// Wiring `()` (the default impl) makes the obsolete sweep a pure storage-pallet concern,

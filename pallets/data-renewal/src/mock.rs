@@ -16,11 +16,11 @@
 // limitations under the License.
 
 //! Test environment for the data-renewal pallet. Wires both
-//! `pallet-bulletin-transaction-storage` and `pallet-bulletin-transaction-storage-renewal` into a
+//! `pallet-bulletin-transaction-storage` and `pallet-bulletin-data-renewal` into a
 //! single mock runtime so the cross-pallet flow (storage → trait callback → renewal
 //! drain) is exercised end-to-end.
 
-use crate as pallet_bulletin_transaction_storage_renewal;
+use crate as pallet_bulletin_data_renewal;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, EnsureAllowedAuthorizers, ValidTransactionParams, DEFAULT_MAX_BLOCK_TRANSACTIONS,
@@ -60,7 +60,7 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 
 	#[runtime::pallet_index(2)]
-	pub type DataRenewal = pallet_bulletin_transaction_storage_renewal;
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 }
 
 parameter_types! {
@@ -122,7 +122,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
 }
 
-impl pallet_bulletin_transaction_storage_renewal::Config for Test {
+impl pallet_bulletin_data_renewal::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;

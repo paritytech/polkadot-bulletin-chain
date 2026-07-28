@@ -1,5 +1,5 @@
 [package]
-name = "pallet-bulletin-transaction-storage-renewal"
+name = "pallet-bulletin-data-renewal"
 version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
