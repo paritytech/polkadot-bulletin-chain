@@ -5,6 +5,8 @@ import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot
 import { getWsProvider } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
+import type { Chain } from "polkadot-api/smoldot";
+import SmWorker from "polkadot-api/smoldot/worker?worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
@@ -72,6 +74,8 @@ export interface ChainState {
   // Base type is the newest live chain's descriptors; all bulletin chains
   // share the same core pallets, and older chains are guarded at runtime.
   api?: TypedApi<typeof bulletin_paseo_next_v2>;
+  /** Active connection transport; "light-client" only on smoldot networks. */
+  transport: Transport;
   blockNumber?: number;
   chainName?: string;
   specVersion?: number;
@@ -82,6 +86,21 @@ export interface ChainState {
 
 const STORAGE_KEY_NETWORK = "bulletin-network";
 const STORAGE_KEY_CUSTOM_URL = "bulletin-network-custom-url";
+const STORAGE_KEY_TRANSPORT = "bulletin-transport";
+
+export type Transport = "light-client" | "rpc";
+
+function resolveTransport(network: Network): Transport {
+  if (!network.lightClient || !network.chainSpec) return "rpc";
+  return localStorage.getItem(STORAGE_KEY_TRANSPORT) === "rpc"
+    ? "rpc"
+    : "light-client";
+}
+
+export function setTransport(transport: Transport): void {
+  localStorage.setItem(STORAGE_KEY_TRANSPORT, transport);
+  connectToNetwork(networkSubject.getValue().id);
+}
 
 export function getCustomNetworkUrl(): string {
   return localStorage.getItem(STORAGE_KEY_CUSTOM_URL) ?? "";
@@ -127,21 +146,48 @@ const chainInfoSubject = new BehaviorSubject<{
   ss58Format?: number;
 }>({});
 const sudoKeySubject = new BehaviorSubject<string | undefined>(undefined);
+const transportSubject = new BehaviorSubject<Transport>(
+  resolveTransport(initialNetwork),
+);
 
-let smoldotWorker: Worker | null = null;
+// Smoldot worker lives for the app lifetime; chains are added/removed per network.
+let smoldot: ReturnType<typeof startFromWorker> | null = null;
 
-async function createSmoldotProvider(network: Network) {
-  if (!smoldotWorker) {
-    smoldotWorker = new Worker(
-      new URL("polkadot-api/smoldot/worker", import.meta.url),
-      { type: "module" }
-    );
-  }
+function getSmoldot() {
+  if (!smoldot) smoldot = startFromWorker(new SmWorker());
+  return smoldot;
+}
 
-  const smoldot = startFromWorker(smoldotWorker);
-  const chainSpec = await fetch(`/chain-specs/${network.id}.json`).then(r => r.text());
+function createSmoldotProvider(specs: { para: string; relay: string }) {
+  let killed = false;
+  const chains: Promise<Chain>[] = [];
 
-  return getSmProvider(() => smoldot.addChain({ chainSpec }));
+  // The provider may invoke the factory again after a halt; each invocation
+  // must return a fresh chain (smoldot dedups the relay internally).
+  const provider = getSmProvider(async () => {
+    const sd = getSmoldot();
+    if (killed) throw new Error("provider killed");
+    const relay = sd.addChain({ chainSpec: specs.relay, disableJsonRpc: true });
+    chains.push(relay);
+    const relayChain = await relay;
+    if (killed) throw new Error("provider killed");
+    const para = sd.addChain({
+      chainSpec: specs.para,
+      potentialRelayChains: [relayChain],
+    });
+    chains.push(para);
+    return para;
+  });
+
+  const kill = () => {
+    killed = true;
+    // Reverse order: para before relay. The provider's own teardown may have
+    // already removed the para chain; the double-remove throws harmlessly.
+    for (const chain of chains.splice(0).reverse()) {
+      chain.then((c) => c.remove()).catch(() => {});
+    }
+  };
+  return { provider, kill };
 }
 
 export async function connectToNetwork(
@@ -175,14 +221,18 @@ export async function connectToNetwork(
     existingClient.destroy();
   }
 
+  const useLightClient =
+    resolveTransport(network) === "light-client" && !endpointOverride;
+
   localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   networkSubject.next(network);
   apiSubject.next(undefined);
   blockNumberSubject.next(undefined);
   chainInfoSubject.next({});
   sudoKeySubject.next(undefined);
+  transportSubject.next(useLightClient ? "light-client" : "rpc");
 
-  if (network.endpoints.length === 0) {
+  if (!useLightClient && network.endpoints.length === 0) {
     blockSubscription?.unsubscribe();
     blockSubscription = null;
     clientSubject.next(undefined);
@@ -200,8 +250,16 @@ export async function connectToNetwork(
   try {
     let provider;
 
-    if (network.lightClient && network.chainSpec) {
-      provider = await createSmoldotProvider(network);
+    if (useLightClient && network.chainSpec) {
+      // Resolve specs here rather than inside the provider factory: errors
+      // thrown there are swallowed and would leave the UI stuck on "connecting".
+      const [para, relay] = await Promise.all([
+        network.chainSpec.para(),
+        network.chainSpec.relay(),
+      ]);
+      const killable = createSmoldotProvider({ para, relay });
+      provider = killable.provider;
+      killCurrentProvider = killable.kill;
     } else {
       const killable = createKillableWsProvider(network.endpoints[0]!);
       provider = killable.provider;
@@ -291,16 +349,18 @@ const chainState$ = combineLatest([
   errorSubject,
   clientSubject,
   apiSubject,
+  transportSubject,
   blockNumberSubject,
   chainInfoSubject,
 ]).pipe(
-  map(([networks, network, status, error, client, api, blockNumber, chainInfo]) => ({
+  map(([networks, network, status, error, client, api, transport, blockNumber, chainInfo]) => ({
     networks,
     network,
     status,
     error,
     client,
     api,
+    transport,
     blockNumber,
     ...chainInfo,
   })),
@@ -315,6 +375,7 @@ export const [useChainState] = bind(chainState$, {
   error: undefined,
   client: undefined,
   api: undefined,
+  transport: resolveTransport(initialNetwork),
   blockNumber: undefined,
   chainName: undefined,
   specVersion: undefined,
@@ -325,6 +386,7 @@ export const [useChainState] = bind(chainState$, {
 
 export const [useNetwork] = bind(networkSubject);
 export const [useConnectionStatus] = bind(statusSubject, "disconnected");
+export const [useTransport] = bind(transportSubject, resolveTransport(initialNetwork));
 export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);

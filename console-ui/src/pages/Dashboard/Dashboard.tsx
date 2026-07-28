@@ -72,7 +72,7 @@ function QuickActions() {
 }
 
 function ChainInfoCard() {
-  const { status, chainName, specVersion, tokenSymbol, blockNumber, network } = useChainState();
+  const { status, chainName, specVersion, tokenSymbol, blockNumber, network, transport } = useChainState();
 
   return (
     <Card>
@@ -90,6 +90,16 @@ function ChainInfoCard() {
               <span className="text-sm text-muted-foreground">Network</span>
               <Badge variant="secondary">{network.name}</Badge>
             </div>
+            {transport === "light-client" && (
+              <p className="mt-1 text-xs font-mono text-right">
+                <span
+                  className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                    status === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"
+                  }`}
+                />
+                light client (smoldot)
+              </p>
+            )}
             {network.endpoints[0] && (
               <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
                 {network.endpoints[0]}

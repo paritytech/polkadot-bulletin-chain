@@ -38,7 +38,8 @@ export interface Network {
   name: string;
   endpoints: string[];
   lightClient: boolean;
-  chainSpec?: string;
+  /** Raw chainspec loaders; presence + lightClient enables the smoldot path. */
+  chainSpec?: { para: () => Promise<string>; relay: () => Promise<string> };
   /** PAPI descriptor used for the typed API. */
   descriptor: ChainDefinition;
   /** IPFS HTTP gateway serving this network's data. */
@@ -224,7 +225,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     id: "paseo-next-v2",
     name: "Bulletin Paseo Next v2",
     endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/paseo-next-v2-raw.json?raw").then(
+          (m) => m.default,
+        ),
+      relay: () =>
+        import("polkadot-api/chains/paseo").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_paseo_next_v2,
     ipfsGateway: "https://paseo-bulletin-next-ipfs.polkadot.io",
     peerMultiaddrs: [
