@@ -432,7 +432,7 @@ fn promote_has_lower_priority_than_store() {
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let promote_call = make_promote_call(data.clone(), signer, sig, TEST_TIMESTAMP_MS);
 		let (promote_tx, _) = promote_call.authorize(TransactionSource::Local).unwrap().unwrap();
-		assert_eq!(promote_tx.priority, crate::PROMOTE_PRIORITY);
+		assert_eq!(promote_tx.priority, PromoteTxParams::get().priority);
 
 		// Get store priority via the storage pallet's signed-call validation.
 		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
@@ -455,8 +455,8 @@ fn promote_has_lower_priority_than_store() {
 	});
 }
 
-/// `integrity_test` must reject a `store` priority at or below
-/// [`crate::PROMOTE_PRIORITY`]. The passing direction is covered by the
+/// `integrity_test` must reject a `store` priority at or below `promote`'s. The
+/// passing direction is covered by the
 /// `#[frame_support::runtime]`-generated integrity test.
 #[test]
 fn integrity_test_rejects_promote_priority_at_or_above_store() {
@@ -465,18 +465,18 @@ fn integrity_test_rejects_promote_priority_at_or_above_store() {
 	new_test_ext().execute_with(|| {
 		// Sanity: the mock is configured the right way round.
 		assert!(
-			crate::PROMOTE_PRIORITY <
+			PromoteTxParams::get().priority <
 				<Test as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get()
 					.priority,
 		);
 		HopPromotion::integrity_test();
 
 		// Now flip it: promotion at the same priority as store must be rejected.
-		StoreTxParams::set(StoreTxParams::get().with_priority(crate::PROMOTE_PRIORITY));
+		StoreTxParams::set(StoreTxParams::get().with_priority(PromoteTxParams::get().priority));
 		let prev_hook = std::panic::take_hook();
 		std::panic::set_hook(Box::new(|_| {}));
 		let outcome = std::panic::catch_unwind(HopPromotion::integrity_test);
 		std::panic::set_hook(prev_hook);
-		assert!(outcome.is_err(), "integrity_test must reject store priority <= PROMOTE_PRIORITY",);
+		assert!(outcome.is_err(), "integrity_test must reject store priority <= promote's",);
 	});
 }

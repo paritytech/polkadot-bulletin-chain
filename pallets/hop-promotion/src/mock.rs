@@ -84,6 +84,8 @@ parameter_types! {
 		ValidTransactionParams::new("RemoveExpiredAccountAuth", TransactionPriority::MAX, 10);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("RemoveExpiredPreimageAuth", TransactionPriority::MAX, 10);
+	pub const PromoteTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("HopPromotion", 0, 5);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("RemoveExhaustedAuthorizer", TransactionPriority::MAX, 10);
 }
@@ -128,6 +130,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 impl pallet_bulletin_hop_promotion::Config for Test {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
 	type WeightInfo = ();
+	type PromoteTxParams = PromoteTxParams;
 }
 
 pub fn new_test_ext() -> TestExternalities {

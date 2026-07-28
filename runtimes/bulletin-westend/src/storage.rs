@@ -175,7 +175,14 @@ parameter_types! {
 	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
 }
 
+parameter_types! {
+	// Lowest priority: promotion only fills blockspace stores would not have used.
+	pub const PromoteTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("HopPromotion", 0, 5);
+}
+
 impl pallet_bulletin_hop_promotion::Config for Runtime {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type PromoteTxParams = PromoteTxParams;
 	type WeightInfo = crate::weights::pallet_bulletin_hop_promotion::WeightInfo<Runtime>;
 }

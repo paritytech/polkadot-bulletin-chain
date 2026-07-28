@@ -999,7 +999,10 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 #[test]
 fn promote_priority_is_below_store_and_renew() {
 	use frame_support::traits::Get;
-	let promote = pallet_bulletin_hop_promotion::PROMOTE_PRIORITY;
+	let promote = <<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams as Get<
+		pallet_bulletin_transaction_storage::ValidTransactionParams,
+	>>::get()
+	.priority;
 	let store = <<Runtime as TxStorageConfig>::StoreTxParams as Get<
 		pallet_bulletin_transaction_storage::ValidTransactionParams,
 	>>::get()
