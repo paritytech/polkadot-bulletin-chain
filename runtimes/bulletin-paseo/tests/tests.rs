@@ -995,16 +995,21 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		})
 }
 
-/// HOP promotion only fills otherwise-unused blockspace, so it must lose to both `store`
-/// and renewals. The pallets check what they can see; only the runtime sees all three.
+/// Promotion must lose to both `store` and renewals; only the runtime sees all three.
 #[test]
 fn promote_priority_is_below_store_and_renew() {
 	use frame_support::traits::Get;
 	let promote = pallet_bulletin_hop_promotion::PROMOTE_PRIORITY;
-	let store = <<Runtime as TxStorageConfig>::StorePriority as Get<_>>::get();
-	let renew = <<Runtime as txs_renewal::Config>::RenewPriority as Get<_>>::get();
-	assert!(promote < store, "promote ({promote}) must be below StorePriority ({store})");
-	assert!(promote < renew, "promote ({promote}) must be below RenewPriority ({renew})");
+	let store = <<Runtime as TxStorageConfig>::StoreTxParams as Get<
+		pallet_bulletin_transaction_storage::ValidTransactionParams,
+	>>::get()
+	.priority;
+	let renew = <<Runtime as txs_renewal::Config>::RenewTxParams as Get<
+		pallet_bulletin_transaction_storage::ValidTransactionParams,
+	>>::get()
+	.priority;
+	assert!(promote < store, "promote ({promote}) must be below store priority ({store})");
+	assert!(promote < renew, "promote ({promote}) must be below renew priority ({renew})");
 }
 
 /// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].

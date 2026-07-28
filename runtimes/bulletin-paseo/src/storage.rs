@@ -13,8 +13,8 @@ use frame_support::{
 	traits::{Contains, EitherOf},
 };
 use pallet_bulletin_transaction_storage::{
-	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, ValidTransactionParams,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_bulletin_transaction_storage_renewal as txs_renewal;
 use pallet_xcm::EnsureXcm;
@@ -29,20 +29,41 @@ parameter_types! {
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
-	// Priorities and longevities for the storage and renewal pallet extrinsics.
-	//
-	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
-	// runs before stores compete for blockspace.
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	// Base priority for `store`. Picked well below `TransactionPriority::MAX` so
-	// `AllowanceBasedPriority` can add its boost without saturating `u64`, while still
-	// leaving plenty of headroom above generic transactions.
-	pub const StorePriority: TransactionPriority = TransactionPriority::MAX / 4;
-	pub const StoreLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	// Renewals price separately from `store`; equal for now, so behaviour is unchanged.
-	pub const RenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
-	pub const RenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+	// Pool params per family. Cleanup sits at `MAX` so it always runs before stores
+	// compete for blockspace; store and renew sit well below it so
+	// `AllowanceBasedPriority` can add its boost without saturating `u64`. Renew prices
+	// separately from store, equal for now.
+	// Keeps the pre-split preimage prefix, which is what makes a `store` and a
+	// `force_renew` of one preimage conflict. Signed `store` shares it harmlessly: it tags
+	// on `(who, content_hash)`, not the bare hash.
+	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
+		"TransactionStorageStoreRenew",
+		TransactionPriority::MAX / 4,
+		crate::DAYS as TransactionLongevity,
+	);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExpiredAccountAuthorization",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExpiredPreimageAuthorization",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExhaustedAuthorizer",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
+	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
+		"DataRenewalRenew",
+		TransactionPriority::MAX / 4,
+		crate::DAYS as TransactionLongevity,
+	);
 }
 
 /// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
@@ -101,10 +122,10 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		// `add_authorizer` / `remove_authorizer`).
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
-	type StorePriority = StorePriority;
-	type StoreLongevity = StoreLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	type EntryMeta = txs_renewal::EntryKind;
 	type AuthorizationExtra = txs_renewal::PermanentExtent;
 	type OnObsoleteTransactions = crate::DataRenewal;
@@ -117,8 +138,7 @@ impl txs_renewal::Config for Runtime {
 	type WeightInfo =
 		crate::weights::pallet_bulletin_transaction_storage_renewal::WeightInfo<Runtime>;
 	type MaxPermanentStorageSize = MaxPermanentStorageSize;
-	type RenewPriority = RenewPriority;
-	type RenewLongevity = RenewLongevity;
+	type RenewTxParams = RenewTxParams;
 }
 
 parameter_types! {

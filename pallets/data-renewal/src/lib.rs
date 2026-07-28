@@ -74,7 +74,7 @@ use bulletin_transaction_storage_primitives::ContentHash;
 use pallet_bulletin_transaction_storage::{
 	AuthorizationScope, AuthorizationScopeFor, AuthorizedCaller, BlockTransactions, CheckContext,
 	OnObsoleteTransactions, TransactionByContentHash, TransactionInfo, TransactionInfoFor,
-	TransactionRef, BAD_DATA_SIZE,
+	TransactionRef, ValidTransactionParams, BAD_DATA_SIZE,
 };
 use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{deps::*, prelude::*};
@@ -130,13 +130,12 @@ pub mod pallet {
 		/// all authorizations. Tracks chain-wide capacity for permanent data.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
-		/// Priority of renewal transactions. A `store` and a `force_renew` of the same
-		/// preimage share one pool tag, so the higher of this and `StorePriority` wins.
-		#[pallet::constant]
-		type RenewPriority: Get<TransactionPriority>;
-		/// Longevity of renewal transactions.
-		#[pallet::constant]
-		type RenewLongevity: Get<TransactionLongevity>;
+		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
+		/// `force_renew` and `enable_auto_renew` is queued per account and content hash:
+		/// the two registrations can never both succeed, and a `force_renew` next to
+		/// either is a duplicate request. Also the pricing for preimage `force_renew`,
+		/// which borrows the storage pallet's prefix.
+		type RenewTxParams: Get<ValidTransactionParams>;
 	}
 
 	#[pallet::error]
@@ -714,8 +713,7 @@ impl<T: Config> Pallet<T> {
 		Ok(context.want_valid_transaction().then(|| {
 			pallet_bulletin_transaction_storage::Pallet::<T>::preimage_valid_transaction(
 				info.content_hash,
-				<T as Config>::RenewPriority::get(),
-				<T as Config>::RenewLongevity::get(),
+				<T as Config>::RenewTxParams::get(),
 			)
 		}))
 	}

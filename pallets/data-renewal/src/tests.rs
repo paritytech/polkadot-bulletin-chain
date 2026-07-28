@@ -3190,3 +3190,31 @@ fn try_state_holds_for_paid_registration_of_force_renewed_content() {
 		assert_ok!(DataRenewal::do_try_state(System::block_number()));
 	});
 }
+
+/// Every renewal call shares one pool tag, so at most one is queued per account and
+/// content hash.
+#[test]
+fn all_renewal_calls_share_a_pool_tag() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![7u8; 1000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+
+		let entry = TransactionRef::ContentHash(content_hash);
+		let tag_of = |call: &crate::Call<Test>| {
+			DataRenewal::validate_renewal_signed(&who, call).unwrap().0.provides
+		};
+
+		let renew = tag_of(&crate::Call::<Test>::renew { entry: entry.clone() });
+		let enable = tag_of(&crate::Call::<Test>::enable_auto_renew { content_hash });
+		let force = tag_of(&crate::Call::<Test>::force_renew { entry });
+
+		assert_eq!(renew, enable, "renew and enable_auto_renew must conflict in the pool");
+		assert_eq!(renew, force, "force_renew must conflict with the registrations too");
+	});
+}

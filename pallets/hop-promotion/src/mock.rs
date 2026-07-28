@@ -17,7 +17,7 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
-use pallet_bulletin_transaction_storage::AsAuthorizer;
+use pallet_bulletin_transaction_storage::{AsAuthorizer, ValidTransactionParams};
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -77,12 +77,15 @@ impl pallet_timestamp::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	// `static` rather than `const` so a test can lower it and assert that
-	// `HopPromotion::integrity_test` rejects the inverted ordering.
-	pub static StorePriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	// `static` so a test can lower the priority and check `integrity_test` rejects it.
+	pub static StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("RemoveExpiredAccountAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("RemoveExpiredPreimageAuth", TransactionPriority::MAX, 10);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("RemoveExhaustedAuthorizer", TransactionPriority::MAX, 10);
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -108,13 +111,12 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
-	type StorePriority = StorePriority;
-	type StoreLongevity = StoreLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
-	// This pallet's tests never exercise renewal, so the storage pallet's opaque
-	// payloads stay at the `()` no-op wiring it documents. Keeps hop-promotion's test
-	// runtime independent of `pallet-bulletin-transaction-storage-renewal`.
+	type StoreTxParams = StoreTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	// No renewal here, so the storage pallet's opaque payloads stay at the documented
+	// `()`. Keeps this test runtime independent of the renewal pallet.
 	type EntryMeta = ();
 	type AuthorizationExtra = ();
 	type OnObsoleteTransactions = ();

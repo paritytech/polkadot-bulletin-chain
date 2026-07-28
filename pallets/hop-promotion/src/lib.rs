@@ -45,10 +45,9 @@ pub mod weights;
 /// to the constant in `sc-hop` (`substrate/client/hop/src/types.rs`).
 pub const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
 
-/// Pool priority of a [`Call::promote`] transaction.
-///
-/// Promotion only fills blockspace that would otherwise go unused, so it must stay below
-/// `StorePriority`. Enforced by this pallet's `integrity_test`.
+/// Pool priority of a [`Call::promote`] transaction. Must stay below the `store`
+/// priority — promotion only fills otherwise-unused blockspace. Enforced by
+/// `integrity_test`.
 pub const PROMOTE_PRIORITY: sp_runtime::transaction_validity::TransactionPriority = 0;
 
 /// Reconstructs the signing payload that the user signed at submit time, given
@@ -104,10 +103,11 @@ pub mod pallet {
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		/// Promotion must not outbid the `store` traffic it shares blockspace with.
 		fn integrity_test() {
-			let store = <T as pallet_bulletin_transaction_storage::Config>::StorePriority::get();
+			let store =
+				<T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().priority;
 			assert!(
 				crate::PROMOTE_PRIORITY < store,
-				"promote priority ({}) must be strictly below StorePriority ({})",
+				"promote priority ({}) must be strictly below store priority ({})",
 				crate::PROMOTE_PRIORITY,
 				store,
 			);

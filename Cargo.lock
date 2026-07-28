@@ -2165,6 +2165,7 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-io",
+ "sp-runtime",
  "sp-transaction-storage-proof",
  "tracing",
 ]
