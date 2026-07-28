@@ -113,10 +113,10 @@ pub mod pallet {
 
 			// `promote` tags on the bare data hash, as do preimage `store` and the
 			// preimage-authorization cleanup.
-			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefix_unused(
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
 				"PromoteTxParams",
 				T::PromoteTxParams::get(),
-			);
+			)]);
 		}
 	}
 

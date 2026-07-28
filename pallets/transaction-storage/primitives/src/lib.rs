@@ -68,11 +68,8 @@ impl ValidTransactionParams {
 	}
 }
 
-/// Panics if any two of `params` share a `tag_prefix`. For `integrity_test`.
-///
-/// Distinctness is required pairwise, not just within a `provides` shape: `ContentHash` and
-/// `AccountId32` both encode to 32 bytes, so any two families tagging on a single one of
-/// them collide. Naming each item makes the panic point at the runtime's mis-wiring.
+/// Panics if any two of `params` share a `tag_prefix`. Each is named so the panic points at
+/// the runtime's mis-wiring.
 pub fn assert_distinct_tag_prefixes(params: &[(&str, ValidTransactionParams)]) {
 	for (i, (name, one)) in params.iter().enumerate() {
 		for (other_name, other) in params.iter().skip(i + 1) {

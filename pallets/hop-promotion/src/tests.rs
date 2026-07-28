@@ -433,8 +433,7 @@ fn integrity_test_rejects_promote_priority_at_or_above_store() {
 	});
 }
 
-/// `integrity_test` rejects a `promote` prefix taken from a storage-pallet family — both
-/// `promote` and preimage `store` tag on the bare data hash.
+/// `integrity_test` rejects a `promote` prefix shared with a storage-pallet family.
 #[test]
 #[should_panic(expected = "PromoteTxParams and StoreTxParams must not share the tag prefix")]
 fn integrity_test_rejects_promote_prefix_shared_with_store() {

@@ -82,8 +82,7 @@ parameter_types! {
 		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);
-	// The cleanup families are never exercised here; only their prefixes matter, which
-	// `integrity_test` requires pairwise distinct.
+	// Never exercised here; only their prefixes matter, which `integrity_test` checks.
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
 		mock_params("ExpiredAccountAuthorization");
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =

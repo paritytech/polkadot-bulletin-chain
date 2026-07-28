@@ -81,8 +81,7 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	// Only the prefixes differ — `integrity_test` requires them pairwise distinct. No test
-	// compares pricing across families, so it is shared.
+	// `integrity_test` requires distinct prefixes; no test compares the pricing.
 	pub const StoreTxParams: ValidTransactionParams = mock_params("Store");
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
 		mock_params("ExpiredAccountAuthorization");

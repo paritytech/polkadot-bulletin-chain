@@ -244,14 +244,14 @@ pub mod pallet {
 			Pallet::<T>::do_try_state(n)
 		}
 
-		/// Renewals must not dedup against the storage pallet's families: signed `renew`
-		/// tags like signed `store`, and preimage `force_renew` like preimage `store` and
-		/// the preimage-authorization cleanup.
+		/// Renewals tag like the storage pallet's families — signed `renew` like signed
+		/// `store`, preimage `force_renew` like preimage `store` — so they must not share a
+		/// prefix with them.
 		fn integrity_test() {
-			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefix_unused(
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
 				"RenewTxParams",
 				<T as Config>::RenewTxParams::get(),
-			);
+			)]);
 		}
 	}
 
