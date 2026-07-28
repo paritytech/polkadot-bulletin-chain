@@ -174,7 +174,7 @@ fn authorize_rejects_empty_data() {
 		let call = make_promote_call(vec![], signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
-			Some(Err(InvalidTransaction::Custom(0).into())),
+			Some(Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into())),
 		);
 	});
 }
@@ -188,7 +188,7 @@ fn authorize_rejects_oversized_data() {
 		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
-			Some(Err(InvalidTransaction::Custom(0).into())),
+			Some(Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into())),
 		);
 	});
 }

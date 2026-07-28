@@ -70,7 +70,7 @@ pub mod pallet {
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_bulletin_transaction_storage::WeightInfo as _;
+	use pallet_bulletin_transaction_storage::{WeightInfo as _, BAD_DATA_SIZE};
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner,
@@ -161,7 +161,7 @@ pub mod pallet {
 				return Err(InvalidTransaction::Call.into());
 			}
 			if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(data.len()) {
-				return Err(InvalidTransaction::Custom(0).into());
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			// Mirrors the early-out in pallet_bulletin_transaction_storage so we don't pay for
