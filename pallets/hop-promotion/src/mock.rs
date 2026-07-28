@@ -115,6 +115,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
 	type StoreTxParams = StoreTxParams;
+	type AuthorizeTxParams = StoreTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;

@@ -153,6 +153,8 @@ pub mod pallet {
 		/// Pool params for signed and preimage-authorized `store`. One prefix is safe
 		/// because they tag on `(who, content_hash)` and `content_hash` respectively.
 		type StoreTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `authorize_*` and `refresh_*`.
+		type AuthorizeTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_account_authorization`. Separate items for the
 		/// three cleanup calls because they share pricing but need distinct prefixes: two
 		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`. Enforced by
@@ -1695,7 +1697,7 @@ pub mod pallet {
 					return Ok((
 						context
 							.want_valid_transaction()
-							.then(|| T::StoreTxParams::get().untagged()),
+							.then(|| T::AuthorizeTxParams::get().untagged()),
 						None,
 					));
 				},

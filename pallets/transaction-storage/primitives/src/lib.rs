@@ -58,7 +58,7 @@ impl ValidTransactionParams {
 			.into()
 	}
 
-	/// Pricing only, for calls that need no dedup tag.
+	/// Pricing only, for calls with no dedup tag.
 	pub fn untagged(self) -> ValidTransaction {
 		ValidTransaction {
 			priority: self.priority,
