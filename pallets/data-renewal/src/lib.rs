@@ -155,6 +155,9 @@ pub mod pallet {
 		/// cycle and cannot be disabled by the owner until the cycle fires and consumes
 		/// the prepayment. Root can still disable for governance cleanup.
 		CannotDisablePrepaidAutoRenewal,
+		/// Data size of the renewed entry is not in the allowed range. Appended last to keep
+		/// the preceding variants' indices stable.
+		BadDataSize,
 	}
 
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
@@ -310,7 +313,7 @@ pub mod pallet {
 			pallet_bulletin_transaction_storage::Pallet::<T>::ensure_data_size_ok(
 				info.size as usize,
 			)
-			.map_err(|_| Error::<T>::TooManyTransactions)?;
+			.map_err(|_| Error::<T>::BadDataSize)?;
 
 			let content_hash = info.content_hash;
 			let new_index = Self::do_renew(info)?;
@@ -848,7 +851,6 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, EntryKind> for Pallet<
 	}
 }
 
-/// Storage-pallet [`BenchmarkHelper`](txs_benchmarking::BenchmarkHelper) for runtimes
 /// Sanity-check this pallet's weights against the block limits, alongside
 /// [`pallet_bulletin_transaction_storage::ensure_weight_sanity`] — which owns the checks for
 /// `store` and for the mandatory floor, and takes this pallet's inherent weight as its
@@ -899,6 +901,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	println!("  Effective normal budget:    {effective_normal:?}");
 }
 
+/// Storage-pallet [`BenchmarkHelper`](txs_benchmarking::BenchmarkHelper) for runtimes
 /// wiring this pallet: delegates the pre-computed check proof to
 /// `DefaultCheckProofHelper` and marks worst-case expiry-sweep entries `Renew` so
 /// the `on_initialize_with_expiry` benchmark exercises the counter decrement in
