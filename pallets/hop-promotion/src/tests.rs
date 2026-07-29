@@ -18,7 +18,10 @@
 use crate::{mock::*, signing_payload};
 use bulletin_transaction_storage_primitives::ValidTransactionParams;
 use codec::Encode;
-use frame_support::{assert_noop, assert_ok, traits::Authorize};
+use frame_support::{
+	assert_noop, assert_ok,
+	traits::{Authorize, IntegrityTest},
+};
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -416,14 +419,10 @@ fn authorize_valid_transaction_properties() {
 	});
 }
 
-/// `integrity_test` rejects a `store` priority at or below `promote`'s. The passing
-/// direction is covered by the `#[frame_support::runtime]`-generated integrity test, and
-/// the emitted priority by `authorize_valid_transaction_properties`.
+/// The passing direction is covered by the runtime-generated integrity test.
 #[test]
 #[should_panic(expected = "must be strictly below store priority")]
 fn integrity_test_rejects_promote_priority_at_or_above_store() {
-	use frame_support::traits::IntegrityTest;
-
 	new_test_ext().execute_with(|| {
 		StoreTxParams::set(ValidTransactionParams {
 			priority: PromoteTxParams::get().priority,
@@ -433,12 +432,9 @@ fn integrity_test_rejects_promote_priority_at_or_above_store() {
 	});
 }
 
-/// `integrity_test` rejects a `promote` prefix shared with a storage-pallet family.
 #[test]
 #[should_panic(expected = "PromoteTxParams and StoreTxParams must not share the tag prefix")]
 fn integrity_test_rejects_promote_prefix_shared_with_store() {
-	use frame_support::traits::IntegrityTest;
-
 	new_test_ext().execute_with(|| {
 		StoreTxParams::set(ValidTransactionParams {
 			tag_prefix: PromoteTxParams::get().tag_prefix,

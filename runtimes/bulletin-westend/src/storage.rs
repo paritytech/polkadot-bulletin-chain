@@ -42,46 +42,38 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
+/// Cleanup runs before stores compete for blockspace.
+const CLEANUP_PRIORITY: TransactionPriority = TransactionPriority::MAX;
+/// Below `MAX` so `AllowanceBasedPriority` can add its boost without saturating `u64`.
+const STORE_PRIORITY: TransactionPriority = TransactionPriority::MAX / 4;
+const TX_LONGEVITY: TransactionLongevity = crate::DAYS as TransactionLongevity;
+
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
-	// Pool params per family. Cleanup sits at `MAX` so it always runs before stores
-	// compete for blockspace; store and renew sit well below it so
-	// `AllowanceBasedPriority` can add its boost without saturating `u64`. Renew prices
-	// separately from store, equal for now. Distinct prefixes keep the two from deduping
-	// against each other.
-	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageStore",
-		TransactionPriority::MAX / 4,
-		crate::DAYS as TransactionLongevity,
-	);
-	pub const AuthorizeTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageAuthorize",
-		TransactionPriority::MAX / 4,
-		crate::DAYS as TransactionLongevity,
-	);
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("TransactionStorageStore", STORE_PRIORITY, TX_LONGEVITY);
+	pub const RenewTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("TransactionStorageRenew", STORE_PRIORITY, TX_LONGEVITY);
+	pub const AuthorizeTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("TransactionStorageAuthorize", STORE_PRIORITY, TX_LONGEVITY);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
 			"TransactionStorageRemoveExpiredAccountAuthorization",
-			TransactionPriority::MAX,
-			crate::DAYS as TransactionLongevity,
+			CLEANUP_PRIORITY,
+			TX_LONGEVITY,
 		);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
 			"TransactionStorageRemoveExpiredPreimageAuthorization",
-			TransactionPriority::MAX,
-			crate::DAYS as TransactionLongevity,
+			CLEANUP_PRIORITY,
+			TX_LONGEVITY,
 		);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
 			"TransactionStorageRemoveExhaustedAuthorizer",
-			TransactionPriority::MAX,
-			crate::DAYS as TransactionLongevity,
+			CLEANUP_PRIORITY,
+			TX_LONGEVITY,
 		);
-	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageRenew",
-		TransactionPriority::MAX / 4,
-		crate::DAYS as TransactionLongevity,
-	);
 }
 
 /// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
@@ -175,9 +167,6 @@ parameter_types! {
 	/// Maximum allowable skew between the user's submit timestamp and the on-chain
 	/// time when validating a HOP promotion: 48 hours, in milliseconds.
 	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
-}
-
-parameter_types! {
 	// Lowest priority: promotion only fills blockspace stores would not have used.
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);

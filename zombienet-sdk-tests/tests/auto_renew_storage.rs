@@ -19,7 +19,7 @@ use crate::{
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
 		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -167,22 +167,24 @@ async fn spawn_shared_harness(
 	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
 }
 
+/// Wait for the FINALIZED head to clear `block`'s `--blocks-pruning` boundary. Pruning
+/// fires off the finalized head, not the best head, so waiting on best-block plus a fudge
+/// is flaky under finality lag.
+async fn wait_past_pruning_boundary(
+	node: &zombienet_sdk::NetworkNode,
+	block: u64,
+	what: &str,
+) -> Result<()> {
+	let target = block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	tracing::info!("Waiting for FINALIZED block {target} so {what} ({block}) is past pruning");
+	wait_for_finalized_height(node, target, BLOCK_PRODUCTION_TIMEOUT_SECS).await
+}
+
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// A pruning-focused log config, NOT the full `NODE_LOG_CONFIG` firehose. The libp2p/sync
-	// trace targets (`litep2p`, `sub-libp2p`, `sync`, `request-response`) generate ~10 MB per
-	// node in a few minutes, which overwhelms the shared-network log files and gets truncated
-	// long before the failing test runs — so a pruning-eviction failure ships un-diagnosable
-	// logs. Keep only what a "bitswap still serves data after pruning" failure needs:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (pruning fired)
-	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
-	//   - `transaction-storage=trace` / `bitswap=trace`: col11 indexing + the served block
-	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets =
-		"transaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
-		format!("-l{}", log_targets),
+		PRUNING_NODE_LOG_CONFIG.into(),
 		"--".into(),
 		"--network-backend=libp2p".into(),
 	]
@@ -588,20 +590,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-renew)").await?;
 
-	// `--blocks-pruning=N` prunes blocks N behind FINALIZED head, not best head. Waiting
-	// on best-block + fudge is flaky under finality lag.
-	let after_renew_pruned_finalized =
-		renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	tracing::info!(
-		"Waiting for FINALIZED block {} so both store and renew blocks are past the pruning boundary",
-		after_renew_pruned_finalized
-	);
-	wait_for_finalized_height(
-		collator1,
-		after_renew_pruned_finalized,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
-	)
-	.await?;
+	wait_past_pruning_boundary(collator1, renew_block, "the renew block").await?;
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -716,20 +705,14 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	verify_node_bitswap(collator1, &data1, BITSWAP_TIMEOUT_SECS, "Collator-1 / data1").await?;
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "Collator-1 / data2").await?;
 
-	// Pruning fires off FINALIZED head — wait on finalized to cross the boundary directly.
-	// Use the later of the two refcounted blocks (renewal_block holds data1's renewed entry,
-	// data2_block holds data2). Both must be past the pruning window for col11 cleanup.
-	let last_refcounted_block = renewal_block.max(data2_block);
-	let after_pruning_finalized =
-		last_refcounted_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	tracing::info!(
-		"Waiting for FINALIZED block {} so renewal_block={} and data2_block={} are past pruning",
-		after_pruning_finalized,
-		renewal_block,
-		data2_block
-	);
-	wait_for_finalized_height(collator1, after_pruning_finalized, BLOCK_PRODUCTION_TIMEOUT_SECS)
-		.await?;
+	// The later of the two refcounted blocks: renewal_block holds data1's renewed entry,
+	// data2_block holds data2. Both must clear the window for col11 cleanup.
+	wait_past_pruning_boundary(
+		collator1,
+		renewal_block.max(data2_block),
+		"the last refcounted block",
+	)
+	.await?;
 
 	// Proof for data2's stored block fires at `data2_block + RP`. When data2 == renewal_block,
 	// this is also the proof block for data1's renewed entry (same block).
@@ -884,24 +867,11 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	)?;
 	tracing::info!("✓ data_renewed still served via bitswap");
 
-	// `data_not_renewed` was stored a few blocks after `data_renewed`, so its store block
-	// crosses the `--blocks-pruning` boundary later than the `wait_until` above (which is
-	// anchored to `data_renewed`). Wait for FINALIZED to pass it before asserting eviction,
-	// otherwise the DONT_HAVE poll also has to absorb the finality-lag gap and races under
-	// slower finalization.
-	let not_renewed_pruned_finalized =
-		data_not_renewed_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	tracing::info!(
-		"Waiting for FINALIZED block {} so data_not_renewed's store block {} is past the pruning boundary",
-		not_renewed_pruned_finalized,
-		data_not_renewed_block
-	);
-	wait_for_finalized_height(
-		collator1,
-		not_renewed_pruned_finalized,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
-	)
-	.await?;
+	// The `wait_until` above is anchored to `data_renewed`, but `data_not_renewed` was stored
+	// a few blocks later. Without this the DONT_HAVE poll also has to absorb the finality-lag
+	// gap, and races under slow finalization.
+	wait_past_pruning_boundary(collator1, data_not_renewed_block, "data_not_renewed's store block")
+		.await?;
 
 	expect_bitswap_dont_have(
 		collator1,

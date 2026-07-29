@@ -150,19 +150,23 @@ pub mod pallet {
 			Self::RuntimeOrigin,
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
 		>;
-		/// Pool params for signed and preimage-authorized `store`. One prefix is safe
-		/// because they tag on `(who, content_hash)` and `content_hash` respectively.
+		/// Pool params for signed and preimage-authorized `store`. One prefix is safe: they
+		/// tag on `(who, content_hash)` and `content_hash` respectively.
+		#[pallet::constant]
 		type StoreTxParams: Get<ValidTransactionParams>;
-		/// Pool params for `authorize_*` and `refresh_*`.
+		/// Pool params for `authorize_*` and `refresh_*`, which validate untagged.
+		#[pallet::constant]
 		type AuthorizeTxParams: Get<ValidTransactionParams>;
-		/// Pool params for `remove_expired_account_authorization`. Separate items for the
-		/// three cleanup calls because they share pricing but need distinct prefixes: two
-		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`. Enforced by
-		/// `integrity_test`.
+		/// Pool params for `remove_expired_account_authorization`. The three cleanup calls get
+		/// their own items because two provide `who` and a `ContentHash` encodes like an
+		/// `AccountId32`, so they need distinct prefixes despite shared pricing.
+		#[pallet::constant]
 		type RemoveExpiredAccountAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_preimage_authorization`.
+		#[pallet::constant]
 		type RemoveExpiredPreimageAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_exhausted_authorizer`.
+		#[pallet::constant]
 		type RemoveExhaustedAuthorizerTxParams: Get<ValidTransactionParams>;
 		/// Opaque per-entry payload on [`TransactionInfo`], never interpreted here:
 		/// `store` writes `Default::default()`, expiry hands it back through
@@ -384,7 +388,7 @@ pub mod pallet {
 				!T::AuthorizationPeriod::get().is_zero(),
 				"AuthorizationPeriod must be greater than zero"
 			);
-			Self::assert_tag_prefixes_distinct(&[]);
+			Self::assert_pool_families_distinct(&[]);
 		}
 	}
 
@@ -989,12 +993,13 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		/// Panics unless this pallet's pool families and `extra` all use distinct tag
-		/// prefixes. `extra` lets dependent pallets fold their own families into the check.
-		pub fn assert_tag_prefixes_distinct(extra: &[(&'static str, ValidTransactionParams)]) {
+		/// Panics unless this pallet's families and `extra` use distinct tag prefixes. `extra`
+		/// lets dependent pallets fold in their own.
+		pub fn assert_pool_families_distinct(extra: &[(&str, ValidTransactionParams)]) {
 			let mut all = extra.to_vec();
 			all.extend([
 				("StoreTxParams", T::StoreTxParams::get()),
+				("AuthorizeTxParams", T::AuthorizeTxParams::get()),
 				(
 					"RemoveExpiredAccountAuthorizationTxParams",
 					T::RemoveExpiredAccountAuthorizationTxParams::get(),

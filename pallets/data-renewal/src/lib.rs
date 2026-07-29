@@ -251,7 +251,7 @@ pub mod pallet {
 		/// `store`, preimage `force_renew` like preimage `store` — so they must not share a
 		/// prefix with them.
 		fn integrity_test() {
-			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_pool_families_distinct(&[(
 				"RenewTxParams",
 				<T as Config>::RenewTxParams::get(),
 			)]);

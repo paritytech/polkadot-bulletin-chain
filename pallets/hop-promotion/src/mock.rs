@@ -28,6 +28,9 @@ use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
 
+const PRIORITY: TransactionPriority = TransactionPriority::MAX;
+const LONGEVITY: TransactionLongevity = 10;
+
 #[frame_support::runtime]
 mod runtime {
 	#[runtime::runtime]
@@ -79,16 +82,18 @@ parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	// `static` so a test can lower the priority and check `integrity_test` rejects it.
 	pub static StoreTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);
-	// Never exercised here; only their prefixes matter, which `integrity_test` checks.
+	// Never exercised; only their prefixes matter, for `integrity_test`.
+	pub const AuthorizeTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("ExpiredAccountAuth", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("ExpiredAccountAuth", PRIORITY, LONGEVITY);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("ExpiredPreimageAuth", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("ExhaustedAuthorizer", TransactionPriority::MAX, 10);
+		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -115,7 +120,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
 	type StoreTxParams = StoreTxParams;
-	type AuthorizeTxParams = StoreTxParams;
+	type AuthorizeTxParams = AuthorizeTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
