@@ -168,17 +168,17 @@ async fn spawn_shared_harness(
 }
 
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
+	// A pruning-focused log config, NOT the full `NODE_LOG_CONFIG` firehose. The libp2p/sync
+	// trace targets (`litep2p`, `sub-libp2p`, `sync`, `request-response`) generate ~10 MB per
+	// node in a few minutes, which overwhelms the shared-network log files and gets truncated
+	// long before the failing test runs — so a pruning-eviction failure ships un-diagnosable
+	// logs. Keep only what a "bitswap still serves data after pruning" failure needs:
+	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (pruning fired)
 	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
+	//   - `transaction-storage=trace` / `bitswap=trace`: col11 indexing + the served block
 	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
+	let log_targets =
+		"transaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
@@ -883,6 +883,25 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		 original store block was pruned",
 	)?;
 	tracing::info!("✓ data_renewed still served via bitswap");
+
+	// `data_not_renewed` was stored a few blocks after `data_renewed`, so its store block
+	// crosses the `--blocks-pruning` boundary later than the `wait_until` above (which is
+	// anchored to `data_renewed`). Wait for FINALIZED to pass it before asserting eviction,
+	// otherwise the DONT_HAVE poll also has to absorb the finality-lag gap and races under
+	// slower finalization.
+	let not_renewed_pruned_finalized =
+		data_not_renewed_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	tracing::info!(
+		"Waiting for FINALIZED block {} so data_not_renewed's store block {} is past the pruning boundary",
+		not_renewed_pruned_finalized,
+		data_not_renewed_block
+	);
+	wait_for_finalized_height(
+		collator1,
+		not_renewed_pruned_finalized,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
 
 	expect_bitswap_dont_have(
 		collator1,

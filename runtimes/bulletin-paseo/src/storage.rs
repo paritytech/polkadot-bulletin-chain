@@ -13,8 +13,8 @@ use frame_support::{
 	traits::{Contains, EitherOf},
 };
 use pallet_bulletin_transaction_storage::{
-	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, DEFAULT_MAX_BLOCK_TRANSACTIONS,
-	DEFAULT_MAX_TRANSACTION_SIZE,
+	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, ValidTransactionParams,
+	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use pallet_xcm::EnsureXcm;
 use sp_runtime::transaction_validity::{TransactionLongevity, TransactionPriority};
@@ -28,17 +28,44 @@ parameter_types! {
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
-	// Priorities and longevities used by the transaction storage pallet extrinsics.
-	//
-	// `RemoveExpiredAuthorization` (permissionless cleanup) sits at the top so it always
-	// runs before stores compete for blockspace.
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
-	// Base priority for `store` / `renew`. Picked well below `TransactionPriority::MAX` so
-	// `AllowanceBasedPriority` can add its boost without saturating `u64`, while still
-	// leaving plenty of headroom above generic transactions.
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX / 4;
-	pub const StoreRenewLongevity: TransactionLongevity = crate::DAYS as TransactionLongevity;
+	// Pool params per family. Cleanup sits at `MAX` so it always runs before stores
+	// compete for blockspace; store and renew sit well below it so
+	// `AllowanceBasedPriority` can add its boost without saturating `u64`. Renew prices
+	// separately from store, equal for now. Distinct prefixes keep the two from deduping
+	// against each other.
+	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
+		"TransactionStorageStore",
+		TransactionPriority::MAX / 4,
+		crate::DAYS as TransactionLongevity,
+	);
+	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
+		"TransactionStorageRenew",
+		TransactionPriority::MAX / 4,
+		crate::DAYS as TransactionLongevity,
+	);
+	pub const AuthorizeTxParams: ValidTransactionParams = ValidTransactionParams::new(
+		"TransactionStorageAuthorize",
+		TransactionPriority::MAX / 4,
+		crate::DAYS as TransactionLongevity,
+	);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExpiredAccountAuthorization",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExpiredPreimageAuthorization",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new(
+			"TransactionStorageRemoveExhaustedAuthorizer",
+			TransactionPriority::MAX,
+			crate::DAYS as TransactionLongevity,
+		);
 }
 
 /// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
@@ -98,10 +125,12 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		// `add_authorizer` / `remove_authorizer`).
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type RenewTxParams = RenewTxParams;
+	type AuthorizeTxParams = AuthorizeTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
@@ -111,9 +140,13 @@ parameter_types! {
 	/// Maximum allowable skew between the user's submit timestamp and the on-chain
 	/// time when validating a HOP promotion: 48 hours, in milliseconds.
 	pub const SubmitTimestampTolerance: u64 = 48 * 60 * 60 * 1000;
+	// Lowest priority: promotion only fills blockspace stores would not have used.
+	pub const PromoteTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("HopPromotion", 0, 5);
 }
 
 impl pallet_bulletin_hop_promotion::Config for Runtime {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
+	type PromoteTxParams = PromoteTxParams;
 	type WeightInfo = crate::weights::pallet_bulletin_hop_promotion::WeightInfo<Runtime>;
 }

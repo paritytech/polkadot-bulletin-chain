@@ -176,18 +176,23 @@ pub mod pallet {
 			Self::RuntimeOrigin,
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
 		>;
-		/// Priority of store/renew transactions.
-		#[pallet::constant]
-		type StoreRenewPriority: Get<TransactionPriority>;
-		/// Longevity of store/renew transactions.
-		#[pallet::constant]
-		type StoreRenewLongevity: Get<TransactionLongevity>;
-		/// Priority of unsigned transactions to remove expired authorizations.
-		#[pallet::constant]
-		type RemoveExpiredAuthorizationPriority: Get<TransactionPriority>;
-		/// Longevity of unsigned transactions to remove expired authorizations.
-		#[pallet::constant]
-		type RemoveExpiredAuthorizationLongevity: Get<TransactionLongevity>;
+		/// Pool params for signed and preimage-authorized `store`. One prefix is safe
+		/// because they tag on `(who, content_hash)` and `content_hash` respectively.
+		type StoreTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `renew`, `force_renew` and `enable_auto_renew`. Separate from
+		/// `store` so the two families neither share pricing nor dedup against each other.
+		type RenewTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `authorize_*` and `refresh_*`.
+		type AuthorizeTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `remove_expired_account_authorization`. Separate items for the
+		/// three cleanup calls because they share pricing but need distinct prefixes: two
+		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`. Enforced by
+		/// `integrity_test`.
+		type RemoveExpiredAccountAuthorizationTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `remove_expired_preimage_authorization`.
+		type RemoveExpiredPreimageAuthorizationTxParams: Get<ValidTransactionParams>;
+		/// Pool params for `remove_exhausted_authorizer`.
+		type RemoveExhaustedAuthorizerTxParams: Get<ValidTransactionParams>;
 		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
 		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for
 		/// [`DEFAULT_MAX_TRANSACTION_SIZE`] / [`DEFAULT_MAX_BLOCK_TRANSACTIONS`].
@@ -480,6 +485,7 @@ pub mod pallet {
 				!T::AuthorizationPeriod::get().is_zero(),
 				"AuthorizationPeriod must be greater than zero"
 			);
+			Self::assert_tag_prefixes_distinct(&[]);
 		}
 	}
 
@@ -2132,12 +2138,35 @@ pub mod pallet {
 			Ok(())
 		}
 
-		fn preimage_store_renew_valid_transaction(content_hash: ContentHash) -> ValidTransaction {
-			ValidTransaction::with_tag_prefix("TransactionStorageStoreRenew")
-				.and_provides(content_hash)
-				.priority(T::StoreRenewPriority::get())
-				.longevity(T::StoreRenewLongevity::get())
-				.into()
+		/// Panics unless this pallet's pool families and `extra` all use distinct tag
+		/// prefixes. `extra` lets dependent pallets fold their own families into the check.
+		pub fn assert_tag_prefixes_distinct(extra: &[(&'static str, ValidTransactionParams)]) {
+			let mut all = extra.to_vec();
+			all.extend([
+				("StoreTxParams", T::StoreTxParams::get()),
+				("RenewTxParams", T::RenewTxParams::get()),
+				(
+					"RemoveExpiredAccountAuthorizationTxParams",
+					T::RemoveExpiredAccountAuthorizationTxParams::get(),
+				),
+				(
+					"RemoveExpiredPreimageAuthorizationTxParams",
+					T::RemoveExpiredPreimageAuthorizationTxParams::get(),
+				),
+				("RemoveExhaustedAuthorizerTxParams", T::RemoveExhaustedAuthorizerTxParams::get()),
+			]);
+			assert_distinct_tag_prefixes(&all);
+		}
+
+		/// Pool params for the store/renew family `is_renew` selects. Distinct prefixes
+		/// keep a `store` and a `force_renew` of the same content hash from deduping
+		/// against each other in the pool.
+		fn store_renew_tx_params(is_renew: bool) -> ValidTransactionParams {
+			if is_renew {
+				T::RenewTxParams::get()
+			} else {
+				T::StoreTxParams::get()
+			}
 		}
 
 		fn check_store_renew_unsigned(
@@ -2165,7 +2194,7 @@ pub mod pallet {
 
 			Ok(context
 				.want_valid_transaction()
-				.then(|| Self::preimage_store_renew_valid_transaction(content_hash)))
+				.then(|| Self::store_renew_tx_params(is_renew).provides(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -2200,42 +2229,24 @@ pub mod pallet {
 				Call::<T>::renew { .. } => Err(InvalidTransaction::Call.into()),
 				Call::<T>::remove_expired_account_authorization { who } => {
 					Self::check_authorization_expired(&AuthorizationScope::Account(who.clone()))?;
-					Ok(context.want_valid_transaction().then(|| {
-						ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredAccountAuthorization",
-						)
-						.and_provides(who)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
-						.into()
-					}))
+					Ok(context
+						.want_valid_transaction()
+						.then(|| T::RemoveExpiredAccountAuthorizationTxParams::get().provides(who)))
 				},
 				Call::<T>::remove_expired_preimage_authorization { content_hash } => {
 					Self::check_authorization_expired(&AuthorizationScope::Preimage(
 						*content_hash,
 					))?;
 					Ok(context.want_valid_transaction().then(|| {
-						ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExpiredPreimageAuthorization",
-						)
-						.and_provides(content_hash)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
-						.into()
+						T::RemoveExpiredPreimageAuthorizationTxParams::get().provides(content_hash)
 					}))
 				},
 				Call::<T>::remove_exhausted_authorizer { who } => {
 					let budget = AllowedAuthorizers::<T>::get(who).ok_or(AUTHORIZER_NOT_FOUND)?;
 					ensure!(budget.is_inactive(Self::now()), AUTHORIZATION_NOT_EXHAUSTED);
-					Ok(context.want_valid_transaction().then(|| {
-						ValidTransaction::with_tag_prefix(
-							"TransactionStorageRemoveExhaustedAuthorizer",
-						)
-						.and_provides(who)
-						.priority(T::RemoveExpiredAuthorizationPriority::get())
-						.longevity(T::RemoveExpiredAuthorizationLongevity::get())
-						.into()
-					}))
+					Ok(context
+						.want_valid_transaction()
+						.then(|| T::RemoveExhaustedAuthorizerTxParams::get().provides(who)))
 				},
 				// Mandatory inherent — always allowed, no pool validation needed.
 				Call::<T>::apply_block_inherents { .. } => Ok(None),
@@ -2276,11 +2287,9 @@ pub mod pallet {
 					T::Authorizer::ensure_origin(origin)
 						.map_err(|_| InvalidTransaction::BadSigner)?;
 					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
-							..Default::default()
-						}),
+						context
+							.want_valid_transaction()
+							.then(|| T::AuthorizeTxParams::get().untagged()),
 						None,
 					));
 				},
@@ -2310,11 +2319,7 @@ pub mod pallet {
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
 						context.want_valid_transaction().then(|| {
-							ValidTransaction::with_tag_prefix("TransactionStorageRenew")
-								.and_provides((who.clone(), info.content_hash))
-								.priority(T::StoreRenewPriority::get())
-								.longevity(T::StoreRenewLongevity::get())
-								.into()
+							T::RenewTxParams::get().provides((who.clone(), info.content_hash))
 						}),
 						Some(scope),
 					));
@@ -2343,11 +2348,7 @@ pub mod pallet {
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
 						context.want_valid_transaction().then(|| {
-							ValidTransaction::with_tag_prefix("TransactionStorageRenew")
-								.and_provides((who.clone(), info.content_hash))
-								.priority(T::StoreRenewPriority::get())
-								.longevity(T::StoreRenewLongevity::get())
-								.into()
+							T::RenewTxParams::get().provides((who.clone(), info.content_hash))
 						}),
 						Some(scope),
 					));
@@ -2369,11 +2370,9 @@ pub mod pallet {
 					}
 					let scope = AuthorizationScope::Account(who.clone());
 					return Ok((
-						context.want_valid_transaction().then(|| ValidTransaction {
-							priority: T::StoreRenewPriority::get(),
-							longevity: T::StoreRenewLongevity::get(),
-							..Default::default()
-						}),
+						context
+							.want_valid_transaction()
+							.then(|| T::RenewTxParams::get().untagged()),
 						Some(scope),
 					));
 				},
@@ -2414,27 +2413,11 @@ pub mod pallet {
 			// execution. The tx tag/priority differs depending on whether preimage or account
 			// authorization was used.
 			let (valid_tx, scope) = if context.want_valid_transaction() {
+				let params = Self::store_renew_tx_params(is_renew);
 				let (valid_tx, scope) = if used_preimage_auth {
-					(
-						Self::preimage_store_renew_valid_transaction(content_hash),
-						AuthorizationScope::Preimage(content_hash),
-					)
+					(params.provides(content_hash), AuthorizationScope::Preimage(content_hash))
 				} else {
-					// Tag prefix differs per family so store and renew operations don't
-					// dedup against each other in the pool.
-					let prefix = if is_renew {
-						"TransactionStorageRenew"
-					} else {
-						"TransactionStorageStore"
-					};
-					(
-						ValidTransaction::with_tag_prefix(prefix)
-							.and_provides((who, content_hash))
-							.priority(T::StoreRenewPriority::get())
-							.longevity(T::StoreRenewLongevity::get())
-							.into(),
-						AuthorizationScope::Account(who.clone()),
-					)
+					(params.provides((who, content_hash)), AuthorizationScope::Account(who.clone()))
 				};
 				(Some(valid_tx), Some(scope))
 			} else {

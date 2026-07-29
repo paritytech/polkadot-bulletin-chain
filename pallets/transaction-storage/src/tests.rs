@@ -24,7 +24,7 @@ use super::{
 	extension::ValidateStorageCalls,
 	mock::{
 		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
-		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
+		RuntimeOrigin, StoreTxParams, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
@@ -1782,7 +1782,7 @@ fn authorize_storage_extension_transforms_origin() {
 		let (valid_tx, val, transformed_origin) = result.unwrap();
 
 		// Verify the transaction is valid with correct priority
-		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
+		assert_eq!(valid_tx.priority, StoreTxParams::get().priority);
 
 		// Verify val contains the signer
 		assert_eq!(val, Some(caller));

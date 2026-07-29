@@ -17,7 +17,7 @@
 //!
 //! Promotes near-expiry HOP pool data to permanent chain storage via
 //! `pallet-transaction-storage`. Uses general transactions with
-//! `#[pallet::authorize]` — no signature, no fees, priority 0, and no
+//! `#[pallet::authorize]` — no signature, no fees, lowest priority, and no
 //! debit of the submitter's Bulletin allowance: promotion only lands in
 //! blockspace that would otherwise be unused, so charging the user
 //! would just leave that space empty for no benefit.
@@ -66,11 +66,11 @@ pub mod pallet {
 	use alloc::vec::Vec;
 	use bulletin_transaction_storage_primitives::{
 		cids::{HashingAlgorithm, RAW_CODEC},
-		ContentHash,
+		ContentHash, ValidTransactionParams,
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_bulletin_transaction_storage::WeightInfo as _;
+	use pallet_bulletin_transaction_storage::{WeightInfo as _, BAD_DATA_SIZE};
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner,
@@ -92,6 +92,32 @@ pub mod pallet {
 
 		/// Weight information for this pallet.
 		type WeightInfo: crate::WeightInfo;
+
+		/// Pool params for `promote`. Its priority must stay below the `store` priority —
+		/// promotion only fills otherwise-unused blockspace — which `integrity_test`
+		/// enforces.
+		type PromoteTxParams: Get<ValidTransactionParams>;
+	}
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn integrity_test() {
+			// Promotion must not outbid the `store` traffic it shares blockspace with.
+			let promote = T::PromoteTxParams::get().priority;
+			let store =
+				<T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().priority;
+			assert!(
+				promote < store,
+				"promote priority ({promote}) must be strictly below store priority ({store})",
+			);
+
+			// `promote` tags on the bare data hash, as do preimage `store` and the
+			// preimage-authorization cleanup.
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
+				"PromoteTxParams",
+				T::PromoteTxParams::get(),
+			)]);
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
@@ -135,7 +161,7 @@ pub mod pallet {
 				return Err(InvalidTransaction::Call.into());
 			}
 			if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(data.len()) {
-				return Err(InvalidTransaction::Custom(0).into());
+				return Err(BAD_DATA_SIZE.into());
 			}
 
 			// Mirrors the early-out in pallet_bulletin_transaction_storage so we don't pay for
@@ -166,13 +192,13 @@ pub mod pallet {
 			}
 
 			Ok((
-				ValidTransaction::with_tag_prefix("HopPromotion")
-					.priority(0)
-					.longevity(5)
-					.propagate(false)
-					.and_provides(data_hash)
-					.build()
-					.expect("builder always succeeds; qed"),
+				// `propagate: false` is a property of the call, not a runtime knob:
+				// `promote` is rejected for `TransactionSource::External`, so gossiping it
+				// is pointless.
+				ValidTransaction {
+					propagate: false,
+					..T::PromoteTxParams::get().provides(data_hash)
+				},
 				Weight::zero(),
 			))
 		}
