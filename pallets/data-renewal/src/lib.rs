@@ -416,7 +416,7 @@ pub mod pallet {
 	#[pallet::inherent]
 	impl<T: Config> ProvideInherent for Pallet<T> {
 		type Call = Call<T>;
-		type Error = sp_transaction_storage_proof::InherentError;
+		type Error = sp_inherents::MakeFatalError<()>;
 		const INHERENT_IDENTIFIER: InherentIdentifier = *b"datarenw";
 
 		fn create_inherent(_data: &InherentData) -> Option<Self::Call> {
