@@ -18,7 +18,7 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 - **Direct Transaction Submission**: `TransactionClient` handles all chain interactions out of the box
 - **Offline Preparation**: `BulletinClient` prepares operations (CID calculation, chunking, DAG building) without network access
-- **Builder Pattern**: Fluent API for configuring store operations
+- **Configurable Stores**: `StoreOptions` for CID codec, hash algorithm, and confirmation level
 - **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
 - **Structured Errors**: Error codes, retryable detection, and recovery hints consistent with TypeScript SDK
 - **Progress Tracking**: Callback-based progress events for uploads
@@ -148,7 +148,8 @@ let options = StoreOptions::default();
 
 // Prepare the operation (calculates CID, no network calls)
 let operation = client.prepare_store(data, options)?;
-println!("CID: {:?}", operation.cid_bytes);
+let cid = cid_to_bytes(&operation.calculate_cid()?)?;
+println!("CID: {:?}", cid);
 
 // Then submit via your own subxt client...
 ```

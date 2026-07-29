@@ -5,7 +5,7 @@ import assert from "assert";
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConnection, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
@@ -51,8 +51,8 @@ async function main() {
         const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
-        // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        // Read back from IPFS and the node RPC, verifying both match.
+        let downloadedContent = await fetchAndVerifyBlock(cid, gatewaySource(HTTP_IPFS_API), nodeRpcSource(client));
         logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,

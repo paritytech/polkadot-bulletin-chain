@@ -144,9 +144,10 @@ use bulletin_sdk_rust::prelude::*;
 
 let client = BulletinClient::new();
 let operation = client.prepare_store(data, StoreOptions::default())?;
+let cid = cid_to_bytes(&operation.calculate_cid()?)?;
 
 tracing::info!(
-    cid = %hex::encode(&operation.cid_bytes),
+    cid = %hex::encode(&cid),
     size = operation.data.len(),
     "Prepared store operation"
 );

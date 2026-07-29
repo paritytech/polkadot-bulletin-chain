@@ -2,52 +2,91 @@
 
 Data stored on Bulletin Chain has a **retention period** after which it may be pruned from validators. To keep data available on-chain, you must **renew** it before the retention period expires.
 
-## The Renewal Flow
+## Referencing Stored Data
 
-```
-1. STORE           2. RECEIVE EVENT      3. TRACK           4. RENEW (later)
-   ↓                  ↓                     ↓                  ↓
-Submit data    Get block number      Save block/index    Call renew()
-to chain       and index from        for later use       before expiration
-               Stored event
-```
+Renewal extrinsics identify the data with a `TransactionRef` (`entry`). It has two variants:
 
-### Step 1: Store Data
+- `Position { block, index }` — the block number and transaction index from the original `Stored` event.
+- `ContentHash(hash)` — the content hash of the stored data.
 
-When you submit a `store` transaction, data is written to the chain.
+## Renewal Extrinsics
 
-### Step 2: Receive the Stored Event
+The pallet exposes three distinct renewal operations. They behave differently — pick the one that matches your needs.
 
-After the transaction is included in a block, the chain emits a **Stored** event containing:
-- `index`: Transaction index within the block
-- `content_hash`: Hash of the stored content
+### `renew(entry)` — one-shot scheduled renewal
 
-You also need to record the **block number** where the transaction was included.
+Schedules a **single** auto-renewal that fires once when the data reaches its retention boundary. After that one renewal the registration is removed and the data is no longer renewed.
 
-### Step 3: Track for Later Renewal
+- Does **not** renew synchronously at dispatch time.
+- Emits `RenewalEnabled { content_hash, who, recurring: false }`.
+- Does **not** emit `Renewed`.
+- Rejects with `AutoRenewalAlreadyEnabled` if a renewal is already registered for this content hash.
 
-Save the `(block_number, index)` pair. You'll need these to renew later:
+### `force_renew(entry)` — immediate synchronous renewal
 
-```
-Stored at block 1000, index 5
-Retention period: 100,800 blocks
-Expires at: block 101,800
-```
+Renews the data **immediately** at dispatch time, extending its retention from the current block.
 
-### Step 4: Renew Before Expiration
+- Emits `Renewed { index, content_hash }` with the **new index**.
+- You must track the new `(block, index)` for the next renewal.
 
-Before the retention period ends, submit a `renew(block, index)` transaction. This:
-- Extends the retention period from the **current block**
-- Emits a new `Renewed` event with a **new index**
-- You must track the **new** block/index for the next renewal
+### `enable_auto_renew(content_hash)` — continuous renewal
+
+Registers the data (identified by content hash, not a `TransactionRef`) for **recurring** auto-renewal. The chain renews it automatically at each retention cycle until disabled.
+
+- Emits `RenewalEnabled { content_hash, who, recurring: true }`.
+- Emits `DataAutoRenewed { index, content_hash, account }` at each cycle.
+
+Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid it is refused with `CannotDisablePrepaidAutoRenewal` — disabling becomes possible after the first cycle has fired.
 
 ## Retention Period
 
-The retention period is a chain constant. Query it via:
-- RPC: `transactionStorage.retentionPeriod()`
-- Typical value: ~100,800 blocks (~7 days at 6s/block)
+The retention period is a runtime **storage value** (`RetentionPeriod`), not a fixed constant — it can be changed by governance. Query it from storage:
+
+- Storage: `TransactionStorage.RetentionPeriod`
+- Default: 201,600 blocks (~14 days at 6s/block)
 
 After the retention period, validators may prune the data. The chain no longer guarantees availability.
+
+## Renewal Flow
+
+```
+1. STORE            2. RECEIVE EVENT      3. TRACK            4. RENEW (later)
+   ↓                   ↓                     ↓                   ↓
+Submit data     Get block number      Save block/index    renew / force_renew /
+to chain        and index from        for later use       enable_auto_renew
+                Stored event                              before expiration
+```
+
+When you submit `store`, the chain emits a `Stored` event with the transaction `index` and `content_hash`. Record the block number too, so you can build the `Position { block, index }` reference later.
+
+For a `force_renew` chain, always renew against the **most recent** reference, since each `force_renew` emits a `Renewed` event with a new index:
+
+```
+Block 1000:  store()             → Stored  { index: 5 }   → save (1000, 5)
+Block 50000: force_renew((1000,5)) → Renewed { index: 2 } → save (50000, 2)
+Block 100000: force_renew((50000,2)) → Renewed { index: 0 } → save (100000, 0)
+```
+
+With `enable_auto_renew` the chain tracks this for you and re-registers the data each cycle; you only need the original reference and can stop it with `disable_auto_renew`.
+
+## Raw Runtime Call
+
+`renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
+
+```typescript
+api.tx.TransactionStorage.renew({
+  entry: { type: "Position", value: { block, index } }
+});
+
+// force_renew takes the same `entry`; fixed-size hashes are passed as
+// 0x-prefixed hex (PAPI SizedHex):
+api.tx.TransactionStorage.force_renew({
+  entry: { type: "ContentHash", value: contentHashHex }
+});
+
+// enable_auto_renew / disable_auto_renew take a content hash, not an `entry`:
+api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+```
 
 ## When to Renew
 
@@ -60,24 +99,6 @@ After the retention period, validators may prune the data. The chain no longer g
 - The data only needs to exist temporarily
 - You've replicated the data to external storage
 - The retention period is sufficient for your use case
-
-## Renewal Chain
-
-Each renewal creates a new record. Always use the **most recent** block and index:
-
-```
-Block 1000: store()  → Stored { index: 5 }
-                       ↓
-                       Save (1000, 5)
-                       ↓
-Block 50000: renew(1000, 5) → Renewed { index: 2 }
-                              ↓
-                              Save (50000, 2)  ← Use this for next renewal!
-                              ↓
-Block 100000: renew(50000, 2) → Renewed { index: 0 }
-                                ↓
-                                Save (100000, 0)
-```
 
 ## Authorization
 
@@ -95,12 +116,13 @@ Even after data expires on-chain:
 
 ## SDK Support
 
-Both SDKs provide renewal helpers:
-- **Rust SDK**: `prepare_renew()`, `RenewalTracker` - See [Rust SDK: Renewal](../rust/renewal.md)
-- **TypeScript SDK**: Coming soon - See [TypeScript SDK](../typescript/README.md)
+Both SDKs provide a `renew` helper:
+- **Rust SDK**: `prepare_renew()`, `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
+- **TypeScript SDK**: `client.renew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
 
 ## Next Steps
 
 - [Rust SDK: Renewal](../rust/renewal.md) - SDK-specific implementation
+- [TypeScript SDK: Renewal](../typescript/renewal.md) - SDK-specific implementation
 - [Storage Model](./storage.md) - How data is stored
 - [Data Retrieval](./retrieval.md) - Fetching from validator nodes

@@ -17,6 +17,9 @@ import {
   CallBuilder,
   StoreBuilder,
   type TransactionReceipt,
+  type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "./async-client.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
@@ -41,8 +44,6 @@ export interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
   simulateStorageFailure?: boolean
-  /** Simulate insufficient authorization (for testing pre-check error path) */
-  simulateInsufficientAuth?: boolean
 }
 
 /**
@@ -62,7 +63,8 @@ export type MockOperation =
       type: "refresh_preimage_authorization"
       contentHash: Uint8Array
     }
-  | { type: "renew"; block: number; index: number }
+  | { type: "renew"; entry: TransactionRef }
+  | { type: "force_renew"; entry: TransactionRef }
   | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
@@ -107,7 +109,6 @@ export class MockBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig> & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
-    simulateInsufficientAuth: boolean
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
@@ -120,7 +121,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       ...resolveClientConfig(config),
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
-      simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,
     }
   }
 
@@ -165,20 +165,12 @@ export class MockBulletinClient implements BulletinClientInterface {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    // Simulate insufficient authorization (pre-submission check)
-    if (this.config.simulateInsufficientAuth) {
-      throw new BulletinError(
-        "Insufficient authorization: need 1 transactions, have 0",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-
-    // Simulate authorization failure
+    // Chain-side rejection: the real client never throws
+    // INSUFFICIENT_AUTHORIZATION for store (boost exhaustion only warns).
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
-        "Insufficient authorization: need 100 bytes, have 0 bytes",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        { need: 100, available: 0 },
+        "Simulated authorization failure",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
 
@@ -329,9 +321,19 @@ export class MockBulletinClient implements BulletinClientInterface {
     })
   }
 
-  renew(block: number, index: number): CallBuilder {
+  renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "renew", block, index })
+      this.operations.push({ type: "renew", entry: toTransactionRef(ref) })
+      return mockReceipt()
+    })
+  }
+
+  forceRenew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({
+        type: "force_renew",
+        entry: toTransactionRef(ref),
+      })
       return mockReceipt()
     })
   }

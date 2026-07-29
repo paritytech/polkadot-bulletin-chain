@@ -34,7 +34,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: runtime
         run: |
           # Expand each runtime into one task per try_runtime instance,
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -83,7 +83,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Snapshot lookup uses a deliberately-non-matching primary `key:` so
       # `restore-keys` always falls through to the most recent dated entry.
@@ -168,7 +168,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Fetch upstream tags"
         if: github.event_name == 'pull_request'
@@ -185,7 +185,7 @@ jobs:
           mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"

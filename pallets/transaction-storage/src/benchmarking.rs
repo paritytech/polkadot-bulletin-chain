@@ -154,6 +154,25 @@ mod benchmarks {
 	}
 
 	#[benchmark]
+	fn store_with_cid_config(
+		l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>,
+	) -> Result<(), BenchmarkError> {
+		// Worst-case CID config: SHA2-256 is the slowest supported hash. The codec is
+		// stored as-is and has no cost impact.
+		let config = CidConfig { codec: RAW_CODEC, hashing: HashingAlgorithm::Sha2_256 };
+		let data = vec![0u8; l as usize];
+		let content_hash = sp_io::hashing::sha2_256(&data);
+		let cid = calculate_cid(&data, config.clone()).unwrap().to_bytes();
+
+		#[extrinsic_call]
+		_(RawOrigin::None, config, data);
+
+		assert!(!BlockTransactions::<T>::get().is_empty());
+		assert_last_event::<T>(Event::Stored { index: 0, content_hash, cid }.into());
+		Ok(())
+	}
+
+	#[benchmark]
 	fn force_renew() -> Result<(), BenchmarkError> {
 		// Worst-case: `ContentHash` variant pays one extra `TransactionByContentHash` read.
 		let data = vec![0u8; T::MaxTransactionSize::get() as usize];
