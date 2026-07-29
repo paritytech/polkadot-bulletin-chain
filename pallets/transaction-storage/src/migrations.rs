@@ -640,7 +640,7 @@ pub mod v3 {
 	}
 }
 
-/// V3 → V4 migration: re-encode each [`AutoRenewals`] entry from
+/// V3 → V4 migration: re-encode each [`crate::AutoRenewals`] entry from
 /// `{ account }` (v3) to `{ account, recurring: true, paid: false }` (v4).
 ///
 /// All existing entries were written by the old fee-paying `enable_auto_renew`,
