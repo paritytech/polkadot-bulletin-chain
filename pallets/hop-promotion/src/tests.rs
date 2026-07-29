@@ -15,9 +15,10 @@
 
 //! Tests for hop-promotion pallet.
 
-use crate::{mock::*, signing_payload, signing_payload_v2, RecipientsBound};
+use crate::{mock::*, signing_payload, signing_payload_v2};
 use codec::Encode;
-use frame_support::{assert_noop, assert_ok, traits::Authorize, BoundedVec};
+use frame_support::{assert_noop, assert_ok, traits::Authorize};
+use sp_core::H256;
 use sp_io::hashing::blake2_256;
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
@@ -72,17 +73,20 @@ fn make_promote_call(
 }
 
 /// V2 counterpart of [`signed_by`]: signs the V2 payload that additionally
-/// binds the genesis hash and the SCALE-encoded recipients list.
+/// binds the genesis hash and the recipients hash.
 fn signed_by_v2(
 	keyring: Sr25519Keyring,
 	data: &[u8],
 	submit_timestamp: u64,
-	recipients: &BoundedVec<MultiSigner, RecipientsBound>,
+	recipients_hash: &H256,
 	genesis_hash: &[u8; 32],
 ) -> (MultiSigner, MultiSignature) {
-	let recipients_hash = blake2_256(&recipients.encode());
-	let payload =
-		signing_payload_v2(&blake2_256(data), submit_timestamp, genesis_hash, &recipients_hash);
+	let payload = signing_payload_v2(
+		&blake2_256(data),
+		submit_timestamp,
+		genesis_hash,
+		recipients_hash.as_fixed_bytes(),
+	);
 	let sig = keyring.sign(&payload);
 	(MultiSigner::Sr25519(keyring.public()), MultiSignature::Sr25519(sig))
 }
@@ -92,13 +96,13 @@ fn make_promote_v2_call(
 	signer: MultiSigner,
 	signature: MultiSignature,
 	submit_timestamp: u64,
-	recipients: BoundedVec<MultiSigner, RecipientsBound>,
+	recipients_hash: H256,
 ) -> RuntimeCall {
 	RuntimeCall::HopPromotion(crate::Call::promote_v2 {
 		signer,
 		signature,
 		submit_timestamp,
-		recipients,
+		recipients_hash,
 		data,
 	})
 }
@@ -107,9 +111,11 @@ fn current_genesis_hash() -> [u8; 32] {
 	*frame_system::Pallet::<Test>::block_hash(0u64).as_fixed_bytes()
 }
 
-fn recipients_from(keys: &[Sr25519Keyring]) -> BoundedVec<MultiSigner, RecipientsBound> {
+/// Canonical client-side recipients hash: `blake2_256` of the SCALE-encoded
+/// `Vec<MultiSigner>` in submission order, as `sc-hop` must compute it.
+fn recipients_hash_of(keys: &[Sr25519Keyring]) -> H256 {
 	let raw: Vec<MultiSigner> = keys.iter().map(|k| MultiSigner::Sr25519(k.public())).collect();
-	BoundedVec::try_from(raw).expect("recipient list within MaxRecipients")
+	H256::from(blake2_256(&raw.encode()))
 }
 
 // ---- Dispatch tests ----
@@ -214,7 +220,7 @@ fn authorize_rejects_empty_data() {
 		let call = make_promote_call(vec![], signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
-			Some(Err(InvalidTransaction::Custom(0).into())),
+			Some(Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into())),
 		);
 	});
 }
@@ -228,7 +234,7 @@ fn authorize_rejects_oversized_data() {
 		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
-			Some(Err(InvalidTransaction::Custom(0).into())),
+			Some(Err(pallet_bulletin_transaction_storage::BAD_DATA_SIZE.into())),
 		);
 	});
 }
@@ -528,17 +534,22 @@ fn authorize_v2_accepts_valid_signature_with_recipients_and_genesis_hash() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		let recipients = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
 		let genesis = current_genesis_hash();
-		let (signer, sig) =
-			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&recipients_hash,
+			&genesis,
+		);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
 		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
 	});
 }
 
 #[test]
-fn authorize_v2_accepts_empty_recipients() {
+fn authorize_v2_rejects_empty_recipients_hash() {
 	new_test_ext().execute_with(|| {
 		set_now(TEST_TIMESTAMP_MS);
 		System::run_to_block::<AllPalletsWithSystem>(1);
@@ -546,12 +557,22 @@ fn authorize_v2_accepts_empty_recipients() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		let recipients = recipients_from(&[]);
+		// Even a valid signature over the empty recipients list must be refused:
+		// `sc-hop` rejects zero-recipient submissions, and the chain mirrors it.
+		let recipients_hash = recipients_hash_of(&[]);
 		let genesis = current_genesis_hash();
-		let (signer, sig) =
-			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
-		assert!(matches!(call.authorize(TransactionSource::Local), Some(Ok(_))));
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&recipients_hash,
+			&genesis,
+		);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
+		assert_eq!(
+			call.authorize(TransactionSource::Local),
+			Some(Err(crate::NO_RECIPIENTS.into())),
+		);
 	});
 }
 
@@ -564,17 +585,17 @@ fn authorize_v2_rejects_wrong_genesis_hash() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
 		// Sign against a fake genesis (simulating a different chain), submit on this chain.
 		let fake_genesis = [0xAB; 32];
 		let (signer, sig) = signed_by_v2(
 			Sr25519Keyring::Alice,
 			&data,
 			TEST_TIMESTAMP_MS,
-			&recipients,
+			&recipients_hash,
 			&fake_genesis,
 		);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::BadProof.into())),
@@ -592,16 +613,11 @@ fn authorize_v2_rejects_tampered_recipients_added() {
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
 		let genesis = current_genesis_hash();
-		let signed_recipients = recipients_from(&[Sr25519Keyring::Bob]);
-		let (signer, sig) = signed_by_v2(
-			Sr25519Keyring::Alice,
-			&data,
-			TEST_TIMESTAMP_MS,
-			&signed_recipients,
-			&genesis,
-		);
-		// Submit with an extra recipient appended.
-		let tampered = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let signed_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
+		let (signer, sig) =
+			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &signed_hash, &genesis);
+		// Submit with the hash of a list that has an extra recipient appended.
+		let tampered = recipients_hash_of(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
 		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, tampered);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
@@ -620,16 +636,11 @@ fn authorize_v2_rejects_tampered_recipients_reordered() {
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
 		let genesis = current_genesis_hash();
-		let signed_recipients = recipients_from(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
-		let (signer, sig) = signed_by_v2(
-			Sr25519Keyring::Alice,
-			&data,
-			TEST_TIMESTAMP_MS,
-			&signed_recipients,
-			&genesis,
-		);
-		// Swap order on submission — same set, different SCALE encoding.
-		let tampered = recipients_from(&[Sr25519Keyring::Charlie, Sr25519Keyring::Bob]);
+		let signed_hash = recipients_hash_of(&[Sr25519Keyring::Bob, Sr25519Keyring::Charlie]);
+		let (signer, sig) =
+			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &signed_hash, &genesis);
+		// Swap order on submission — same set, different SCALE encoding, different hash.
+		let tampered = recipients_hash_of(&[Sr25519Keyring::Charlie, Sr25519Keyring::Bob]);
 		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, tampered);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
@@ -647,10 +658,10 @@ fn authorize_v2_rejects_v1_payload_format() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
 		// Sign V1 payload (no genesis/recipients), then submit as V2 — verify must fail.
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::BadProof.into())),
@@ -667,17 +678,17 @@ fn authorize_v2_rejects_bad_signature() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
 		let genesis = current_genesis_hash();
 		// Sign for different data, submit with the canonical data — same V2 pattern as the V1 case.
 		let (signer, sig) = signed_by_v2(
 			Sr25519Keyring::Alice,
 			&[7u8; 50],
 			TEST_TIMESTAMP_MS,
-			&recipients,
+			&recipients_hash,
 			&genesis,
 		);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::BadProof.into())),
@@ -693,11 +704,16 @@ fn authorize_v2_rejects_unauthorized_account() {
 
 		let data = vec![1u8; 100];
 		// No `authorize_account` — must fail with BadSigner before signature verify.
-		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
 		let genesis = current_genesis_hash();
-		let (signer, sig) =
-			signed_by_v2(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS, &recipients, &genesis);
-		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients);
+		let (signer, sig) = signed_by_v2(
+			Sr25519Keyring::Alice,
+			&data,
+			TEST_TIMESTAMP_MS,
+			&recipients_hash,
+			&genesis,
+		);
+		let call = make_promote_v2_call(data, signer, sig, TEST_TIMESTAMP_MS, recipients_hash);
 		assert_eq!(
 			call.authorize(TransactionSource::Local),
 			Some(Err(InvalidTransaction::BadSigner.into())),
@@ -712,7 +728,43 @@ fn promote_v2_succeeds_with_authorized_origin() {
 		frame_system::Pallet::<Test>::set_extrinsic_index(0);
 		let data = vec![42u8; 100];
 		let (signer, sig) = dummy_signer_and_sig();
-		let recipients = recipients_from(&[Sr25519Keyring::Bob]);
-		assert_ok!(HopPromotion::promote_v2(authorized_origin(), signer, sig, 0, recipients, data));
+		let recipients_hash = recipients_hash_of(&[Sr25519Keyring::Bob]);
+		assert_ok!(HopPromotion::promote_v2(
+			authorized_origin(),
+			signer,
+			sig,
+			0,
+			recipients_hash,
+			data,
+		));
 	});
+}
+
+/// Golden test vector pinning the V2 signing-payload byte layout. The same
+/// vector must be replicated in `sc-hop` when the SDK side lands, so both
+/// implementations provably produce identical bytes.
+#[test]
+fn signing_payload_v2_matches_test_vector() {
+	let data = b"hop v2 test vector";
+	let submit_timestamp: u64 = 1_700_000_000_000;
+	let genesis_hash = [0x11u8; 32];
+	// Recipients: well-known sr25519 keyring publics, in submission order.
+	let recipients = vec![
+		MultiSigner::Sr25519(Sr25519Keyring::Bob.public()),
+		MultiSigner::Sr25519(Sr25519Keyring::Charlie.public()),
+	];
+	let recipients_hash = blake2_256(&recipients.encode());
+
+	let payload =
+		signing_payload_v2(&blake2_256(data), submit_timestamp, &genesis_hash, &recipients_hash);
+	let expected = "0xd28b02d1bcab9cd7d7d683a3f8f051544a172d04faf3e94beeed37fed32495e1";
+	assert_eq!(sp_core::bytes::to_hex(&payload, false), expected);
+}
+
+/// Pins the precomputed `EMPTY_RECIPIENTS_HASH` to the hash of the actual
+/// SCALE encoding of an empty recipients list.
+#[test]
+fn empty_recipients_hash_matches_empty_list_encoding() {
+	assert_eq!(crate::EMPTY_RECIPIENTS_HASH, blake2_256(&Vec::<MultiSigner>::new().encode()));
+	assert_eq!(*recipients_hash_of(&[]).as_fixed_bytes(), crate::EMPTY_RECIPIENTS_HASH);
 }
