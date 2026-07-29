@@ -34,18 +34,29 @@
  *     ../target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.compressed.wasm
  */
 
+import { readFileSync } from "node:fs";
 import { ChopsticksProvider, setup } from "@acala-network/chopsticks-core";
 import { Keyring } from "@polkadot/keyring";
 import { cryptoWaitReady, blake2AsU8a, xxhashAsHex } from "@polkadot/util-crypto";
-import { Struct, u8, u32, u64, Bytes, Vector, Tuple } from "@polkadot-api/substrate-bindings";
+import {
+  Struct,
+  u8,
+  u32,
+  u64,
+  Bytes,
+  Vector,
+  Tuple,
+  decAnyMetadata,
+  unifyMetadata,
+} from "@polkadot-api/substrate-bindings";
 
 const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";
 const runtimeWasm = process.argv[3] || null;
 
-// Runtime pallet index (construct_runtime) and call index of the mandatory
-// `process_pending_renewals` inherent in `pallet-bulletin-data-renewal`.
-const PALLET_DATA_RENEWAL = 42;
-const CALL_PROCESS_PENDING_RENEWALS = 4;
+// The mandatory drain inherent. Indices come from metadata, not hardcoded: a
+// `construct_runtime` change would otherwise point them at some other call.
+const PALLET_NAME = "DataRenewal";
+const CALL_NAME = "process_pending_renewals";
 
 // ─── PAPI Typed Codecs ────────────────────────────────────────────────────
 //
@@ -135,6 +146,39 @@ function bareInherentExtrinsic(palletIndex, callIndex) {
   return "0x" + toHex(prefixed);
 }
 
+/** Resolve `pallet.call` to its `(palletIndex, callIndex)` from runtime metadata. */
+async function resolveCallIndices(provider, palletName, callName) {
+  const meta = unifyMetadata(decAnyMetadata(await provider.send("state_getMetadata", [], false)));
+
+  const pallet = meta.pallets.find((p) => p.name === palletName);
+  if (!pallet) {
+    throw new Error(
+      `Pallet ${palletName} is absent from the runtime metadata (found: ${meta.pallets
+        .map((p) => p.name)
+        .join(", ")})`,
+    );
+  }
+  if (pallet.calls === undefined) {
+    throw new Error(`Pallet ${palletName} declares no calls`);
+  }
+
+  const callsType = meta.lookup.find((entry) => entry.id === pallet.calls.type);
+  if (callsType?.def.tag !== "variant") {
+    throw new Error(`Call type ${pallet.calls.type} of ${palletName} is not a variant`);
+  }
+
+  const variant = callsType.def.value.find((v) => v.name === callName);
+  if (!variant) {
+    throw new Error(
+      `${palletName} has no call ${callName} (found: ${callsType.def.value
+        .map((v) => v.name)
+        .join(", ")})`,
+    );
+  }
+
+  return { palletIndex: pallet.index, callIndex: variant.index };
+}
+
 // ─── Logging helpers ──────────────────────────────────────────────────────
 
 function logHeader(text) {
@@ -154,15 +198,16 @@ async function main() {
   console.log(`Endpoint: ${endpoint}`);
 
   logStep(0, "Setting up Chopsticks fork...");
-  const config = { endpoint };
+  const chain = await setup({ endpoint });
   if (runtimeWasm) {
     console.log(`  Runtime WASM override: ${runtimeWasm}`);
-    config.wasmOverride = runtimeWasm;
+    // `setup` takes no override option; `setWasm` writes `:code` and drops the
+    // cached metadata, so the fork reports and executes the local runtime.
+    chain.head.setWasm(`0x${toHex(new Uint8Array(readFileSync(runtimeWasm)))}`);
   } else {
     console.log("  No WASM override — using live chain runtime.");
     console.log("  Pass WASM path as 3rd arg to use local runtime with DataRenewal support.");
   }
-  const chain = await setup(config);
   await chain.api.isReady;
   const provider = new ChopsticksProvider(chain);
   await provider.isReady;
@@ -307,7 +352,9 @@ async function main() {
   // ── Expiry block: on_initialize queues PendingAutoRenewals, and the injected
   //    process_pending_renewals inherent drains it in the same block. ──
   logStep(7, "Building the expiry block with the process_pending_renewals inherent injected...");
-  const inherent = bareInherentExtrinsic(PALLET_DATA_RENEWAL, CALL_PROCESS_PENDING_RENEWALS);
+  const { palletIndex, callIndex } = await resolveCallIndices(provider, PALLET_NAME, CALL_NAME);
+  logOk(`${PALLET_NAME}.${CALL_NAME} resolved from metadata to (${palletIndex}, ${callIndex})`);
+  const inherent = bareInherentExtrinsic(palletIndex, callIndex);
   console.log(`  Injecting inherent extrinsic: ${inherent}`);
   await provider.send("dev_setStorage", [[[proofCheckedKey, "0x01"]]], false);
   await provider.send("dev_newBlock", [{ transactions: [inherent] }], false);

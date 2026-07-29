@@ -153,6 +153,12 @@ jobs:
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
+      # Chopsticks cannot synthesize custom pallet inherents
+      # (AcalaNetwork/chopsticks#1037), so the drain inherent is injected by hand.
+      - name: Test chopsticks auto-renew inherent
+        working-directory: examples
+        run: just run-test-auto-renew-chopsticks "ws://127.0.0.1:10000" "none" "true"
+
       # SDK Client Tests
       - name: Test Rust SDK
         working-directory: examples
