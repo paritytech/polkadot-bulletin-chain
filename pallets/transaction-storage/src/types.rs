@@ -15,13 +15,11 @@
 
 //! Type definitions for the transaction storage pallet.
 
-pub use bulletin_transaction_storage_primitives::{
-	assert_distinct_tag_prefixes, TransactionRef, ValidTransactionParams,
-};
 use bulletin_transaction_storage_primitives::{
 	cids::{CidCodec, HashingAlgorithm},
 	ContentHash,
 };
+pub use bulletin_transaction_storage_primitives::{TransactionRef, ValidTransactionParams};
 use codec::{Decode, Encode, MaxEncodedLen};
 #[cfg(feature = "runtime-benchmarks")]
 use polkadot_sdk_frame::deps::frame_benchmarking;

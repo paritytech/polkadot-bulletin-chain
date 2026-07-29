@@ -78,21 +78,6 @@ pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
 /// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
-/// Pool tag prefixes for the [`Config`] families. Runtimes take these instead of
-/// hand-copying the strings; only the pricing beside them is a per-chain choice.
-pub const STORE_TAG_PREFIX: &str = "TransactionStorageStore";
-/// See [`STORE_TAG_PREFIX`].
-pub const RENEW_TAG_PREFIX: &str = "TransactionStorageRenew";
-/// See [`STORE_TAG_PREFIX`].
-pub const REMOVE_EXPIRED_ACCOUNT_AUTHORIZATION_TAG_PREFIX: &str =
-	"TransactionStorageRemoveExpiredAccountAuthorization";
-/// See [`STORE_TAG_PREFIX`].
-pub const REMOVE_EXPIRED_PREIMAGE_AUTHORIZATION_TAG_PREFIX: &str =
-	"TransactionStorageRemoveExpiredPreimageAuthorization";
-/// See [`STORE_TAG_PREFIX`].
-pub const REMOVE_EXHAUSTED_AUTHORIZER_TAG_PREFIX: &str =
-	"TransactionStorageRemoveExhaustedAuthorizer";
-
 /// Encountered an impossible situation, implies a bug.
 pub const IMPOSSIBLE: InvalidTransaction = InvalidTransaction::Custom(0);
 /// Data size is not in the allowed range.
@@ -197,7 +182,7 @@ pub mod pallet {
 		/// Pool params for `renew`, `force_renew` and `enable_auto_renew`. Separate from
 		/// `store` so the two do not dedup against each other.
 		type RenewTxParams: Get<ValidTransactionParams>;
-		/// Pool params for `authorize_*` and `refresh_*`. Untagged, so `tag_prefix` is unused.
+		/// Pool params for `authorize_*` and `refresh_*`, which validate untagged.
 		type AuthorizeTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_account_authorization`. The three cleanup calls get
 		/// their own items because two provide `who` and a `ContentHash` encodes like an
@@ -2152,13 +2137,14 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Panics unless this pallet's tagged families and `extra` use distinct tag prefixes.
-		/// `extra` lets dependent pallets fold in their own. `AuthorizeTxParams` is untagged.
+		/// Panics unless this pallet's families and `extra` use distinct tag prefixes. `extra`
+		/// lets dependent pallets fold in their own.
 		pub fn assert_pool_families_distinct(extra: &[(&str, ValidTransactionParams)]) {
 			let mut all = extra.to_vec();
 			all.extend([
 				("StoreTxParams", T::StoreTxParams::get()),
 				("RenewTxParams", T::RenewTxParams::get()),
+				("AuthorizeTxParams", T::AuthorizeTxParams::get()),
 				(
 					"RemoveExpiredAccountAuthorizationTxParams",
 					T::RemoveExpiredAccountAuthorizationTxParams::get(),
@@ -2169,7 +2155,7 @@ pub mod pallet {
 				),
 				("RemoveExhaustedAuthorizerTxParams", T::RemoveExhaustedAuthorizerTxParams::get()),
 			]);
-			assert_distinct_tag_prefixes(&all);
+			bulletin_transaction_storage_primitives::assert_distinct_tag_prefixes(&all);
 		}
 
 		/// Keeps a `store` and a `force_renew` of the same content hash on separate pool
@@ -2636,10 +2622,12 @@ impl<T: Config> Pallet<T> {
 		let expected = renewed_sum.saturating_add(prepaid_sum);
 
 		// Live state drifts both ways through history this pallet did not create: pre-counter
-		// `Renew` entries were never charged, and Root dropping a prepaid registration never
-		// decrements. Erroring would fail the check-migration jobs on any such chain, so the
-		// equality holds only where state is built from nothing. The cap below is the bound
-		// that matters — `used` gates admission, so under-counting is the dangerous side.
+		// `Renew` entries were never charged (under-count), and Root dropping a prepaid
+		// registration never decrements (over-count). Erroring would fail the check-migration
+		// jobs on any such chain, so the equality holds only where state is built from nothing.
+		// Note the cap check below is not a backstop for the under-count: it compares the same
+		// `used` that drifted. Retiring the two causes — decrementing on the Root path, and a
+		// migration that recomputes `used` — is what would let this be unconditional.
 		if used != expected {
 			if cfg!(test) {
 				return Err(PERMANENT_USED_DRIFT.into());

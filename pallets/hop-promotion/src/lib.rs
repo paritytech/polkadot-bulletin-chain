@@ -70,9 +70,7 @@ pub mod pallet {
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_bulletin_transaction_storage::{
-		Config as TxStorageConfig, WeightInfo as _, BAD_DATA_SIZE,
-	};
+	use pallet_bulletin_transaction_storage::{WeightInfo as _, BAD_DATA_SIZE};
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner,
@@ -104,7 +102,7 @@ pub mod pallet {
 		fn integrity_test() {
 			// Promotion must not outbid the `store` traffic it shares blockspace with.
 			let promote = T::PromoteTxParams::get().priority;
-			let store = <T as TxStorageConfig>::StoreTxParams::get().priority;
+			let store = T::StoreTxParams::get().priority;
 			assert!(
 				promote < store,
 				"promote priority ({promote}) must be strictly below store priority ({store})",

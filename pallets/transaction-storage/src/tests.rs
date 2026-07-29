@@ -1659,7 +1659,7 @@ fn try_state_detects_permanent_used_mismatch_with_transactions() {
 		PermanentStorageUsed::put(2000);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
+			crate::PERMANENT_USED_DRIFT
 		);
 
 		// Under-count: the direction that lets renewed bytes past the cap.
@@ -1680,7 +1680,7 @@ fn try_state_detects_permanent_used_mismatch_with_transactions() {
 		);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
+			crate::PERMANENT_USED_DRIFT
 		);
 	});
 }
