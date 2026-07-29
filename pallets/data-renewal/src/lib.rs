@@ -182,7 +182,7 @@ pub mod pallet {
 		_,
 		BoundedVec<
 			(ContentHash, TransactionInfoFor<T>, RenewalData<T::AccountId>),
-			<T as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions,
+			T::MaxBlockTransactions,
 		>,
 		ValueQuery,
 	>;
@@ -403,7 +403,7 @@ pub mod pallet {
 		#[pallet::call_index(4)]
 		#[pallet::weight((
 			<T as Config>::WeightInfo::process_pending_renewals(
-				<T as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions::get(),
+				T::MaxBlockTransactions::get(),
 			),
 			DispatchClass::Mandatory,
 		))]
@@ -494,10 +494,7 @@ impl<T: Config> Pallet<T> {
 	/// `MaxBlockTransactions`. Used by both the manual flow ([`Self::do_renew`])
 	/// and the batched drain ([`Self::do_process_auto_renewals`]).
 	pub(crate) fn do_renew_in_memory(
-		transactions: &mut BoundedVec<
-			TransactionInfoFor<T>,
-			<T as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions,
-		>,
+		transactions: &mut BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions>,
 		info: &TransactionInfoFor<T>,
 		extrinsic_index: u32,
 	) -> Option<u32> {
@@ -875,8 +872,7 @@ pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 
 	let block_weights = <T as frame_system::Config>::BlockWeights::get();
 	let base_extrinsic = block_weights.get(DispatchClass::Normal).base_extrinsic;
-	let max_block_txs =
-		<T as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions::get();
+	let max_block_txs = T::MaxBlockTransactions::get();
 	let effective_normal =
 		pallet_bulletin_transaction_storage::effective_normal_budget::<T>(collator_pov_percent);
 
