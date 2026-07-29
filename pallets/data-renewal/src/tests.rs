@@ -3087,22 +3087,21 @@ fn try_state_holds_across_renew_lifecycle() {
 	});
 }
 
-/// A counter above the on-chain sums is caught; a counter below them is tolerated, which
-/// is the state of a chain that renewed before the counter existed — those entries were
-/// never charged and the counter catches up as they age out.
+/// Both drift directions are caught on clean state; a live chain only logs. See `do_try_state`.
 #[test]
 fn try_state_detects_counter_drift() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 
-		// Counter above the (empty) on-chain sums.
+		// Counter above the (empty) on-chain sums: over-count, conservative but still wrong.
 		crate::PermanentStorageUsed::<Test>::put(2000);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed exceeds Σ renewed sizes + Σ paid auto-renewal sizes",
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
 
-		// Counter below the on-chain renewed sum: uncharged legacy entries, allowed.
+		// Counter below the on-chain renewed sum: under-count, the direction that lets real
+		// renewed bytes past `MaxPermanentStorageSize`.
 		crate::PermanentStorageUsed::<Test>::put(0);
 		let renewed = TransactionInfo {
 			chunk_root: Default::default(),
@@ -3118,7 +3117,10 @@ fn try_state_detects_counter_drift() {
 			1u64,
 			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renewed]).unwrap(),
 		);
-		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+		assert_err!(
+			DataRenewal::do_try_state(System::block_number()),
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+		);
 	});
 }
 

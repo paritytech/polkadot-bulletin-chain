@@ -1943,17 +1943,14 @@ impl<T: Config> Pallet<T> {
 ///
 /// - `collator_pov_percent`: for parachains, the collator-side PoV cap (e.g. `Some(85)`).
 ///   Solochains should pass `None`.
-/// - `extra_mandatory`: mandatory weight other pallets add to the worst-case expiry block —
-///   `Weight::zero()` for a store-only runtime, otherwise the consumer pallet's inherent (e.g.
-///   `process_pending_renewals(MaxBlockTransactions)`). Only the runtime sees both pallets.
+/// - `extra_mandatory`: mandatory weight other pallets add to the same block; `Weight::zero()` for
+///   a store-only runtime. Only the runtime sees both pallets.
 ///
 /// # Panics
 ///
 /// Panics with a descriptive message if any check fails.
-/// The normal-class budget actually available to extrinsics: `max_total` minus FRAME's
-/// `on_initialize` reservation, with the proof size capped at the collator's PoV limit for
-/// parachains. Shared with the consumer pallets' own weight-sanity checks, which price their
-/// dispatchables against the same budget.
+/// Normal-class budget left for extrinsics: `max_total` minus FRAME's `on_initialize`
+/// reservation, proof size capped at the collator's PoV limit. Shared with consumer pallets.
 #[cfg(any(test, feature = "std"))]
 pub fn effective_normal_budget<T: Config>(
 	collator_pov_percent: Option<u64>,

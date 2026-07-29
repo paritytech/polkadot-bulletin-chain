@@ -155,8 +155,8 @@ pub mod pallet {
 		/// cycle and cannot be disabled by the owner until the cycle fires and consumes
 		/// the prepayment. Root can still disable for governance cleanup.
 		CannotDisablePrepaidAutoRenewal,
-		/// Data size of the renewed entry is not in the allowed range. Appended last to keep
-		/// the preceding variants' indices stable.
+		/// Data size of the renewed entry is not in the allowed range. Appended last: the
+		/// earlier indices are wire-visible.
 		BadDataSize,
 	}
 
@@ -799,14 +799,28 @@ impl<T: Config> Pallet<T> {
 			prepaid_sum = prepaid_sum.saturating_add(info.size as u64);
 		}
 
-		// Upper bound, not equality: a chain that renewed before this counter existed carries
-		// `Renew` entries it never charged, so the counter lags until they age out of the
-		// retention window (`handle_obsolete` saturates at 0). Over-counting is the direction
-		// that would breach `MaxPermanentStorageSize`, so only that is an error.
+		let expected = renewed_sum.saturating_add(prepaid_sum);
+
+		// `used` gates admission, so under-counting is what lets renewed bytes past the cap;
+		// over-counting only rejects early. Live state drifts both ways through history this
+		// pallet did not create — pre-counter `Renew` entries were never charged, and Root
+		// dropping a prepaid registration never decrements — so the equality is enforced only
+		// where state is built from nothing.
+		#[cfg(test)]
 		ensure!(
-			used <= renewed_sum.saturating_add(prepaid_sum),
-			"PermanentStorageUsed exceeds Σ renewed sizes + Σ paid auto-renewal sizes",
+			used == expected,
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
+		#[cfg(all(feature = "try-runtime", not(test)))]
+		if used != expected {
+			tracing::warn!(
+				target: LOG_TARGET,
+				used,
+				expected,
+				"PermanentStorageUsed drifts from Σ renewed + Σ paid auto-renewal sizes",
+			);
+		}
+
 		ensure!(
 			used <= T::MaxPermanentStorageSize::get(),
 			"PermanentStorageUsed exceeds MaxPermanentStorageSize",
@@ -851,17 +865,9 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, EntryKind> for Pallet<
 	}
 }
 
-/// Sanity-check this pallet's weights against the block limits, alongside
-/// [`pallet_bulletin_transaction_storage::ensure_weight_sanity`] — which owns the checks for
-/// `store` and for the mandatory floor, and takes this pallet's inherent weight as its
-/// `extra_mandatory` argument.
-///
-/// `collator_pov_percent` is the collator-side PoV cap (e.g. `Some(85)` for a parachain);
-/// solochains pass `None`.
-///
-/// # Panics
-///
-/// Panics with a descriptive message if any check fails.
+/// Panics unless this pallet's weights fit the block limits. Runs alongside
+/// [`pallet_bulletin_transaction_storage::ensure_weight_sanity`], which owns the mandatory
+/// floor. `collator_pov_percent` is the collator PoV cap; solochains pass `None`.
 #[cfg(any(test, feature = "std"))]
 pub fn ensure_weight_sanity<T: Config>(collator_pov_percent: Option<u64>) {
 	use frame_support::dispatch::DispatchClass;
@@ -920,5 +926,17 @@ impl<T: Config> txs_benchmarking::BenchmarkHelper<T> for RenewalBenchmarkHelper 
 
 	fn worst_case_entry_meta() -> T::EntryMeta {
 		EntryKind::Renew
+	}
+
+	fn register_worst_case_entry(content_hash: ContentHash) {
+		// Recurring and awaiting its cycle, so the lookup hits and the entry queues.
+		Renewals::<T>::insert(
+			content_hash,
+			RenewalData {
+				account: frame_benchmarking::account("renewal_owner", 0, 0),
+				recurring: true,
+				paid: false,
+			},
+		);
 	}
 }

@@ -1025,9 +1025,7 @@ fn transaction_storage_weight_sanity() {
 	// Collator-side PoV cap: default 85% of max_pov_size.
 	// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
 	const POV_PERCENT: Option<u64> = Some(85);
-	// The renewal drain is mandatory on the same worst-case expiry block as the storage
-	// pallet's own mandatory work, so it belongs in that pallet's floor check. Only the
-	// runtime sees both pallets.
+	// Mandatory on the same worst-case block as the storage pallet's own mandatory work.
 	let renewal_drain =
 		<Runtime as pallet_bulletin_data_renewal::Config>::WeightInfo::process_pending_renewals(
 			<Runtime as TxStorageConfig>::MaxBlockTransactions::get(),

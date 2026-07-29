@@ -118,9 +118,9 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type EntryMeta = crate::EntryKind;
 	type AuthorizationExtra = crate::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;
+	// The runtimes wire this, so the benchmark tests exercise it too.
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper =
-		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper = crate::RenewalBenchmarkHelper;
 }
 
 impl pallet_bulletin_data_renewal::Config for Test {

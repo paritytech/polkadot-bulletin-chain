@@ -44,6 +44,12 @@ pub trait BenchmarkHelper<T: Config> {
 	fn worst_case_entry_meta() -> T::EntryMeta {
 		Default::default()
 	}
+
+	/// Give `content_hash` the consumer-pallet state that makes
+	/// [`Config::OnObsoleteTransactions`] take its most expensive path. Without it the expiry
+	/// sweep is benchmarked with no registration to find, so the lookup and the queueing it
+	/// leads to go uncharged.
+	fn register_worst_case_entry(_content_hash: ContentHash) {}
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
@@ -486,6 +492,7 @@ mod benchmarks {
 				.cloned()
 				.ok_or(BenchmarkError::Stop("first store did not populate BlockTransactions"))?;
 			let chunks_per_tx = template.block_chunks;
+			T::BenchmarkHelper::register_worst_case_entry(template.content_hash);
 
 			let obsolete_block = BlockNumberFor::<T>::from(1u32);
 			BlockTransactions::<T>::mutate(|txns| -> Result<(), BenchmarkError> {
@@ -498,6 +505,7 @@ mod benchmarks {
 					txns.try_push(next)
 						.map_err(|_| BenchmarkError::Stop("BlockTransactions overflow"))?;
 					TransactionByContentHash::<T>::insert(unique_hash, (obsolete_block, i));
+					T::BenchmarkHelper::register_worst_case_entry(unique_hash);
 				}
 				Ok(())
 			})?;
