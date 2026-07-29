@@ -24,7 +24,7 @@ use super::{
 	extension::ValidateStorageCalls,
 	mock::{
 		new_test_ext, run_to_block, MaxPermanentStorageSize, RuntimeCall, RuntimeEvent,
-		RuntimeOrigin, StoreRenewPriority, System, Test, TransactionStorage,
+		RuntimeOrigin, StoreTxParams, System, Test, TransactionStorage,
 	},
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
@@ -1496,16 +1496,37 @@ fn try_state_passes_during_enable_auto_renew_prepayment_window() {
 	});
 }
 
-/// `PermanentStorageUsed` desync from `Σ size of renewed Transactions entries` is caught.
+/// Both drift directions are caught on clean state; a live chain only logs.
 #[test]
 fn try_state_detects_permanent_used_mismatch_with_transactions() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		// Bump the counter without writing any matching renewed `Transactions` entry.
+		// Over-count: conservative, but still wrong.
 		PermanentStorageUsed::put(2000);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
+			crate::PERMANENT_USED_DRIFT
+		);
+
+		// Under-count: the direction that lets renewed bytes past the cap.
+		PermanentStorageUsed::put(0);
+		let renewed = TransactionInfo {
+			chunk_root: Default::default(),
+			content_hash: [1u8; 32],
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 1000,
+			extrinsic_index: u32::MAX,
+			block_chunks: num_chunks(1000),
+			kind: TransactionKind::Renew,
+		};
+		Transactions::insert(
+			1u64,
+			BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap(),
+		);
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			crate::PERMANENT_USED_DRIFT
 		);
 	});
 }
@@ -1628,7 +1649,7 @@ fn authorize_storage_extension_transforms_origin() {
 		let (valid_tx, val, transformed_origin) = result.unwrap();
 
 		// Verify the transaction is valid with correct priority
-		assert_eq!(valid_tx.priority, StoreRenewPriority::get());
+		assert_eq!(valid_tx.priority, StoreTxParams::get().priority);
 
 		// Verify val contains the signer
 		assert_eq!(val, Some(caller));

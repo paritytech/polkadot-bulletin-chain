@@ -17,7 +17,8 @@
 
 use crate::{
 	self as pallet_bulletin_transaction_storage, AsAuthorizer, EnsureAllowedAuthorizers,
-	TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	TransactionStorageProof, ValidTransactionParams, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
@@ -29,6 +30,10 @@ use polkadot_sdk_frame::{
 };
 
 type Block = MockBlock<Test>;
+
+/// Pool pricing for every family; none of these tests depend on the relative values.
+const PRIORITY: TransactionPriority = TransactionPriority::MAX;
+const LONGEVITY: TransactionLongevity = 10;
 
 // Configure a mock runtime to test the pallet.
 #[frame_support::runtime]
@@ -79,10 +84,18 @@ parameter_types! {
 	/// How far ahead a `_window` extrinsic may schedule a slot to start.
 	pub const MaxStartsAtFuture: u32 = 100;
 	pub const MaxAuthorizationSlots: u32 = 8;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
+	pub const RenewTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Renew", PRIORITY, LONGEVITY);
+	pub const AuthorizeTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredAccountAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
 	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 	/// Storage-backed mock relay-chain block number. Tests bump this with
 	/// [`set_relay_now`]; the pallet reads it via [`MockRelayBlockNumberProvider`].
@@ -130,10 +143,12 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type RenewTxParams = RenewTxParams;
+	type AuthorizeTxParams = AuthorizeTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
 }
