@@ -134,6 +134,7 @@ pub mod pallet {
 		/// `force_renew` and `enable_auto_renew` per account and content hash is queued at
 		/// a time. Preimage `force_renew` tags on the content hash alone, so it dedups
 		/// separately.
+		#[pallet::constant]
 		type RenewTxParams: Get<ValidTransactionParams>;
 	}
 
