@@ -254,6 +254,15 @@ function isAncientBirthBlockError(err: unknown): boolean {
   return e?.type === "Invalid" && e?.value?.type === "AncientBirthBlock"
 }
 
+// Same shape-matching as isAncientBirthBlockError; only Invalid/Payment
+// is safe to retry here (see storeWithPreimageAuth).
+function isPaymentInvalidError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const e = (err as { error?: { type?: unknown; value?: { type?: unknown } } })
+    .error
+  return e?.type === "Invalid" && e?.value?.type === "Payment"
+}
+
 /**
  * Map a raw PAPI transaction status event to SDK progress events.
  *
@@ -1499,7 +1508,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     try {
       const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
       const bareTx = await tx.getBareTx()
-      const finalized = await this.submit(bareTx)
+      let finalized: Awaited<ReturnType<SubmitFn>>
+      try {
+        finalized = await this.submit(bareTx)
+      } catch (err) {
+        // Payment here means "no authorization", which is transient when
+        // the authorization was reorg-retracted and re-included: PAPI
+        // validated the tx on the retracted fork, settled it as invalid
+        // and never re-checks, so the first submit cannot self-recover.
+        // Unlike the era-expiry retry, the original tx could still land,
+        // but resubmitting the identical bare bytes keeps the same tx
+        // hash, so inclusion stays idempotent.
+        if (!isPaymentInvalidError(err)) throw err
+        finalized = await this.submit(bareTx)
+      }
 
       if (!finalized.ok) {
         throw new BulletinError(
