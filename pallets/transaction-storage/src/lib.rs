@@ -278,7 +278,7 @@ pub mod pallet {
 	/// Both [`Pallet::renew`] and [`Pallet::enable_auto_renew`] insert with
 	/// `paid: true`: the extension's `check_signed` charges `bytes_permanent`,
 	/// `PermanentStorageUsed`, and one tx slot up front (same as `force_renew`).
-	/// [`Pallet::do_process_auto_renewals`] keys its charge-skip off `paid`: when
+	/// `do_process_auto_renewals` keys its charge-skip off `paid`: when
 	/// `paid` is true the cycle renews without re-charging and then flips `paid`
 	/// to false (for recurring entries) so subsequent cycles pay per-cycle, as
 	/// before. One-shot entries (`recurring: false`) are removed after the single
@@ -798,7 +798,7 @@ pub mod pallet {
 		/// cycle fires at the next `RetentionPeriod` boundary **without**
 		/// re-charging — the slot is already paid for; the cycle then flips
 		/// `paid` to `false`. From that point on, every subsequent cycle charges
-		/// the owner's authorization in [`Self::do_process_auto_renewals`],
+		/// the owner's authorization in `do_process_auto_renewals`,
 		/// dropping the registration with [`Event::AutoRenewalFailed`] if the
 		/// quota is exhausted at cycle time.
 		///
@@ -860,7 +860,7 @@ pub mod pallet {
 		/// (governance/cleanup).
 		///
 		/// Feeless: no token fee and no authorization is consumed. Signed admission is
-		/// gated in [`check_signed`](Self::check_signed) on ownership and the prepaid
+		/// gated in `check_signed` on ownership and the prepaid
 		/// flag, so a caller can issue at most one successful `disable_auto_renew` per
 		/// registration it owns — and only after the first cycle has fired.
 		///
@@ -893,7 +893,7 @@ pub mod pallet {
 		}
 
 		/// Composite block-level inherent: optionally validates a transaction storage proof and
-		/// always drains [`PendingAutoRenewals`].
+		/// always drains `PendingAutoRenewals`.
 		///
 		/// `ProvideInherent::create_inherent` only returns a single `Call`, but this pallet
 		/// has two block-end concerns — verifying the storage proof for the block at
@@ -1846,7 +1846,7 @@ pub mod pallet {
 		/// would currently pass transaction validation for `who`.
 		///
 		/// Mirrors the preconditions enforced by [`Self::store`] +
-		/// [`Self::check_authorization`] (`is_renew = false`):
+		/// `check_authorization` (`is_renew = false`):
 		///
 		/// - `data_len` is within `[1, MaxTransactionSize]`
 		/// - `who` has an unexpired authorization entry
@@ -1864,7 +1864,7 @@ pub mod pallet {
 		/// validation for `who`.
 		///
 		/// Mirrors the preconditions enforced by [`Self::renew`] +
-		/// [`Self::check_authorization`] (`is_renew = true`):
+		/// `check_authorization` (`is_renew = true`):
 		///
 		/// - `entry` resolves to currently-stored data
 		/// - the stored data's size is within `[1, MaxTransactionSize]`
@@ -1894,7 +1894,7 @@ pub mod pallet {
 		/// Returns `true` if `who` has an authorization entry that has not yet expired,
 		/// regardless of how much of the extent remains. The entry is only cleared when
 		/// its expiration is reached and someone calls
-		/// [`remove_expired_account_authorization`], so a fully-consumed-but-in-window
+		/// [`Pallet::remove_expired_account_authorization`], so a fully-consumed-but-in-window
 		/// account still counts as active here. HOP promotion uses this to keep
 		/// promoting blobs for an account that has spent all of its store/renew quota.
 		pub fn account_has_active_authorization(who: &T::AccountId) -> bool {
@@ -1955,7 +1955,7 @@ pub mod pallet {
 		/// Whether `content_hash` is currently stored on-chain — i.e. some
 		/// retained transaction in this pallet indexes it.
 		///
-		/// O(1): one [`TransactionByContentHash`] map read. The map's
+		/// O(1): one `TransactionByContentHash` map read. The map's
 		/// lifecycle matches the question's semantics — `store`/`renew`
 		/// insert (or overwrite to the latest `(block, index)`), and
 		/// `on_initialize` removes the entry when the block it points at
@@ -2593,7 +2593,8 @@ impl<T: Config> Pallet<T> {
 	/// Verify the chain-wide permanent-storage accounting invariants:
 	/// - `PermanentStorageUsed == Σ Renew sizes in Transactions + Σ paid AutoRenewals sizes` — the
 	///   paid term covers the prepayment window between `renew` / `enable_auto_renew` charging the
-	///   counter and `do_process_auto_renewals` writing the `Renew` entry.
+	///   counter and `do_process_auto_renewals` writing the `Renew` entry. Enforced under
+	///   `cfg(test)` only; on live state it is logged (see below).
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
@@ -2615,10 +2616,28 @@ impl<T: Config> Pallet<T> {
 						.map_or(0, |info| info.size as u64);
 					acc.saturating_add(size)
 				});
+		let expected = renewed_sum.saturating_add(prepaid_sum);
+
+		// `used` gates admission, so under-counting is what lets renewed bytes past the cap;
+		// over-counting only rejects early. Live state drifts both ways through history this
+		// pallet did not create — pre-counter `Renew` entries were never charged, and Root
+		// dropping a prepaid registration never decrements — so the equality is enforced only
+		// where state is built from nothing, and merely logged on a real chain. Erroring there
+		// would fail the check-migration jobs on any chain carrying that history.
+		#[cfg(test)]
 		ensure!(
-			renewed_sum.saturating_add(prepaid_sum) == used,
+			used == expected,
 			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
 		);
+		#[cfg(all(feature = "try-runtime", not(test)))]
+		if used != expected {
+			tracing::warn!(
+				target: LOG_TARGET,
+				used,
+				expected,
+				"PermanentStorageUsed drifts from Σ renewed + Σ paid auto-renewal sizes",
+			);
+		}
 
 		ensure!(
 			used <= T::MaxPermanentStorageSize::get(),

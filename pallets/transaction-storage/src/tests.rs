@@ -1650,13 +1650,37 @@ fn try_state_passes_during_enable_auto_renew_prepayment_window() {
 	});
 }
 
-/// `PermanentStorageUsed` desync from `Σ size of renewed Transactions entries` is caught.
+/// Both drift directions between `PermanentStorageUsed` and `Σ size of renewed
+/// Transactions entries` are caught on clean state; a live chain only logs. See
+/// `check_permanent_storage_accounting`.
 #[test]
 fn try_state_detects_permanent_used_mismatch_with_transactions() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		// Bump the counter without writing any matching renewed `Transactions` entry.
+		// Counter above the (empty) on-chain sums: over-count, conservative but still wrong.
 		PermanentStorageUsed::put(2000);
+		assert_err!(
+			TransactionStorage::do_try_state(System::block_number()),
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
+		);
+
+		// Counter below the on-chain renewed sum: under-count, the direction that lets real
+		// renewed bytes past `MaxPermanentStorageSize`.
+		PermanentStorageUsed::put(0);
+		let renewed = TransactionInfo {
+			chunk_root: Default::default(),
+			content_hash: [1u8; 32],
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size: 1000,
+			extrinsic_index: u32::MAX,
+			block_chunks: num_chunks(1000),
+			kind: TransactionKind::Renew,
+		};
+		Transactions::insert(
+			1u64,
+			BoundedVec::<TransactionInfo, _>::try_from(vec![renewed]).unwrap(),
+		);
 		assert_err!(
 			TransactionStorage::do_try_state(System::block_number()),
 			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes"
