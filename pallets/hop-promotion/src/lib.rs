@@ -94,6 +94,7 @@ pub mod pallet {
 		type WeightInfo: crate::WeightInfo;
 
 		/// Pool params for `promote`. `integrity_test` enforces its priority below `store`'s.
+		#[pallet::constant]
 		type PromoteTxParams: Get<ValidTransactionParams>;
 	}
 

@@ -178,19 +178,25 @@ pub mod pallet {
 		>;
 		/// Pool params for signed and preimage-authorized `store`. One prefix is safe: they
 		/// tag on `(who, content_hash)` and `content_hash` respectively.
+		#[pallet::constant]
 		type StoreTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `renew`, `force_renew` and `enable_auto_renew`. Separate from
 		/// `store` so the two do not dedup against each other.
+		#[pallet::constant]
 		type RenewTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `authorize_*` and `refresh_*`, which validate untagged.
+		#[pallet::constant]
 		type AuthorizeTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_account_authorization`. The three cleanup calls get
 		/// their own items because two provide `who` and a `ContentHash` encodes like an
 		/// `AccountId32`, so they need distinct prefixes despite shared pricing.
+		#[pallet::constant]
 		type RemoveExpiredAccountAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_preimage_authorization`.
+		#[pallet::constant]
 		type RemoveExpiredPreimageAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_exhausted_authorizer`.
+		#[pallet::constant]
 		type RemoveExhaustedAuthorizerTxParams: Get<ValidTransactionParams>;
 		/// Benchmark helper — provides pre-computed proof matching this runtime's config.
 		/// Use [`DefaultCheckProofHelper`](crate::benchmarking::DefaultCheckProofHelper) for

@@ -32,7 +32,7 @@ pub type ContentHash = [u8; 32];
 
 /// A [`ValidTransaction`] minus its `provides` payload. Families that must not evict each
 /// other in the pool need distinct `tag_prefix`es.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Encode, TypeInfo)]
 pub struct ValidTransactionParams {
 	pub tag_prefix: &'static str,
 	pub priority: TransactionPriority,
