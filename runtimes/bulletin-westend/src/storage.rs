@@ -17,6 +17,8 @@ use frame_system::EnsureSignedBy;
 use pallet_bulletin_transaction_storage::{
 	AsAuthorizer, CallInspector, EnsureAllowedAuthorizers, ValidTransactionParams,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	REMOVE_EXHAUSTED_AUTHORIZER_TAG_PREFIX, REMOVE_EXPIRED_ACCOUNT_AUTHORIZATION_TAG_PREFIX,
+	REMOVE_EXPIRED_PREIMAGE_AUTHORIZATION_TAG_PREFIX, RENEW_TAG_PREFIX, STORE_TAG_PREFIX,
 };
 use pallet_xcm::EnsureXcm;
 use sp_keyring::Sr25519Keyring;
@@ -44,18 +46,16 @@ impl SortedMembers<AccountId> for TestAccounts {
 
 parameter_types! {
 	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
-	// Pool params per family. Cleanup sits at `MAX` so it always runs before stores
-	// compete for blockspace; store and renew sit well below it so
-	// `AllowanceBasedPriority` can add its boost without saturating `u64`. Renew prices
-	// separately from store, equal for now. Distinct prefixes keep the two from deduping
-	// against each other.
+	// Cleanup sits at `MAX` so it always runs before stores compete for blockspace. The
+	// rest sit well below it so `AllowanceBasedPriority` can add its boost without
+	// saturating `u64`. Prefixes come from the pallet; only this pricing is per-chain.
 	pub const StoreTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageStore",
+		STORE_TAG_PREFIX,
 		TransactionPriority::MAX / 4,
 		crate::DAYS as TransactionLongevity,
 	);
 	pub const RenewTxParams: ValidTransactionParams = ValidTransactionParams::new(
-		"TransactionStorageRenew",
+		RENEW_TAG_PREFIX,
 		TransactionPriority::MAX / 4,
 		crate::DAYS as TransactionLongevity,
 	);
@@ -66,19 +66,19 @@ parameter_types! {
 	);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
-			"TransactionStorageRemoveExpiredAccountAuthorization",
+			REMOVE_EXPIRED_ACCOUNT_AUTHORIZATION_TAG_PREFIX,
 			TransactionPriority::MAX,
 			crate::DAYS as TransactionLongevity,
 		);
 	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
-			"TransactionStorageRemoveExpiredPreimageAuthorization",
+			REMOVE_EXPIRED_PREIMAGE_AUTHORIZATION_TAG_PREFIX,
 			TransactionPriority::MAX,
 			crate::DAYS as TransactionLongevity,
 		);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
-			"TransactionStorageRemoveExhaustedAuthorizer",
+			REMOVE_EXHAUSTED_AUTHORIZER_TAG_PREFIX,
 			TransactionPriority::MAX,
 			crate::DAYS as TransactionLongevity,
 		);

@@ -78,6 +78,21 @@ pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
 /// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
 
+/// Pool tag prefixes for the [`Config`] families. Runtimes take these instead of
+/// hand-copying the strings; only the pricing beside them is a per-chain choice.
+pub const STORE_TAG_PREFIX: &str = "TransactionStorageStore";
+/// See [`STORE_TAG_PREFIX`].
+pub const RENEW_TAG_PREFIX: &str = "TransactionStorageRenew";
+/// See [`STORE_TAG_PREFIX`].
+pub const REMOVE_EXPIRED_ACCOUNT_AUTHORIZATION_TAG_PREFIX: &str =
+	"TransactionStorageRemoveExpiredAccountAuthorization";
+/// See [`STORE_TAG_PREFIX`].
+pub const REMOVE_EXPIRED_PREIMAGE_AUTHORIZATION_TAG_PREFIX: &str =
+	"TransactionStorageRemoveExpiredPreimageAuthorization";
+/// See [`STORE_TAG_PREFIX`].
+pub const REMOVE_EXHAUSTED_AUTHORIZER_TAG_PREFIX: &str =
+	"TransactionStorageRemoveExhaustedAuthorizer";
+
 /// Encountered an impossible situation, implies a bug.
 pub const IMPOSSIBLE: InvalidTransaction = InvalidTransaction::Custom(0);
 /// Data size is not in the allowed range.
@@ -176,18 +191,17 @@ pub mod pallet {
 			Self::RuntimeOrigin,
 			Success = Option<AuthorizationOrigin<Self::AccountId, BlockNumberFor<Self>>>,
 		>;
-		/// Pool params for signed and preimage-authorized `store`. One prefix is safe
-		/// because they tag on `(who, content_hash)` and `content_hash` respectively.
+		/// Pool params for signed and preimage-authorized `store`. One prefix is safe: they
+		/// tag on `(who, content_hash)` and `content_hash` respectively.
 		type StoreTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `renew`, `force_renew` and `enable_auto_renew`. Separate from
-		/// `store` so the two families neither share pricing nor dedup against each other.
+		/// `store` so the two do not dedup against each other.
 		type RenewTxParams: Get<ValidTransactionParams>;
-		/// Pool params for `authorize_*` and `refresh_*`.
+		/// Pool params for `authorize_*` and `refresh_*`. Untagged, so `tag_prefix` is unused.
 		type AuthorizeTxParams: Get<ValidTransactionParams>;
-		/// Pool params for `remove_expired_account_authorization`. Separate items for the
-		/// three cleanup calls because they share pricing but need distinct prefixes: two
-		/// provide `who`, and a `ContentHash` encodes like an `AccountId32`. Enforced by
-		/// `integrity_test`.
+		/// Pool params for `remove_expired_account_authorization`. The three cleanup calls get
+		/// their own items because two provide `who` and a `ContentHash` encodes like an
+		/// `AccountId32`, so they need distinct prefixes despite shared pricing.
 		type RemoveExpiredAccountAuthorizationTxParams: Get<ValidTransactionParams>;
 		/// Pool params for `remove_expired_preimage_authorization`.
 		type RemoveExpiredPreimageAuthorizationTxParams: Get<ValidTransactionParams>;
@@ -485,7 +499,7 @@ pub mod pallet {
 				!T::AuthorizationPeriod::get().is_zero(),
 				"AuthorizationPeriod must be greater than zero"
 			);
-			Self::assert_tag_prefixes_distinct(&[]);
+			Self::assert_pool_families_distinct(&[]);
 		}
 	}
 
@@ -2138,9 +2152,9 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Panics unless this pallet's pool families and `extra` all use distinct tag
-		/// prefixes. `extra` lets dependent pallets fold their own families into the check.
-		pub fn assert_tag_prefixes_distinct(extra: &[(&'static str, ValidTransactionParams)]) {
+		/// Panics unless this pallet's tagged families and `extra` use distinct tag prefixes.
+		/// `extra` lets dependent pallets fold in their own. `AuthorizeTxParams` is untagged.
+		pub fn assert_pool_families_distinct(extra: &[(&str, ValidTransactionParams)]) {
 			let mut all = extra.to_vec();
 			all.extend([
 				("StoreTxParams", T::StoreTxParams::get()),
@@ -2158,9 +2172,8 @@ pub mod pallet {
 			assert_distinct_tag_prefixes(&all);
 		}
 
-		/// Pool params for the store/renew family `is_renew` selects. Distinct prefixes
-		/// keep a `store` and a `force_renew` of the same content hash from deduping
-		/// against each other in the pool.
+		/// Keeps a `store` and a `force_renew` of the same content hash on separate pool
+		/// prefixes, so neither evicts the other.
 		fn store_renew_tx_params(is_renew: bool) -> ValidTransactionParams {
 			if is_renew {
 				T::RenewTxParams::get()
@@ -2526,6 +2539,10 @@ pub mod pallet {
 pub mod extension;
 
 #[cfg(any(test, feature = "try-runtime"))]
+const PERMANENT_USED_DRIFT: &str =
+	"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes";
+
+#[cfg(any(test, feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {
 	pub(crate) fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
 		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");
@@ -2594,7 +2611,7 @@ impl<T: Config> Pallet<T> {
 	/// - `PermanentStorageUsed == Σ Renew sizes in Transactions + Σ paid AutoRenewals sizes` — the
 	///   paid term covers the prepayment window between `renew` / `enable_auto_renew` charging the
 	///   counter and `do_process_auto_renewals` writing the `Renew` entry. Enforced under
-	///   `cfg(test)` only; on live state it is logged (see below).
+	///   `cfg(test)`; only logged on live state.
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	fn check_permanent_storage_accounting(
 		_n: BlockNumberFor<T>,
@@ -2618,25 +2635,16 @@ impl<T: Config> Pallet<T> {
 				});
 		let expected = renewed_sum.saturating_add(prepaid_sum);
 
-		// `used` gates admission, so under-counting is what lets renewed bytes past the cap;
-		// over-counting only rejects early. Live state drifts both ways through history this
-		// pallet did not create — pre-counter `Renew` entries were never charged, and Root
-		// dropping a prepaid registration never decrements — so the equality is enforced only
-		// where state is built from nothing, and merely logged on a real chain. Erroring there
-		// would fail the check-migration jobs on any chain carrying that history.
-		#[cfg(test)]
-		ensure!(
-			used == expected,
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
-		);
-		#[cfg(all(feature = "try-runtime", not(test)))]
+		// Live state drifts both ways through history this pallet did not create: pre-counter
+		// `Renew` entries were never charged, and Root dropping a prepaid registration never
+		// decrements. Erroring would fail the check-migration jobs on any such chain, so the
+		// equality holds only where state is built from nothing. The cap below is the bound
+		// that matters — `used` gates admission, so under-counting is the dangerous side.
 		if used != expected {
-			tracing::warn!(
-				target: LOG_TARGET,
-				used,
-				expected,
-				"PermanentStorageUsed drifts from Σ renewed + Σ paid auto-renewal sizes",
-			);
+			if cfg!(test) {
+				return Err(PERMANENT_USED_DRIFT.into());
+			}
+			tracing::warn!(target: LOG_TARGET, used, expected, "{PERMANENT_USED_DRIFT}");
 		}
 
 		ensure!(

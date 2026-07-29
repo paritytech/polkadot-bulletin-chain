@@ -82,7 +82,7 @@ parameter_types! {
 		ValidTransactionParams::new("Store", TransactionPriority::MAX, 10);
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);
-	// Never exercised here; only their prefixes matter, which `integrity_test` checks.
+	// Never exercised; only their prefixes matter, for `integrity_test`.
 	pub const RenewTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Renew", TransactionPriority::MAX, 10);
 	pub const AuthorizeTxParams: ValidTransactionParams =

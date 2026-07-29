@@ -70,7 +70,9 @@ pub mod pallet {
 	};
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
-	use pallet_bulletin_transaction_storage::{WeightInfo as _, BAD_DATA_SIZE};
+	use pallet_bulletin_transaction_storage::{
+		Config as TxStorageConfig, WeightInfo as _, BAD_DATA_SIZE,
+	};
 	use sp_runtime::{
 		traits::{IdentifyAccount, Verify},
 		AccountId32, MultiSignature, MultiSigner,
@@ -93,9 +95,7 @@ pub mod pallet {
 		/// Weight information for this pallet.
 		type WeightInfo: crate::WeightInfo;
 
-		/// Pool params for `promote`. Its priority must stay below the `store` priority —
-		/// promotion only fills otherwise-unused blockspace — which `integrity_test`
-		/// enforces.
+		/// Pool params for `promote`. `integrity_test` enforces its priority below `store`'s.
 		type PromoteTxParams: Get<ValidTransactionParams>;
 	}
 
@@ -104,16 +104,14 @@ pub mod pallet {
 		fn integrity_test() {
 			// Promotion must not outbid the `store` traffic it shares blockspace with.
 			let promote = T::PromoteTxParams::get().priority;
-			let store =
-				<T as pallet_bulletin_transaction_storage::Config>::StoreTxParams::get().priority;
+			let store = <T as TxStorageConfig>::StoreTxParams::get().priority;
 			assert!(
 				promote < store,
 				"promote priority ({promote}) must be strictly below store priority ({store})",
 			);
 
-			// `promote` tags on the bare data hash, as do preimage `store` and the
-			// preimage-authorization cleanup.
-			pallet_bulletin_transaction_storage::Pallet::<T>::assert_tag_prefixes_distinct(&[(
+			// `promote` tags on the bare data hash, as do preimage `store` and cleanup.
+			pallet_bulletin_transaction_storage::Pallet::<T>::assert_pool_families_distinct(&[(
 				"PromoteTxParams",
 				T::PromoteTxParams::get(),
 			)]);
@@ -192,9 +190,8 @@ pub mod pallet {
 			}
 
 			Ok((
-				// `propagate: false` is a property of the call, not a runtime knob:
-				// `promote` is rejected for `TransactionSource::External`, so gossiping it
-				// is pointless.
+				// Not a runtime knob: `promote` is rejected for `TransactionSource::External`,
+				// so gossiping it is pointless.
 				ValidTransaction {
 					propagate: false,
 					..T::PromoteTxParams::get().provides(data_hash)

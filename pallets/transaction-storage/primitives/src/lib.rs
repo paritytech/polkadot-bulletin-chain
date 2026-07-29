@@ -30,10 +30,8 @@ pub mod cids;
 /// 32-byte hash of a stored blob of data.
 pub type ContentHash = [u8; 32];
 
-/// A [`ValidTransaction`] minus its `provides` payload.
-///
-/// Transactions sharing a `tag_prefix` *and* a `provides` tag conflict, so families that
-/// must not evict each other need distinct prefixes.
+/// A [`ValidTransaction`] minus its `provides` payload. Families that must not evict each
+/// other in the pool need distinct `tag_prefix`es.
 #[derive(Clone, Copy)]
 pub struct ValidTransactionParams {
 	pub tag_prefix: &'static str,
@@ -68,8 +66,7 @@ impl ValidTransactionParams {
 	}
 }
 
-/// Panics if any two of `params` share a `tag_prefix`. Each is named so the panic points at
-/// the runtime's mis-wiring.
+/// Panics if any two of `params` share a `tag_prefix`. Names are for the panic message.
 pub fn assert_distinct_tag_prefixes(params: &[(&str, ValidTransactionParams)]) {
 	for (i, (name, one)) in params.iter().enumerate() {
 		for (other_name, other) in params.iter().skip(i + 1) {
@@ -118,7 +115,7 @@ mod tests {
 
 	const A: ValidTransactionParams = ValidTransactionParams::new("a", 1, 1);
 	const B: ValidTransactionParams = ValidTransactionParams::new("b", 2, 2);
-	// Same prefix as `A`, different pricing: pricing is irrelevant to deduping.
+	// Same prefix, different pricing: only the prefix matters.
 	const A_AGAIN: ValidTransactionParams = ValidTransactionParams::new("a", 3, 3);
 
 	#[test]
