@@ -1358,7 +1358,7 @@ pub mod pallet {
 					return n_actual;
 				},
 			};
-			<BlockTransactions<T>>::mutate(|transactions| {
+			Self::with_block_entries(|entries| {
 				for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 					// `paid = true` means the cycle was already charged at registration
 					// (the one-shot `renew` path and the first cycle after
@@ -1368,7 +1368,7 @@ pub mod pallet {
 					let charged = was_paid ||
 						Self::check_authorization(&scope, tx_info.size, true, true).is_ok();
 					let new_index = if charged {
-						Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
+						entries.reindex(&tx_info, extrinsic_index, TransactionKind::Renew)
 					} else {
 						None
 					};
@@ -1422,45 +1422,21 @@ pub mod pallet {
 			n_actual
 		}
 
-		/// Push a `kind = Renew` entry onto the in-memory accumulator and update
-		/// [`TransactionByContentHash`]. Returns `None` at `MaxBlockTransactions`.
+		/// Single-renewal entry point for the [`force_renew`](Self::force_renew) and
+		/// [`enable_auto_renew`](Self::enable_auto_renew) dispatchables. Auto-renewals go
+		/// through [`Self::do_process_auto_renewals`] instead, which amortizes one
+		/// `BlockTransactions` read/write across the whole drain loop.
 		///
-		/// Called by:
-		/// - [`Self::do_renew`] for the single-renewal manual flow (`force_renew`).
-		/// - [`Self::do_process_auto_renewals`] in a loop, amortizing one [`BlockTransactions`]
-		///   read/write across all pending entries.
-		///
-		/// The hard-cap accounting (per-account `bytes_permanent`, chain-wide
-		/// [`PermanentStorageUsed`]) is performed by [`Self::check_authorization`] —
-		/// invoked by the extension's `pre_dispatch` for the manual flow and by
-		/// [`Self::do_process_auto_renewals`] for the auto flow before this is called.
-		fn do_renew_in_memory(
-			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
-			info: &TransactionInfo,
-			extrinsic_index: u32,
-		) -> Option<u32> {
-			let new_index = Self::push_entry(
-				transactions,
-				TransactionInfo { extrinsic_index, kind: TransactionKind::Renew, ..info.clone() },
-			)?;
-			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
-			Some(new_index)
-		}
-
-		/// Append `entry`, deriving `block_chunks`, and repoint [`TransactionByContentHash`]
-		/// at it. `None` at `MaxBlockTransactions`. Appends without indexing the data —
-		/// private so every path goes through the two callers that own the host call.
-		fn push_entry(
-			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
-			mut entry: TransactionInfo,
-		) -> Option<u32> {
-			entry.block_chunks =
-				TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(entry.size));
-			let content_hash = entry.content_hash;
-			let new_index = transactions.len() as u32;
-			transactions.try_push(entry).ok()?;
-			TransactionByContentHash::<T>::insert(content_hash, (Self::now(), new_index));
-			Some(new_index)
+		/// Hard-cap accounting (per-account `bytes_permanent`, chain-wide
+		/// [`PermanentStorageUsed`]) is enforced by [`Self::check_authorization`] in the
+		/// extension's `pre_dispatch` before this runs.
+		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
+			let extrinsic_index =
+				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
+			Self::with_block_entries(|entries| {
+				entries.reindex(&info, extrinsic_index, TransactionKind::Renew)
+			})
+			.ok_or(Error::<T>::TooManyTransactions)
 		}
 	}
 
@@ -1557,14 +1533,19 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 
-			let index = Self::store_entry(
-				root,
-				data_len,
-				cid.content_hash,
-				hashing,
-				cid_codec,
-				extrinsic_index,
-			)?;
+			let index = Self::with_block_entries(|entries| {
+				entries.store(TransactionInfo {
+					chunk_root: root,
+					size: data_len,
+					content_hash: cid.content_hash,
+					hashing,
+					cid_codec,
+					extrinsic_index,
+					block_chunks: 0,
+					kind: TransactionKind::Store,
+				})
+			})
+			.ok_or(Error::<T>::TooManyTransactions)?;
 
 			Self::deposit_event(Event::Stored {
 				index,
@@ -1575,55 +1556,15 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Single-renewal entry point for the [`force_renew`](Self::force_renew) and
-		/// [`enable_auto_renew`](Self::enable_auto_renew) dispatchables.
-		///
-		/// Wraps [`Self::do_renew_in_memory`] (the centralized renewal mechanics) with a
-		/// [`BlockTransactions`] read/write. Auto-renewals do not go through this wrapper
-		/// — [`Self::do_process_auto_renewals`] amortizes a single read/write across the
-		/// whole drain loop instead.
-		///
-		/// Hard-cap accounting (per-account `bytes_permanent`, chain-wide
-		/// [`PermanentStorageUsed`]) is enforced by [`Self::check_authorization`] in the
-		/// extension's `pre_dispatch` before this runs.
-		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
-			let extrinsic_index =
-				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			<BlockTransactions<T>>::try_mutate(|transactions| {
-				Self::do_renew_in_memory(transactions, &info, extrinsic_index)
-					.ok_or(Error::<T>::TooManyTransactions)
-			})
+		/// Run `f` against this block's entries — one `BlockTransactions` read/write for
+		/// the whole closure, so a batch amortizes a single access.
+		pub fn with_block_entries<R>(f: impl FnOnce(&mut BlockEntries<T>) -> R) -> R {
+			<BlockTransactions<T>>::mutate(|entries| f(&mut BlockEntries { entries }))
 		}
 
-		/// Append a freshly stored entry and index the trailing `size` bytes of extrinsic
-		/// `extrinsic_index` — see the FOOTGUN note on [`Self::do_store`]. The host call runs
-		/// after the runtime mutation and is not rolled back, so nothing fallible may follow.
-		fn store_entry(
-			chunk_root: <BlakeTwo256 as Hash>::Output,
-			size: u32,
-			content_hash: ContentHash,
-			hashing: HashingAlgorithm,
-			cid_codec: CidCodec,
-			extrinsic_index: u32,
-		) -> Result<u32, Error<T>> {
-			let new_index = <BlockTransactions<T>>::try_mutate(|transactions| {
-				Self::push_entry(
-					transactions,
-					TransactionInfo {
-						chunk_root,
-						size,
-						content_hash,
-						hashing,
-						cid_codec,
-						extrinsic_index,
-						block_chunks: 0,
-						kind: TransactionKind::Store,
-					},
-				)
-				.ok_or(Error::<T>::TooManyTransactions)
-			})?;
-			sp_io::transaction_index::index(extrinsic_index, size, content_hash);
-			Ok(new_index)
+		/// Entries accumulated for the current block.
+		pub fn block_entry_count() -> u32 {
+			<BlockTransactions<T>>::decode_len().unwrap_or_default() as u32
 		}
 
 		/// Current block number — local shorthand for `frame_system::Pallet::<T>::block_number()`.
@@ -2037,8 +1978,7 @@ pub mod pallet {
 		/// Returns `true` if no more store/renew transactions can be included in the current
 		/// block.
 		pub fn block_transactions_full() -> bool {
-			BlockTransactions::<T>::decode_len()
-				.is_some_and(|len| len >= T::MaxBlockTransactions::get() as usize)
+			Self::block_entry_count() >= T::MaxBlockTransactions::get()
 		}
 
 		/// Check that authorization exists for data of the given size.
@@ -2520,6 +2460,51 @@ pub mod pallet {
 					.try_consume(transactions, bytes)
 					.ok_or(Error::<T>::InsufficientAuthorizerBudget.into())
 			})
+		}
+	}
+
+	/// This block's entry accumulator, held for the duration of
+	/// [`Pallet::with_block_entries`]. Keeps the `BlockTransactions` /
+	/// `TransactionByContentHash` / host-index invariants in one place.
+	pub struct BlockEntries<'a, T: Config> {
+		entries: &'a mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
+	}
+
+	impl<T: Config> BlockEntries<'_, T> {
+		/// Appends without indexing the data — private so every public path indexes.
+		/// `entry.block_chunks` is derived here. `None` at `MaxBlockTransactions`.
+		fn push(&mut self, mut entry: TransactionInfo) -> Option<u32> {
+			entry.block_chunks =
+				TransactionInfo::total_chunks(self.entries).saturating_add(num_chunks(entry.size));
+			let content_hash = entry.content_hash;
+			let new_index = self.entries.len() as u32;
+			self.entries.try_push(entry).ok()?;
+			TransactionByContentHash::<T>::insert(content_hash, (Pallet::<T>::now(), new_index));
+			Some(new_index)
+		}
+
+		/// Append `entry` and index the trailing `entry.size` bytes of extrinsic
+		/// `entry.extrinsic_index` — see the FOOTGUN note on `Pallet::do_store`. The host
+		/// call is not rolled back, so nothing fallible may follow it in this dispatch.
+		pub(crate) fn store(&mut self, entry: TransactionInfo) -> Option<u32> {
+			let (extrinsic_index, size, content_hash) =
+				(entry.extrinsic_index, entry.size, entry.content_hash);
+			let new_index = self.push(entry)?;
+			sp_io::transaction_index::index(extrinsic_index, size, content_hash);
+			Some(new_index)
+		}
+
+		/// `Self::store` for already-stored data: appends a copy of `info` under
+		/// `extrinsic_index` and `kind`, and re-indexes it. Same no-rollback caveat.
+		pub fn reindex(
+			&mut self,
+			info: &TransactionInfo,
+			extrinsic_index: u32,
+			kind: TransactionKind,
+		) -> Option<u32> {
+			let new_index = self.push(TransactionInfo { extrinsic_index, kind, ..info.clone() })?;
+			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
+			Some(new_index)
 		}
 	}
 }
