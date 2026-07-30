@@ -35,6 +35,12 @@ pub const LOG_ERROR_TIMEOUT_SECS: u64 = 10;
 pub const TEST_DATA_SIZE: usize = 2048;
 pub const TRANSACTION_STORAGE_COLUMN: &str = "col11";
 pub const NODE_LOG_CONFIG: &str = "-lsync=trace,sub-libp2p=trace,litep2p=trace,request-response=trace,transaction-storage=trace,bitswap=trace";
+/// For pruning-eviction tests. Deliberately omits `NODE_LOG_CONFIG`'s libp2p/sync trace
+/// targets: they emit ~10 MB per node in minutes, truncating the shared-network log files
+/// long before the failing test runs. The `db`/`state-db` targets are what shows whether
+/// pruning actually fired. (Node uses RocksDB, so a `parity-db` target would never fire.)
+pub const PRUNING_NODE_LOG_CONFIG: &str =
+	"-ltransaction-storage=trace,bitswap=trace,db=debug,state-db=debug,state-db::pin=debug";
 
 // Parachain network topology (configurable via env vars)
 pub const RELAY_CHAIN_ENV: &str = "RELAY_CHAIN";
