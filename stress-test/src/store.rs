@@ -1094,7 +1094,7 @@ pub async fn submit_sequential_wave(
 				},
 				Err(e) => {
 					let msg = format!("{e}");
-					let class = classify_tx_error(&anyhow::anyhow!("{}", &msg));
+					let class = classify_tx_error(&anyhow::anyhow!("{}", msg));
 					// Keep first 5 raw errors for log output.
 					{
 						let mut errs = raw_errs.lock().unwrap();
