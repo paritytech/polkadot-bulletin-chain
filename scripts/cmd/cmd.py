@@ -103,8 +103,13 @@ if args.command == 'bench':
 
     print_and_log(f'Provided runtimes: {args.runtime}')
     print_and_log(f'Cargo profile: {profile}')
+    # External runtimes live out-of-tree and are benchmarked in their own repo.
+    external = [x['name'] for x in runtimesMatrix if x.get('external_runtime')]
+    if external:
+        print_and_log(f'Skipping external runtimes: {external}')
+
     # convert to mapped dict
-    runtimesMatrix = list(filter(lambda x: x['name'] in args.runtime, runtimesMatrix))
+    runtimesMatrix = list(filter(lambda x: x['name'] in args.runtime and not x.get('external_runtime'), runtimesMatrix))
     runtimesMatrix = {x['name']: x for x in runtimesMatrix}
     print_and_log(f'Filtered out runtimes: {runtimesMatrix}')
 
