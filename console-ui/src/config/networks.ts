@@ -25,8 +25,6 @@ export interface MonitoringLinks {
   sentryChainProbeSpan?: string;
   /** Substrate telemetry view. */
   telemetry?: string;
-  /** PolkadotJS Apps deep-link. */
-  polkadotJs?: string;
   /** Block explorer (Subscan etc.). */
   explorer?: string;
   /** Operational runbook. */
@@ -123,7 +121,7 @@ function bitswapLink(chain: string): string {
   );
 }
 
-function polkadotJsAppsLink(endpoint: string): string {
+export function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
 }
 
@@ -173,9 +171,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       "/ip4/127.0.0.1/tcp/10001/ws/p2p/12D3KooWKjTeRJH8nMcFytc7qTTCQy7JrFgiZFr7iUjd1aPEBn8v",
       "/ip4/127.0.0.1/tcp/12347/ws/p2p/12D3KooWM8qgmWsh9ddbdX3kqR7W8tWuh62zhsdpwfs81eSnQuaH",
     ],
-    monitoring: {
-      polkadotJs: polkadotJsAppsLink("ws://localhost:10000"),
-    },
+    monitoring: {},
   },
   westend: {
     id: "westend",
@@ -197,13 +193,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
-      polkadotJs: polkadotJsAppsLink("wss://westend-bulletin-rpc.polkadot.io"),
     },
   },
   "products-devnet": {
     id: "products-devnet",
     name: "Products Devnet",
-    endpoints: ["wss://bullet.sik.rocks"],
+    endpoints: ["wss://bullet.tunastaking.eu", "wss://bullet.sik.rocks"],
     lightClient: false,
     descriptor: bulletin_products_devnet,
     peerMultiaddrs: [
@@ -218,7 +213,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
-      polkadotJs: polkadotJsAppsLink("wss://bullet.sik.rocks"),
     },
     hopNodes: [
       "wss://bullet.sik.rocks",
@@ -251,7 +245,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_PASEO_NEXT_V2,
-      polkadotJs: polkadotJsAppsLink("wss://paseo-bulletin-next-rpc.polkadot.io"),
       collatorLogs: lokiLogsLink("bulletin-next-paseo"),
     },
     hopNodes: [
@@ -268,7 +261,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     ipfsGateway: "https://previewnet.substrate.dev",
     preferredDownloadMethod: "gateway",
     monitoring: {
-      polkadotJs: polkadotJsAppsLink("wss://previewnet.substrate.dev/bulletin"),
     },
     hopNodes: [
       "wss://previewnet.substrate.dev/bulletin-hop-0",
@@ -289,7 +281,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
-      polkadotJs: polkadotJsAppsLink("wss://bulletin-rpc.polkadot.io"),
     },
   },
   custom: {
@@ -298,6 +289,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     endpoints: [],
     lightClient: false,
     descriptor: bulletin_paseo_next_v2,
+    monitoring: {},
   },
 };
 
