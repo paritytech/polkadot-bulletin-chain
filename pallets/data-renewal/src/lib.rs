@@ -480,8 +480,8 @@ impl<T: Config> Pallet<T> {
 	pub(crate) fn do_renew(info: TransactionInfoFor<T>) -> Result<u32, Error<T>> {
 		let extrinsic_index =
 			<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_entries(|entries| {
-			entries.reindex(&info, extrinsic_index, EntryKind::Renew)
+		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_transactions(|entries| {
+			entries.renew(&info, extrinsic_index, EntryKind::Renew)
 		})
 		.ok_or(Error::<T>::TooManyTransactions)
 	}
@@ -518,7 +518,7 @@ impl<T: Config> Pallet<T> {
 				return n_actual;
 			},
 		};
-		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_entries(|entries| {
+		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_transactions(|entries| {
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 				// `paid = true` means the cycle was already charged at registration
 				// (the one-shot `renew` path and the first cycle after
@@ -528,7 +528,7 @@ impl<T: Config> Pallet<T> {
 				let charged =
 					was_paid || Self::check_renew_authorization(&scope, tx_info.size, true).is_ok();
 				let new_index = if charged {
-					entries.reindex(&tx_info, extrinsic_index, EntryKind::Renew)
+					entries.renew(&tx_info, extrinsic_index, EntryKind::Renew)
 				} else {
 					None
 				};

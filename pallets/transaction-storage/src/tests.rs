@@ -78,16 +78,16 @@ mod runtime_api;
 fn store_at_block_capacity_leaves_entries_untouched() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		TransactionStorage::fill_block_entries(DEFAULT_MAX_BLOCK_TRANSACTIONS, 100);
-		let before = TransactionStorage::block_entries();
+		TransactionStorage::fill_block_transactions(DEFAULT_MAX_BLOCK_TRANSACTIONS, 100);
+		let before = TransactionStorage::block_transactions();
 
 		assert_noop!(
 			TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]),
 			Error::TooManyTransactions
 		);
 
-		assert_eq!(TransactionStorage::block_entries(), before);
-		assert_eq!(TransactionStorage::block_entry_count(), DEFAULT_MAX_BLOCK_TRANSACTIONS);
+		assert_eq!(TransactionStorage::block_transactions(), before);
+		assert_eq!(TransactionStorage::block_transactions_count(), DEFAULT_MAX_BLOCK_TRANSACTIONS);
 	});
 }
 

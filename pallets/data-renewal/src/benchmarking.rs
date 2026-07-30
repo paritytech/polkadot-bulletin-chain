@@ -274,7 +274,7 @@ mod benchmarks {
 		_(RawOrigin::None);
 
 		assert!(PendingAutoRenewals::<T>::get().is_empty());
-		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<T>::block_entry_count(), n);
+		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<T>::block_transactions_count(), n);
 		Ok(())
 	}
 

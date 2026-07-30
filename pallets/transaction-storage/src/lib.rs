@@ -803,7 +803,7 @@ pub mod pallet {
 	//
 	// `pub` so `pallet-bulletin-data-renewal` can mutate while applying renewals
 	// (the batched drain inherent amortizes a single read/write across the per-block pending
-	// vec). Cross-pallet appends go through [`Pallet::with_block_entries`].
+	// vec). Cross-pallet appends go through [`Pallet::with_block_transactions`].
 	#[pallet::storage]
 	pub(super) type BlockTransactions<T: Config> =
 		StorageValue<_, BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions>, ValueQuery>;
@@ -1041,8 +1041,8 @@ pub mod pallet {
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
 		///
-		/// FOOTGUN: `sp_io::transaction_index::index` (via `BlockEntries::store`) indexes the
-		/// *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
+		/// FOOTGUN: `sp_io::transaction_index::index` (via `BlockTransactionsMut::store`) indexes
+		/// the *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
 		/// encodes as `preamble ++ call`, `data` must be the LAST field of any
 		/// dispatchable that funnels into `do_store` (e.g. [`store`](Self::store),
 		/// [`store_with_cid_config`](Self::store_with_cid_config),
@@ -1078,7 +1078,7 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 
-			let index = Self::with_block_entries(|entries| {
+			let index = Self::with_block_transactions(|entries| {
 				entries.store(TransactionInfo {
 					chunk_root: root,
 					size: data_len,
@@ -1103,8 +1103,8 @@ pub mod pallet {
 
 		/// Run `f` against this block's entries — one `BlockTransactions` read/write for
 		/// the whole closure, so a batch amortizes a single access.
-		pub fn with_block_entries<R>(f: impl FnOnce(&mut BlockEntries<T>) -> R) -> R {
-			<BlockTransactions<T>>::mutate(|entries| f(&mut BlockEntries { entries }))
+		pub fn with_block_transactions<R>(f: impl FnOnce(&mut BlockTransactionsMut<T>) -> R) -> R {
+			<BlockTransactions<T>>::mutate(|entries| f(&mut BlockTransactionsMut { entries }))
 		}
 
 		/// Move the entries accumulated for `n` into `Transactions[n]`, iff they have chunks.
@@ -1116,7 +1116,7 @@ pub mod pallet {
 		}
 
 		/// Entries accumulated for the current block.
-		pub fn block_entry_count() -> u32 {
+		pub fn block_transactions_count() -> u32 {
 			<BlockTransactions<T>>::decode_len().unwrap_or_default() as u32
 		}
 
@@ -1490,7 +1490,7 @@ pub mod pallet {
 		/// Returns `true` if no more store/renew transactions can be included in the current
 		/// block.
 		pub fn block_transactions_full() -> bool {
-			Self::block_entry_count() >= T::MaxBlockTransactions::get()
+			Self::block_transactions_count() >= T::MaxBlockTransactions::get()
 		}
 
 		/// Check that authorization exists for data of the given size.
@@ -1844,13 +1844,13 @@ pub mod pallet {
 	}
 
 	/// This block's entry accumulator, held for the duration of
-	/// [`Pallet::with_block_entries`]. Keeps the `BlockTransactions` /
+	/// [`Pallet::with_block_transactions`]. Keeps the `BlockTransactions` /
 	/// `TransactionByContentHash` / host-index invariants in this pallet.
-	pub struct BlockEntries<'a, T: Config> {
+	pub struct BlockTransactionsMut<'a, T: Config> {
 		entries: &'a mut BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions>,
 	}
 
-	impl<T: Config> BlockEntries<'_, T> {
+	impl<T: Config> BlockTransactionsMut<'_, T> {
 		/// Appends without indexing the data — private so every public path indexes.
 		/// `entry.block_chunks` is derived here. `None` at `MaxBlockTransactions`.
 		fn push(&mut self, mut entry: TransactionInfoFor<T>) -> Option<u32> {
@@ -1876,7 +1876,7 @@ pub mod pallet {
 
 		/// `Self::store` for already-stored data: appends a copy of `info` under
 		/// `extrinsic_index` and `meta`, and re-indexes it. Same no-rollback caveat.
-		pub fn reindex(
+		pub fn renew(
 			&mut self,
 			info: &TransactionInfoFor<T>,
 			extrinsic_index: u32,
@@ -1895,17 +1895,17 @@ pub mod extension;
 #[cfg(any(test, feature = "std"))]
 impl<T: Config> Pallet<T> {
 	/// Entries accumulated for the current block.
-	pub fn block_entries() -> BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions> {
+	pub fn block_transactions() -> BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions> {
 		<BlockTransactions<T>>::get()
 	}
 
 	/// Seal `block`'s accumulated entries exactly as `on_finalize` does.
-	pub fn seal_block_entries(block: BlockNumberFor<T>) {
+	pub fn seal_block_transactions(block: BlockNumberFor<T>) {
 		Self::seal_block(block);
 	}
 
 	/// Append `count` placeholder entries of `size` bytes, to drive the block-full paths.
-	pub fn fill_block_entries(count: u32, size: u32) {
+	pub fn fill_block_transactions(count: u32, size: u32) {
 		<BlockTransactions<T>>::mutate(|entries| {
 			for _ in 0..count {
 				let _ = entries.try_push(TransactionInfo {

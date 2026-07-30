@@ -568,8 +568,8 @@ fn force_renew_at_block_capacity_leaves_entries_untouched() {
 			<<Test as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions as Get<
 				u32,
 			>>::get();
-		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_entries(max_txns, 100);
-		let before = pallet_bulletin_transaction_storage::Pallet::<Test>::block_entries();
+		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_transactions(max_txns, 100);
+		let before = pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions();
 
 		assert_noop!(
 			DataRenewal::force_renew(
@@ -579,7 +579,10 @@ fn force_renew_at_block_capacity_leaves_entries_untouched() {
 			crate::Error::<Test>::TooManyTransactions
 		);
 
-		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<Test>::block_entries(), before);
+		assert_eq!(
+			pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions(),
+			before
+		);
 	});
 }
 
@@ -588,7 +591,7 @@ fn renews_data() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
-		let info = pallet_bulletin_transaction_storage::Pallet::<Test>::block_entries()
+		let info = pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions()
 			.last()
 			.unwrap()
 			.clone();
@@ -1264,7 +1267,7 @@ fn auto_renewal_consumes_authorization() {
 
 		// Cycle 2: carry `BlockTransactions[12]` → `Transactions[12]` so the
 		// block-12 renew can age out at block 23.
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 		init_block(23);
 		// The block-12 grant expired at block 22; re-grant fresh counters so the
 		// cycle can charge against a known baseline.
@@ -1310,7 +1313,7 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		);
 
 		// Carry block-12 renew into Transactions[12] for the next age-out.
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Cycle 2 at block 23 runs against a refreshed authorization with no
 		// headroom — `bytes_permanent + size > bytes_allowance` fires.
@@ -1381,7 +1384,7 @@ fn auto_renew_permissionless_transfer() {
 		// Carry the cycle-12 renew out of `BlockTransactions` so the next
 		// `enable_auto_renew` can resolve the `(12, 0)` index against
 		// `Transactions[12]` (mirrors what `on_finalize` does in a live chain).
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Alice can now disable.
 		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
@@ -1455,7 +1458,10 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		assert_eq!(pending.len(), 3);
 
 		// Fill block with (max - 1) dummy transactions so only 1 renewal fits
-		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_entries(max_txns - 1, 100);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_transactions(
+			max_txns - 1,
+			100,
+		);
 
 		// Process auto-renewals — should NOT return an error even though 2 of 3 fail
 		assert_ok!(apply_block_inherents_full(None));
@@ -1519,7 +1525,7 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 			<<Test as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions as Get<
 				u32,
 			>>::get();
-		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_entries(max_txns, 100);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::fill_block_transactions(max_txns, 100);
 
 		assert_ok!(apply_block_inherents_full(None));
 
@@ -1874,7 +1880,7 @@ fn renew_bumps_permanent_used_and_records_kind() {
 		);
 		// `BlockTransactions` holds the in-progress block's entries; the store entry must
 		// have `kind = Store`.
-		let block_txs = pallet_bulletin_transaction_storage::Pallet::<Test>::block_entries();
+		let block_txs = pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions();
 		assert_eq!(block_txs.len(), 1);
 		assert_eq!(block_txs[0].meta, EntryKind::Store);
 
@@ -1891,7 +1897,7 @@ fn renew_bumps_permanent_used_and_records_kind() {
 			2000,
 			"renew must bump the chain-wide permanent counter",
 		);
-		let block_txs = pallet_bulletin_transaction_storage::Pallet::<Test>::block_entries();
+		let block_txs = pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions();
 		assert_eq!(block_txs.len(), 1);
 		assert_eq!(block_txs[0].meta, EntryKind::Renew);
 	});
@@ -2274,7 +2280,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Cycle 2 block: on_initialize captures the block-12 renewal into pending.
 		init_block(23);
@@ -2388,7 +2394,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		));
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Cycle 2 at block 23 would charge another `size` chain-wide; overshoot the cap.
 		init_block(23);
@@ -2505,7 +2511,7 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Cycle 2 at block 23 charges per-cycle: again the registrant (Bob) pays.
 		init_block(23);
@@ -2580,7 +2586,7 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 			2000,
 			"prepaid cycle does not charge again",
 		);
-		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_entries(12);
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
 		// Refresh again at block 21 to keep the auth alive past block 23.
 		init_block(21);
