@@ -1439,22 +1439,27 @@ pub mod pallet {
 			info: &TransactionInfo,
 			extrinsic_index: u32,
 		) -> Option<u32> {
-			let block_chunks =
-				TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(info.size));
-			let new_index = transactions.len() as u32;
-			let new_info = TransactionInfo {
-				chunk_root: info.chunk_root,
-				size: info.size,
-				content_hash: info.content_hash,
-				hashing: info.hashing,
-				cid_codec: info.cid_codec,
-				extrinsic_index,
-				block_chunks,
-				kind: TransactionKind::Renew,
-			};
-			transactions.try_push(new_info).ok()?;
+			let new_index = Self::push_entry(
+				transactions,
+				TransactionInfo { extrinsic_index, kind: TransactionKind::Renew, ..info.clone() },
+			)?;
 			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
-			TransactionByContentHash::<T>::insert(info.content_hash, (Self::now(), new_index));
+			Some(new_index)
+		}
+
+		/// Append `entry`, deriving `block_chunks`, and repoint [`TransactionByContentHash`]
+		/// at it. `None` at `MaxBlockTransactions`. Appends without indexing the data —
+		/// private so every path goes through the two callers that own the host call.
+		fn push_entry(
+			transactions: &mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
+			mut entry: TransactionInfo,
+		) -> Option<u32> {
+			entry.block_chunks =
+				TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(entry.size));
+			let content_hash = entry.content_hash;
+			let new_index = transactions.len() as u32;
+			transactions.try_push(entry).ok()?;
+			TransactionByContentHash::<T>::insert(content_hash, (Self::now(), new_index));
 			Some(new_index)
 		}
 	}
@@ -1515,7 +1520,7 @@ pub mod pallet {
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
 		///
-		/// FOOTGUN: `sp_io::transaction_index::index` (called below) indexes the
+		/// FOOTGUN: `sp_io::transaction_index::index` (via `Self::store_entry`) indexes the
 		/// *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
 		/// encodes as `preamble ++ call`, `data` must be the LAST field of any
 		/// dispatchable that funnels into `do_store` (e.g. [`store`](Self::store),
@@ -1552,19 +1557,14 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 
-			let index = Self::append_to_block_transactions(
+			let index = Self::store_entry(
 				root,
 				data_len,
 				cid.content_hash,
 				hashing,
 				cid_codec,
 				extrinsic_index,
-				TransactionKind::Store,
 			)?;
-			// Index after the runtime mutation — index ops aren't rolled back on dispatch error.
-			// Indexes the trailing `data_len` bytes of the extrinsic, so `data` must be the
-			// caller's last call argument (see the FOOTGUN note on `do_store`).
-			sp_io::transaction_index::index(extrinsic_index, data_len, cid.content_hash);
 
 			Self::deposit_event(Event::Stored {
 				index,
@@ -1595,38 +1595,34 @@ pub mod pallet {
 			})
 		}
 
-		/// Append a new entry to [`BlockTransactions`] (with the cumulative `block_chunks`)
-		/// and update [`TransactionByContentHash`]. Caller must call
-		/// `transaction_index::{index,renew}` AFTER this — host calls aren't rolled back on
-		/// dispatch error.
-		fn append_to_block_transactions(
+		/// Append a freshly stored entry and index the trailing `size` bytes of extrinsic
+		/// `extrinsic_index` — see the FOOTGUN note on [`Self::do_store`]. The host call runs
+		/// after the runtime mutation and is not rolled back, so nothing fallible may follow.
+		fn store_entry(
 			chunk_root: <BlakeTwo256 as Hash>::Output,
 			size: u32,
 			content_hash: ContentHash,
 			hashing: HashingAlgorithm,
 			cid_codec: CidCodec,
 			extrinsic_index: u32,
-			kind: TransactionKind,
 		) -> Result<u32, Error<T>> {
 			let new_index = <BlockTransactions<T>>::try_mutate(|transactions| {
-				let block_chunks =
-					TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(size));
-				let new_index = transactions.len() as u32;
-				transactions
-					.try_push(TransactionInfo {
+				Self::push_entry(
+					transactions,
+					TransactionInfo {
 						chunk_root,
 						size,
 						content_hash,
 						hashing,
 						cid_codec,
 						extrinsic_index,
-						block_chunks,
-						kind,
-					})
-					.map_err(|_| Error::<T>::TooManyTransactions)?;
-				Ok::<_, Error<T>>(new_index)
+						block_chunks: 0,
+						kind: TransactionKind::Store,
+					},
+				)
+				.ok_or(Error::<T>::TooManyTransactions)
 			})?;
-			TransactionByContentHash::<T>::insert(content_hash, (Self::now(), new_index));
+			sp_io::transaction_index::index(extrinsic_index, size, content_hash);
 			Ok(new_index)
 		}
 
