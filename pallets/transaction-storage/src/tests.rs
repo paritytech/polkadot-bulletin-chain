@@ -70,6 +70,27 @@ const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
 mod runtime_api;
 
+/// `store` at `MaxBlockTransactions` reports `TooManyTransactions` and leaves the
+/// accumulator alone. Partial writes are already impossible — `#[pallet::call]` runs every
+/// dispatchable in a storage layer that undoes them on `Err` — so this pins the outcome,
+/// not the mechanism.
+#[test]
+fn store_at_block_capacity_leaves_entries_untouched() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		TransactionStorage::fill_block_entries(DEFAULT_MAX_BLOCK_TRANSACTIONS, 100);
+		let before = TransactionStorage::block_entries();
+
+		assert_noop!(
+			TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]),
+			Error::TooManyTransactions
+		);
+
+		assert_eq!(TransactionStorage::block_entries(), before);
+		assert_eq!(TransactionStorage::block_entry_count(), DEFAULT_MAX_BLOCK_TRANSACTIONS);
+	});
+}
+
 #[test]
 fn discards_data() {
 	new_test_ext().execute_with(|| {

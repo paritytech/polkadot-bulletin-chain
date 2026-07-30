@@ -17,8 +17,7 @@
 
 //! Benchmarks for the data-renewal pallet.
 
-// `super::*` re-exports the pallet's own imports (`AuthorizationScope`,
-// `BlockTransactions`, `TransactionInfo`, `TransactionRef`,
+// `super::*` re-exports the pallet's own imports (`AuthorizationScope`, `TransactionRef`,
 // `ContentHash`, `RenewalData`, FRAME prelude, ...). Only the benchmark-only extras
 // are imported explicitly here.
 use super::{Pallet as DataRenewal, *};
@@ -29,7 +28,7 @@ use pallet_bulletin_transaction_storage::{
 	self as txs,
 	extension::{StorageLeaves, ValidateAuthorizedCalls},
 	pallet::Origin,
-	Pallet as TransactionStorage,
+	Pallet as TransactionStorage, TransactionInfo,
 };
 use polkadot_sdk_frame::{
 	benchmarking::prelude::*,
@@ -275,7 +274,7 @@ mod benchmarks {
 		_(RawOrigin::None);
 
 		assert!(PendingAutoRenewals::<T>::get().is_empty());
-		assert_eq!(BlockTransactions::<T>::get().len() as u32, n);
+		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<T>::block_entry_count(), n);
 		Ok(())
 	}
 

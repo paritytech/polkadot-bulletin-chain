@@ -163,7 +163,7 @@ impl<T: Config> ActiveAuthorization<'_, T> {
 /// `RetentionPeriod` window.
 ///
 /// The storage pallet eagerly takes `Transactions[obsolete]`, computes `is_latest` for each
-/// entry (whether [`crate::TransactionByContentHash`] still points at this `(block, index)`),
+/// entry (whether `TransactionByContentHash` still points at this `(block, index)`),
 /// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
 /// resulting slice to this trait. Implementers — typically
 /// `pallet-bulletin-data-renewal` — inspect each entry's opaque `meta` to

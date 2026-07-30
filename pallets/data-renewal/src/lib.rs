@@ -72,13 +72,12 @@ pub use weights::WeightInfo;
 
 use bulletin_transaction_storage_primitives::ContentHash;
 use pallet_bulletin_transaction_storage::{
-	AuthorizationScope, AuthorizationScopeFor, AuthorizedCaller, BlockTransactions, CheckContext,
-	OnObsoleteTransactions, TransactionByContentHash, TransactionInfo, TransactionInfoFor,
-	TransactionRef, ValidTransactionParams, BAD_DATA_SIZE,
+	AuthorizationScope, AuthorizationScopeFor, AuthorizedCaller, CheckContext,
+	OnObsoleteTransactions, TransactionInfoFor, TransactionRef, ValidTransactionParams,
+	BAD_DATA_SIZE,
 };
 use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{deps::*, prelude::*};
-use sp_transaction_storage_proof::num_chunks;
 
 #[cfg(feature = "try-runtime")]
 const LOG_TARGET: &str = "runtime::data-renewal";
@@ -476,52 +475,19 @@ pub mod pallet {
 }
 
 impl<T: Config> Pallet<T> {
-	/// Single-renewal wrapper for [`Pallet::force_renew`]. Amortizes one
-	/// `BlockTransactions` read/write. Hard-cap accounting runs earlier in the
-	/// extension's `pre_dispatch`.
+	/// Single-renewal wrapper for [`Pallet::force_renew`]. Hard-cap accounting runs
+	/// earlier in the extension's `pre_dispatch`.
 	pub(crate) fn do_renew(info: TransactionInfoFor<T>) -> Result<u32, Error<T>> {
 		let extrinsic_index =
 			<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-		<BlockTransactions<T>>::try_mutate(|transactions| {
-			Self::do_renew_in_memory(transactions, &info, extrinsic_index)
-				.ok_or(Error::<T>::TooManyTransactions)
+		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_entries(|entries| {
+			entries.reindex(&info, extrinsic_index, EntryKind::Renew)
 		})
+		.ok_or(Error::<T>::TooManyTransactions)
 	}
 
-	/// Push a `meta = Renew` entry onto the in-memory `BlockTransactions`
-	/// accumulator, host-index the renewal, and update
-	/// [`TransactionByContentHash`]. Returns `None` at
-	/// `MaxBlockTransactions`. Used by both the manual flow ([`Self::do_renew`])
-	/// and the batched drain ([`Self::do_process_auto_renewals`]).
-	pub(crate) fn do_renew_in_memory(
-		transactions: &mut BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions>,
-		info: &TransactionInfoFor<T>,
-		extrinsic_index: u32,
-	) -> Option<u32> {
-		let block_chunks =
-			TransactionInfo::total_chunks(transactions).saturating_add(num_chunks(info.size));
-		let new_index = transactions.len() as u32;
-		let new_info = TransactionInfo {
-			chunk_root: info.chunk_root,
-			size: info.size,
-			content_hash: info.content_hash,
-			hashing: info.hashing,
-			cid_codec: info.cid_codec,
-			extrinsic_index,
-			block_chunks,
-			meta: EntryKind::Renew,
-		};
-		transactions.try_push(new_info).ok()?;
-		sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
-		TransactionByContentHash::<T>::insert(
-			info.content_hash,
-			(pallet_bulletin_transaction_storage::Pallet::<T>::now(), new_index),
-		);
-		Some(new_index)
-	}
-
-	/// Drain [`PendingAutoRenewals`], returning the count drained. Threads one
-	/// `BlockTransactions::mutate` across all entries. Per-cycle charges
+	/// Drain [`PendingAutoRenewals`], returning the count drained. One
+	/// `BlockTransactions` read/write for all entries. Per-cycle charges
 	/// (recurring cycles past the prepaid one) go through `check_authorization`;
 	/// the prepaid bump is refunded when a paid cycle is rejected by the
 	/// per-block slot cap.
@@ -552,7 +518,7 @@ impl<T: Config> Pallet<T> {
 				return n_actual;
 			},
 		};
-		<BlockTransactions<T>>::mutate(|transactions| {
+		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_entries(|entries| {
 			for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 				// `paid = true` means the cycle was already charged at registration
 				// (the one-shot `renew` path and the first cycle after
@@ -562,7 +528,7 @@ impl<T: Config> Pallet<T> {
 				let charged =
 					was_paid || Self::check_renew_authorization(&scope, tx_info.size, true).is_ok();
 				let new_index = if charged {
-					Self::do_renew_in_memory(transactions, &tx_info, extrinsic_index)
+					entries.reindex(&tx_info, extrinsic_index, EntryKind::Renew)
 				} else {
 					None
 				};
