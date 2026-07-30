@@ -1358,7 +1358,7 @@ pub mod pallet {
 					return n_actual;
 				},
 			};
-			Self::with_block_entries(|entries| {
+			Self::with_block_transactions(|entries| {
 				for (content_hash, tx_info, renewal_data) in pending.into_iter() {
 					// `paid = true` means the cycle was already charged at registration
 					// (the one-shot `renew` path and the first cycle after
@@ -1367,11 +1367,8 @@ pub mod pallet {
 					let scope = AuthorizationScope::Account(renewal_data.account.clone());
 					let charged = was_paid ||
 						Self::check_authorization(&scope, tx_info.size, true, true).is_ok();
-					let new_index = if charged {
-						entries.reindex(&tx_info, extrinsic_index, TransactionKind::Renew)
-					} else {
-						None
-					};
+					let new_index =
+						if charged { entries.renew(&tx_info, extrinsic_index) } else { None };
 
 					if let Some(new_index) = new_index {
 						if !renewal_data.recurring {
@@ -1433,10 +1430,8 @@ pub mod pallet {
 		fn do_renew(info: TransactionInfo) -> Result<u32, Error<T>> {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
-			Self::with_block_entries(|entries| {
-				entries.reindex(&info, extrinsic_index, TransactionKind::Renew)
-			})
-			.ok_or(Error::<T>::TooManyTransactions)
+			Self::with_block_transactions(|entries| entries.renew(&info, extrinsic_index))
+				.ok_or(Error::<T>::TooManyTransactions)
 		}
 	}
 
@@ -1533,7 +1528,7 @@ pub mod pallet {
 			let extrinsic_index =
 				<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 
-			let index = Self::with_block_entries(|entries| {
+			let index = Self::with_block_transactions(|entries| {
 				entries.store(TransactionInfo {
 					chunk_root: root,
 					size: data_len,
@@ -1558,12 +1553,12 @@ pub mod pallet {
 
 		/// Run `f` against this block's entries — one `BlockTransactions` read/write for
 		/// the whole closure, so a batch amortizes a single access.
-		pub fn with_block_entries<R>(f: impl FnOnce(&mut BlockEntries<T>) -> R) -> R {
-			<BlockTransactions<T>>::mutate(|entries| f(&mut BlockEntries { entries }))
+		pub fn with_block_transactions<R>(f: impl FnOnce(&mut BlockTransactionsMut<T>) -> R) -> R {
+			<BlockTransactions<T>>::mutate(|entries| f(&mut BlockTransactionsMut { entries }))
 		}
 
 		/// Entries accumulated for the current block.
-		pub fn block_entry_count() -> u32 {
+		pub fn block_transactions_count() -> u32 {
 			<BlockTransactions<T>>::decode_len().unwrap_or_default() as u32
 		}
 
@@ -1978,7 +1973,7 @@ pub mod pallet {
 		/// Returns `true` if no more store/renew transactions can be included in the current
 		/// block.
 		pub fn block_transactions_full() -> bool {
-			Self::block_entry_count() >= T::MaxBlockTransactions::get()
+			Self::block_transactions_count() >= T::MaxBlockTransactions::get()
 		}
 
 		/// Check that authorization exists for data of the given size.
@@ -2464,13 +2459,13 @@ pub mod pallet {
 	}
 
 	/// This block's entry accumulator, held for the duration of
-	/// [`Pallet::with_block_entries`]. Keeps the `BlockTransactions` /
+	/// [`Pallet::with_block_transactions`]. Keeps the `BlockTransactions` /
 	/// `TransactionByContentHash` / host-index invariants in one place.
-	pub struct BlockEntries<'a, T: Config> {
+	pub struct BlockTransactionsMut<'a, T: Config> {
 		entries: &'a mut BoundedVec<TransactionInfo, T::MaxBlockTransactions>,
 	}
 
-	impl<T: Config> BlockEntries<'_, T> {
+	impl<T: Config> BlockTransactionsMut<'_, T> {
 		/// Appends without indexing the data — private so every public path indexes.
 		/// `entry.block_chunks` is derived here. `None` at `MaxBlockTransactions`.
 		fn push(&mut self, mut entry: TransactionInfo) -> Option<u32> {
@@ -2494,15 +2489,14 @@ pub mod pallet {
 			Some(new_index)
 		}
 
-		/// `Self::store` for already-stored data: appends a copy of `info` under
-		/// `extrinsic_index` and `kind`, and re-indexes it. Same no-rollback caveat.
-		pub fn reindex(
-			&mut self,
-			info: &TransactionInfo,
-			extrinsic_index: u32,
-			kind: TransactionKind,
-		) -> Option<u32> {
-			let new_index = self.push(TransactionInfo { extrinsic_index, kind, ..info.clone() })?;
+		/// `Self::store` for already-stored data: appends a `Renew` copy of `info` under
+		/// `extrinsic_index` and re-indexes it with the host. Same no-rollback caveat.
+		pub fn renew(&mut self, info: &TransactionInfo, extrinsic_index: u32) -> Option<u32> {
+			let new_index = self.push(TransactionInfo {
+				extrinsic_index,
+				kind: TransactionKind::Renew,
+				..info.clone()
+			})?;
 			sp_io::transaction_index::renew(extrinsic_index, info.content_hash);
 			Some(new_index)
 		}
