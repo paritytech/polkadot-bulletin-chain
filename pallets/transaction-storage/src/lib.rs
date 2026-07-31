@@ -2489,8 +2489,15 @@ pub mod pallet {
 			Some(new_index)
 		}
 
-		/// `Self::store` for already-stored data: appends a `Renew` copy of `info` under
-		/// `extrinsic_index` and re-indexes it with the host. Same no-rollback caveat.
+        /// [`Self::store`] for already-stored data: appends a `Renew` copy of `info` under
+        /// `extrinsic_index` and re-indexes it with the host. Same no-rollback caveat.
+        ///
+        /// Appends only — the caller owns the economics. This does not check that
+        /// `info.content_hash` is still stored, and does not charge the renewal: the
+        /// per-account `bytes_permanent` debit and the chain-wide [`PermanentStorageUsed`]
+        /// cap check must already have run for `info.size` (see
+        /// [`Pallet::check_authorization`]). Skipping them grants permanent retention for
+        /// free and leaves the counter out of step with the `Renew` entries it accounts for.
 		pub fn renew(&mut self, info: &TransactionInfo, extrinsic_index: u32) -> Option<u32> {
 			let new_index = self.push(TransactionInfo {
 				extrinsic_index,
