@@ -1491,7 +1491,7 @@ pub mod pallet {
 		/// Common implementation for [`store`](Self::store) and
 		/// [`store_with_cid_config`](Self::store_with_cid_config).
 		///
-		/// FOOTGUN: `sp_io::transaction_index::index` (via `Self::store_entry`) indexes the
+		/// FOOTGUN: `sp_io::transaction_index::index` (via `BlockTransactionsMut::store`) indexes the
 		/// *trailing* `data_len` bytes of the encoded extrinsic. Since an extrinsic
 		/// encodes as `preamble ++ call`, `data` must be the LAST field of any
 		/// dispatchable that funnels into `do_store` (e.g. [`store`](Self::store),
