@@ -348,10 +348,13 @@ pub mod v1 {
 /// current layout in bounded per-block steps. `BlockTransactions` is still translated
 /// here defensively (single transient `StorageValue`).
 pub mod v2 {
-	use super::*;
+	use super::{
+		v7::{LegacyAuthorization, LegacyAuthorizations},
+		*,
+	};
 	use crate::{
 		pallet::{BlockTransactions, Pallet},
-		TransactionInfo, TransactionKind,
+		AuthorizationExtent, TransactionInfo, TransactionKind,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -364,6 +367,24 @@ pub mod v2 {
 		sp_runtime::traits::{BlakeTwo256, Hash},
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
+
+	#[derive(Encode, Decode)]
+	pub(crate) struct V1AuthorizationExtent {
+		pub transactions: u32,
+		pub bytes: u64,
+	}
+
+	#[derive(Encode, Decode)]
+	pub(crate) struct V1Authorization<BlockNumber> {
+		pub extent: V1AuthorizationExtent,
+		pub expiration: BlockNumber,
+	}
+
+	impl<BlockNumber: PartialOrd + Copy> V1Authorization<BlockNumber> {
+		fn expired(&self, now: BlockNumber) -> bool {
+			now >= self.expiration
+		}
+	}
 
 	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
 	/// field. Used here to decode existing entries during translation.
@@ -381,12 +402,39 @@ pub mod v2 {
 
 	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
 		fn on_runtime_upgrade() -> Weight {
-			// The historical body of this migration translated entries in the old
-			// single-window `Authorizations` map. The slot redesign (v3→v4) drops
-			// that storage entirely, so translating it here would be wasted work
-			// — we leave the entries in the old layout for v3→v4 to clear by
-			// raw prefix.
-			//
+			// Rewrite v1 `Authorizations` entries into the single-window v2..v6
+			// layout, written via the `LegacyAuthorizations` alias — the live
+			// map's value type is already the slot-based v7 shape, which the
+			// stepped v6→v7 migration produces from exactly this layout.
+			let mut auth_migrated: u64 = 0;
+			let mut auth_dropped: u64 = 0;
+			let now = Pallet::<T>::now();
+			LegacyAuthorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
+				|_scope, old| {
+					if old.extent.bytes == 0 || old.expired(now) {
+						auth_dropped = auth_dropped.saturating_add(1);
+						return None;
+					}
+					auth_migrated = auth_migrated.saturating_add(1);
+					Some(LegacyAuthorization {
+						extent: AuthorizationExtent {
+							bytes: 0,
+							bytes_permanent: 0,
+							bytes_allowance: old.extent.bytes,
+							transactions: 0,
+							transactions_allowance: old.extent.transactions,
+						},
+						expiration: old.expiration,
+					})
+				},
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				migrated = auth_migrated,
+				dropped = auth_dropped,
+				"v1->v2 AuthorizationExtent migration complete",
+			);
+
 			// `BlockTransactions` is transient (cleared every `on_finalize`),
 			// almost always empty between blocks, but we still translate
 			// defensively in case the upgrade lands mid-block.
@@ -422,13 +470,16 @@ pub mod v2 {
 				"v1->v2 BlockTransactions migration complete",
 			);
 
-			T::DbWeight::get().reads_writes(block_tx_present, block_tx_present)
+			let auth_touched = auth_migrated.saturating_add(auth_dropped);
+			T::DbWeight::get().reads_writes(
+				auth_touched.saturating_add(block_tx_present),
+				auth_touched.saturating_add(block_tx_present),
+			)
 		}
 	}
 
-	/// Versioned migration v1→v2: translates `BlockTransactions` to the v2
-	/// `TransactionInfo` layout. The (legacy) per-window `Authorizations` map is
-	/// cleared by v3→v4.
+	/// Versioned migration v1→v2: rewrites `AuthorizationExtent` and
+	/// `BlockTransactions` to the v2 layouts.
 	pub type MigrateV1ToV2<T> = VersionedMigration<
 		1,
 		2,

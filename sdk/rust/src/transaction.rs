@@ -224,15 +224,16 @@ impl TransactionClient {
 	}
 
 	/// Query the current authorization for an account and return the remaining boost-tier
-	/// capacity as `(transactions_remaining, bytes_remaining)`.
+	/// capacity as `(transactions_remaining, bytes_remaining)`, summed over the slots
+	/// active at the current relay-chain block.
 	///
-	/// `bytes` and `transactions` on `AuthorizationExtent` are *consumed* counters; this
-	/// helper subtracts them from the granted caps (saturating to `0` if the holder is
-	/// already over-cap on either axis). Note that overshooting the caps no longer rejects
-	/// the transaction — it only forfeits the priority boost — so the returned remaining
-	/// values are a soft-budget preflight, not a hard precondition.
+	/// `bytes` and `transactions` on a slot's extent are *consumed* counters; this
+	/// helper subtracts them from the granted caps (saturating to `0` if a slot is
+	/// already over-cap on either axis) before summing. Note that overshooting the caps
+	/// no longer rejects the transaction — it only forfeits the priority boost — so the
+	/// returned remaining values are a soft-budget preflight, not a hard precondition.
 	///
-	/// Returns `None` if no authorization exists or it has expired.
+	/// Returns `None` if no authorization exists or no slot is currently active.
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
@@ -250,22 +251,40 @@ impl TransactionClient {
 			.await
 			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?;
 
-		let current_block_number = latest_block.number();
+		// Slot windows are expressed in relay-chain blocks.
+		let relay_now = latest_block
+			.storage()
+			.fetch_or_default(
+				&bulletin::storage().parachain_system().last_relay_chain_block_number(),
+			)
+			.await
+			.map_err(|e| Error::NetworkError(format!("Failed to query relay block: {e:?}")))?;
 
 		let maybe_auth =
 			latest_block.storage().fetch(&storage_query).await.map_err(|e| {
 				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
 			})?;
 
-		match maybe_auth {
-			Some(auth) if auth.expiration > current_block_number => {
-				let transactions_remaining =
-					auth.extent.transactions_allowance.saturating_sub(auth.extent.transactions);
-				let bytes_remaining = auth.extent.bytes_allowance.saturating_sub(auth.extent.bytes);
-				Ok(Some((transactions_remaining, bytes_remaining)))
-			},
-			Some(_) => Ok(None), // expired
-			None => Ok(None),
+		let Some(auth) = maybe_auth else { return Ok(None) };
+
+		let mut active = false;
+		let mut transactions_remaining: u32 = 0;
+		let mut bytes_remaining: u64 = 0;
+		for slot in auth.slots.0 {
+			if slot.starts_at <= relay_now && relay_now < slot.expiration {
+				active = true;
+				transactions_remaining = transactions_remaining.saturating_add(
+					slot.extent.transactions_allowance.saturating_sub(slot.extent.transactions),
+				);
+				bytes_remaining = bytes_remaining
+					.saturating_add(slot.extent.bytes_allowance.saturating_sub(slot.extent.bytes));
+			}
+		}
+
+		if active {
+			Ok(Some((transactions_remaining, bytes_remaining)))
+		} else {
+			Ok(None)
 		}
 	}
 

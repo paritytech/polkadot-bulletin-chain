@@ -249,3 +249,53 @@ fn rewrites_all_entries_in_place() {
 		}
 	});
 }
+
+#[test]
+fn v1_entries_translate_through_v2_then_v7() {
+	use crate::migrations::v2::{MigrateV1ToV2, V1Authorization, V1AuthorizationExtent};
+	use polkadot_sdk_frame::{deps::frame_support::storage::unhashed, traits::OnRuntimeUpgrade};
+
+	new_test_ext().execute_with(|| {
+		set_relay_now(RELAY_NOW);
+		StorageVersion::new(1).put::<TransactionStorage>();
+		let parachain_now = System::block_number();
+
+		let active = AuthorizationScope::Account(1u64);
+		let expired = AuthorizationScope::Account(2u64);
+		let empty = AuthorizationScope::Account(3u64);
+		let seed = |scope: &AuthorizationScope<u64>, bytes: u64, expiration: u64| {
+			let v1 = V1Authorization::<u64> {
+				extent: V1AuthorizationExtent { transactions: 7, bytes },
+				expiration,
+			};
+			unhashed::put_raw(&LegacyAuthorizations::hashed_key_for(scope), &v1.encode());
+		};
+		seed(&active, 4_096, parachain_now + 100);
+		seed(&expired, 4_096, parachain_now);
+		seed(&empty, 0, parachain_now + 100);
+
+		MigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
+
+		// The active entry now holds the single-window layout the v6→v7 step
+		// consumes; the old remaining quota became the allowance. Expired and
+		// zero-quota entries are gone.
+		let legacy = LegacyAuthorizations::get(&active).expect("translated");
+		assert_eq!(legacy.extent.bytes_allowance, 4_096);
+		assert_eq!(legacy.extent.transactions_allowance, 7);
+		assert_eq!(legacy.expiration, parachain_now + 100);
+		assert!(LegacyAuthorizations::get(&expired).is_none());
+		assert!(LegacyAuthorizations::get(&empty).is_none());
+
+		StorageVersion::new(6).put::<TransactionStorage>();
+		drive_migration();
+
+		let slots = Authorizations::get(&active).expect("auth exists").slots.into_inner();
+		assert_eq!(slots.len(), 1);
+		assert_eq!(slots[0].extent.bytes_allowance, 4_096);
+		assert_eq!(slots[0].extent.transactions_allowance, 7);
+		assert!(Authorizations::get(&expired).is_none());
+		assert!(Authorizations::get(&empty).is_none());
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+	});
+}

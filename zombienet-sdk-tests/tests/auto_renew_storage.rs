@@ -922,6 +922,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 			bytes: 0,
 			bytes_permanent: 0,
 			bytes_allowance,
+			starts_at: 0,
 			expiration: u32::MAX,
 		},
 		nonce,
@@ -2025,6 +2026,7 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 			bytes: 0,
 			bytes_permanent: 0,
 			bytes_allowance,
+			starts_at: 0,
 			expiration: u32::MAX,
 		},
 		nonce,
@@ -3322,6 +3324,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 			bytes: l,
 			bytes_permanent: 0,
 			bytes_allowance: 2 * l,
+			starts_at: 0,
 			expiration: u32::MAX,
 		},
 		nonce,
@@ -3513,24 +3516,16 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
-	// Best-chain estimates for the override and the cycle-1 wait. After finality covers the
+	// Best-chain estimate for the cycle-1 wait. After finality covers the
 	// store we re-resolve to the canonical block (`resolve_canonical_store_block`) so the
 	// downstream assertions land on the right finalized blocks even after a reorg between
 	// best-inclusion and finality.
 	let est_r1 = best_store_block + cadence;
-	let est_r2 = best_store_block + 2 * cadence;
 
-	// `expired()` is `now >= expiration`; midpoint of (r1, r2] gives slack — generous enough
-	// that an off-by-one between best and canonical doesn't flip cycle 1 from "renews" to
-	// "fails", or cycle 2 from "fails" to "renews".
-	let override_expiration: u32 = ((est_r1 + est_r2) / 2) as u32;
-	tracing::info!(
-		"Overriding Alice's authorization expiration: est_r1={}, est_r2={}, expiration={}",
-		est_r1,
-		est_r2,
-		override_expiration
-	);
-
+	// Slot windows are relay-chain blocks, so a parachain-height expiration estimate can't
+	// pin the "expires between cycle 1 and cycle 2" moment. Instead: cycle 1 runs against an
+	// always-active slot, and after asserting it we overwrite the slot with an
+	// already-expired one so cycle 2 deterministically hits the expired branch.
 	// Generous allowances so the renewal gate only fails on expiry, not the per-account cap.
 	let l = data.len() as u64;
 	override_alice_authorization(
@@ -3541,7 +3536,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 			bytes: l,
 			bytes_permanent: 0,
 			bytes_allowance: 100 * l,
-			expiration: override_expiration,
+			starts_at: 0,
+			expiration: u32::MAX,
 		},
 		nonce,
 	)
@@ -3591,6 +3587,26 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 	tracing::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
 
+	// Expire Alice's authorization before cycle 2: replace the always-active slot with one
+	// that ended at relay block 1. Finality lags best by only a few blocks, so this lands
+	// well before `r2 = r1 + cadence`.
+	override_alice_authorization(
+		client,
+		AuthorizationOverride {
+			transactions: 1,
+			transactions_allowance: 100,
+			bytes: l,
+			bytes_permanent: 0,
+			bytes_allowance: 100 * l,
+			starts_at: 0,
+			expiration: 1,
+		},
+		nonce,
+	)
+	.await?;
+	nonce += 1;
+	tracing::info!("Alice's authorization slot expired ahead of cycle 2");
+
 	wait_for_finalized_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	// Proof for the cycle-1 renewal at r1 fires at `r2 - 1 = r1 + RP`.
 	assert_proof_checked_at(client, r2 - 1, "auth_expires cycle 2").await?;
@@ -3599,9 +3615,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	assert_eq!(
 		count_event(&r2_events, "AutoRenewalFailed"),
 		1,
-		"[cycle 2] expected 1 AutoRenewalFailed at block {} (auth expired at {})",
+		"[cycle 2] expected 1 AutoRenewalFailed at block {} (auth slot expired before cycle 2)",
 		r2,
-		override_expiration
 	);
 	assert_eq!(
 		count_event(&r2_events, "DataAutoRenewed"),

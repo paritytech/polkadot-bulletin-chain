@@ -904,13 +904,17 @@ mod benchmarks {
 			MigrateV6ToV7::<T>::step(None, &mut meter).expect("step must succeed");
 		}
 
-		// Entry rewritten in place: the legacy decoder no longer sees it, and
-		// the v7 decoder reads back the translated `Authorization` with the
-		// original allowance preserved on its single slot.
-		assert!(LegacyAuthorizations::<T>::get(&scope).is_none());
+		// Entry rewritten in place: the v7 decoder reads back the translated
+		// `Authorization` with the original allowance preserved on its single
+		// slot. Both the legacy and v7 decoders accept prefixes of each
+		// other's encodings (SCALE ignores trailing bytes), so the only sound
+		// proof of the rewrite is that the raw value equals the v7 encoding.
 		let auth = crate::pallet::Authorizations::<T>::get(&scope).expect("auth exists");
 		assert_eq!(auth.slots.len(), 1);
 		assert_eq!(auth.slots[0].extent.bytes_allowance, 1024 * 1024);
+		let raw = sp_io::storage::get(&crate::pallet::Authorizations::<T>::hashed_key_for(&scope))
+			.expect("raw value exists");
+		assert_eq!(&*raw, auth.encode().as_slice());
 
 		Ok(())
 	}

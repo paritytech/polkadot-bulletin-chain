@@ -688,13 +688,16 @@ pub async fn get_alice_nonce(node: &zombienet_sdk::NetworkNode) -> Result<u64> {
 	Ok(nonce)
 }
 
-/// Mirrors the pallet's `Authorization<BlockNumber>` SCALE layout (encoded as a tuple).
+/// Mirrors the pallet's slot-based `Authorization` SCALE layout: a bounded vec
+/// holding a single `TimedAuthorization` slot. `starts_at`/`expiration` are
+/// **relay-chain** block numbers (`starts_at` inclusive, `expiration` exclusive).
 pub struct AuthorizationOverride {
 	pub transactions: u32,
 	pub transactions_allowance: u32,
 	pub bytes: u64,
 	pub bytes_permanent: u64,
 	pub bytes_allowance: u64,
+	pub starts_at: u32,
 	pub expiration: u32,
 }
 
@@ -706,7 +709,7 @@ pub async fn override_alice_authorization(
 	nonce: u64,
 ) -> Result<()> {
 	use subxt::ext::{
-		codec::Encode,
+		codec::{Compact, Encode},
 		scale_value::{Composite, Value as ScaleValue},
 	};
 
@@ -716,19 +719,28 @@ pub async fn override_alice_authorization(
 	let address =
 		subxt::dynamic::storage("TransactionStorage", "Authorizations", vec![scope_value]);
 	let key = client.storage().address_bytes(&address)?;
+	// `Authorization { slots }` — a one-element bounded vec of `TimedAuthorization
+	// { extent, starts_at, expiration }`.
 	let value = (
-		auth.transactions,
-		auth.transactions_allowance,
-		auth.bytes,
-		auth.bytes_permanent,
-		auth.bytes_allowance,
-		auth.expiration,
+		Compact(1u32),
+		(
+			(
+				auth.transactions,
+				auth.transactions_allowance,
+				auth.bytes,
+				auth.bytes_permanent,
+				auth.bytes_allowance,
+			),
+			auth.starts_at,
+			auth.expiration,
+		),
 	)
 		.encode();
 
 	tracing::info!(
-		"Overriding Alice's Authorization (expiration={}, bytes_permanent={}, \
+		"Overriding Alice's Authorization (starts_at={}, expiration={}, bytes_permanent={}, \
 		 bytes_allowance={}) via sudo set_storage",
+		auth.starts_at,
 		auth.expiration,
 		auth.bytes_permanent,
 		auth.bytes_allowance,
