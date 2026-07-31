@@ -200,7 +200,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     id: "products-devnet",
     name: "Products Devnet",
     endpoints: ["wss://bullet.tunastaking.eu", "wss://bullet.sik.rocks"],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/products-devnet-raw.json?raw").then(
+          (m) => m.default,
+        ),
+      relay: () =>
+        import("polkadot-api/chains/paseo").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_products_devnet,
     peerMultiaddrs: [
       "/dns/bulletin-paseo.faradaynodes.com/tcp/35507/wss/p2p/12D3KooWRVrepgbKXa8qUq1NAR6ehqZr1tZZK8Y7NynaruNJy9gA",
@@ -280,7 +288,13 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     id: "polkadot",
     name: "Bulletin Polkadot",
     endpoints: ["wss://bulletin-rpc.polkadot.io"],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/polkadot-raw.json?raw").then((m) => m.default),
+      relay: () =>
+        import("polkadot-api/chains/polkadot").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_polkadot,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
