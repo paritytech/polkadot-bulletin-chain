@@ -1875,7 +1875,15 @@ pub mod pallet {
 		}
 
 		/// `Self::store` for already-stored data: appends a copy of `info` under
-		/// `extrinsic_index` and `meta`, and re-indexes it. Same no-rollback caveat.
+		/// `extrinsic_index` and `meta`, and re-indexes it with the host. Same no-rollback
+		/// caveat.
+		///
+		/// Appends only — the caller owns the economics. This does not check that
+		/// `info.content_hash` is still stored, and does not charge the renewal: the
+		/// per-account `bytes_permanent` debit and the renewing pallet's chain-wide
+		/// permanent-storage cap check must already have run for `info.size` (see
+		/// [`Pallet::check_authorization`]). Skipping them grants permanent retention for
+		/// free and leaves that counter out of step with the entries it accounts for.
 		pub fn renew(
 			&mut self,
 			info: &TransactionInfoFor<T>,
