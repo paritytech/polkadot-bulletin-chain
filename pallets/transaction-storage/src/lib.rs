@@ -1328,7 +1328,7 @@ pub mod pallet {
 		///   renew quota (`bytes_permanent + size > bytes_allowance`) was exhausted, or the
 		///   chain-wide cap (`PermanentStorageUsed + size > MaxPermanentStorageSize`) would be
 		///   breached.
-		/// - [`Self::do_renew_in_memory`] returns `None` because the per-block transaction slot cap
+		/// - [`BlockTransactionsMut::renew`] returns `None` because the per-block transaction slot cap
 		///   (`MaxBlockTransactions`) is reached.
 		///
 		/// On failure the data is **gone**: the same `on_initialize` that queued the
