@@ -1316,7 +1316,7 @@ pub mod pallet {
 		/// Drain [`PendingAutoRenewals`] and return the count drained.
 		///
 		/// Batches the [`BlockTransactions`] read/write across all `n` renewals by threading
-		/// an in-memory accumulator through repeated [`Self::do_renew_in_memory`] calls.
+		/// an in-memory accumulator through repeated [`BlockTransactionsMut::renew`] calls.
 		/// A naive `do_renew`-per-item loop would re-encode the full vec per iteration
 		/// (O(n²)), which a linear weight model underestimates by ~17% at saturation.
 		///
