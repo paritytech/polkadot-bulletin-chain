@@ -1,0 +1,52 @@
+# fio pre-screen for the block-critical IO of a Bulletin node.
+# Emulates, per 6 s block, the storage work that gates block production, run against a large
+# (cold) file so the proof read is a true random read into the retention set.
+#
+# Usage:
+#   sudo TARGET=/mnt/data/bench fio scripts/storage-bench/fio-block-critical.fio
+# Set SIZE to your retention footprint (default 1700g). Needs SIZE + ~100g free on TARGET.
+# Compare p99 (clat) across NVMe / gp3 / SATA. Budget: p99 must sit well inside the block time.
+
+[global]
+directory=${TARGET}
+size=${SIZE:-1700g}
+ioengine=libaio
+direct=1
+runtime=300
+time_based=1
+group_reporting=1
+# Report the percentiles that matter for the block-time budget.
+percentile_list=50:95:99:99.9
+
+# ParityDB state access: small random read/write, low queue depth, latency-sensitive.
+# State is tiny under --state-pruning=1000, so a small file, not the retention set.
+[state-random]
+rw=randrw
+rwmixread=70
+bs=4k
+iodepth=4
+numjobs=2
+size=50g
+
+# New blob data written to columns::TRANSACTION: ~8 MiB per block, sequential.
+# 8 MiB / 6 s ~= 1.33 MiB/s sustained; the burst is what matters, so write in 8 MiB chunks.
+[blob-write]
+filename=blob-set
+rw=write
+bs=1m
+iodepth=8
+numjobs=1
+rate=1398101
+# ^ 8 MiB per 6 s in bytes/s; 2 s blocks = 4194304, 500 ms = 16777216.
+
+# Proof challenge: one random read of a few KB from anywhere in the retention set, per block
+# (rate_iops=1 is ~6x the 6 s block rate, deliberately conservative). This is the cold
+# random-read latency test, the number most likely to differ by tier. Shares the blob file
+# so reads hit the written set.
+[proof-random-read]
+filename=blob-set
+rw=randread
+bs=16k
+iodepth=1
+numjobs=1
+rate_iops=1
