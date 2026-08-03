@@ -39,10 +39,12 @@ pub trait WeightInfo {
 	fn force_renew() -> Weight;
 	fn renew() -> Weight;
 	fn authorize_account() -> Weight;
+	fn authorize_account_window() -> Weight;
 	fn add_authorizer() -> Weight;
 	fn remove_authorizer() -> Weight;
 	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
+	fn authorize_preimage_window() -> Weight;
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
@@ -55,6 +57,7 @@ pub trait WeightInfo {
 	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
 	fn migrate_v3_to_v4_step() -> Weight;
+	fn migrate_v6_to_v7_step() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -138,6 +141,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	fn authorize_account_window() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `272`
+		//  Estimated: `3550`
+		// Minimum execution time: 17_098_000 picoseconds.
+		Weight::from_parts(18_097_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:0 w:1)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(71), added: 2546, mode: `MaxEncodedLen`)
 	fn add_authorizer() -> Weight {
@@ -176,6 +191,18 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
 	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
 	fn authorize_preimage() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `272`
+		//  Estimated: `3550`
+		// Minimum execution time: 12_343_000 picoseconds.
+		Weight::from_parts(13_240_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	fn authorize_preimage_window() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `272`
 		//  Estimated: `3550`
@@ -400,6 +427,14 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Worst-case weight for one outer-loop iteration of the v4→v5 multi-block
+	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert) per
+	/// `AutoRenewals` entry. Placeholder until benchmarked.
+	fn migrate_v6_to_v7_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 }
 
 // For backwards compatibility and tests
@@ -436,6 +471,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(1))
 			.saturating_add(RocksDbWeight::get().writes(1))
 	}
+	fn authorize_account_window() -> Weight {
+		Weight::from_parts(18_097_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
 	fn add_authorizer() -> Weight {
 		Weight::from_parts(7_919_000, 0)
 			.saturating_add(Weight::from_parts(0, 0))
@@ -454,6 +495,12 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 	fn authorize_preimage() -> Weight {
+		Weight::from_parts(13_240_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(RocksDbWeight::get().reads(1))
+			.saturating_add(RocksDbWeight::get().writes(1))
+	}
+	fn authorize_preimage_window() -> Weight {
 		Weight::from_parts(13_240_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(RocksDbWeight::get().reads(1))
@@ -539,5 +586,10 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 6104))
 			.saturating_add(RocksDbWeight::get().reads(2))
 			.saturating_add(RocksDbWeight::get().writes(2))
+	}
+	fn migrate_v6_to_v7_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2))
+			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 }

@@ -173,6 +173,19 @@ export interface BulletinTypedApi {
               }
               expiration: number
             }
+          /** Slot-based chains: per-scope windows in relay-chain blocks. */
+          | {
+              slots: Array<{
+                extent: {
+                  transactions: number
+                  transactions_allowance: number
+                  bytes: bigint
+                  bytes_allowance: bigint
+                }
+                starts_at: number
+                expiration: number
+              }>
+            }
           | undefined
         >
       }
@@ -668,12 +681,20 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
     let auth:
       | {
-          extent: {
+          extent?: {
             transactions: number
             transactions_allowance?: number
             bytes: bigint
             bytes_allowance?: bigint
           }
+          slots?: Array<{
+            extent: {
+              transactions: number
+              transactions_allowance: number
+              bytes: bigint
+              bytes_allowance: bigint
+            }
+          }>
         }
       | undefined
     try {
@@ -693,24 +714,56 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     // so proceed and let the chain validate rather than blocking
     if (!auth) return
 
-    // Newer chains expose `*_allowance` (caps) alongside `transactions`/`bytes`
-    // (consumed counters); older chains expose only the cap fields. Available
-    // = allowance - consumed; falling back to the raw field when allowance
-    // is absent keeps the SDK compatible with both shapes.
-    const txAllowance = auth.extent.transactions_allowance
-    const availableTransactions =
-      txAllowance != null
-        ? Math.max(0, txAllowance - auth.extent.transactions)
-        : auth.extent.transactions
-    const bytesAllowance = auth.extent.bytes_allowance
-    const availableBytes =
-      bytesAllowance != null
-        ? Number(
-            bytesAllowance > auth.extent.bytes
-              ? bytesAllowance - auth.extent.bytes
+    let availableTransactions: number
+    let availableBytes: number
+    if (auth.slots != null) {
+      // Slot-based chains: sum `allowance - consumed` across all slots. Slot
+      // windows (relay blocks) are ignored — expired slots make this an
+      // over-estimate, which for a warn-only preflight only means a missed
+      // warning, never a false one.
+      availableTransactions = auth.slots.reduce(
+        (sum, slot) =>
+          sum +
+          Math.max(
+            0,
+            slot.extent.transactions_allowance - slot.extent.transactions,
+          ),
+        0,
+      )
+      availableBytes = auth.slots.reduce(
+        (sum, slot) =>
+          sum +
+          Number(
+            slot.extent.bytes_allowance > slot.extent.bytes
+              ? slot.extent.bytes_allowance - slot.extent.bytes
               : 0n,
-          )
-        : Number(auth.extent.bytes)
+          ),
+        0,
+      )
+    } else if (auth.extent != null) {
+      // Single-window chains expose `*_allowance` (caps) alongside
+      // `transactions`/`bytes` (consumed counters); the oldest chains expose
+      // only the cap fields. Available = allowance - consumed; falling back to
+      // the raw field when allowance is absent keeps the SDK compatible with
+      // both shapes.
+      const txAllowance = auth.extent.transactions_allowance
+      availableTransactions =
+        txAllowance != null
+          ? Math.max(0, txAllowance - auth.extent.transactions)
+          : auth.extent.transactions
+      const bytesAllowance = auth.extent.bytes_allowance
+      availableBytes =
+        bytesAllowance != null
+          ? Number(
+              bytesAllowance > auth.extent.bytes
+                ? bytesAllowance - auth.extent.bytes
+                : 0n,
+            )
+          : Number(auth.extent.bytes)
+    } else {
+      // Unknown shape — proceed and let the chain validate.
+      return
+    }
 
     if (
       availableTransactions < requiredTransactions ||

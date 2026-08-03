@@ -139,6 +139,7 @@ pub mod migrations {
 		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -157,6 +158,7 @@ pub mod migrations {
 	pub type MbmMigrations = (
 		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
+		pallet_bulletin_transaction_storage::migrations::v7::MigrateV6ToV7<Runtime>,
 	);
 }
 

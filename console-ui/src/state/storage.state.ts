@@ -67,6 +67,40 @@ export function extentAllowanceTransactions(extent: any): bigint {
   return BigInt(allowance ?? extent?.transactions ?? 0);
 }
 
+/**
+ * Flatten a slot-based `Authorization` (`{ slots }`, newest chains) into the
+ * single-window `{ extent, expiration }` view the UI consumes; single-window
+ * values pass through. Consumption and caps sum across slots; `expiration`
+ * is the latest slot's (a relay-chain block on slot-based chains).
+ */
+function normalizeAuthorization(auth: any): {
+  extent: any;
+  expiration: number | undefined;
+} {
+  if (auth?.slots == null) {
+    return { extent: auth?.extent, expiration: auth?.expiration };
+  }
+  const extent = {
+    transactions: 0n,
+    transactions_allowance: 0n,
+    bytes: 0n,
+    bytes_permanent: 0n,
+    bytes_allowance: 0n,
+  };
+  let expiration: number | undefined;
+  for (const slot of auth.slots) {
+    extent.transactions += BigInt(slot.extent?.transactions ?? 0);
+    extent.transactions_allowance += BigInt(slot.extent?.transactions_allowance ?? 0);
+    extent.bytes += BigInt(slot.extent?.bytes ?? 0n);
+    extent.bytes_permanent += BigInt(slot.extent?.bytes_permanent ?? 0n);
+    extent.bytes_allowance += BigInt(slot.extent?.bytes_allowance ?? 0n);
+    if (expiration == null || slot.expiration > expiration) {
+      expiration = slot.expiration;
+    }
+  }
+  return { extent, expiration };
+}
+
 function buildAuthorization(extent: any, expiration: number | null | undefined): Authorization {
   return {
     transactions: extentRemainingTransactions(extent),
@@ -121,7 +155,8 @@ export async function fetchAccountAuthorization(
       return null;
     }
 
-    const authorization = buildAuthorization(auth.extent, auth.expiration);
+    const normalized = normalizeAuthorization(auth);
+    const authorization = buildAuthorization(normalized.extent, normalized.expiration);
 
     authorizationSubject.next(authorization);
     return authorization;
@@ -155,7 +190,8 @@ export async function checkPreimageAuthorization(
       return null;
     }
 
-    const authorization = buildAuthorization(auth.extent, auth.expiration);
+    const normalized = normalizeAuthorization(auth);
+    const authorization = buildAuthorization(normalized.extent, normalized.expiration);
 
     preimageAuthSubject.next(authorization);
     return authorization;
@@ -194,7 +230,7 @@ export async function fetchPreimageAuthorizations(
             : new Uint8Array(32);
         return {
           contentHash,
-          maxSize: extentAllowanceBytes(value.extent),
+          maxSize: extentAllowanceBytes(normalizeAuthorization(value).extent),
         };
       });
 

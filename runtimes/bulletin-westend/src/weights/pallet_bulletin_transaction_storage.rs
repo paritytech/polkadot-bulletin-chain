@@ -128,6 +128,18 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
+	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	fn authorize_account_window() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `272`
+		//  Estimated: `3550`
+		// Minimum execution time: 16_975_000 picoseconds.
+		Weight::from_parts(18_008_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(67), added: 2542, mode: `MaxEncodedLen`)
 	fn add_authorizer() -> Weight {
@@ -172,6 +184,18 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		//  Estimated: `3550`
 		// Minimum execution time: 12_194_000 picoseconds.
 		Weight::from_parts(12_973_000, 0)
+			.saturating_add(Weight::from_parts(0, 3550))
+			.saturating_add(T::DbWeight::get().reads(1))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Storage: `TransactionStorage::Authorizations` (r:1 w:1)
+	/// Proof: `TransactionStorage::Authorizations` (`max_values`: None, `max_size`: Some(85), added: 2560, mode: `MaxEncodedLen`)
+	fn authorize_preimage_window() -> Weight {
+		// Proof Size summary in bytes:
+		//  Measured:  `272`
+		//  Estimated: `3550`
+		// Minimum execution time: 12_376_000 picoseconds.
+		Weight::from_parts(13_133_000, 0)
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(1))
 			.saturating_add(T::DbWeight::get().writes(1))
@@ -381,6 +405,14 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		Weight::from_parts(14_798_000, 0)
 			.saturating_add(Weight::from_parts(0, 6104))
 			.saturating_add(T::DbWeight::get().reads(3))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Worst-case weight for one outer-loop iteration of the v4→v5 multi-block
+	/// migration: 2 reads (iterator step + raw fetch), 1 write (re-insert) per
+	/// `AutoRenewals` entry. Placeholder until benchmarked.
+	fn migrate_v6_to_v7_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }

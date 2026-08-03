@@ -135,7 +135,8 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased =
+		(pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -150,7 +151,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v7::MigrateV6ToV7<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
