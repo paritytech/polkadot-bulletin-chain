@@ -4,6 +4,8 @@
 # The workflow uses a manual trigger.
 # On triggering the workflow, the release branch name and the versions of the crates should
 # be provided as input parameters.
+# The release is cut from `commit_hash` if given, otherwise from the tip of the branch the
+# workflow was dispatched on.
 # In dry-run mode, no remote branch is created, no commit is pushed, and no crate is published.
 # The release branch is created on the first run if it does not exist. If a branch with the
 # same name already exists (e.g. for a patch release), it is reused.
@@ -21,6 +23,10 @@ on:
         description: "Release branch name"
         type: string
         required: true
+      commit_hash:
+        description: "Commit to release from (defaults to the tip of the selected branch)"
+        type: string
+        required: false
       common_version:
         description: "Version for bulletin-pallets-common"
         type: string
@@ -61,10 +67,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so an arbitrary commit of the branch can be checked out.
+          ref: ${{ inputs.commit_hash || github.ref }}
+          fetch-depth: 0
 
       - name: Validate inputs
         env:
           RELEASE_BRANCH: ${{ inputs.release_branch }}
+          COMMIT_HASH: ${{ inputs.commit_hash }}
           COMMON_VERSION: ${{ inputs.common_version }}
           PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
           RUNTIME_API_VERSION: ${{ inputs.runtime_api_version }}
@@ -83,6 +94,11 @@ jobs:
             main|master|HEAD|-*|*..*|*" "*)
               echo "Disallowed branch name: $RELEASE_BRANCH" >&2; exit 1 ;;
           esac
+          if [ -n "$COMMIT_HASH" ]; then
+            echo "$COMMIT_HASH" | grep -qE '^[0-9a-fA-F]{7,40}$' || {
+              echo "Invalid commit hash: $COMMIT_HASH" >&2; exit 1;
+            }
+          fi
 
       - name: Configure git
         run: |
@@ -90,17 +106,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Resolve release commit
+        env:
+          COMMIT_HASH: ${{ inputs.commit_hash }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -n "$COMMIT_HASH" ]; then
+            git merge-base --is-ancestor "$COMMIT_HASH" "origin/$SOURCE_BRANCH" || {
+              echo "Commit $COMMIT_HASH is not on branch $SOURCE_BRANCH" >&2; exit 1;
+            }
+          fi
+          echo "Releasing from $(git rev-parse HEAD) (branch $SOURCE_BRANCH)"
+
       - name: Create or checkout release branch
         if: ${{ !inputs.dry_run }}
         env:
           RELEASE_BRANCH: ${{ inputs.release_branch }}
         run: |
           if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" > /dev/null 2>&1; then
-            echo "Branch $RELEASE_BRANCH already exists, checking out"
+            echo "Branch $RELEASE_BRANCH already exists, checking out its tip"
             git fetch origin "$RELEASE_BRANCH"
             git checkout "$RELEASE_BRANCH"
           else
-            echo "Creating new branch $RELEASE_BRANCH"
+            echo "Creating new branch $RELEASE_BRANCH at $(git rev-parse HEAD)"
             git checkout -b "$RELEASE_BRANCH"
           fi
 
