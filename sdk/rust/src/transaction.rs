@@ -284,11 +284,10 @@ impl TransactionClient {
 
 		let current_block_number = latest_block.number();
 
-		let maybe_auth = latest_block
-			.storage()
-			.fetch_raw(key)
-			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to query authorization: {e:?}")))?;
+		let maybe_auth =
+			latest_block.storage().fetch_raw(key).await.map_err(|e| {
+				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
+			})?;
 
 		let Some(bytes) = maybe_auth else { return Ok(None) };
 
@@ -299,8 +298,7 @@ impl TransactionClient {
 			return Ok(None); // expired
 		}
 
-		let transactions_remaining =
-			auth.transactions_allowance.saturating_sub(auth.transactions);
+		let transactions_remaining = auth.transactions_allowance.saturating_sub(auth.transactions);
 		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes);
 		Ok(Some((transactions_remaining, bytes_remaining)))
 	}
