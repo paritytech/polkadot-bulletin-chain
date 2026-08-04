@@ -5,7 +5,9 @@ description: |
   Modes:
     prepare  — populate-on-miss + save-on-end. Must run in a non-matrix job so the
                cache is built exactly once and shared with downstream consumers.
-    consume  — restore-only with fail-on-cache-miss. Use in matrix legs / consumers.
+    consume  — restore; on miss (e.g. evicted entry) repopulate and save so later
+               runs hit again. Use in matrix legs / consumers. Concurrent legs may
+               race to save the same key; the losing save is a no-op warning.
 
   Versions are read from .github/env (POLKADOT_NODE_VERSION, CHAIN_SPEC_BUILDER_VERSION,
   ZOMBIENET_VERSION, TRY_RUNTIME_VERSION, FRAME_OMNI_BENCHER_VERSION). The action loads
@@ -78,12 +80,27 @@ runs:
       run: just binaries-polkadot > /dev/null
 
     - name: Restore polkadot-node binaries
+      id: restore-polkadot-node
       if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' polkadot-node ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
         key: polkadot-binaries-${{ runner.os }}-polkadot-node-${{ env.POLKADOT_NODE_VERSION }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: false
+
+    - name: Populate polkadot-node binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' polkadot-node ') && steps.restore-polkadot-node.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::warning::use-polkadot-binaries: cache miss for polkadot-node ${POLKADOT_NODE_VERSION} (evicted?); repopulating in this job"
+        just binaries-polkadot > /dev/null
+
+    - name: Save polkadot-node binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' polkadot-node ') && steps.restore-polkadot-node.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/polkadot-node
+        key: polkadot-binaries-${{ runner.os }}-polkadot-node-${{ env.POLKADOT_NODE_VERSION }}
 
     - name: Add polkadot-node to PATH
       if: contains(format(' {0} ', inputs.groups), ' polkadot-node ')
@@ -114,12 +131,27 @@ runs:
       run: just binaries-chain-spec-builder > /dev/null
 
     - name: Restore chain-spec-builder binaries
+      id: restore-chain-spec-builder
       if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
         key: polkadot-binaries-${{ runner.os }}-chain-spec-builder-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: false
+
+    - name: Populate chain-spec-builder binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ') && steps.restore-chain-spec-builder.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::warning::use-polkadot-binaries: cache miss for chain-spec-builder ${CHAIN_SPEC_BUILDER_VERSION} (evicted?); repopulating in this job"
+        just binaries-chain-spec-builder > /dev/null
+
+    - name: Save chain-spec-builder binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' chain-spec-builder ') && steps.restore-chain-spec-builder.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/chain-spec-builder
+        key: polkadot-binaries-${{ runner.os }}-chain-spec-builder-${{ env.CHAIN_SPEC_BUILDER_VERSION }}
 
     - name: Add chain-spec-builder to PATH
       if: contains(format(' {0} ', inputs.groups), ' chain-spec-builder ')
@@ -148,12 +180,27 @@ runs:
       run: just binaries-zombienet > /dev/null
 
     - name: Restore zombienet binaries
+      id: restore-zombienet
       if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' zombienet ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
         key: polkadot-binaries-${{ runner.os }}-zombienet-${{ env.ZOMBIENET_VERSION }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: false
+
+    - name: Populate zombienet binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' zombienet ') && steps.restore-zombienet.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::warning::use-polkadot-binaries: cache miss for zombienet ${ZOMBIENET_VERSION} (evicted?); repopulating in this job"
+        just binaries-zombienet > /dev/null
+
+    - name: Save zombienet binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' zombienet ') && steps.restore-zombienet.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/zombienet
+        key: polkadot-binaries-${{ runner.os }}-zombienet-${{ env.ZOMBIENET_VERSION }}
 
     - name: Add zombienet to PATH
       if: contains(format(' {0} ', inputs.groups), ' zombienet ')
@@ -182,12 +229,27 @@ runs:
       run: just binaries-try-runtime > /dev/null
 
     - name: Restore try-runtime binaries
+      id: restore-try-runtime
       if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' try-runtime ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
         key: polkadot-binaries-${{ runner.os }}-try-runtime-${{ env.TRY_RUNTIME_VERSION }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: false
+
+    - name: Populate try-runtime binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' try-runtime ') && steps.restore-try-runtime.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::warning::use-polkadot-binaries: cache miss for try-runtime ${TRY_RUNTIME_VERSION} (evicted?); repopulating in this job"
+        just binaries-try-runtime > /dev/null
+
+    - name: Save try-runtime binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' try-runtime ') && steps.restore-try-runtime.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/try-runtime
+        key: polkadot-binaries-${{ runner.os }}-try-runtime-${{ env.TRY_RUNTIME_VERSION }}
 
     - name: Add try-runtime to PATH
       if: contains(format(' {0} ', inputs.groups), ' try-runtime ')
@@ -216,12 +278,27 @@ runs:
       run: just binaries-bencher > /dev/null
 
     - name: Restore frame-omni-bencher binaries
+      id: restore-frame-omni-bencher
       if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ')
       uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
         path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
         key: polkadot-binaries-${{ runner.os }}-frame-omni-bencher-${{ env.FRAME_OMNI_BENCHER_VERSION }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: false
+
+    - name: Populate frame-omni-bencher binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ') && steps.restore-frame-omni-bencher.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        echo "::warning::use-polkadot-binaries: cache miss for frame-omni-bencher ${FRAME_OMNI_BENCHER_VERSION} (evicted?); repopulating in this job"
+        just binaries-bencher > /dev/null
+
+    - name: Save frame-omni-bencher binaries on cache miss
+      if: inputs.mode == 'consume' && contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ') && steps.restore-frame-omni-bencher.outputs.cache-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ env.POLKADOT_BINARIES_DIR }}/frame-omni-bencher
+        key: polkadot-binaries-${{ runner.os }}-frame-omni-bencher-${{ env.FRAME_OMNI_BENCHER_VERSION }}
 
     - name: Add frame-omni-bencher to PATH
       if: contains(format(' {0} ', inputs.groups), ' frame-omni-bencher ')
