@@ -141,7 +141,6 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode,
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-// TODO: revisit sudo usage with https://github.com/paritytech/polkadot-bulletin-chain/pull/265
 async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
@@ -152,10 +151,9 @@ async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    const sudoTx = typedApi.tx.Sudo.sudo({ call: remarkTx.decodedCall });
     // Must be awaited: exiting while the tx is still in the pool leaves the signer's
     // on-chain nonce stale, so the next test signs with an already-consumed nonce.
-    await waitForTransaction(sudoTx, proofSigner, "Proof remark");
+    await waitForTransaction(remarkTx, proofSigner, "Proof remark");
     console.log(`📤 DAG proof - "${proof}" - stored in Bulletin`);
     return { rawDagCid }
 }
