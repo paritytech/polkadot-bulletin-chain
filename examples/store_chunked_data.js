@@ -141,7 +141,6 @@ export async function reconstructDagFromProof(expectedRootCid, proofCid, mhCode,
     console.log(`✅ Verified reconstructed root CID: ${rootCid.toString()}`);
 }
 
-// TODO: revisit sudo usage with https://github.com/paritytech/polkadot-bulletin-chain/pull/265
 async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
     console.log(`🧩 Storing proof for rootCID: ${rootCID.toString()} to the Bulletin`);
 
@@ -152,8 +151,7 @@ async function storeProof(typedApi, proofSigner, rootCID, dagFileBytes) {
     // This can be a serious pallet, this is just a demonstration.
     const proof = `ProofCid: ${rawDagCid.toString()} -> rootCID: ${rootCID.toString()}`;
     const remarkTx = typedApi.tx.System.remark({ remark: Binary.fromText(proof) });
-    const sudoTx = typedApi.tx.Sudo.sudo({ call: remarkTx.decodedCall });
-    await sudoTx.signSubmitAndWatch(proofSigner).subscribe({
+    await remarkTx.signSubmitAndWatch(proofSigner).subscribe({
         next: (ev) => console.log(`✅ Proof remark event:`, ev.type),
         error: (err) => console.error(`❌ Proof remark error:`, err),
     });
