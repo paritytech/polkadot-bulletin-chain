@@ -579,7 +579,7 @@ pub async fn submit_renew_pair(
 			("index".to_string(), Value::u128(index as u128)),
 		],
 	);
-	let renew_call = tx("TransactionStorage", "force_renew", vec![entry]);
+	let renew_call = tx("DataRenewal", "force_renew", vec![entry]);
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
@@ -630,11 +630,8 @@ pub async fn enable_auto_renew(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let call = tx(
-		"TransactionStorage",
-		"enable_auto_renew",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
+	let call =
+		tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tracing::info!("Submitting enable_auto_renew (nonce={})...", nonce);
@@ -659,11 +656,8 @@ pub async fn disable_auto_renew(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let call = tx(
-		"TransactionStorage",
-		"disable_auto_renew",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
+	let call =
+		tx("DataRenewal", "disable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tracing::info!("Submitting disable_auto_renew (nonce={})...", nonce);

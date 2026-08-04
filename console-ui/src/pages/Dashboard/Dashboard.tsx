@@ -14,6 +14,7 @@ import { useChainState, useApi } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
   type RawTransactionInfo,
+  entryKindOf,
 } from "@/state/storage.state";
 import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
@@ -244,16 +245,26 @@ function UsageCard() {
         recordPalletError(err);
         return null;
       }),
-      api.query.TransactionStorage.PermanentStorageUsed.getValue().catch((err: unknown) => {
+      // The chain-wide counter and cap moved from TransactionStorage to DataRenewal;
+      // fall back for chains still running the pre-split runtime.
+      (
+        (api.query as any).DataRenewal?.PermanentStorageUsed ??
+        (api.query as any).TransactionStorage?.PermanentStorageUsed
+      )
+        .getValue()
+        .catch((err: unknown) => {
+          recordPalletError(err);
+          return null;
+        }),
+      Promise.resolve(
+        (
+          (api.constants as any).DataRenewal?.MaxPermanentStorageSize ??
+          (api.constants as any).TransactionStorage?.MaxPermanentStorageSize
+        )()
+      ).catch((err: unknown) => {
         recordPalletError(err);
         return null;
       }),
-      Promise.resolve(api.constants.TransactionStorage.MaxPermanentStorageSize()).catch(
-        (err: unknown) => {
-          recordPalletError(err);
-          return null;
-        }
-      ),
     ])
       .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
@@ -281,10 +292,11 @@ function UsageCard() {
           for (const { value } of txEntries) {
             if (Array.isArray(value)) {
               for (const info of value) {
-                if (info?.kind?.type === "Store") {
+                const entryKind = entryKindOf(info);
+                if (entryKind === "Store") {
                   ephemeral.count++;
                   ephemeral.bytes += BigInt(info.size);
-                } else if (info?.kind?.type === "Renew") {
+                } else if (entryKind === "Renew") {
                   permanentCount.count++;
                 }
               }

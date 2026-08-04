@@ -2062,6 +2062,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-bulletin-data-renewal",
  "pallet-bulletin-hop-promotion",
  "pallet-bulletin-transaction-storage",
  "pallet-bulletin-transaction-storage-runtime-api",
@@ -2225,6 +2226,7 @@ dependencies = [
  "pallet-aura",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-bulletin-data-renewal",
  "pallet-bulletin-hop-promotion",
  "pallet-bulletin-transaction-storage",
  "pallet-bulletin-transaction-storage-runtime-api",
@@ -8071,6 +8073,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-bulletin-data-renewal"
+version = "0.1.0"
+dependencies = [
+ "array-bytes 6.2.3",
+ "bulletin-pallets-common",
+ "bulletin-transaction-storage-primitives",
+ "pallet-bulletin-transaction-storage",
+ "pallet-bulletin-transaction-storage-runtime-api",
+ "parity-scale-codec",
+ "polkadot-sdk-frame",
+ "scale-info",
+ "sp-transaction-storage-proof",
+ "tracing",
+]
+
+[[package]]
 name = "pallet-bulletin-hop-promotion"
 version = "0.1.0"
 dependencies = [
@@ -8097,6 +8115,7 @@ dependencies = [
  "array-bytes 6.2.3",
  "bulletin-pallets-common",
  "bulletin-transaction-storage-primitives",
+ "impl-trait-for-tuples",
  "pallet-bulletin-transaction-storage-runtime-api",
  "parity-scale-codec",
  "polkadot-sdk-frame",

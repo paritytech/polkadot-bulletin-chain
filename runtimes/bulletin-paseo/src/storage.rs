@@ -60,7 +60,7 @@ parameter_types! {
 		);
 }
 
-/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
 /// storage calls inside wrapper extrinsics so it can recursively validate and consume
 /// authorization.
 ///
@@ -103,7 +103,6 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
@@ -118,14 +117,22 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreTxParams = StoreTxParams;
-	type RenewTxParams = RenewTxParams;
 	type AuthorizeTxParams = AuthorizeTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	type EntryMeta = pallet_bulletin_data_renewal::EntryKind;
+	type AuthorizationExtra = pallet_bulletin_data_renewal::PermanentExtent;
+	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper =
-		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper = pallet_bulletin_data_renewal::RenewalBenchmarkHelper;
+}
+
+impl pallet_bulletin_data_renewal::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
+	type MaxPermanentStorageSize = MaxPermanentStorageSize;
+	type RenewTxParams = RenewTxParams;
 }
 
 parameter_types! {

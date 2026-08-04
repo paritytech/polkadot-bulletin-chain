@@ -80,8 +80,6 @@ parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
 	pub const StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
-	pub const RenewTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("Renew", PRIORITY, LONGEVITY);
 	pub const AuthorizeTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
@@ -90,7 +88,6 @@ parameter_types! {
 		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
-	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -102,7 +99,6 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
@@ -110,11 +106,13 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 		EnsureAllowedAuthorizers<Self>,
 	>;
 	type StoreTxParams = StoreTxParams;
-	type RenewTxParams = RenewTxParams;
 	type AuthorizeTxParams = AuthorizeTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	type EntryMeta = ();
+	type AuthorizationExtra = ();
+	type OnObsoleteTransactions = ();
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
 }
