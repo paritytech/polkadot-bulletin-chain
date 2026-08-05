@@ -1635,7 +1635,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		.collect();
 	let content_hashes: Vec<[u8; 32]> = items.iter().map(|d| blake2_256(d)).collect();
 
-	// Sync to a fresh block boundary so the batch has the full 24s block interval to enter
+	// Sync to a fresh block boundary so the batch has the full 6s block interval to enter
 	// the pool. Submitting mid-interval races the author's pool snapshot and splits the
 	// stores across two blocks, tripping the single-block assert below.
 	let pre_store_block = wait_for_next_best_block(&client, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
