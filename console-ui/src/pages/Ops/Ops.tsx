@@ -2,7 +2,7 @@ import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart, Network,
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { useChainState } from "@/state/chain.state";
-import type { MonitoringLinks } from "@/config/networks";
+import { type MonitoringLinks, polkadotJsAppsLink } from "@/config/networks";
 
 type LinkSpec = {
   label: string;
@@ -14,7 +14,7 @@ type LinkSpec = {
 type Subgroup = { title: string; items: LinkSpec[] };
 type Group    = { title: string; items?: LinkSpec[]; subgroups?: Subgroup[] };
 
-function group(monitoring: MonitoringLinks | undefined): Group[] {
+function group(monitoring: MonitoringLinks | undefined, endpoint: string | undefined): Group[] {
   if (!monitoring) return [];
 
   const chainHealth: LinkSpec[] = [];
@@ -50,10 +50,10 @@ function group(monitoring: MonitoringLinks | undefined): Group[] {
       description: "Live list of every node running this chain (version, block height, peers).",
     });
   }
-  if (monitoring.polkadotJs) {
+  if (endpoint) {
     chainHealth.push({
       label: "PolkadotJS Apps",
-      href: monitoring.polkadotJs,
+      href: polkadotJsAppsLink(endpoint),
       icon: ExternalLink,
       description: "Inspect chain state and events.",
     });
@@ -164,8 +164,8 @@ function LinkGrid({ items }: { items: LinkSpec[] }) {
 }
 
 export function Ops() {
-  const { network } = useChainState();
-  const groups = group(network?.monitoring);
+  const { network, connectedEndpoint } = useChainState();
+  const groups = group(network?.monitoring, connectedEndpoint ?? network?.endpoints[0]);
 
   return (
     <div className="space-y-6">

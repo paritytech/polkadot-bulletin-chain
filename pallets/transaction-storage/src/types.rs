@@ -15,7 +15,9 @@
 
 //! Type definitions for the transaction storage pallet.
 
-pub use bulletin_transaction_storage_primitives::TransactionRef;
+pub use bulletin_transaction_storage_primitives::{
+	assert_distinct_tag_prefixes, TransactionRef, ValidTransactionParams,
+};
 use bulletin_transaction_storage_primitives::{
 	cids::{CidCodec, HashingAlgorithm},
 	ContentHash,
@@ -38,40 +40,40 @@ pub(crate) type BalanceOf<T> =
 
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
-/// Usage state of an authorization. All four counters reset to `0` when the authorization
-/// is (re-)granted on the expired-but-present path, so they measure consumption **within
-/// the current authorization window** — not lifetime on-chain footprint:
+/// Usage state of an authorization. All counters (including `extra`) reset on the
+/// expired-re-grant path — they measure per-window consumption, not lifetime:
 ///
-/// - `bytes` / `transactions` — soft side (priority signal). Saturate upward on every `store`;
-///   never gate.
-/// - `bytes_permanent` — hard side (per-window renew quota). Increments on every `renew`, gates
-///   with [`crate::Error::PermanentAllowanceExceeded`] when `bytes_permanent + size >
-///   bytes_allowance`. Never decrements; the chain-wide [`crate::PermanentStorageUsed`] counter is
-///   the source of truth for renewed on-chain bytes.
+/// - `bytes` / `transactions` — soft side (priority signal); saturate, never gate.
 /// - `bytes_allowance` / `transactions_allowance` — caps set at grant time. `bytes_allowance` is
-///   shared between the soft and hard axes.
+///   shared with the consumer pallet's `extra` accounting.
+/// - `extra` — opaque consumer-pallet state; this pallet only stores and resets it.
+///
+/// FIELD ORDER IS LOAD-BEARING. Before the renewal split this struct held a `bytes_permanent:
+/// u64` where `extra` now sits, and live chains carry tens of thousands of authorizations
+/// written at that layout which nothing reshapes — `extra` keeps that slot so the encodings
+/// stay byte-identical. Reordering (or wiring an `Extra` that is not 8 bytes) silently
+/// reinterprets every one of them. Pinned by
+/// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
-pub struct AuthorizationExtent {
+pub struct AuthorizationExtent<Extra> {
 	/// Transactions consumed so far.
 	pub transactions: u32,
 	/// Total transaction allowance granted.
 	pub transactions_allowance: u32,
 	/// Bytes consumed by `store` calls (temporary storage).
 	pub bytes: u64,
-	/// Bytes consumed by `renew` calls (permanent storage).
-	pub bytes_permanent: u64,
+	/// Opaque consumer-pallet state, mutated only through
+	/// [`crate::Pallet::try_mutate_active_authorization`]. Occupies the pre-split
+	/// `bytes_permanent` slot — see the struct docs.
+	pub extra: Extra,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
 }
 
-impl AuthorizationExtent {
-	/// Per-account renew quota check: `bytes_permanent + size <= bytes_allowance`.
-	pub fn has_permanent_capacity(&self, size: u64) -> bool {
-		self.bytes_permanent.saturating_add(size) <= self.bytes_allowance
-	}
-}
+/// [`AuthorizationExtent`] bound to a runtime's [`crate::Config::AuthorizationExtra`].
+pub type AuthorizationExtentFor<T> = AuthorizationExtent<<T as Config>::AuthorizationExtra>;
 
 /// The scope of an authorization.
 ///
@@ -95,19 +97,18 @@ pub enum AuthorizationScope<AccountId> {
 	Preimage(ContentHash),
 }
 
-pub(crate) type AuthorizationScopeFor<T> =
-	AuthorizationScope<<T as frame_system::Config>::AccountId>;
+pub type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Config>::AccountId>;
 
 /// Describes the caller of a store/renew extrinsic after origin validation.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum AuthorizedCaller<AccountId> {
 	/// A signed transaction whose origin was transformed to
-	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateStorageCalls`].
+	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateAuthorizedCalls`].
 	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
 	/// A root call (e.g. via `sudo`).
 	Root,
 	/// An unsigned transaction validated by [`ValidateUnsigned`].
-	/// TODO: replaced by https://github.com/paritytech/polkadot-bulletin-chain/pull/194
+	/// TODO: replaced by <https://github.com/paritytech/polkadot-bulletin-chain/pull/194>
 	Unsigned,
 }
 
@@ -116,39 +117,76 @@ pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::
 
 /// An authorization to store data.
 #[derive(Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
-pub(crate) struct Authorization<BlockNumber> {
+pub struct Authorization<BlockNumber, Extra> {
 	/// Extent of the authorization (number of transactions/bytes).
-	pub(crate) extent: AuthorizationExtent,
+	pub extent: AuthorizationExtent<Extra>,
 	/// The block at which this authorization expires.
-	pub(crate) expiration: BlockNumber,
+	pub expiration: BlockNumber,
 }
 
-impl<BlockNumber: PartialOrd + Copy> Authorization<BlockNumber> {
+impl<BlockNumber: PartialOrd + Copy, Extra> Authorization<BlockNumber, Extra> {
 	/// `true` once `now` has reached `expiration`; the authorization no longer
 	/// permits `store`/`renew` and is eligible for `remove_expired_*`.
-	pub(crate) fn expired(&self, now: BlockNumber) -> bool {
+	pub fn expired(&self, now: BlockNumber) -> bool {
 		now >= self.expiration
 	}
 }
 
-pub(crate) type AuthorizationFor<T> = Authorization<BlockNumberFor<T>>;
+pub type AuthorizationFor<T> = Authorization<BlockNumberFor<T>, <T as Config>::AuthorizationExtra>;
 
-/// Distinguishes a stored transaction created by `store` (temporary) from one created by
-/// `renew` (permanent), so that `on_initialize`'s obsolete-block cleanup can decrement
-/// `PermanentStorageUsed` only for the renewed entries.
-#[derive(
-	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
-)]
-pub enum TransactionKind {
-	Store,
-	Renew,
+/// Mutable view over one unexpired authorization, passed to
+/// [`crate::Pallet::try_mutate_active_authorization`]'s closure: the opaque payload
+/// plus one native tx slot — never allowances or expiry.
+pub struct ActiveAuthorization<'a, T: Config> {
+	pub(crate) authorization: &'a mut AuthorizationFor<T>,
+}
+
+impl<T: Config> ActiveAuthorization<'_, T> {
+	/// Read-only view of the extent (counters, allowances, and the opaque extra).
+	pub fn extent(&self) -> &AuthorizationExtentFor<T> {
+		&self.authorization.extent
+	}
+
+	/// Mutable access to the opaque consumer-pallet payload.
+	pub fn extra_mut(&mut self) -> &mut T::AuthorizationExtra {
+		&mut self.authorization.extent.extra
+	}
+
+	/// Consume one native transaction slot (saturating).
+	pub fn note_transaction(&mut self) {
+		self.authorization.extent.transactions =
+			self.authorization.extent.transactions.saturating_add(1);
+	}
+}
+
+/// Callback fired by [`crate::Pallet::on_initialize`] when transactions age out of the
+/// `RetentionPeriod` window.
+///
+/// The storage pallet eagerly takes `Transactions[obsolete]`, computes `is_latest` for each
+/// entry (whether `TransactionByContentHash` still points at this `(block, index)`),
+/// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
+/// resulting slice to this trait. Implementers — typically
+/// `pallet-bulletin-data-renewal` — inspect each entry's opaque `meta` to
+/// maintain chain-wide renewed-byte counters and queue auto-renewals.
+///
+/// Wiring `()` (the default impl) makes the obsolete sweep a pure storage-pallet concern,
+/// suitable for runtimes that omit the renewal pallet entirely.
+pub trait OnObsoleteTransactions<BlockNumber, Meta> {
+	/// `obsolete` is the block whose transactions just aged out. `items` are the entries
+	/// taken from `Transactions[obsolete]` paired with their `is_latest` flag. The order
+	/// preserves the original `BoundedVec` order.
+	fn handle_obsolete(obsolete: BlockNumber, items: &[(TransactionInfo<Meta>, bool)]);
+}
+
+impl<BlockNumber, Meta> OnObsoleteTransactions<BlockNumber, Meta> for () {
+	fn handle_obsolete(_: BlockNumber, _: &[(TransactionInfo<Meta>, bool)]) {}
 }
 
 /// State data for a stored transaction.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
-pub struct TransactionInfo {
+pub struct TransactionInfo<Meta> {
 	/// Chunk trie root.
-	pub(crate) chunk_root: <BlakeTwo256 as Hash>::Output,
+	pub chunk_root: <BlakeTwo256 as Hash>::Output,
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
@@ -168,27 +206,29 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunks.
-	pub(crate) block_chunks: ChunkIndex,
+	pub block_chunks: ChunkIndex,
 
-	/// Whether the entry was created by a `store` (temporary) or a `renew` (permanent).
-	/// Used by the obsolete-block cleanup in `on_initialize` to decrement the chain-wide
-	/// `PermanentStorageUsed` counter for renewed bytes that have just aged out. Field
-	/// is appended at the end of the struct so the v1→v2 translation is a tail-extend.
-	pub kind: TransactionKind,
+	/// Opaque per-entry payload ([`crate::Config::EntryMeta`]), stored verbatim and
+	/// handed back through [`OnObsoleteTransactions::handle_obsolete`] at expiry.
+	/// Tail field; the wired type must keep `TransactionKind`'s 1-byte encoding.
+	pub meta: Meta,
 }
 
-impl TransactionInfo {
+/// [`TransactionInfo`] bound to a runtime's [`crate::Config::EntryMeta`].
+pub type TransactionInfoFor<T> = TransactionInfo<<T as Config>::EntryMeta>;
+
+impl<Meta> TransactionInfo<Meta> {
 	/// Get the number of total chunks.
 	///
 	/// See the `block_chunks` field of [`TransactionInfo`] for details.
-	pub fn total_chunks(txs: &[TransactionInfo]) -> ChunkIndex {
+	pub fn total_chunks(txs: &[TransactionInfo<Meta>]) -> ChunkIndex {
 		txs.last().map_or(0, |t| t.block_chunks)
 	}
 }
 
 /// Context of a `check_signed`/`check_unsigned` call.
 #[derive(Clone, Copy)]
-pub(crate) enum CheckContext {
+pub enum CheckContext {
 	/// `validate_signed` or `validate_unsigned`.
 	Validate,
 	/// `pre_dispatch_signed` or `pre_dispatch`.
@@ -198,12 +238,12 @@ pub(crate) enum CheckContext {
 impl CheckContext {
 	/// Should authorization be consumed in this context? If not, we merely check that
 	/// authorization exists.
-	pub(crate) fn consume_authorization(self) -> bool {
+	pub fn consume_authorization(self) -> bool {
 		matches!(self, CheckContext::PreDispatch)
 	}
 
 	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
-	pub(crate) fn want_valid_transaction(self) -> bool {
+	pub fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
 	}
 }
