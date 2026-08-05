@@ -36,7 +36,7 @@ import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
 import { buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
 import { fetchFromBitswapRpc } from "@/lib/bitswap-rpc";
-import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus, useTransport, type Network } from "@/state/chain.state";
+import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus, useTransport, useConnectedEndpoint, type Network } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
 
@@ -157,6 +157,7 @@ export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
   const network = useNetwork();
   const transport = useTransport();
+  const connectedEndpoint = useConnectedEndpoint();
   const blockNumber = useBlockNumber();
   const api = useApi();
   const client = useClient();
@@ -823,7 +824,7 @@ export function Download() {
                   <span className="text-muted-foreground font-mono text-xs truncate">
                     {transport === "light-client"
                       ? "Light client (smoldot)"
-                      : network.endpoints[0] ?? network.name}
+                      : connectedEndpoint ?? network.endpoints[0] ?? network.name}
                   </span>
                 </div>
               ) : (

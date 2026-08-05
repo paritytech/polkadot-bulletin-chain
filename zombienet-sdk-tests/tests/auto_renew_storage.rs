@@ -19,7 +19,7 @@ use crate::{
 		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
 		wait_for_finalized_quiescence, wait_for_session_change_on_node, AuthorizationOverride,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, TEST_DATA_SIZE,
+		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -167,22 +167,24 @@ async fn spawn_shared_harness(
 	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
 }
 
+/// Wait for the FINALIZED head to clear `block`'s `--blocks-pruning` boundary. Pruning
+/// fires off the finalized head, not the best head, so waiting on best-block plus a fudge
+/// is flaky under finality lag.
+async fn wait_past_pruning_boundary(
+	node: &zombienet_sdk::NetworkNode,
+	block: u64,
+	what: &str,
+) -> Result<()> {
+	let target = block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
+	tracing::info!("Waiting for FINALIZED block {target} so {what} ({block}) is past pruning");
+	wait_for_finalized_height(node, target, BLOCK_PRODUCTION_TIMEOUT_SECS).await
+}
+
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
-	// Extends NODE_LOG_CONFIG with pruning-side targets so a "bitswap still has data after
-	// pruning should have fired" failure has the corresponding node events to read:
-	//   - `db=debug`: `Removing block #N` from sc-client-db::prune_block (the
-	//     pruning-actually-fired confirmation)
-	//   - `state-db=debug` / `state-db::pin=debug`: canonicalization + pin/unpin
-	// (Node uses RocksDB — `parity-db` target would never fire.)
-	let log_targets = format!(
-		"{},db=debug,state-db=debug,state-db::pin=debug",
-		// Strip the leading "-l" so we can append more comma-separated targets.
-		NODE_LOG_CONFIG.strip_prefix("-l").unwrap_or(NODE_LOG_CONFIG)
-	);
 	vec![
 		"--ipfs-server".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
-		format!("-l{}", log_targets),
+		PRUNING_NODE_LOG_CONFIG.into(),
 		"--".into(),
 		"--network-backend=libp2p".into(),
 	]
@@ -588,20 +590,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-renew)").await?;
 
-	// `--blocks-pruning=N` prunes blocks N behind FINALIZED head, not best head. Waiting
-	// on best-block + fudge is flaky under finality lag.
-	let after_renew_pruned_finalized =
-		renew_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	tracing::info!(
-		"Waiting for FINALIZED block {} so both store and renew blocks are past the pruning boundary",
-		after_renew_pruned_finalized
-	);
-	wait_for_finalized_height(
-		collator1,
-		after_renew_pruned_finalized,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
-	)
-	.await?;
+	wait_past_pruning_boundary(collator1, renew_block, "the renew block").await?;
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -716,20 +705,14 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	verify_node_bitswap(collator1, &data1, BITSWAP_TIMEOUT_SECS, "Collator-1 / data1").await?;
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "Collator-1 / data2").await?;
 
-	// Pruning fires off FINALIZED head — wait on finalized to cross the boundary directly.
-	// Use the later of the two refcounted blocks (renewal_block holds data1's renewed entry,
-	// data2_block holds data2). Both must be past the pruning window for col11 cleanup.
-	let last_refcounted_block = renewal_block.max(data2_block);
-	let after_pruning_finalized =
-		last_refcounted_block + BLOCKS_PRUNING_GREATER_THAN_RETENTION as u64 + 1;
-	tracing::info!(
-		"Waiting for FINALIZED block {} so renewal_block={} and data2_block={} are past pruning",
-		after_pruning_finalized,
-		renewal_block,
-		data2_block
-	);
-	wait_for_finalized_height(collator1, after_pruning_finalized, BLOCK_PRODUCTION_TIMEOUT_SECS)
-		.await?;
+	// The later of the two refcounted blocks: renewal_block holds data1's renewed entry,
+	// data2_block holds data2. Both must clear the window for col11 cleanup.
+	wait_past_pruning_boundary(
+		collator1,
+		renewal_block.max(data2_block),
+		"the last refcounted block",
+	)
+	.await?;
 
 	// Proof for data2's stored block fires at `data2_block + RP`. When data2 == renewal_block,
 	// this is also the proof block for data1's renewed entry (same block).
@@ -883,6 +866,12 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		 original store block was pruned",
 	)?;
 	tracing::info!("✓ data_renewed still served via bitswap");
+
+	// The `wait_until` above is anchored to `data_renewed`, but `data_not_renewed` was stored
+	// a few blocks later. Without this the DONT_HAVE poll also has to absorb the finality-lag
+	// gap, and races under slow finalization.
+	wait_past_pruning_boundary(collator1, data_not_renewed_block, "data_not_renewed's store block")
+		.await?;
 
 	expect_bitswap_dont_have(
 		collator1,
@@ -1100,7 +1089,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -1144,7 +1133,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 				.iter()
 				.filter_map(|e| e.ok())
 				.filter(|e| {
-					e.pallet_name() == "TransactionStorage" && e.variant_name() == "RenewalEnabled"
+					e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalEnabled"
 				})
 				.count();
 			if current.number() == 0 {
@@ -1304,16 +1293,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -1720,8 +1705,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	let pre_enable_block = current_best_block(&client).await?.number() as u64;
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (worker, hash) in workers.iter().zip(content_hashes.iter()) {
-		let call =
-			tx("TransactionStorage", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
+		let call = tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(hash.as_slice())]);
 		let params = SubstrateExtrinsicParamsBuilder::new().nonce(1).immortal().build();
 		let signer = worker.clone();
 		let cli = client.clone();
@@ -1834,16 +1818,12 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| {
-				e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-			})
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -2125,7 +2105,7 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 	let mut enable_futs = Vec::with_capacity(content_hashes.len());
 	for (i, content_hash) in content_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2319,7 +2299,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let mut futs = Vec::with_capacity(ON_INIT_CLEANUP_ITEMS_PER_SET as usize);
 	for (i, content_hash) in set1_hashes.iter().enumerate() {
 		let call = tx(
-			"TransactionStorage",
+			"DataRenewal",
 			"enable_auto_renew",
 			vec![Value::from_bytes(content_hash.as_slice())],
 		);
@@ -2353,8 +2333,7 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 			let block_n = current.number() as u64;
 			let events = current.events().await?;
 			for ev in events.iter().filter_map(|e| e.ok()) {
-				if ev.pallet_name() == "TransactionStorage" && ev.variant_name() == "RenewalEnabled"
-				{
+				if ev.pallet_name() == "DataRenewal" && ev.variant_name() == "RenewalEnabled" {
 					enabled_count += 1;
 					if block_n > latest_enable_block {
 						latest_enable_block = block_n;
@@ -2502,16 +2481,12 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let auto_renewed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "DataAutoRenewed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
 		.count() as u32;
 	let auto_renewal_failed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| {
-			e.pallet_name() == "TransactionStorage" && e.variant_name() == "AutoRenewalFailed"
-		})
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
 		.count() as u32;
 	assert_eq!(
 		auto_renewed, ON_INIT_CLEANUP_ITEMS_PER_SET,
@@ -2968,7 +2943,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 				let idx = candidates[(pseudo_random(block_n + 1) as usize) % candidates.len()];
 				let hash = stored[idx].content_hash;
 				let renew_call = tx(
-					"TransactionStorage",
+					"DataRenewal",
 					"force_renew",
 					vec![Value::unnamed_variant(
 						"ContentHash",
@@ -3439,8 +3414,8 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
 	// lags ~10s behind best on cumulus).
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
-		"AutoRenewals",
+		"DataRenewal",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r3_hash).fetch(&auto_renewals_addr).await?;
@@ -3622,8 +3597,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 
 	let auto_renewals_addr = subxt::dynamic::storage(
-		"TransactionStorage",
-		"AutoRenewals",
+		"DataRenewal",
+		"Renewals",
 		vec![Value::from_bytes(content_hash.as_slice())],
 	);
 	let auto_renewals_after = client.storage().at(r2_hash).fetch(&auto_renewals_addr).await?;

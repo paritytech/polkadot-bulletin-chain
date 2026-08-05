@@ -6,7 +6,7 @@
  *
  * TypeScript equivalent of the Rust authorize-and-store example.
  * Demonstrates:
- * 1. Authorizing an account to store data (sudo via AsyncBulletinClient)
+ * 1. Authorizing an account to store data (allowed authorizer via AsyncBulletinClient)
  * 2. Storing data on chain via AsyncBulletinClient.store().send()
  * 3. Verifying the returned CID
  *

@@ -12,14 +12,14 @@
  *       is_promoted_on_chain  — hop-sdk (HopClient.isPromotedOnChain)
  *
  * Actors:
- *   - sudo     signs `authorize_account` on-chain.
- *   - sender   submits HOP blobs (needs raw signBytes).
- *   - receiver claims and acks (anonymous client — no signer needed).
+ *   - authorizer signs `authorize_account` on-chain (must be in `AllowedAuthorizers`).
+ *   - sender     submits HOP blobs (needs raw signBytes).
+ *   - receiver   claims and acks (anonymous client — no signer needed).
  *
  * Scenario:
  *   1. Pool baseline assertion.
  *   2. Pre-auth: can_account_promote → false; max_promotion_size sanity.
- *   3. Sudo authorizes sender.
+ *   3. Authorizer authorizes sender.
  *   4. Post-auth: can_account_promote → true (cross-checked papi vs SDK).
  *   5. Round-trip submit → claim → ack → assert pool empty + not promoted.
  *   6. Promotion submit → wait for on-chain promotion → assert pool empty.
@@ -42,7 +42,7 @@
  *   --hop-check-interval  10   → maintenance task fires every 10 seconds
  *
  * Usage:
- *   node examples/hop_round_trip.js [ws_url] [sudo_derivation_path] [ipfs_gateway_url]
+ *   node examples/hop_round_trip.js [ws_url] [authorizer_derivation_path] [ipfs_gateway_url]
  *   node examples/hop_round_trip.js ws://localhost:10000 //Eve http://127.0.0.1:8283
  */
 
@@ -75,7 +75,7 @@ import { bulletin } from './.papi/descriptors/dist/index.js';
 // ── CLI args ─────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 const NODE_WS = args[0] || 'ws://localhost:10000';
-const SUDO_PATH = args[1] || '//Eve';
+const AUTHORIZER_PATH = args[1] || '//Eve';
 const IPFS_GATEWAY = args[2] || DEFAULT_IPFS_GATEWAY_URL;
 const SENDER_PATH = '//CustomSigner';
 
@@ -167,16 +167,16 @@ async function pollFetchCid(gatewayUrl, cid) {
 
 async function main() {
 	logHeader('HOP END-TO-END TEST');
-	logConnection(NODE_WS, SUDO_PATH, '');
+	logConnection(NODE_WS, AUTHORIZER_PATH, '');
 
 	// ── Keypair setup ────────────────────────────────────────────────────────
 	const miniSecret = entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE));
 	const derive = sr25519CreateDerive(miniSecret);
 
-	// Sudo signs an on-chain extrinsic — getPolkadotSigner is fine here
+	// The authorizer signs an on-chain extrinsic — getPolkadotSigner is fine here
 	// (only the HOP signBytes path must avoid <Bytes> wrapping).
-	const sudoKeyPair = derive(SUDO_PATH);
-	const sudoSigner = getPolkadotSigner(sudoKeyPair.publicKey, 'Sr25519', sudoKeyPair.sign);
+	const authorizerKeyPair = derive(AUTHORIZER_PATH);
+	const authorizerSigner = getPolkadotSigner(authorizerKeyPair.publicKey, 'Sr25519', authorizerKeyPair.sign);
 
 	const senderKeyPair = derive(SENDER_PATH);
 	const senderAddress = ss58Address(senderKeyPair.publicKey);
@@ -190,7 +190,7 @@ async function main() {
 	const promotionData = new TextEncoder().encode(promotionMessage);
 	const promotionHash = blake2b256(promotionData);
 
-	logInfo(`Sudo account   : ${SUDO_PATH}`);
+	logInfo(`Authorizer     : ${AUTHORIZER_PATH}`);
 	logInfo(`Sender account : ${senderAddress}`);
 	logInfo(`Round-trip msg : "${roundTripMessage}" (hash ${toHex(roundTripHash)})`);
 	logInfo(`Promotion msg  : "${promotionMessage}" (hash ${toHex(promotionHash)})`);
@@ -238,10 +238,10 @@ async function main() {
 		logSuccess(`Pre-auth checks ok (max_promotion_size = ${maxSize}).`);
 
 		// ── Step 3: authorize sender ─────────────────────────────────────────
-		logStep('3️⃣', `Sudo authorizing ${senderAddress}…`);
+		logStep('3️⃣', `Authorizing ${senderAddress}…`);
 		await authorizeAccount(
 			bulletinAPI,
-			sudoSigner,
+			authorizerSigner,
 			senderAddress,
 			10 /* transactions */,
 			BigInt(10 * 1024 * 1024) /* bytes */,

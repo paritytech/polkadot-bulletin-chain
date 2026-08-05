@@ -17,7 +17,8 @@
 
 use crate::{
 	self as pallet_bulletin_transaction_storage, AsAuthorizer, EnsureAllowedAuthorizers,
-	TransactionStorageProof, DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	TransactionStorageProof, ValidTransactionParams, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
@@ -29,6 +30,10 @@ use polkadot_sdk_frame::{
 };
 
 type Block = MockBlock<Test>;
+
+/// Pool pricing for every family; none of these tests depend on the relative values.
+const PRIORITY: TransactionPriority = TransactionPriority::MAX;
+const LONGEVITY: TransactionLongevity = 10;
 
 // Configure a mock runtime to test the pallet.
 #[frame_support::runtime]
@@ -73,11 +78,16 @@ impl frame_system::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
-	pub storage MaxPermanentStorageSize: u64 = u64::MAX;
+	pub const StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
+	pub const AuthorizeTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredAccountAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -89,17 +99,20 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type MaxPermanentStorageSize = MaxPermanentStorageSize;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
 		EnsureAllowedAuthorizers<Self>,
 	>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type AuthorizeTxParams = AuthorizeTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	type EntryMeta = ();
+	type AuthorizationExtra = ();
+	type OnObsoleteTransactions = ();
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper = crate::benchmarking::DefaultCheckProofHelper;
 }

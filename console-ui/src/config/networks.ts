@@ -199,7 +199,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
   "products-devnet": {
     id: "products-devnet",
     name: "Products Devnet",
-    endpoints: ["wss://bullet.tunastaking.eu", "wss://bullet.sik.rocks"],
+    endpoints: [
+      "wss://bullet.sik.rocks",
+      "wss://bullet.tunastaking.eu",
+      "wss://bulletin-paseo.tservices.es:8443",
+      "wss://bulletin-paseo-02.tservices.es:9443",
+    ],
     lightClient: true,
     chainSpec: {
       para: () =>
