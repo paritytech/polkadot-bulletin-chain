@@ -44,6 +44,9 @@ class NullWebSocket {
 let killCurrentProvider: (() => void) | null = null;
 // Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
 let blockSubscription: { unsubscribe(): void } | null = null;
+// Bumped on every connect/disconnect; stale connectToNetwork continuations
+// compare against it and bail so they can't clobber a newer connection.
+let connectGeneration = 0;
 
 function createKillableWsProvider(endpoints: string[]) {
   let killed = false;
@@ -104,16 +107,20 @@ const STORAGE_KEY_TRANSPORT = "bulletin-transport";
 
 export type Transport = "light-client" | "rpc";
 
+// Default to RPC: smoldot currently breaks Download and old-block Explorer
+// (polkadot-sdk#10812). The preference is stored per network.
 function resolveTransport(network: Network): Transport {
   if (!network.lightClient || !network.chainSpec) return "rpc";
-  return localStorage.getItem(STORAGE_KEY_TRANSPORT) === "rpc"
-    ? "rpc"
-    : "light-client";
+  return localStorage.getItem(`${STORAGE_KEY_TRANSPORT}-${network.id}`) ===
+    "light-client"
+    ? "light-client"
+    : "rpc";
 }
 
 export function setTransport(transport: Transport): void {
-  localStorage.setItem(STORAGE_KEY_TRANSPORT, transport);
-  connectToNetwork(networkSubject.getValue().id);
+  const network = networkSubject.getValue();
+  localStorage.setItem(`${STORAGE_KEY_TRANSPORT}-${network.id}`, transport);
+  connectToNetwork(network.id);
 }
 
 export function getCustomNetworkUrl(): string {
@@ -182,18 +189,28 @@ function createSmoldotProvider(specs: { para: string; relay: string }) {
   // The provider may invoke the factory again after a halt; each invocation
   // must return a fresh chain (smoldot dedups the relay internally).
   const provider = getSmProvider(async () => {
-    const sd = getSmoldot();
-    if (killed) throw new Error("provider killed");
-    const relay = sd.addChain({ chainSpec: specs.relay, disableJsonRpc: true });
-    chains.push(relay);
-    const relayChain = await relay;
-    if (killed) throw new Error("provider killed");
-    const para = sd.addChain({
-      chainSpec: specs.para,
-      potentialRelayChains: [relayChain],
-    });
-    chains.push(para);
-    return para;
+    try {
+      const sd = getSmoldot();
+      if (killed) throw new Error("provider killed");
+      const relay = sd.addChain({ chainSpec: specs.relay, disableJsonRpc: true });
+      chains.push(relay);
+      const relayChain = await relay;
+      if (killed) throw new Error("provider killed");
+      const para = sd.addChain({
+        chainSpec: specs.para,
+        potentialRelayChains: [relayChain],
+      });
+      chains.push(para);
+      return para;
+    } catch (e) {
+      // getSmProvider swallows factory errors; without this the UI would
+      // stay on "connecting" forever after a failed addChain.
+      if (!killed) {
+        statusSubject.next("error");
+        errorSubject.next(e instanceof Error ? e.message : String(e));
+      }
+      throw e;
+    }
   });
 
   const kill = () => {
@@ -211,6 +228,7 @@ export async function connectToNetwork(
   networkId: NetworkId,
   endpointOverride?: string,
 ): Promise<void> {
+  const gen = ++connectGeneration;
   const networks = networksSubject.getValue();
   const baseNetwork = networks[networkId];
   if (!baseNetwork) {
@@ -275,6 +293,7 @@ export async function connectToNetwork(
         network.chainSpec.para(),
         network.chainSpec.relay(),
       ]);
+      if (gen !== connectGeneration) return;
       const killable = createSmoldotProvider({ para, relay });
       provider = killable.provider;
       killCurrentProvider = killable.kill;
@@ -297,6 +316,7 @@ export async function connectToNetwork(
         api.constants.System.SS58Prefix(),
         client._request<{ tokenSymbol?: string; tokenDecimals?: number }>("system_properties", []),
       ]);
+      if (gen !== connectGeneration) return;
 
       chainInfoSubject.next({
         chainName: version.spec_name,
@@ -306,6 +326,7 @@ export async function connectToNetwork(
         ss58Format,
       });
     } catch {
+      if (gen !== connectGeneration) return;
       // Constants may not be available immediately
       chainInfoSubject.next({});
     }
@@ -313,8 +334,10 @@ export async function connectToNetwork(
     // Get sudo key
     try {
       const sudoKey = await api.query.Sudo.Key.getValue();
+      if (gen !== connectGeneration) return;
       sudoKeySubject.next(sudoKey ?? undefined);
     } catch {
+      if (gen !== connectGeneration) return;
       // Sudo pallet may not be available
       sudoKeySubject.next(undefined);
     }
@@ -334,6 +357,7 @@ export async function connectToNetwork(
 
     statusSubject.next("connected");
   } catch (err) {
+    if (gen !== connectGeneration) return;
     const message = err instanceof Error ? err.message : "Unknown error";
     errorSubject.next(message);
     statusSubject.next("error");
@@ -341,6 +365,7 @@ export async function connectToNetwork(
 }
 
 export function disconnect(): void {
+  connectGeneration++;
   blockSubscription?.unsubscribe();
   blockSubscription = null;
   if (killCurrentProvider) {
