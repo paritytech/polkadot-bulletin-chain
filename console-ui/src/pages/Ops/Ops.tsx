@@ -164,8 +164,8 @@ function LinkGrid({ items }: { items: LinkSpec[] }) {
 }
 
 export function Ops() {
-  const { network } = useChainState();
-  const groups = group(network?.monitoring, network?.endpoints[0]);
+  const { network, connectedEndpoint } = useChainState();
+  const groups = group(network?.monitoring, connectedEndpoint ?? network?.endpoints[0]);
 
   return (
     <div className="space-y-6">
