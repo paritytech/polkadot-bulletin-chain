@@ -169,7 +169,9 @@ build-external-runtime name features="":
     git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REF" >&2
     git -C "$CHECKOUT_DIR" checkout -q FETCH_HEAD
 
-    BUILD_ARGS=(--release -p "$PACKAGE")
+    # --locked: honor the external repo's Cargo.lock; fresh resolution can
+    # drift to dep versions the pinned rev never built against.
+    BUILD_ARGS=(--release --locked -p "$PACKAGE")
     if [ -n "$FEATURES" ]; then
         BUILD_ARGS+=(--features "$FEATURES")
     fi

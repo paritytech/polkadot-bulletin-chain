@@ -48,5 +48,21 @@
       "ref": "e93abddfb111e6948c2fe155fbd772af90556f09",
       "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
+  },
+  {
+    "name": "bulletin-paseo-external",
+    "package": "bulletin-paseo-runtime",
+    "integration_tests": false,
+    "try_runtime": {
+      "extra_flags": "--blocktime 24000 --disable-spec-version-check",
+      "instances": [
+        { "name": "paseo", "uris": ["wss://bulletin-paseo.tservices.es:8443"] }
+      ]
+    },
+    "external_runtime": {
+      "repo": "https://github.com/paseo-network/runtimes.git",
+      "ref": "25a71672caea6d11306a70d2106f7c9d4b611cf2",
+      "path": "./system-parachains/bulletin-paseo"
+    }
   }
 ]
