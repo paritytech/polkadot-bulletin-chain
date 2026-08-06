@@ -821,17 +821,12 @@ async fn parachain_force_renew_lifecycle_test() -> Result<()> {
 	nonce += 1;
 
 	let content_hash = blake2_256(&data);
-	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
-		.await?;
-	let store_block =
-		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
-			.await?;
-
-	// Renew mid-retention: late enough to widen the survival window between the store
-	// block's pruning and the renew block's pruning (where the positive bitswap check
-	// runs), early enough that inclusion beats the sweep of the store entry at
-	// `store_block + RETENTION_PERIOD + 1`.
-	wait_for_finalized_height(collator1, store_block + 4, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	// The retention sweep follows BEST-chain height (`Transactions[store]` is taken at
+	// best block `store + RP + 1`) while finality can lag many blocks behind, so the
+	// pre-renew spacing must be anchored to best height — a finalized-height wait here
+	// races the sweep and the entry can be gone before the renew validates. Canonical
+	// block numbers are resolved after the renew is in.
+	wait_for_block_height(collator1, best_store_block + 4, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	let renew_block_best = submit_force_renew(client, &content_hash, nonce).await?;
 
 	// Re-anchor against finality: `TransactionByContentHash` at a finalized block names
@@ -840,7 +835,14 @@ async fn parachain_force_renew_lifecycle_test() -> Result<()> {
 		.await?;
 	let anchor_hash = finalized_block_hash_at(client, renew_block_best + 2).await?;
 	let renew_block = canonical_store_block(client, anchor_hash, &content_hash).await?;
-	tracing::info!("force_renew landed at canonical block {}", renew_block);
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	tracing::info!(
+		"force_renew landed at canonical block {} (store at {})",
+		renew_block,
+		store_block
+	);
 	assert!(
 		renew_block <= store_block + RETENTION_PERIOD as u64,
 		"force_renew landed at {}, after the sweep of store block {}; margin too small",
