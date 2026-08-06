@@ -14,13 +14,13 @@ use crate::{
 		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
 		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
 		override_alice_authorization, resolve_canonical_store_block, set_retention_period,
-		set_retention_period_finalized, submit_renew_one_shot, submit_renew_pair,
-		submit_store_signed, top_up_alice_authorization, verify_all_items_bitswap_concurrent,
-		verify_node_bitswap, verify_parachain_binaries, wait_for_block_height,
-		wait_for_finalized_height, wait_for_finalized_quiescence, wait_for_next_best_block,
-		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
-		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN,
-		PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		set_retention_period_finalized, submit_force_renew, submit_renew_one_shot,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization,
+		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
+		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
+		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -780,6 +780,136 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	tracing::info!("✓ Data evicted after the second retention period (no further renewal)");
 
 	test_log!(TEST, "=== Parachain one-shot renew lifecycle PASSED ===");
+	Ok(())
+}
+
+/// `force_renew` lifecycle: a synchronous mid-retention renewal re-anchors the data at the
+/// renew block. Positively asserts the data outlives pruning of its store block (eviction
+/// checks alone would also pass if the renew silently failed to add a ref), that the
+/// renewed entry passes its own proof cycle without leaving a renewal registration, and
+/// that the data is evicted once the renew block ages out.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_force_renew_lifecycle_test() -> Result<()> {
+	const TEST: &str = "para_force_renew";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== Parachain force_renew lifecycle ({} blocks pruning, retention {}) ===",
+		BLOCKS_PRUNING_GREATER_THAN_RETENTION,
+		RETENTION_PERIOD
+	);
+
+	let harness = pruning_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
+
+	let nonce = get_alice_nonce(collator1).await?;
+
+	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_FORCE_RENEW_");
+	let (hash_hex, _) = content_hash_and_cid(&data);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+
+	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	tracing::info!("Data stored at best-chain block {}", best_store_block);
+
+	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
+
+	// `force_renew` charges 1 tx slot + `data.len()` permanent bytes at dispatch.
+	top_up_alice_authorization(client, TOPUP_TX_COUNT, 2 * data.len() as u64, nonce).await?;
+	nonce += 1;
+
+	let content_hash = blake2_256(&data);
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+
+	// Renew mid-retention: late enough to widen the survival window between the store
+	// block's pruning and the renew block's pruning (where the positive bitswap check
+	// runs), early enough that inclusion beats the sweep of the store entry at
+	// `store_block + RETENTION_PERIOD + 1`.
+	wait_for_finalized_height(collator1, store_block + 4, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	let renew_block_best = submit_force_renew(client, &content_hash, nonce).await?;
+
+	// Re-anchor against finality: `TransactionByContentHash` at a finalized block names
+	// the canonical renew block even if the best-block inclusion got reorged.
+	wait_for_finalized_height(collator1, renew_block_best + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let anchor_hash = finalized_block_hash_at(client, renew_block_best + 2).await?;
+	let renew_block = canonical_store_block(client, anchor_hash, &content_hash).await?;
+	tracing::info!("force_renew landed at canonical block {}", renew_block);
+	assert!(
+		renew_block <= store_block + RETENTION_PERIOD as u64,
+		"force_renew landed at {}, after the sweep of store block {}; margin too small",
+		renew_block,
+		store_block
+	);
+
+	let renew_hash = finalized_block_hash_at(client, renew_block).await?;
+	let renew_events = client.blocks().at(renew_hash).await?.events().await?;
+	assert_eq!(
+		count_renewal_event_for(&renew_events, "Renewed", &content_hash),
+		1,
+		"expected 1 Renewed for {} at block {}",
+		hash_hex,
+		renew_block
+	);
+
+	// The original store entry still runs its proof cycle; the renew entry is a separate
+	// col11 ref, not an extension of the old one.
+	let first_proof_block = store_block + RETENTION_PERIOD as u64;
+	wait_for_finalized_height(collator1, first_proof_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	assert_proof_checked_at(client, first_proof_block, "force-renew post-store").await?;
+
+	// First retention period over, store block pruned; the renew's ref must keep the data
+	// served.
+	wait_past_pruning_boundary(collator1, store_block, "the store block").await?;
+	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store-pruning)")
+		.await
+		.context("force_renew did not preserve the data past the pruned store block")?;
+	tracing::info!("✓ Data still served after the store block was pruned");
+
+	// The renewed entry's own proof cycle: proof fires, then the sweep passes with no
+	// renewal events — `force_renew` must not leave a registration behind.
+	let second_proof_block = renew_block + RETENTION_PERIOD as u64;
+	let sweep_block = second_proof_block + 1;
+	wait_for_finalized_height(collator1, sweep_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	assert_proof_checked_at(client, second_proof_block, "force-renew post-renew").await?;
+	let sweep_hash = finalized_block_hash_at(client, sweep_block).await?;
+	let sweep_events = client.blocks().at(sweep_hash).await?.events().await?;
+	assert_eq!(
+		count_renewal_event_for(&sweep_events, "DataAutoRenewed", &content_hash),
+		0,
+		"expected no renewal for {} at sweep block {}: force_renew is synchronous only",
+		hash_hex,
+		sweep_block
+	);
+	assert_eq!(
+		count_renewal_event_for(&sweep_events, "AutoRenewalFailed", &content_hash),
+		0,
+		"expected no AutoRenewalFailed for {} at sweep block {}: nothing should be registered",
+		hash_hex,
+		sweep_block
+	);
+
+	// With no registration, the renew block holds the data's last col11 ref; once it ages
+	// out of the pruning window the data must be evicted.
+	wait_past_pruning_boundary(collator1, renew_block, "the force_renew block").await?;
+	expect_bitswap_dont_have(
+		collator1,
+		&data,
+		BITSWAP_EVICTION_TIMEOUT_SECS,
+		"Collator-1 (post-renew-pruning)",
+	)
+	.await
+	.context("data still served after the force_renew block was pruned")?;
+	tracing::info!("✓ Data evicted after the renew block aged out (no further renewal)");
+
+	test_log!(TEST, "=== Parachain force_renew lifecycle PASSED ===");
 	Ok(())
 }
 
