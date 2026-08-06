@@ -14,12 +14,13 @@ use crate::{
 		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
 		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
 		override_alice_authorization, resolve_canonical_store_block, set_retention_period,
-		set_retention_period_finalized, submit_renew_pair, submit_store_signed,
-		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
-		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
-		wait_for_finalized_quiescence, wait_for_next_best_block, wait_for_session_change_on_node,
-		AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
-		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		set_retention_period_finalized, submit_renew_one_shot, submit_renew_pair,
+		submit_store_signed, top_up_alice_authorization, verify_all_items_bitswap_concurrent,
+		verify_node_bitswap, verify_parachain_binaries, wait_for_block_height,
+		wait_for_finalized_height, wait_for_finalized_quiescence, wait_for_next_best_block,
+		wait_for_session_change_on_node, AuthorizationOverride, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN,
+		PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -609,6 +610,176 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	);
 
 	test_log!(TEST, "=== Parachain double-renew under pruning PASSED ===");
+	Ok(())
+}
+
+/// Count `DataRenewal` events of `variant` whose fields contain `content_hash`. Scoped so
+/// recurring renewals left running by sibling tests on the shared harness can't collide
+/// with per-block event counts.
+fn count_renewal_event_for(
+	events: &subxt::events::Events<SubstrateConfig>,
+	variant: &str,
+	content_hash: &[u8; 32],
+) -> u32 {
+	events
+		.iter()
+		.filter_map(|e| e.ok())
+		.filter(|e| {
+			e.pallet_name() == "DataRenewal" &&
+				e.variant_name() == variant &&
+				e.field_bytes().windows(32).any(|w| w == content_hash)
+		})
+		.count() as u32
+}
+
+/// One-shot `renew` lifecycle: the prepaid renewal fires exactly once at the retention
+/// boundary and unregisters. The data outlives pruning of its store block (the renewal's
+/// fresh col11 ref), then, with no further renewal, is evicted once the renewal block
+/// itself ages out of the pruning window.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
+	const TEST: &str = "para_renew_one_shot";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== Parachain one-shot renew lifecycle ({} blocks pruning, retention {}) ===",
+		BLOCKS_PRUNING_GREATER_THAN_RETENTION,
+		RETENTION_PERIOD
+	);
+
+	let harness = pruning_harness().await?;
+	let collator1 = &harness.collator1;
+	let client_owned = collator1.wait_client().await?;
+	let client = &client_owned;
+
+	let nonce = get_alice_nonce(collator1).await?;
+
+	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_RENEW_ONE_SHOT_");
+	let (hash_hex, _) = content_hash_and_cid(&data);
+	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
+
+	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	tracing::info!("Data stored at best-chain block {}", best_store_block);
+
+	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
+
+	// The one-shot prepays 1 tx slot + `data.len()` permanent bytes at registration.
+	top_up_alice_authorization(client, TOPUP_TX_COUNT, 2 * data.len() as u64, nonce).await?;
+	nonce += 1;
+
+	let content_hash = blake2_256(&data);
+	// Re-anchor against the finalized chain before the renew: the pool validates renewals
+	// against finalized state, and the cycle math below needs the canonical store block.
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	if store_block != best_store_block {
+		tracing::info!(
+			"Canonical store block on finalized chain is {} (best-chain reported {})",
+			store_block,
+			best_store_block
+		);
+	}
+
+	submit_renew_one_shot(client, &content_hash, nonce).await?;
+	tracing::info!("One-shot renew registered for content_hash {}", hash_hex);
+
+	// The prepaid renewal fires at the retention boundary, same cadence as auto-renew.
+	let renewal_block = store_block + RETENTION_PERIOD as u64 + 1;
+	wait_for_finalized_height(collator1, renewal_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Proof for the original store lands one block before the renewal.
+	let proof_block = renewal_block - 1;
+	assert_proof_checked_at(client, proof_block, "one-shot pre-renewal").await?;
+
+	// Registration present up to the renewal block, then removed by the one-shot drain.
+	let renewals_addr = subxt::dynamic::storage(
+		"DataRenewal",
+		"Renewals",
+		vec![Value::from_bytes(content_hash.as_slice())],
+	);
+	let proof_hash = finalized_block_hash_at(client, proof_block).await?;
+	assert!(
+		client.storage().at(proof_hash).fetch(&renewals_addr).await?.is_some(),
+		"Renewals[{}] should be registered at block {} (one block before the renewal)",
+		hash_hex,
+		proof_block
+	);
+	let renewal_hash = finalized_block_hash_at(client, renewal_block).await?;
+	let renewal_events = client.blocks().at(renewal_hash).await?.events().await?;
+	assert_eq!(
+		count_renewal_event_for(&renewal_events, "DataAutoRenewed", &content_hash),
+		1,
+		"expected 1 DataAutoRenewed for {} at renewal block {}",
+		hash_hex,
+		renewal_block
+	);
+	assert_eq!(
+		count_renewal_event_for(&renewal_events, "AutoRenewalFailed", &content_hash),
+		0,
+		"expected 0 AutoRenewalFailed for {} at renewal block {}",
+		hash_hex,
+		renewal_block
+	);
+	assert!(
+		client.storage().at(renewal_hash).fetch(&renewals_addr).await?.is_none(),
+		"Renewals[{}] should be removed at block {}: one-shot must not re-register",
+		hash_hex,
+		renewal_block
+	);
+	tracing::info!("✓ One-shot renewal fired at block {} and unregistered", renewal_block);
+
+	// First retention period over, store block pruned; the renewal's col11 ref must keep
+	// the data served.
+	wait_past_pruning_boundary(collator1, store_block, "the store block").await?;
+	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store-pruning)")
+		.await
+		.context("one-shot renewal did not preserve the data past the pruned store block")?;
+	tracing::info!("✓ Data still served after the store block was pruned");
+
+	// Second retention period: the renewed entry's proof fires, but no renewal follows.
+	let second_proof_block = renewal_block + RETENTION_PERIOD as u64;
+	let second_expiry_block = second_proof_block + 1;
+	wait_for_finalized_height(collator1, second_expiry_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	assert_proof_checked_at(client, second_proof_block, "one-shot post-renewal").await?;
+	let second_expiry_hash = finalized_block_hash_at(client, second_expiry_block).await?;
+	let expiry_events = client.blocks().at(second_expiry_hash).await?.events().await?;
+	assert_eq!(
+		count_renewal_event_for(&expiry_events, "DataAutoRenewed", &content_hash),
+		0,
+		"expected no renewal for {} at block {}: the one-shot already fired",
+		hash_hex,
+		second_expiry_block
+	);
+	assert_eq!(
+		count_renewal_event_for(&expiry_events, "AutoRenewalFailed", &content_hash),
+		0,
+		"expected no AutoRenewalFailed for {} at block {}: nothing should be registered",
+		hash_hex,
+		second_expiry_block
+	);
+
+	// With no further renewal, the renewal block holds the data's last col11 ref; once it
+	// ages out of the pruning window the data must be evicted.
+	wait_past_pruning_boundary(collator1, renewal_block, "the one-shot renewal block").await?;
+	expect_bitswap_dont_have(
+		collator1,
+		&data,
+		BITSWAP_EVICTION_TIMEOUT_SECS,
+		"Collator-1 (post-renewal-pruning)",
+	)
+	.await
+	.context(
+		"data still served after the one-shot renewal block was pruned; a second renewal \
+		 must not have been scheduled",
+	)?;
+	tracing::info!("✓ Data evicted after the second retention period (no further renewal)");
+
+	test_log!(TEST, "=== Parachain one-shot renew lifecycle PASSED ===");
 	Ok(())
 }
 
