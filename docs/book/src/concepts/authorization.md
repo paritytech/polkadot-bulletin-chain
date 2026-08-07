@@ -28,7 +28,7 @@ Or check the **Dashboard** in the Console UI - the sudo account is displayed in 
 The easiest way to get authorization on testnets:
 
 1. Open the **Console UI** (you're likely already here!)
-2. Connect your wallet (Polkadot.js, Talisman, etc.)
+2. Connect your wallet (Polkadot.js, Talisman, PolkaGate, etc.)
 3. Navigate to **Faucet** in the menu
 4. Request authorization for your account
 5. The faucet will grant you a default allocation (transactions + bytes)
