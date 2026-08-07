@@ -108,8 +108,40 @@ export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
   return { type: "Position", value: { block: ref.block, index: ref.index } }
 }
 
-/** Which call shape the runtime's renewal extrinsics take. */
-type RenewShape = "transactionRef" | "legacy"
+/**
+ * Which call shape the runtime's renewal extrinsics take, or `unavailable` for a runtime
+ * that ships no renewal at all (no `pallet-bulletin-data-renewal`).
+ */
+type RenewShape = "transactionRef" | "legacy" | "unavailable"
+
+/** The connected runtime has no renewal extrinsics under any pallet. */
+function renewalUnavailable(): BulletinError {
+  return new BulletinError(
+    "renewal is not available on this chain",
+    ErrorCode.UNSUPPORTED_OPERATION,
+  )
+}
+
+/**
+ * Compatibility level of a PAPI tx entry against the connected runtime, or `null` when the
+ * entry carries no probe — hand-rolled api objects (tests, mocks) have no
+ * `getCompatibilityLevel`, and there presence alone has to decide.
+ */
+async function probeCompatibility(entry: unknown): Promise<number | null> {
+  const probe = (
+    entry as { getCompatibilityLevel?: () => Promise<number> } | undefined
+  )?.getCompatibilityLevel
+  if (typeof probe !== "function") return null
+  try {
+    return await probe.call(entry)
+  } catch (error) {
+    throw new BulletinError(
+      "failed to probe runtime compatibility for renew",
+      ErrorCode.TRANSACTION_FAILED,
+      error,
+    )
+  }
+}
 
 /**
  * Minimal shape of the pallet namespace carrying the renewal extrinsics, so the
@@ -1314,27 +1346,37 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * retries. A resolved shape is cached for the client's lifetime; after a
    * runtime upgrade that changes the renewal call shape, create a new client.
    */
+  /**
+   * Whether any pallet on the connected runtime exposes a usable `renew`.
+   *
+   * Probes both the post-split (`DataRenewal`) and pre-split (`TransactionStorage`) homes,
+   * since a pre-split runtime answers `Incompatible` for the former while its legacy
+   * `renew` still works. An entry with no probe counts as present, so this reports `false`
+   * only on positive evidence that the runtime ships no renewal.
+   */
+  private async hasRenewCall(): Promise<boolean> {
+    for (const pallet of [
+      this.api.tx.DataRenewal,
+      this.api.tx.TransactionStorage,
+    ]) {
+      if (!pallet) continue
+      const level = await probeCompatibility(pallet.renew)
+      if (level === null || level > 0) return true
+    }
+    return false
+  }
+
   private resolveRenewShape(): Promise<RenewShape> {
     this.renewShapePromise ??= (async (): Promise<RenewShape> => {
       const forceRenew = this.renewalPallet.force_renew
       if (!forceRenew) return "legacy"
-      const probe = (
-        forceRenew as unknown as {
-          getCompatibilityLevel?: () => Promise<number>
-        }
-      ).getCompatibilityLevel
-      if (typeof probe !== "function") return "transactionRef"
-      let level: number
-      try {
-        level = await probe.call(forceRenew)
-      } catch (error) {
-        throw new BulletinError(
-          "failed to probe runtime compatibility for renew",
-          ErrorCode.TRANSACTION_FAILED,
-          error,
-        )
-      }
-      return level > 0 ? "transactionRef" : "legacy"
+      const level = await probeCompatibility(forceRenew)
+      if (level === null) return "transactionRef"
+      if (level > 0) return "transactionRef"
+      // `force_renew` is incompatible: either a pre-`TransactionRef` runtime whose legacy
+      // `renew` still works, or a runtime that ships no renewal at all. Only the second
+      // has no usable `renew` under either pallet.
+      return (await this.hasRenewCall()) ? "legacy" : "unavailable"
     })()
     const resolved = this.renewShapePromise
     resolved.catch(() => {
@@ -1355,8 +1397,10 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new CallBuilder(async (options) => {
       const entry = toTransactionRef(ref)
       const ts = this.renewalPallet
+      const shape = await this.resolveRenewShape()
+      if (shape === "unavailable") throw renewalUnavailable()
       let tx: PapiTransaction
-      if ((await this.resolveRenewShape()) === "transactionRef") {
+      if (shape === "transactionRef") {
         tx = ts.renew({ entry })
       } else if (entry.type === "Position") {
         // Pre-`TransactionRef` runtimes take the position fields directly.
@@ -1384,10 +1428,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       const ts = this.renewalPallet
-      if (
-        (await this.resolveRenewShape()) !== "transactionRef" ||
-        !ts.force_renew
-      ) {
+      const shape = await this.resolveRenewShape()
+      if (shape === "unavailable") throw renewalUnavailable()
+      if (shape !== "transactionRef" || !ts.force_renew) {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
           ErrorCode.UNSUPPORTED_OPERATION,
