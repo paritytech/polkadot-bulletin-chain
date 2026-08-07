@@ -45,7 +45,7 @@
     },
     "external_runtime": {
       "repo": "https://github.com/bkontur/runtimes.git",
-      "ref": "8e1fea06e0bbf0f83308f271b9ca5a13024b5cf8",
+      "ref": "1d441417a4b2248b029481153538b60edb33f364",
       "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
   },
