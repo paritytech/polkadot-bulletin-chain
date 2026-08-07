@@ -62,6 +62,30 @@ function createClient(txPallet: Record<string, unknown>) {
   return new AsyncBulletinClient(api as any, signer as any, submitFn)
 }
 
+/** A tx entry carrying a PAPI compatibility probe reporting `level`. */
+function probed(level: number, impl: (a?: unknown) => unknown = () => mockTx) {
+  const entry = impl as ((a?: unknown) => unknown) & {
+    getCompatibilityLevel: () => Promise<number>
+  }
+  entry.getCompatibilityLevel = async () => level
+  return entry
+}
+
+/**
+ * Mirrors a real PAPI client against a runtime without `pallet-bulletin-data-renewal`:
+ * both pallet proxies answer for any name, and every renewal entry is Incompatible.
+ */
+function createRenewalFreeClient() {
+  const api = {
+    tx: {
+      DataRenewal: { renew: probed(0), force_renew: probed(0) },
+      TransactionStorage: { renew: probed(0) },
+    },
+  }
+  // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
+  return new AsyncBulletinClient(api as any, signer as any, submitFn)
+}
+
 describe("renew argument shape detection", () => {
   it("unpacks Position to {block, index} when the api has no force_renew (old runtime)", async () => {
     let arg: unknown
@@ -292,6 +316,50 @@ describe("forceRenew", () => {
         message: expect.stringContaining("probe"),
       },
     )
+  })
+})
+
+describe("runtimes without a renewal pallet", () => {
+  it("rejects renew with a clear error rather than dispatching a missing call", async () => {
+    await expect(
+      createRenewalFreeClient().renew(positionInput).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "renewal is not available on this chain",
+    })
+  })
+
+  it("rejects forceRenew with the same error", async () => {
+    await expect(
+      createRenewalFreeClient().forceRenew(positionInput).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "renewal is not available on this chain",
+    })
+  })
+
+  it("still renews when only the pre-split `renew` is compatible", async () => {
+    // A pre-split runtime: `DataRenewal` answers Incompatible for everything, but
+    // `TransactionStorage.renew` works — that must read as legacy, not "no renewal".
+    // Dispatch still goes through `renewalPallet`, which prefers the `DataRenewal` proxy.
+    let arg: unknown
+    const api = {
+      tx: {
+        DataRenewal: {
+          renew: probed(0, (a?: unknown) => {
+            arg = a
+            return mockTx
+          }),
+          force_renew: probed(0),
+        },
+        TransactionStorage: { renew: probed(3) },
+      },
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
+    const client = new AsyncBulletinClient(api as any, signer as any, submitFn)
+
+    await client.renew(positionInput).send()
+    expect(arg).toEqual({ block: 100, index: 5 })
   })
 })
 
