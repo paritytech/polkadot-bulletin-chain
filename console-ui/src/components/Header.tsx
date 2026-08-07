@@ -27,7 +27,9 @@ import {
   connectToNetwork,
   getCustomNetworkUrl,
   clearCustomNetworkUrl,
+  setTransport,
   type NetworkId,
+  type Transport,
 } from "@/state/chain.state";
 import { WEB3_STORAGE_URL } from "@/config/networks";
 import { useWalletState, useSelectedAccount } from "@/state/wallet.state";
@@ -123,8 +125,33 @@ function AuthorizationStatus() {
   );
 }
 
+function TransportToggle({ transport }: { transport: Transport }) {
+  const segment = (value: Transport, label: string, title: string) => (
+    <button
+      type="button"
+      onClick={() => transport !== value && setTransport(value)}
+      title={title}
+      className={cn(
+        "rounded px-2 py-1 text-xs font-semibold",
+        transport === value
+          ? "bg-primary text-primary-foreground"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="flex h-10 items-center gap-0.5 rounded-md border bg-background p-1">
+      {segment("light-client", "Light", "In-browser light client (smoldot)")}
+      {segment("rpc", "RPC", "Remote RPC node")}
+    </div>
+  );
+}
+
 function NetworkSwitcher() {
-  const { network, networks } = useChainState();
+  const { network, networks, transport } = useChainState();
   const isCustom = network.id === "custom";
   const activeCustomUrl = isCustom ? network.endpoints[0] : undefined;
   const [customUrl, setCustomUrl] = useState(() => activeCustomUrl ?? getCustomNetworkUrl());
@@ -158,7 +185,7 @@ function NetworkSwitcher() {
     <SelectItem
       key={net.id}
       value={net.id}
-      disabled={net.id !== "custom" && net.endpoints.length === 0}
+      disabled={net.id !== "custom" && net.endpoints.length === 0 && !net.lightClient}
     >
       {net.name}
     </SelectItem>
@@ -166,12 +193,15 @@ function NetworkSwitcher() {
 
   if (!isCustom) {
     return (
-      <Select value={network.id} onValueChange={handleNetworkChange}>
-        <SelectTrigger className="w-[260px]">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>{selectItems}</SelectContent>
-      </Select>
+      <div className="flex items-center gap-2">
+        {network.lightClient && <TransportToggle transport={transport} />}
+        <Select value={network.id} onValueChange={handleNetworkChange}>
+          <SelectTrigger className="w-[260px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>{selectItems}</SelectContent>
+        </Select>
+      </div>
     );
   }
 
