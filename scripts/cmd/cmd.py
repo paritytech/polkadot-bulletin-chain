@@ -75,7 +75,7 @@ parser_bench = subparsers.add_parser('bench', help='Runs benchmarks', epilog=ben
 for arg, config in common_args.items():
     parser_bench.add_argument(arg, **config)
 
-parser_bench.add_argument('--runtime', help='Runtime(s) space separated', choices=runtimeNames, nargs='*', default=runtimeNames)
+parser_bench.add_argument('--runtime', help='Runtime(s) space separated; external runtimes are skipped', choices=runtimeNames, nargs='*', default=runtimeNames)
 parser_bench.add_argument('--pallet', help='Pallet(s) space separated', nargs='*', default=[])
 parser_bench.add_argument('--steps', help='Select how many samples we should take across the variable components [default: 50]', default=50)
 parser_bench.add_argument('--repeat', help='Select how many repetitions of this benchmark should run from within the wasm [default: 20', default=20)
@@ -103,10 +103,21 @@ if args.command == 'bench':
 
     print_and_log(f'Provided runtimes: {args.runtime}')
     print_and_log(f'Cargo profile: {profile}')
+    # External runtimes live out-of-tree and are benchmarked in their own repo.
+    requested = list(filter(lambda x: x['name'] in args.runtime, runtimesMatrix))
+    external = [x['name'] for x in requested if x.get('external_runtime')]
+    if external:
+        print_and_log(f'Skipping external runtimes: {external}')
+
     # convert to mapped dict
-    runtimesMatrix = list(filter(lambda x: x['name'] in args.runtime, runtimesMatrix))
+    runtimesMatrix = list(filter(lambda x: not x.get('external_runtime'), requested))
     runtimesMatrix = {x['name']: x for x in runtimesMatrix}
     print_and_log(f'Filtered out runtimes: {runtimesMatrix}')
+
+    # Nothing left to do once the external ones are gone - not a failure.
+    if not runtimesMatrix and external:
+        print_and_log('Nothing to benchmark: all requested runtimes are external')
+        sys.exit(0)
 
     # loop over remaining runtimes to collect available pallets
     for runtime in runtimesMatrix.values():

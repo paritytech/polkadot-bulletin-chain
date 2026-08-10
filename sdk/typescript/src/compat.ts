@@ -28,48 +28,72 @@ import {
 import { decAnyMetadata, unifyMetadata } from "@polkadot-api/substrate-bindings"
 import { BulletinError, ErrorCode } from "./types.js"
 
-/** Supported shapes of `TransactionStorage.renew` across the fleet. */
-export type RenewShape = "transaction-ref" | "positional"
+/** Supported shapes of the renewal calls across the fleet. */
+export type RenewShape = "data-renewal" | "transaction-ref" | "positional"
 
-/** checksum → shape (see module docs for how keys are derived and verified). */
-export const RENEW_REGISTRY: Readonly<Record<string, RenewShape>> = {
-  // sdk/metadata.scale — current runtime: `renew(entry: TransactionRef)`.
-  a4vk5ap2ldpq: "transaction-ref",
-  // sdk/metadata-compat/transaction-storage-v1000011.scale —
-  // bulletin-westend v1000011: positional `renew(block, index)`.
-  eq2g3ci5e7ion: "positional",
-}
+/** Pallets that may host the renewal calls, newest first. */
+const RENEW_PALLETS = ["DataRenewal", "TransactionStorage"] as const
+export type RenewPallet = (typeof RENEW_PALLETS)[number]
 
 /**
- * Checksum of `TransactionStorage.renew` in opaque metadata bytes; `null`
- * when the pallet or call is absent.
+ * pallet → checksum → shape (see module docs for how keys are derived and
+ * verified). Keys pair the hosting pallet with the checksum: PAPI's per-item
+ * checksum covers only the call's type tree, and the renewal split moved
+ * `renew` across pallets without changing that tree, so the same checksum
+ * appears under both pallets and means a different encoder in each.
  */
-export function renewChecksum(metadataBytes: Uint8Array): string | null {
-  const unified = unifyMetadata(decAnyMetadata(metadataBytes))
-  return getChecksumBuilder(getLookupFn(unified)).buildCall(
-    "TransactionStorage",
-    "renew",
-  )
+export const RENEW_REGISTRY: Readonly<
+  Record<RenewPallet, Readonly<Record<string, RenewShape>>>
+> = {
+  DataRenewal: {
+    // sdk/metadata.scale — current runtime, post renewal split:
+    // `DataRenewal.renew(entry: TransactionRef)`.
+    a4vk5ap2ldpq: "data-renewal",
+  },
+  TransactionStorage: {
+    // sdk/metadata-compat/transaction-storage-v1000016.scale — pre-split
+    // chains: `TransactionStorage.renew(entry: TransactionRef)`.
+    a4vk5ap2ldpq: "transaction-ref",
+    // sdk/metadata-compat/transaction-storage-v1000011.scale —
+    // bulletin-westend v1000011: positional `renew(block, index)`.
+    eq2g3ci5e7ion: "positional",
+  },
 }
 
 /**
- * Resolve the `renew` encoder shape for the connected chain. Fails closed on
- * an absent or unknown shape.
+ * Checksum of `<pallet>.renew` in opaque metadata bytes; `null` when the
+ * pallet or call is absent.
+ */
+export function renewChecksum(
+  metadataBytes: Uint8Array,
+  pallet: RenewPallet = "TransactionStorage",
+): string | null {
+  const unified = unifyMetadata(decAnyMetadata(metadataBytes))
+  return getChecksumBuilder(getLookupFn(unified)).buildCall(pallet, "renew")
+}
+
+/**
+ * Resolve the `renew` encoder shape for the connected chain: the newest
+ * pallet hosting a `renew` call decides. Fails closed on an absent or
+ * unknown shape.
  */
 export function resolveRenewShape(metadataBytes: Uint8Array): RenewShape {
-  const checksum = renewChecksum(metadataBytes)
-  if (checksum === null) {
-    throw new BulletinError(
-      "TransactionStorage.renew is not available on this chain",
-      ErrorCode.UNSUPPORTED_OPERATION,
-    )
+  const unified = unifyMetadata(decAnyMetadata(metadataBytes))
+  const builder = getChecksumBuilder(getLookupFn(unified))
+  for (const pallet of RENEW_PALLETS) {
+    const checksum = builder.buildCall(pallet, "renew")
+    if (checksum === null) continue
+    const shape = RENEW_REGISTRY[pallet][checksum]
+    if (!shape) {
+      throw new BulletinError(
+        `${pallet}.renew has an unsupported shape on this chain (checksum ${checksum}); this SDK release supports ${RENEW_PALLETS.flatMap((p) => Object.keys(RENEW_REGISTRY[p])).length} shape(s) — a newer runtime may need an SDK upgrade`,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    return shape
   }
-  const shape = RENEW_REGISTRY[checksum]
-  if (!shape) {
-    throw new BulletinError(
-      `TransactionStorage.renew has an unsupported shape on this chain (checksum ${checksum}); this SDK release supports ${Object.keys(RENEW_REGISTRY).length} shape(s) — a newer runtime may need an SDK upgrade`,
-      ErrorCode.UNSUPPORTED_OPERATION,
-    )
-  }
-  return shape
+  throw new BulletinError(
+    "renew is not available on this chain",
+    ErrorCode.UNSUPPORTED_OPERATION,
+  )
 }

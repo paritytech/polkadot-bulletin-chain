@@ -38,28 +38,46 @@ use std::{collections::HashMap, sync::OnceLock};
 #[subxt::subxt(runtime_metadata_path = "../metadata-compat/transaction-storage-v1000011.scale")]
 pub mod bulletin_v1000011 {}
 
-/// Encoders for `TransactionStorage.renew`, one per supported fleet shape.
+/// `TransactionStorage` as of bulletin-westend v1000016 (pre renewal split):
+/// `renew(entry: TransactionRef)` / `force_renew` still live in
+/// `TransactionStorage` instead of `DataRenewal`.
+#[subxt::subxt(runtime_metadata_path = "../metadata-compat/transaction-storage-v1000016.scale")]
+pub mod bulletin_v1000016 {}
+
+/// Encoders for the renewal calls, one per supported fleet shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RenewAdapter {
-	/// `renew(entry: TransactionRef)` — the current runtime (`metadata.scale`).
+	/// `DataRenewal.renew(entry: TransactionRef)` — the current runtime
+	/// (`metadata.scale`, post renewal split).
+	DataRenewal,
+	/// `TransactionStorage.renew(entry: TransactionRef)` — pre-split chains
+	/// (e.g. bulletin-westend v1000016), encoded via [`bulletin_v1000016`].
 	TransactionRef,
-	/// `renew(block, index)` — legacy chains (e.g. bulletin-westend v1000011),
-	/// encoded via [`bulletin_v1000011`].
+	/// `TransactionStorage.renew(block, index)` — legacy chains (e.g.
+	/// bulletin-westend v1000011), encoded via [`bulletin_v1000011`].
 	Positional,
 }
 
-/// Resolve the encoder for `TransactionStorage.renew` on the connected chain
-/// by hashing the live item and looking it up in the registry. Fails closed
-/// on an absent or unknown shape.
+/// Resolve the encoder for the renewal calls on the connected chain by hashing
+/// the live item — `DataRenewal.renew` when the pallet exists, otherwise
+/// `TransactionStorage.renew` — and looking it up in the registry. Fails
+/// closed on an absent or unknown shape.
+///
+/// Keys pair the hosting pallet with the item hash: subxt's per-item hash
+/// covers only the call's type tree, and the renewal split moved `renew`
+/// across pallets without changing that tree, so the hash alone cannot tell
+/// `DataRenewal.renew` from a pre-split `TransactionStorage.renew`.
 pub fn renew_adapter(live: &subxt::Metadata) -> Result<RenewAdapter> {
-	let Some(hash) = live_call_hash(live, "TransactionStorage", "renew") else {
-		return Err(Error::RenewalFailed(
-			"TransactionStorage.renew is not available on this chain".into(),
-		));
+	let (pallet, hash) = if let Some(hash) = live_call_hash(live, "DataRenewal", "renew") {
+		("DataRenewal", hash)
+	} else if let Some(hash) = live_call_hash(live, "TransactionStorage", "renew") {
+		("TransactionStorage", hash)
+	} else {
+		return Err(Error::RenewalFailed("renew is not available on this chain".into()));
 	};
-	renew_registry().get(&hash).copied().ok_or_else(|| {
+	renew_registry().get(&(pallet, hash)).copied().ok_or_else(|| {
 		Error::RenewalFailed(format!(
-			"TransactionStorage.renew has an unsupported shape on this chain (item hash 0x{}); \
+			"{pallet}.renew has an unsupported shape on this chain (item hash 0x{}); \
 			 this SDK release supports {} shape(s) — a newer runtime may need an SDK upgrade",
 			hex32(&hash),
 			renew_registry().len()
@@ -67,25 +85,42 @@ pub fn renew_adapter(live: &subxt::Metadata) -> Result<RenewAdapter> {
 	})
 }
 
-/// `hash → adapter`, keys derived from the same committed metadata that
-/// generated each adapter's encoder.
-fn renew_registry() -> &'static HashMap<[u8; 32], RenewAdapter> {
-	static REGISTRY: OnceLock<HashMap<[u8; 32], RenewAdapter>> = OnceLock::new();
+/// `(pallet, hash) → adapter`, keys derived from the same committed metadata
+/// that generated each adapter's encoder.
+fn renew_registry() -> &'static HashMap<(&'static str, [u8; 32]), RenewAdapter> {
+	static REGISTRY: OnceLock<HashMap<(&'static str, [u8; 32]), RenewAdapter>> = OnceLock::new();
 	REGISTRY.get_or_init(|| {
 		HashMap::from([
 			(
-				committed_call_hash(
-					include_bytes!("../../metadata.scale"),
+				(
+					"DataRenewal",
+					committed_call_hash(
+						include_bytes!("../../metadata.scale"),
+						"DataRenewal",
+						"renew",
+					),
+				),
+				RenewAdapter::DataRenewal,
+			),
+			(
+				(
 					"TransactionStorage",
-					"renew",
+					committed_call_hash(
+						include_bytes!("../../metadata-compat/transaction-storage-v1000016.scale"),
+						"TransactionStorage",
+						"renew",
+					),
 				),
 				RenewAdapter::TransactionRef,
 			),
 			(
-				committed_call_hash(
-					include_bytes!("../../metadata-compat/transaction-storage-v1000011.scale"),
+				(
 					"TransactionStorage",
-					"renew",
+					committed_call_hash(
+						include_bytes!("../../metadata-compat/transaction-storage-v1000011.scale"),
+						"TransactionStorage",
+						"renew",
+					),
 				),
 				RenewAdapter::Positional,
 			),
@@ -120,7 +155,13 @@ mod tests {
 	fn registry_resolves_every_committed_snapshot() {
 		let current =
 			subxt::Metadata::decode(&mut &include_bytes!("../../metadata.scale")[..]).unwrap();
-		assert_eq!(renew_adapter(&current).unwrap(), RenewAdapter::TransactionRef);
+		assert_eq!(renew_adapter(&current).unwrap(), RenewAdapter::DataRenewal);
+
+		let pre_split = subxt::Metadata::decode(
+			&mut &include_bytes!("../../metadata-compat/transaction-storage-v1000016.scale")[..],
+		)
+		.unwrap();
+		assert_eq!(renew_adapter(&pre_split).unwrap(), RenewAdapter::TransactionRef);
 
 		let legacy = subxt::Metadata::decode(
 			&mut &include_bytes!("../../metadata-compat/transaction-storage-v1000011.scale")[..],
@@ -129,10 +170,10 @@ mod tests {
 		assert_eq!(renew_adapter(&legacy).unwrap(), RenewAdapter::Positional);
 	}
 
-	/// Two rows, two distinct keys — a duplicate hash would silently shrink
-	/// the map and mask a mis-generated snapshot.
+	/// Three rows, three distinct keys — a duplicate hash would silently
+	/// shrink the map and mask a mis-generated snapshot.
 	#[test]
 	fn registry_keys_are_distinct() {
-		assert_eq!(renew_registry().len(), 2);
+		assert_eq!(renew_registry().len(), 3);
 	}
 }

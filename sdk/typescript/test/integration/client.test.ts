@@ -24,6 +24,7 @@ import {
   blobFromBytes,
   blobFromItems,
   CidCodec,
+  DEFAULT_CLIENT_CONFIG,
   HashAlgorithm,
   type UploadItem,
   UploadStatus,
@@ -74,7 +75,21 @@ const ENDPOINT = process.env.BULLETIN_RPC_URL ?? "ws://localhost:9944"
 
 const blake2b256 = (data: Uint8Array) => blake2b(data, { dkLen: 32 })
 
-describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
+// Worst case per transaction is the SDK's txTimeout (production default,
+// above PAPI's mortality window). Budgets are sized as transaction-count
+// times txTimeout plus margin, so the SDK's descriptive "Transaction timed
+// out" error surfaces instead of an opaque vitest timeout.
+const TX_TIMEOUT = DEFAULT_CLIENT_CONFIG.txTimeout
+const MARGIN = 60_000
+// Non-chunked tests submit at most 2 transactions.
+const DEFAULT_TEST_TIMEOUT = 2 * TX_TIMEOUT + MARGIN
+// Worst chunked test: 5 chunks + 1 manifest. The pipeline submits in waves,
+// but the budget keeps the sequential worst case.
+const CHUNKED_TEST_TIMEOUT = 6 * TX_TIMEOUT + MARGIN
+
+describe("BulletinClient Integration Tests", {
+  timeout: DEFAULT_TEST_TIMEOUT,
+}, () => {
   let client: BulletinClient
   let aliceAddress: string
 
@@ -102,11 +117,12 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
     // Self-contained client: SDK owns the PAPI client lifecycle.
     // No `descriptor` here → SDK uses getUnsafeApi() (works at runtime,
     // loses compile-time chain types). Alice uploads; Eve authorizes.
+    // Production-default txTimeout: tighter overrides (60s, 120s) flaked
+    // under CI load — finalization was observed taking >120s.
     client = new BulletinClient({
       providers: () => [getWsProvider(ENDPOINT)],
       uploadSigner: aliceSigner,
       authorizerSigner: eveSigner,
-      txTimeout: 120_000,
     })
 
     // Authorize Alice's account so signed uploads succeed.
@@ -118,7 +134,8 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
         BigInt(estimate.bytes),
       )
       .send()
-  })
+    // One transaction; the config hookTimeout (30s) is too tight for it.
+  }, TX_TIMEOUT + MARGIN)
 
   afterAll(async () => {
     if (client) await client.destroy()
@@ -175,7 +192,9 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
   }
 
   describe("submit(blob) — chunked file + DAG-PB manifest", () => {
-    it("auto-chunks a 5 MiB file and returns one root CID", async () => {
+    it("auto-chunks a 5 MiB file and returns one root CID", {
+      timeout: CHUNKED_TEST_TIMEOUT,
+    }, async () => {
       const data = makeChunkedTestData(5 * 1024 * 1024)
       const events: Array<{
         type: UploadStatus
@@ -200,7 +219,9 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(finalized[0]?.total).toBe(6)
     })
 
-    it("fires events in input order (Started → InBlock → Finalized per item)", async () => {
+    it("fires events in input order (Started → InBlock → Finalized per item)", {
+      timeout: CHUNKED_TEST_TIMEOUT,
+    }, async () => {
       const data = makeChunkedTestData(3 * 1024 * 1024) // 3 MiB
       const lastSeenByIndex = new Map<number, UploadStatus>()
 
@@ -225,7 +246,9 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       expect(lastSeenByIndex.size).toBe(4)
     })
 
-    it("surfaces per-item CIDs through ItemFinalized events", async () => {
+    it("surfaces per-item CIDs through ItemFinalized events", {
+      timeout: CHUNKED_TEST_TIMEOUT,
+    }, async () => {
       const data = makeChunkedTestData(2 * 1024 * 1024) // 2 MiB → 2 chunks
       const finalizedCids: string[] = []
 
@@ -374,8 +397,13 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
       )
       const contentHash = blake2b256(data)
 
-      // Authorize the preimage first (signed by Alice).
-      await client.authorizePreimage(contentHash, BigInt(data.length)).send()
+      // Authorize the preimage first (signed via authorizerSigner). Wait for
+      // finality so the unsigned store below cannot validate on a fork that
+      // lacks the authorization.
+      await client
+        .authorizePreimage(contentHash, BigInt(data.length))
+        .withWaitFor("finalized")
+        .send()
 
       // Anonymous submitter — no signer needed for the unsigned path. We
       // reuse the existing signed `client` (its signer field is set but
@@ -415,7 +443,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
    * uploads eventually succeed. Exercises the per-item retry queue +
    * `chainNonce`-based hijack detection introduced in sub-PR #4.
    */
-  describe("Hijack recovery", { timeout: 180_000 }, () => {
+  describe("Hijack recovery", { timeout: DEFAULT_TEST_TIMEOUT }, () => {
     it("two parallel uploads from the same signer both succeed", async () => {
       // Both clients share the SAME signer → fight over the same nonces.
       const makeRivalClient = () => {
@@ -426,7 +454,6 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           providers: () => [getWsProvider(ENDPOINT)],
           uploadSigner: rivalSigner,
           authorizerSigner: rivalSigner,
-          txTimeout: 120_000,
         })
       }
       const clientA = makeRivalClient()
@@ -466,7 +493,7 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
    * locks the invariant.
    */
   describe("Exactly-once accounting under parallel same-account upload", {
-    timeout: 480_000,
+    timeout: DEFAULT_TEST_TIMEOUT,
   }, () => {
     it("3 parallel uploads → Authorizations.extent advances by exact sum", async () => {
       const SESSIONS = 3
@@ -530,7 +557,6 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
         return new BulletinClient({
           providers: () => [getWsProvider(ENDPOINT)],
           uploadSigner: rivalSigner,
-          txTimeout: 180_000,
         })
       })
 
@@ -646,7 +672,6 @@ describe("BulletinClient Integration Tests", { timeout: 120_000 }, () => {
           new BulletinClient({
             providers: () => [getWsProvider(ENDPOINT)],
             uploadSigner: acc.signer,
-            txTimeout: 120_000,
           }),
       )
 

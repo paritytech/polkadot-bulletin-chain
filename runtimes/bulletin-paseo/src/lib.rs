@@ -113,9 +113,13 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls<
 			Runtime,
 			storage::StorageCallInspector,
+			(
+				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+			),
 		>,
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
@@ -135,7 +139,8 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased =
+		(pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -175,7 +180,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_021,
+	spec_version: 1_000_022,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -558,9 +563,13 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+			pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
 				Runtime,
 				storage::StorageCallInspector,
+				(
+					pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+					pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+				),
 			>::default(),
 			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
 				Runtime,
@@ -618,6 +627,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -658,6 +669,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_data_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
@@ -964,7 +976,9 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+			pallet_bulletin_data_renewal::Pallet::<Runtime>::account_authorization(
+				account,
+			)
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
@@ -975,7 +989,9 @@ impl_runtime_apis! {
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
+			pallet_bulletin_data_renewal::Pallet::<Runtime>::can_renew(
+				&account, &entry,
+			)
 		}
 	}
 

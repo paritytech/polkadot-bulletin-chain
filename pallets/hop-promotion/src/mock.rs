@@ -17,7 +17,7 @@
 
 use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
-use pallet_bulletin_transaction_storage::AsAuthorizer;
+use pallet_bulletin_transaction_storage::{AsAuthorizer, ValidTransactionParams};
 use polkadot_sdk_frame::{
 	deps::{frame_support, frame_system},
 	prelude::*,
@@ -27,6 +27,9 @@ use polkadot_sdk_frame::{
 use sp_runtime::{traits::IdentityLookup, AccountId32};
 
 type Block = MockBlock<Test>;
+
+const PRIORITY: TransactionPriority = TransactionPriority::MAX;
+const LONGEVITY: TransactionLongevity = 10;
 
 #[frame_support::runtime]
 mod runtime {
@@ -77,10 +80,20 @@ impl pallet_timestamp::Config for Test {
 
 parameter_types! {
 	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
-	pub const StoreRenewPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const StoreRenewLongevity: TransactionLongevity = 10;
-	pub const RemoveExpiredAuthorizationPriority: TransactionPriority = TransactionPriority::MAX;
-	pub const RemoveExpiredAuthorizationLongevity: TransactionLongevity = 10;
+	// `static` so a test can lower the priority and check `integrity_test` rejects it.
+	pub static StoreTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
+	pub const PromoteTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("HopPromotion", 0, 5);
+	// Never exercised; only their prefixes matter, for `integrity_test`.
+	pub const AuthorizeTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredAccountAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExpiredPreimageAuthorizationTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
+	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
+		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -102,15 +115,20 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
-	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type AuthorizationPeriod = AuthorizationPeriod;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
-	type StoreRenewPriority = StoreRenewPriority;
-	type StoreRenewLongevity = StoreRenewLongevity;
-	type RemoveExpiredAuthorizationPriority = RemoveExpiredAuthorizationPriority;
-	type RemoveExpiredAuthorizationLongevity = RemoveExpiredAuthorizationLongevity;
+	type StoreTxParams = StoreTxParams;
+	type AuthorizeTxParams = AuthorizeTxParams;
+	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
+	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
+	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	// No renewal here, so the storage pallet's opaque payloads stay at the documented
+	// `()`. Keeps this test runtime independent of the renewal pallet.
+	type EntryMeta = ();
+	type AuthorizationExtra = ();
+	type OnObsoleteTransactions = ();
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
@@ -119,6 +137,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 impl pallet_bulletin_hop_promotion::Config for Test {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
 	type WeightInfo = ();
+	type PromoteTxParams = PromoteTxParams;
 }
 
 pub fn new_test_ext() -> TestExternalities {

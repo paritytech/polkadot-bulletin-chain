@@ -269,6 +269,9 @@ export const gatewaySource = (httpIpfsApi) =>
 export const nodeRpcSource = (client, label = 'bitswap-rpc') =>
     ({ name: label, fetch: (cid) => fetchCidFromNode(client, cid) });
 
+/** Smoldot serves the same `bitswap_v1_get`, fetching the block from its peers over p2p bitswap. */
+export const smoldotRpcSource = (client) => nodeRpcSource(client, 'smoldot-bitswap-rpc');
+
 /**
  * Fetch the block `cid` addresses from every source and assert each hashes to the
  * CID. With a single source this is a plain hash-verified fetch; with several it

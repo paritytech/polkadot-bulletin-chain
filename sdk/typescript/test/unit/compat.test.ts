@@ -30,9 +30,11 @@ vi.mock("polkadot-api", async (importOriginal) => {
 })
 
 /** A BulletinClient whose connected "chain" serves the given metadata bytes;
- *  `renewTx` captures the encoded arm, `submitTx` short-circuits submission. */
+ *  the per-pallet `renew` spies capture the encoded arm, `submitTx`
+ *  short-circuits submission. */
 async function makeDispatchClient(metadataBytes: Uint8Array) {
-  const renewTx = vi.fn(() => ({}) as never)
+  const renewTs = vi.fn(() => ({}) as never)
+  const renewDr = vi.fn(() => ({}) as never)
   // The real unsafe api decodes OpaqueMetadata as plain bytes — the mock
   // must mirror that shape exactly (a `{ asBytes }` stub hid a live bug).
   const metadataAtVersion = vi.fn(async () => metadataBytes)
@@ -40,7 +42,10 @@ async function makeDispatchClient(metadataBytes: Uint8Array) {
     getTypedApi: () => ({ tx: { TransactionStorage: {} } }),
     getUnsafeApi: () => ({
       apis: { Metadata: { metadata_at_version: metadataAtVersion } },
-      tx: { TransactionStorage: { renew: renewTx } },
+      tx: {
+        TransactionStorage: { renew: renewTs },
+        DataRenewal: { renew: renewDr },
+      },
     }),
     submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
     destroy: () => {},
@@ -53,25 +58,42 @@ async function makeDispatchClient(metadataBytes: Uint8Array) {
   })
   const submitTx = vi.fn(async () => ({ blockHash: "0xb", txHash: "0xt" }))
   ;(client as unknown as { submitTx: unknown }).submitTx = submitTx
-  return { client, renewTx, metadataAtVersion, submitTx }
+  return { client, renewTs, renewDr, metadataAtVersion, submitTx }
 }
 
 describe("compat registry", () => {
   it("pins the checksum of every committed snapshot", () => {
-    const current = renewChecksum(metadataFile("metadata.scale"))
-    expect(current && RENEW_REGISTRY[current]).toBe("transaction-ref")
+    const current = renewChecksum(metadataFile("metadata.scale"), "DataRenewal")
+    expect(current && RENEW_REGISTRY.DataRenewal[current]).toBe("data-renewal")
+    // Post-split runtimes host no TransactionStorage.renew at all.
+    expect(renewChecksum(metadataFile("metadata.scale"))).toBeNull()
+
+    const preSplit = renewChecksum(
+      metadataFile("metadata-compat/transaction-storage-v1000016.scale"),
+    )
+    expect(preSplit && RENEW_REGISTRY.TransactionStorage[preSplit]).toBe(
+      "transaction-ref",
+    )
 
     const legacy = renewChecksum(
       metadataFile("metadata-compat/transaction-storage-v1000011.scale"),
     )
-    expect(legacy && RENEW_REGISTRY[legacy]).toBe("positional")
+    expect(legacy && RENEW_REGISTRY.TransactionStorage[legacy]).toBe(
+      "positional",
+    )
   })
 
-  it("keys are distinct and resolution round-trips", () => {
-    expect(Object.keys(RENEW_REGISTRY)).toHaveLength(2)
+  it("rows are complete and resolution round-trips", () => {
+    expect(Object.keys(RENEW_REGISTRY.DataRenewal)).toHaveLength(1)
+    expect(Object.keys(RENEW_REGISTRY.TransactionStorage)).toHaveLength(2)
     expect(resolveRenewShape(metadataFile("metadata.scale"))).toBe(
-      "transaction-ref",
+      "data-renewal",
     )
+    expect(
+      resolveRenewShape(
+        metadataFile("metadata-compat/transaction-storage-v1000016.scale"),
+      ),
+    ).toBe("transaction-ref")
     expect(
       resolveRenewShape(
         metadataFile("metadata-compat/transaction-storage-v1000011.scale"),
@@ -81,23 +103,36 @@ describe("compat registry", () => {
 })
 
 describe("client renew dispatch (mocked PAPI)", () => {
-  it("encodes the TransactionRef arm on current metadata", async () => {
-    const { client, renewTx, submitTx } = await makeDispatchClient(
+  it("encodes the DataRenewal arm on current metadata", async () => {
+    const { client, renewTs, renewDr, submitTx } = await makeDispatchClient(
       metadataFile("metadata.scale"),
     )
     await client.renew({ block: 7, index: 3 }).send()
-    expect(renewTx).toHaveBeenCalledWith({
+    expect(renewDr).toHaveBeenCalledWith({
       entry: { type: "Position", value: { block: 7, index: 3 } },
     })
+    expect(renewTs).not.toHaveBeenCalled()
     expect(submitTx).toHaveBeenCalledTimes(1)
   })
 
+  it("encodes the TransactionStorage arm on pre-split metadata", async () => {
+    const { client, renewTs, renewDr } = await makeDispatchClient(
+      metadataFile("metadata-compat/transaction-storage-v1000016.scale"),
+    )
+    await client.renew({ block: 7, index: 3 }).send()
+    expect(renewTs).toHaveBeenCalledWith({
+      entry: { type: "Position", value: { block: 7, index: 3 } },
+    })
+    expect(renewDr).not.toHaveBeenCalled()
+  })
+
   it("encodes the positional arm on legacy metadata", async () => {
-    const { client, renewTx } = await makeDispatchClient(
+    const { client, renewTs, renewDr } = await makeDispatchClient(
       metadataFile("metadata-compat/transaction-storage-v1000011.scale"),
     )
     await client.renew({ block: 7, index: 3 }).send()
-    expect(renewTx).toHaveBeenCalledWith({ block: 7, index: 3 })
+    expect(renewTs).toHaveBeenCalledWith({ block: 7, index: 3 })
+    expect(renewDr).not.toHaveBeenCalled()
   })
 
   it("resolves the shape once per client", async () => {

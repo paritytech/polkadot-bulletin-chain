@@ -34,9 +34,14 @@ Rules:
   survives an ordinary rebuild.
 - Delete a snapshot (and its module + dispatch arm) once no supported chain
   needs it.
+- Registry keys pair the hosting **pallet** with the item hash/checksum: the
+  per-item hash covers only the item's own type tree, so a call moved across
+  pallets unchanged (the renewal split) keeps its hash and the pallet is the
+  only discriminator.
 
 ## Snapshots
 
 | File | Source chain (fetched) | Covers |
 |---|---|---|
 | `transaction-storage-v1000011.scale` | bulletin-westend v1000011, `wss://westend-bulletin-rpc.polkadot.io` (2026-07-08) | positional `renew(block, index)` |
+| `transaction-storage-v1000016.scale` | bulletin-westend v1000016, trimmed from the pre-split workspace `sdk/metadata.scale` (2026-08-07) | `renew(entry: TransactionRef)` / `force_renew` in `TransactionStorage` (pre renewal split) |

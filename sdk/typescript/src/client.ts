@@ -152,12 +152,12 @@ export interface BulletinTypedApi {
         content_hash: string
         max_size: bigint
       }): PapiTransaction
-      // `renew` takes a `TransactionRef` on current runtimes and `(block, index)`
-      // on older ones; the SDK detects which via the compat registry.
-      renew(
+      // Renewal calls live here only on pre-split runtimes — `renew` takes a
+      // `TransactionRef` there and `(block, index)` on older ones. The SDK
+      // detects which via the compat registry and encodes via the unsafe api.
+      renew?(
         args: { block: number; index: number } | { entry: TransactionRef },
       ): PapiTransaction
-      // Only present on runtimes that ship `TransactionRef`.
       force_renew?(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
@@ -169,6 +169,11 @@ export interface BulletinTypedApi {
       refresh_preimage_authorization(args: {
         content_hash: string
       }): PapiTransaction
+    }
+    /** Renewal extrinsics on post-split runtimes; absent from older descriptors. */
+    DataRenewal?: {
+      renew(args: { entry: TransactionRef }): PapiTransaction
+      force_renew(args: { entry: TransactionRef }): PapiTransaction
     }
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
@@ -1555,20 +1560,27 @@ export class BulletinClient implements BulletinClientInterface {
   renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
       // Registry dispatch (see compat.ts): the connected chain's checksum
-      // for `TransactionStorage.renew` selects the encoder — identification
-      // first, never trial-encoding; unknown shapes fail closed. Both arms
+      // for the renewal call selects pallet + encoder — identification
+      // first, never trial-encoding; unknown shapes fail closed. All arms
       // encode via the unsafe api (codecs built from the live metadata) so
       // a stale caller descriptor can't veto a compatible chain.
       const entry = toTransactionRef(ref)
       const shape = await this.renewShape()
-      const renewTx = this.papiClient.getUnsafeApi().tx.TransactionStorage
-        .renew as (args: object) => PapiTransaction
+      const txs = this.papiClient.getUnsafeApi().tx
       let tx: PapiTransaction
-      if (shape === "transaction-ref") {
-        tx = renewTx({ entry })
+      if (shape === "data-renewal") {
+        tx = (txs.DataRenewal.renew as (args: object) => PapiTransaction)({
+          entry,
+        })
+      } else if (shape === "transaction-ref") {
+        tx = (
+          txs.TransactionStorage.renew as (args: object) => PapiTransaction
+        )({ entry })
       } else if (entry.type === "Position") {
         // Pre-`TransactionRef` runtimes take the position fields directly.
-        tx = renewTx(entry.value)
+        tx = (
+          txs.TransactionStorage.renew as (args: object) => PapiTransaction
+        )(entry.value)
       } else {
         throw new BulletinError(
           "content-hash renewal is not supported by this runtime",
@@ -1595,14 +1607,17 @@ export class BulletinClient implements BulletinClientInterface {
    */
   forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
-      const ts = this.papiClient.getUnsafeApi().tx.TransactionStorage
-      if ((await this.renewShape()) !== "transaction-ref" || !ts.force_renew) {
+      const shape = await this.renewShape()
+      if (shape === "positional") {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
           ErrorCode.UNSUPPORTED_OPERATION,
         )
       }
-      const tx = (ts.force_renew as (args: object) => PapiTransaction)({
+      const txs = this.papiClient.getUnsafeApi().tx
+      const palletTx =
+        shape === "data-renewal" ? txs.DataRenewal : txs.TransactionStorage
+      const tx = (palletTx.force_renew as (args: object) => PapiTransaction)({
         entry: toTransactionRef(ref),
       })
       return this.submitTx(
