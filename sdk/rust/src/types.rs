@@ -98,6 +98,12 @@ pub enum Error {
 	/// Invalid chunk size.
 	#[cfg_attr(feature = "std", error("Invalid chunk size: {0}"))]
 	InvalidChunkSize(String),
+
+	// This enum derives `Encode`/`Decode`, so inserting one in the
+	// middle silently renumbers every variant after it.
+	/// The connected chain ships without `pallet-bulletin-data-renewal`.
+	#[cfg_attr(feature = "std", error("Renewal is not available on this chain"))]
+	RenewalUnavailable,
 }
 
 impl Error {
@@ -119,6 +125,8 @@ impl Error {
 			Error::RetrievalFailed(_) => "RETRIEVAL_FAILED",
 			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
 			Error::RenewalFailed(_) => "RENEWAL_FAILED",
+			// Mirrors the TypeScript SDK's `UNSUPPORTED_OPERATION`.
+			Error::RenewalUnavailable => "UNSUPPORTED_OPERATION",
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
 			Error::TransactionFailed(_) => "TRANSACTION_FAILED",
 			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
@@ -159,6 +167,8 @@ impl Error {
 			Error::RetrievalFailed(_) => "The data may not be available yet; try again",
 			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
 			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
+			Error::RenewalUnavailable =>
+				"This chain has no renewal pallet; data expires at the retention period",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
 			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
 			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
@@ -511,6 +521,7 @@ mod tests {
 			Error::CidCalculationFailed("calc fail".into()),
 			Error::TransactionFailed("tx fail".into()),
 			Error::InvalidChunkSize("zero".into()),
+			Error::RenewalUnavailable,
 		]
 	}
 
@@ -535,6 +546,7 @@ mod tests {
 			"CID_CALCULATION_FAILED",
 			"TRANSACTION_FAILED",
 			"INVALID_CHUNK_SIZE",
+			"UNSUPPORTED_OPERATION",
 		];
 
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
