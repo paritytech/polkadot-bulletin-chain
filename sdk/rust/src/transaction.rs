@@ -22,6 +22,10 @@ use subxt_signer::sr25519::Keypair;
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
+/// Runtime name of the pallet holding the renewal extrinsics. Absent on chains that ship
+/// without `pallet-bulletin-data-renewal`.
+const RENEWAL_PALLET: &str = "DataRenewal";
+
 /// `TransactionStorage::Authorizations` values, decoded with plain SCALE instead of through the
 /// subxt-generated type.
 ///
@@ -34,15 +38,51 @@ pub mod bulletin {}
 ///
 /// The layout is frozen on the runtime side by
 /// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
-#[derive(Decode)]
 struct StoredAuthorization {
 	transactions: u32,
 	transactions_allowance: u32,
 	bytes: u64,
-	/// `bytes_permanent` pre-split, `extra` after it.
+	/// `bytes_permanent` pre-split, `extra` after it, absent on runtimes without renewal.
 	_extra: u64,
 	bytes_allowance: u64,
 	expiration: u32,
+}
+
+impl StoredAuthorization {
+	/// `extent { u32, u32, u64, u64, u64 }` + `expiration: u32`.
+	const LEN_WITH_EXTRA: usize = 36;
+	/// The same without the 8-byte `extra` slot.
+	const LEN_WITHOUT_EXTRA: usize = Self::LEN_WITH_EXTRA - 8;
+
+	/// Decode either layout.
+	///
+	/// A runtime that omits `pallet-bulletin-data-renewal` wires `AuthorizationExtra = ()`,
+	/// which encodes to nothing — the `extra` slot is simply absent there. Both layouts are
+	/// fixed-size, so the encoded length picks between them rather than a guess.
+	fn decode_any(bytes: &[u8]) -> core::result::Result<Self, codec::Error> {
+		let has_extra = match bytes.len() {
+			Self::LEN_WITH_EXTRA => true,
+			Self::LEN_WITHOUT_EXTRA => false,
+			_ => return Err("unexpected Authorizations value length".into()),
+		};
+
+		let input = &mut &bytes[..];
+		let transactions = u32::decode(input)?;
+		let transactions_allowance = u32::decode(input)?;
+		let bytes_used = u64::decode(input)?;
+		let _extra = if has_extra { u64::decode(input)? } else { 0 };
+		let bytes_allowance = u64::decode(input)?;
+		let expiration = u32::decode(input)?;
+
+		Ok(Self {
+			transactions,
+			transactions_allowance,
+			bytes: bytes_used,
+			_extra,
+			bytes_allowance,
+			expiration,
+		})
+	}
 }
 
 /// Convert the primitives `TransactionRef` into the subxt-generated one.
@@ -291,7 +331,7 @@ impl TransactionClient {
 
 		let Some(bytes) = maybe_auth else { return Ok(None) };
 
-		let auth = StoredAuthorization::decode(&mut &bytes[..])
+		let auth = StoredAuthorization::decode_any(&bytes)
 			.map_err(|e| Error::NetworkError(format!("Failed to decode authorization: {e}")))?;
 
 		if auth.expiration <= current_block_number {
@@ -459,11 +499,26 @@ impl TransactionClient {
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
+	/// Reject renewal calls up front on a chain that has no renewal pallet.
+	///
+	/// The generated calls are built from `sdk/metadata.scale`, which comes from a runtime
+	/// that wires `pallet-bulletin-data-renewal`. A runtime that omits it has no
+	/// [`RENEWAL_PALLET`] at all, and submitting would surface subxt's metadata-validation
+	/// error instead of the actual reason.
+	fn ensure_renewal_available(&self) -> Result<()> {
+		if self.api.metadata().pallet_by_name(RENEWAL_PALLET).is_none() {
+			return Err(Error::RenewalUnavailable);
+		}
+		Ok(())
+	}
+
 	/// Schedule a one-shot renewal of stored data.
 	///
 	/// The renewal fires once when the data reaches its retention boundary; it
 	/// does not renew synchronously. For immediate renewal use
 	/// [`force_renew`](Self::force_renew).
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
 	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
@@ -473,6 +528,7 @@ impl TransactionClient {
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
+		self.ensure_renewal_available()?;
 		let entry = entry.into();
 		let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
 
@@ -489,12 +545,15 @@ impl TransactionClient {
 	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
 	pub async fn force_renew(
 		&self,
 		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
+		self.ensure_renewal_available()?;
 		let entry = entry.into();
 		let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
 
@@ -617,7 +676,7 @@ pub struct RenewReceipt {
 #[cfg(test)]
 mod tests {
 	use super::StoredAuthorization;
-	use codec::{Decode, Encode};
+	use codec::Encode;
 
 	/// Mirror of the runtime-side freeze test: the bytes a pre-split chain wrote must land in the
 	/// fields `query_account_authorization` reads.
@@ -627,7 +686,7 @@ mod tests {
 		// followed by `expiration`.
 		let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u32).encode();
 
-		let auth = StoredAuthorization::decode(&mut &pre_split[..]).unwrap();
+		let auth = StoredAuthorization::decode_any(&pre_split).unwrap();
 
 		assert_eq!(auth.transactions, 1);
 		assert_eq!(auth.transactions_allowance, 5);
@@ -635,5 +694,28 @@ mod tests {
 		assert_eq!(auth._extra, 700);
 		assert_eq!(auth.bytes_allowance, 900);
 		assert_eq!(auth.expiration, 50);
+	}
+
+	/// A runtime without `pallet-bulletin-data-renewal` wires `AuthorizationExtra = ()`, so the
+	/// `extra` slot is absent and the value is 8 bytes shorter.
+	#[test]
+	fn stored_authorization_decodes_layout_without_extra() {
+		// extent { transactions, transactions_allowance, bytes, bytes_allowance } + `expiration`.
+		let no_extra = (1u32, 5u32, 100u64, 900u64, 50u32).encode();
+
+		let auth = StoredAuthorization::decode_any(&no_extra).unwrap();
+
+		assert_eq!(auth.transactions, 1);
+		assert_eq!(auth.transactions_allowance, 5);
+		assert_eq!(auth.bytes, 100);
+		assert_eq!(auth._extra, 0);
+		assert_eq!(auth.bytes_allowance, 900);
+		assert_eq!(auth.expiration, 50);
+	}
+
+	/// Neither layout: reject rather than silently misread a future shape.
+	#[test]
+	fn stored_authorization_rejects_unknown_length() {
+		assert!(StoredAuthorization::decode_any(&(1u32, 5u32).encode()).is_err());
 	}
 }

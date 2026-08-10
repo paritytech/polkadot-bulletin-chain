@@ -291,6 +291,31 @@ fn relocation_migration_try_runtime_checks_pass() {
 	});
 }
 
+/// The try-runtime checks must also pass on a chain that already ran the relocation and has
+/// taken renewals since: the old prefix is empty, so the scan moves nothing, and the entries
+/// under the new prefix are the chain's own — not evidence of a dropped entry.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn relocation_migration_try_runtime_checks_pass_when_already_relocated() {
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+	new_test_ext().execute_with(|| {
+		let hash: ContentHash = BlakeTwo256::hash(b"already-relocated").into();
+		Renewals::<Test>::insert(
+			hash,
+			RenewalData::<u64> { account: 7, recurring: true, paid: false },
+		);
+
+		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
+			.expect("pre_upgrade must accept already-relocated state");
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
+			.expect("post_upgrade checks must pass");
+
+		assert!(Renewals::<Test>::get(hash).is_some(), "pre-existing entry must survive");
+	});
+}
+
 /// Live chains carry tens of thousands of authorizations written before the renewal split,
 /// and nothing reshapes them: `AuthorizationExtent::extra` was placed in the slot the old
 /// `bytes_permanent` field occupied so the two encodings coincide. Reordering the struct —
