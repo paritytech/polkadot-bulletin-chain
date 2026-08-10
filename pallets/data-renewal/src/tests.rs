@@ -19,9 +19,9 @@
 
 #![allow(deprecated)]
 
-use crate::{mock::*, EntryKind, PendingAutoRenewals, PermanentExtent, RenewalData, Renewals};
+use crate::{mock::*, PendingAutoRenewals, PermanentExtent, RenewalData, Renewals};
 use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
-use codec::{Decode, Encode};
+use codec::Encode;
 use pallet_bulletin_transaction_storage::{
 	self as txs, pallet::Origin, AuthorizationExtent, AuthorizationScope, TransactionInfo,
 	TransactionRef,
@@ -2108,49 +2108,6 @@ fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 			.count();
 		assert_eq!(count, 1, "exactly one used-updated event per cleanup, not per entry");
 	});
-}
-
-/// `EntryKind` must keep the retired `TransactionKind`'s exact encoding (1 byte;
-/// `Store = 0`, `Renew = 1`): live `Transactions` entries written before the split
-/// decode through `TransactionInfo<EntryKind>` without a storage migration.
-#[test]
-fn entry_kind_encoding_is_frozen() {
-	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
-
-	assert_eq!(EntryKind::Store.encode(), vec![0u8]);
-	assert_eq!(EntryKind::Renew.encode(), vec![1u8]);
-	assert_eq!(EntryKind::default(), EntryKind::Store);
-
-	// Frozen copy of the pre-split `TransactionInfo` layout (tail field was
-	// `kind: TransactionKind`). Bytes written by the old runtime must decode
-	// as the new generic type.
-	#[derive(Encode)]
-	struct FrozenTransactionInfo {
-		chunk_root: <BlakeTwo256 as Hash>::Output,
-		content_hash: [u8; 32],
-		hashing: HashingAlgorithm,
-		cid_codec: u64,
-		size: u32,
-		extrinsic_index: u32,
-		block_chunks: u32,
-		kind: u8, // TransactionKind::Renew
-	}
-	let frozen = FrozenTransactionInfo {
-		chunk_root: BlakeTwo256::hash(b"root"),
-		content_hash: [7u8; 32],
-		hashing: HashingAlgorithm::Blake2b256,
-		cid_codec: 0x55,
-		size: 2000,
-		extrinsic_index: 42,
-		block_chunks: 8,
-		kind: 1,
-	};
-	let decoded =
-		TransactionInfo::<EntryKind>::decode(&mut &frozen.encode()[..]).expect("must decode");
-	assert_eq!(decoded.content_hash, [7u8; 32]);
-	assert_eq!(decoded.size, 2000);
-	assert_eq!(decoded.extrinsic_index, 42);
-	assert_eq!(decoded.meta, EntryKind::Renew);
 }
 
 /// Renew emits `PermanentStorageUsedUpdated { used }` so off-chain capacity-planning

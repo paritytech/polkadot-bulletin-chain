@@ -19,23 +19,13 @@
 
 use codec::{Decode, Encode, MaxEncodedLen};
 
-/// Per-entry `EntryMeta` wired into the storage pallet; `handle_obsolete` decrements
-/// the chain-wide counter for aged-out [`EntryKind::Renew`] entries.
-///
-/// INVARIANT: identical (names and 1-byte encoding) to the retired `TransactionKind`,
-/// so pre-split `Transactions` entries decode without migration. Locked by the
-/// `entry_kind_encoding_is_frozen` test.
-#[derive(
-	Copy, Clone, Debug, PartialEq, Eq, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
-)]
-pub enum EntryKind {
-	/// Created by `store`; ages out silently.
-	#[default]
-	#[codec(index = 0)]
-	Store,
-	/// Created by `renew`/auto-renewal; counted in the chain-wide counter.
-	#[codec(index = 1)]
-	Renew,
+/// Capability this pallet requires of the runtime-wired `EntryMeta`: contribute the
+/// "renewed" variant and recognize it back. The enum itself belongs to the runtime,
+/// so other pallets can contribute further variants.
+pub trait RenewMeta {
+	/// Marks an entry appended by `renew`/auto-renewal.
+	fn renew() -> Self;
+	fn is_renew(&self) -> bool;
 }
 
 /// Per-authorization `AuthorizationExtra` wired into the storage pallet: the

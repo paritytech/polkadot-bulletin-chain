@@ -170,8 +170,8 @@ pub mod pallet {
 		type RemoveExhaustedAuthorizerTxParams: Get<ValidTransactionParams>;
 		/// Opaque per-entry payload on [`TransactionInfo`], never interpreted here:
 		/// `store` writes `Default::default()`, expiry hands it back through
-		/// [`Config::OnObsoleteTransactions`]. Wire `()` or the renewal pallet's
-		/// `EntryKind`.
+		/// [`Config::OnObsoleteTransactions`]. Wire `()` or a runtime-composed enum
+		/// satisfying its consumers' bounds (e.g. the renewal pallet's `RenewMeta`).
 		type EntryMeta: Member + codec::FullCodec + MaxEncodedLen + scale_info::TypeInfo + Default;
 		/// Opaque per-authorization payload inside [`AuthorizationExtent`], never
 		/// interpreted here: reset with the other counters, mutated only through
