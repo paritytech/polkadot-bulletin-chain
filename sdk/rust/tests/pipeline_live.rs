@@ -648,8 +648,10 @@ async fn events_fire_in_per_item_order() {
 			let mut last = l.lock().unwrap();
 			let prev = last.insert(index, c);
 			let ok = match c {
-				0 => prev.is_none(),                    // Started is first
-				1 => prev == Some(0),                   // InBlock follows Started
+				0 => prev.is_none(), // Started is first
+				// InBlock follows Started; a fork can re-include an item and
+				// legitimately fire InBlock again.
+				1 => matches!(prev, Some(0) | Some(1)),
 				2 => matches!(prev, Some(0) | Some(1)), // Finalized follows Started/InBlock
 				_ => false,                             // no failures expected
 			};
