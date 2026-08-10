@@ -958,8 +958,9 @@ async fn estimate_dedup_skip_existing_and_guard() {
 }
 
 /// Renew round-trip through the compat registry on the local chain: the
-/// registry must resolve the workspace runtime's `renew(entry: TransactionRef)`
-/// shape, and a stored item's `(block, index)` slot must renew successfully.
+/// registry must resolve the workspace runtime's `DataRenewal.renew(entry)`
+/// shape (post renewal split), and a stored item's `(block, index)` slot must
+/// renew successfully.
 #[tokio::test]
 #[ignore]
 async fn renew_roundtrip_via_registry() {
@@ -970,7 +971,7 @@ async fn renew_roundtrip_via_registry() {
 
 	assert_eq!(
 		renew_adapter(&client.api().metadata()).expect("shape registered"),
-		RenewAdapter::TransactionRef,
+		RenewAdapter::DataRenewal,
 		"local chain speaks the current renew shape"
 	);
 
@@ -1011,8 +1012,11 @@ async fn renew_roundtrip_via_registry() {
 /// adapter. Network-dependent, so opt-in via env even within the ignored
 /// suite (CI runs `--ignored` hermetically against local zombienet):
 ///
+/// Point it at a chain still serving the positional `renew(block, index)`
+/// shape (bulletin-westend upgraded past it at v1000022):
+///
 /// ```text
-/// BULLETIN_LEGACY_RPC_URL=wss://westend-bulletin-rpc.polkadot.io \
+/// BULLETIN_LEGACY_RPC_URL=wss://<legacy-chain-rpc> \
 ///     cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored renew_registry_resolves_live_legacy_chain
 /// ```
 #[tokio::test]
