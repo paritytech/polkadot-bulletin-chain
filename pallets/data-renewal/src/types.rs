@@ -17,15 +17,25 @@
 
 //! Type definitions for the data-renewal pallet.
 
+use bulletin_transaction_storage_primitives::EntryKind;
 use codec::{Decode, Encode, MaxEncodedLen};
 
-/// Capability this pallet requires of the runtime-wired `EntryMeta`: contribute the
-/// "renewed" variant and recognize it back. The enum itself belongs to the runtime,
-/// so other pallets can contribute further variants.
+/// Required of the runtime-wired `EntryMeta`: construct the value this pallet writes
+/// on renewed entries, and recognize it. [`EntryKind`] is the stock implementor.
 pub trait RenewMeta {
-	/// Marks an entry appended by `renew`/auto-renewal.
+	/// The value written on entries appended by `renew`/auto-renewal.
 	fn renew() -> Self;
 	fn is_renew(&self) -> bool;
+}
+
+impl RenewMeta for EntryKind {
+	fn renew() -> Self {
+		Self::Renew
+	}
+
+	fn is_renew(&self) -> bool {
+		matches!(self, Self::Renew)
+	}
 }
 
 /// Per-authorization `AuthorizationExtra` wired into the storage pallet: the

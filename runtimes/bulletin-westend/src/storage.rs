@@ -149,51 +149,11 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
-	type EntryMeta = EntryKind;
+	type EntryMeta = bulletin_transaction_storage_primitives::EntryKind;
 	type AuthorizationExtra = pallet_bulletin_data_renewal::PermanentExtent;
 	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper = pallet_bulletin_data_renewal::RenewalBenchmarkHelper;
-}
-
-/// Per-entry `EntryMeta` composed by this runtime: `Store` is the storage pallet's
-/// `Default` contribution, `Renew` the renewal pallet's (via
-/// [`RenewMeta`](pallet_bulletin_data_renewal::RenewMeta)). Future pallets add their
-/// variants here.
-///
-/// INVARIANT: identical (names and 1-byte encoding) to the retired `TransactionKind`,
-/// so pre-split `Transactions` entries decode without migration. Locked by the
-/// `entry_kind_encoding_is_frozen` test.
-#[derive(
-	Copy,
-	Clone,
-	Debug,
-	PartialEq,
-	Eq,
-	Default,
-	codec::Encode,
-	codec::Decode,
-	codec::MaxEncodedLen,
-	scale_info::TypeInfo,
-)]
-pub enum EntryKind {
-	/// Created by `store`; ages out silently.
-	#[default]
-	#[codec(index = 0)]
-	Store,
-	/// Created by `renew`/auto-renewal; counted in the chain-wide counter.
-	#[codec(index = 1)]
-	Renew,
-}
-
-impl pallet_bulletin_data_renewal::RenewMeta for EntryKind {
-	fn renew() -> Self {
-		Self::Renew
-	}
-
-	fn is_renew(&self) -> bool {
-		matches!(self, Self::Renew)
-	}
 }
 
 impl pallet_bulletin_data_renewal::Config for Runtime {
@@ -216,54 +176,4 @@ impl pallet_bulletin_hop_promotion::Config for Runtime {
 	type SubmitTimestampTolerance = SubmitTimestampTolerance;
 	type PromoteTxParams = PromoteTxParams;
 	type WeightInfo = crate::weights::pallet_bulletin_hop_promotion::WeightInfo<Runtime>;
-}
-
-#[cfg(test)]
-mod tests {
-	use super::EntryKind;
-	use bulletin_transaction_storage_primitives::cids::HashingAlgorithm;
-	use codec::{Decode, Encode};
-	use pallet_bulletin_transaction_storage::TransactionInfo;
-	use sp_runtime::traits::{BlakeTwo256, Hash};
-
-	/// `EntryKind` must keep the retired `TransactionKind`'s exact encoding (1 byte;
-	/// `Store = 0`, `Renew = 1`): live `Transactions` entries written before the split
-	/// decode through `TransactionInfo<EntryKind>` without a storage migration.
-	#[test]
-	fn entry_kind_encoding_is_frozen() {
-		assert_eq!(EntryKind::Store.encode(), vec![0u8]);
-		assert_eq!(EntryKind::Renew.encode(), vec![1u8]);
-		assert_eq!(EntryKind::default(), EntryKind::Store);
-
-		// Frozen copy of the pre-split `TransactionInfo` layout (tail field was
-		// `kind: TransactionKind`). Bytes written by the old runtime must decode
-		// as the new generic type.
-		#[derive(Encode)]
-		struct FrozenTransactionInfo {
-			chunk_root: <BlakeTwo256 as Hash>::Output,
-			content_hash: [u8; 32],
-			hashing: HashingAlgorithm,
-			cid_codec: u64,
-			size: u32,
-			extrinsic_index: u32,
-			block_chunks: u32,
-			kind: u8, // TransactionKind::Renew
-		}
-		let frozen = FrozenTransactionInfo {
-			chunk_root: BlakeTwo256::hash(b"root"),
-			content_hash: [7u8; 32],
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 2000,
-			extrinsic_index: 42,
-			block_chunks: 8,
-			kind: 1,
-		};
-		let decoded =
-			TransactionInfo::<EntryKind>::decode(&mut &frozen.encode()[..]).expect("must decode");
-		assert_eq!(decoded.content_hash, [7u8; 32]);
-		assert_eq!(decoded.size, 2000);
-		assert_eq!(decoded.extrinsic_index, 42);
-		assert_eq!(decoded.meta, EntryKind::Renew);
-	}
 }

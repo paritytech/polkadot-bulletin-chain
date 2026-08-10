@@ -40,37 +40,6 @@ type Block = MockBlock<Test>;
 const PRIORITY: TransactionPriority = TransactionPriority::MAX;
 const LONGEVITY: TransactionLongevity = 10;
 
-/// Local stand-in for the runtime-composed `EntryMeta` enum.
-#[derive(
-	Copy,
-	Clone,
-	Debug,
-	PartialEq,
-	Eq,
-	Default,
-	codec::Encode,
-	codec::Decode,
-	codec::MaxEncodedLen,
-	scale_info::TypeInfo,
-)]
-pub enum EntryKind {
-	#[default]
-	#[codec(index = 0)]
-	Store,
-	#[codec(index = 1)]
-	Renew,
-}
-
-impl crate::RenewMeta for EntryKind {
-	fn renew() -> Self {
-		Self::Renew
-	}
-
-	fn is_renew(&self) -> bool {
-		matches!(self, Self::Renew)
-	}
-}
-
 #[frame_support::runtime]
 mod runtime {
 	#[runtime::runtime]
@@ -151,7 +120,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
-	type EntryMeta = EntryKind;
+	type EntryMeta = bulletin_transaction_storage_primitives::EntryKind;
 	type AuthorizationExtra = crate::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;
 	// The runtimes wire this, so the benchmark tests exercise it too.

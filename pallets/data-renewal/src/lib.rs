@@ -126,7 +126,7 @@ pub mod pallet {
 		/// Weight info for renewal dispatchables.
 		type WeightInfo: WeightInfo;
 		/// Cap, in bytes, on total permanent storage (via `renew`) committed across
-		/// all authorizations. Tracks chain-wide capacity for permanent data.
+		/// all authorizations.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
 		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
@@ -794,7 +794,7 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-/// Obsolete-block sweep callback: decrements the chain-wide counter for aged-out
+/// Obsolete-block sweep callback: decrements [`PermanentStorageUsed`] for aged-out
 /// `Renew` entries and queues `is_latest` entries with a [`Renewals`] registration
 /// into [`PendingAutoRenewals`] for the same block's inherent.
 impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pallet<T> {
