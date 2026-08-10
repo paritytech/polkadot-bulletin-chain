@@ -2985,25 +2985,31 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 
 // ---- runtime-API composition helpers ----
 
-/// `account_authorization` (runtime-API summary) composes the storage pallet's native
-/// extent with this pallet's `PermanentExtent`; `None` when missing or expired.
+/// The runtimes compose the `account_authorization` runtime-API summary out of
+/// `get_active_authorization`; this pins what they read — the extent, the expiration,
+/// and this pallet's renew quota in `extra` — including that expiry hides the entry.
 #[test]
-fn account_authorization_returns_none_when_missing_or_expired() {
+fn active_authorization_carries_the_runtime_api_summary_fields() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
+		let scope = AuthorizationScope::Account(who);
+		let active = || txs::Pallet::<Test>::get_active_authorization(&scope);
 
 		// No authorization yet.
-		assert_eq!(DataRenewal::account_authorization(who), None);
+		assert!(active().is_none());
 
-		// Authorize, then advance past expiry.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 4000));
-		let auth = DataRenewal::account_authorization(who).expect("active authorization");
-		assert_eq!(auth.bytes_allowance, 4000);
-		assert_eq!(auth.bytes_permanent_used, 0);
+		let auth = active().expect("active authorization");
+		// Granted at block 1, `AuthorizationPeriod` is 10 in the mock.
+		assert_eq!(auth.expiration, 11);
+		assert_eq!(auth.extent.bytes_allowance, 4000);
+		assert_eq!(auth.extent.transactions_allowance, 5);
+		assert_eq!(auth.extent.extra, PermanentExtent { bytes_permanent: 0 });
 
+		// Past expiry the summary must report nothing.
 		run_to_block(100, || None);
-		assert_eq!(DataRenewal::account_authorization(who), None);
+		assert!(active().is_none());
 	});
 }
 

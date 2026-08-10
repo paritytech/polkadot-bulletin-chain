@@ -76,7 +76,6 @@ use pallet_bulletin_transaction_storage::{
 	OnObsoleteTransactions, TransactionInfoFor, TransactionRef, ValidTransactionParams,
 	BAD_DATA_SIZE,
 };
-use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{deps::*, prelude::*};
 
 #[cfg(feature = "try-runtime")]
@@ -689,25 +688,6 @@ impl<T: Config> Pallet<T> {
 		Ok(context
 			.want_valid_transaction()
 			.then(|| <T as Config>::RenewTxParams::get().provides(info.content_hash)))
-	}
-
-	/// Active-authorization summary for the `BulletinTransactionStorageApi` runtime
-	/// API; composed here because `bytes_permanent_used` reads [`PermanentExtent`].
-	/// `None` when missing or expired.
-	pub fn account_authorization(
-		who: T::AccountId,
-	) -> Option<AccountAuthorization<BlockNumberFor<T>>> {
-		let auth = pallet_bulletin_transaction_storage::Pallet::<T>::get_active_authorization(
-			&AuthorizationScope::Account(who),
-		)?;
-		Some(AccountAuthorization {
-			expires_at: auth.expiration,
-			bytes_allowance: auth.extent.bytes_allowance,
-			bytes_used: auth.extent.bytes,
-			bytes_permanent_used: auth.extent.extra.bytes_permanent,
-			transactions_allowance: auth.extent.transactions_allowance,
-			transactions_used: auth.extent.transactions,
-		})
 	}
 
 	/// `true` iff `renew(entry)` would currently pass validation for `who`: `entry`

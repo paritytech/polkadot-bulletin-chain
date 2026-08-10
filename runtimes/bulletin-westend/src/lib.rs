@@ -987,9 +987,21 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_data_renewal::Pallet::<Runtime>::account_authorization(
-				account,
-			)
+			use pallet_bulletin_transaction_storage::AuthorizationScope;
+			use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
+
+			// The storage pallet owns every field but `bytes_permanent_used`, which lives in
+			// the opaque `AuthorizationExtra` it never interprets. This is the one place both
+			// halves are named, so the summary is composed here rather than in either pallet.
+			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
+				.map(|auth| AccountAuthorization {
+					expires_at: auth.expiration,
+					bytes_allowance: auth.extent.bytes_allowance,
+					bytes_used: auth.extent.bytes,
+					bytes_permanent_used: auth.extent.extra.bytes_permanent,
+					transactions_allowance: auth.extent.transactions_allowance,
+					transactions_used: auth.extent.transactions,
+				})
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
