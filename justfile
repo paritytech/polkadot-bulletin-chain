@@ -101,6 +101,7 @@ test-zombienet-auto-renew runtime="westend" group="all":
                 auto_renew_storage::parachain_auto_renew_vs_no_renew_eviction_test \
                 auto_renew_storage::parachain_renew_twice_within_block_with_pruning_test \
                 auto_renew_storage::parachain_renew_one_shot_lifecycle_test \
+                auto_renew_storage::parachain_force_renew_lifecycle_test \
                 auto_renew_storage::parachain_auto_renew_with_concurrent_store_test)
             ;;
         restart)
