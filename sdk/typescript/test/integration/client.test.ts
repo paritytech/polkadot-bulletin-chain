@@ -490,9 +490,11 @@ describe("AsyncBulletinClient Integration Tests", {
       )
       const contentHash = blake2b256(data)
 
-      // Authorize the preimage first
+      // Authorize the preimage first. Wait for finality so the unsigned
+      // store below cannot validate on a fork that lacks the authorization.
       await authorizer
         .authorizePreimage(contentHash, BigInt(data.length))
+        .withWaitFor("finalized")
         .send()
 
       // Store with preimage auth (unsigned transaction)
