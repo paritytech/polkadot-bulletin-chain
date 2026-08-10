@@ -133,7 +133,7 @@ let chunker_config = ChunkerConfig {
 
 let options = StoreOptions {
     cid_codec: CidCodec::DagPb,
-    hash_algorithm: HashAlgorithm::Blake2b256,
+    hash_algorithm: HashingAlgorithm::Blake2b256,
     wait_for: WaitFor::InBlock,
 };
 

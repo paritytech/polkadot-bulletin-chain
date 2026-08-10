@@ -14,12 +14,13 @@ cumulus-pallet-parachain-system = { version = "0.28.0", default-features = false
 cumulus-pallet-session-benchmarking = { version = "29.0.0", default-features = false }
 cumulus-pallet-weight-reclaim = { version = "0.10.0", default-features = false }
 cumulus-pallet-xcm = { version = "0.26.0", default-features = false }
-cumulus-pallet-xcmp-queue = { version = "0.28.0", default-features = false }
+cumulus-pallet-xcmp-queue = { version = "0.29.0", default-features = false }
 cumulus-primitives-aura = { version = "0.23.0", default-features = false }
 cumulus-primitives-core = { version = "0.25.0", default-features = false }
-cumulus-primitives-utility = { version = "0.28.0", default-features = false }
+cumulus-primitives-utility = { version = "0.29.0", default-features = false }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
+impl-trait-for-tuples = "0.2.3"
 jsonrpsee = { version = "0.24.3" }
 litep2p = { version = "0.13" }
 parachain-info = { version = "0.27.0", package = "staging-parachain-info", default-features = false }
@@ -28,10 +29,10 @@ scale-info = { version = "2.11.6", default-features = false }
 serde = { version = "1.0.126" }
 serde_json = { version = "1.0.132", default-features = false }
 smallvec = { version = "1.15.1", default-features = false }
-testnet-parachains-constants = { version = "21.0.0", package = "testnet-parachains-constants", default-features = false }
+testnet-parachains-constants = { version = "22.0.0", package = "testnet-parachains-constants", default-features = false }
 tracing = { version = "0.1.41", default-features = false }
 tracing-subscriber = { version = "=0.3.19" }
-westend-runtime-constants = { version = "28.0.0", package = "westend-runtime-constants", default-features = false }
+westend-runtime-constants = { version = "29.0.0", package = "westend-runtime-constants", default-features = false }
 
 # Local workspace members
 bulletin-pallets-common = { version = "0.1.0", path = "pallets/common", default-features = false }
@@ -39,6 +40,7 @@ bulletin-paseo-runtime = { path = "runtimes/bulletin-paseo" }
 bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/transaction-storage/primitives", default-features = false }
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
+pallet-bulletin-data-renewal = { version = "0.1.0", path = "pallets/data-renewal", default-features = false }
 pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
 pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "pallets/transaction-storage/runtime-api", default-features = false }
@@ -75,7 +77,6 @@ sp-version = { version = "45.0.0", default-features = false }
 
 pallet-authorship = { version = "47.0.0", default-features = false }
 pallet-migrations = { version = "18.0.0", default-features = false }
-pallet-proxy = { version = "48.0.0", default-features = false }
 pallet-session = { version = "48.0.0", default-features = false }
 pallet-skip-feeless-payment = { version = "22.0.0", default-features = false }
 pallet-sudo = { version = "48.0.0", default-features = false }
@@ -89,21 +90,21 @@ xcm-builder = { version = "28.0.0", package = "staging-xcm-builder", default-fea
 xcm-executor = { version = "27.0.0", package = "staging-xcm-executor", default-features = false }
 
 # Parachains common primitives (needed by runtimes)
-parachains-common = { version = "30.0.0", default-features = false }
+parachains-common = { version = "31.0.0", default-features = false }
 
 # XCM emulator framework for integration tests
-asset-hub-westend-runtime = { version = "0.47.0", default-features = true }
-emulated-integration-tests-common = { version = "32.0.0", default-features = true }
-westend-runtime = { version = "33.0.0", default-features = true }
-xcm-emulator = { version = "0.29.0", default-features = true }
+asset-hub-westend-runtime = { version = "0.48.0", default-features = true }
+emulated-integration-tests-common = { version = "33.0.0", default-features = true }
+westend-runtime = { version = "34.0.0", default-features = true }
+xcm-emulator = { version = "0.30.0", default-features = true }
 
 # Runtime metadata hash extension
 frame-metadata-hash-extension = { version = "0.15.0", default-features = false }
 
 # Polkadot runtime common utilities
-parachains-runtimes-test-utils = { version = "31.0.0", default-features = true }
+parachains-runtimes-test-utils = { version = "32.0.0", default-features = true }
 polkadot-primitives = { version = "24.0.0", default-features = false }
-polkadot-runtime-common = { version = "27.0.0", default-features = false }
+polkadot-runtime-common = { version = "28.0.0", default-features = false }
 sc-consensus-grandpa = { version = "0.42.0" }
 sp-consensus-aura = { version = "0.48.0", default-features = false }
 xcm-runtime-apis = { version = "0.15.0", default-features = false }
@@ -123,6 +124,7 @@ substrate-wasm-builder = { version = "33.0.0" }
 resolver = "2"
 members = [
 	"pallets/common",
+	"pallets/data-renewal",
 	"pallets/hop-promotion",
 	"pallets/transaction-storage",
 	"pallets/transaction-storage/primitives",

@@ -10,9 +10,9 @@ All SDK operations return `Result<T, Error>`. The `Error` enum covers all failur
 use bulletin_sdk_rust::prelude::*;
 use tracing::{info, error};
 
-match client.store(data).send().await {
-    Ok(result) => {
-        info!(cid = %hex::encode(&result.cid), "Stored successfully");
+match client.store(data, &signer, WaitFor::InBlock).await {
+    Ok(receipt) => {
+        info!(block_hash = %receipt.block_hash, "Stored successfully");
     }
     Err(Error::EmptyData) => {
         error!("Data cannot be empty");
@@ -55,10 +55,10 @@ assert_eq!(err.code(), "CHUNK_TOO_LARGE");
 Returns `true` if the error is likely transient and retrying may succeed:
 
 ```rust
-match client.store(data).send().await {
+match client.store(data.clone(), &signer, WaitFor::InBlock).await {
     Err(e) if e.is_retryable() => {
         tracing::warn!(?e, "Transient error, retrying...");
-        client.store(data).send().await?
+        client.store(data, &signer, WaitFor::InBlock).await?
     }
     Err(e) => return Err(e.into()),
     Ok(result) => result,
@@ -70,7 +70,7 @@ match client.store(data).send().await {
 Returns an actionable suggestion for resolving the error:
 
 ```rust
-if let Err(e) = client.store(data).send().await {
+if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
     tracing::error!(
         code = e.code(),
         hint = e.recovery_hint(),
@@ -137,6 +137,7 @@ use std::sync::Arc;
 let receipt = client.store_with_progress(
     data,
     &signer,
+    WaitFor::InBlock,
     Some(Arc::new(|event| {
         match event {
             ProgressEvent::Transaction(status) => {
@@ -228,7 +229,7 @@ The `is_retryable()` / `retryable` sets also differ: Rust includes more network-
 ### Authorization Flow
 
 ```rust
-match client.store(data).send().await {
+match client.store(data, &signer, WaitFor::InBlock).await {
     Err(Error::AuthorizationNotFound(_)) => {
         tracing::error!("No authorization found. Call authorize_account() first.");
     }
@@ -253,7 +254,7 @@ let mut attempts = 0;
 let max_retries = 3;
 
 loop {
-    match client.store(data.clone()).send().await {
+    match client.store(data.clone(), &signer, WaitFor::InBlock).await {
         Ok(result) => break result,
         Err(e) if e.is_retryable() && attempts < max_retries => {
             attempts += 1;

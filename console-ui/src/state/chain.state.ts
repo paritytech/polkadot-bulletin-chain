@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws";
+import { getWsProvider, WsEvent } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
-import { bulletin_westend, bulletin_paseo, bulletin_paseo_next_v2, bulletin_polkadot } from "@polkadot-api/descriptors";
+import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import {
   BULLETIN_NETWORKS,
   DEFAULT_NETWORK,
@@ -19,16 +19,6 @@ export type NetworkId = string;
 
 // Re-export Network type for convenience
 export type { Network };
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DESCRIPTORS: Record<string, any> = {
-  local: bulletin_westend,
-  westend: bulletin_westend,
-  paseo: bulletin_paseo,
-  "paseo-next-v2": bulletin_paseo_next_v2,
-  polkadot: bulletin_polkadot,
-  previewnet: bulletin_westend,
-};
 
 // No-op WebSocket that never connects. Used to silence the PAPI provider's
 // internal reconnection loop after we switch away from a network.
@@ -53,7 +43,7 @@ let killCurrentProvider: (() => void) | null = null;
 // Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
 let blockSubscription: { unsubscribe(): void } | null = null;
 
-function createKillableWsProvider(endpoint: string) {
+function createKillableWsProvider(endpoints: string[]) {
   let killed = false;
 
   // Proxy intercepts `new WebsocketClass(...)` and returns a NullWebSocket
@@ -65,8 +55,20 @@ function createKillableWsProvider(endpoint: string) {
     },
   });
 
-  const provider = getWsProvider(endpoint, {
+  // The provider rotates through `endpoints` on connection failure.
+  const provider = getWsProvider(endpoints, {
     websocketClass: wsClass as typeof WebSocket,
+    onStatusChanged: (status) => {
+      // A killed provider keeps cycling CONNECTING -> timeout ERROR against
+      // NullWebSockets; drop its events so it can't clobber the endpoint
+      // tracked by the newer provider.
+      if (killed) return;
+      if (status.type === WsEvent.CONNECTING || status.type === WsEvent.CONNECTED) {
+        connectedEndpointSubject.next(status.uri);
+      }
+      // ERROR/CLOSE carry no uri; keep the last value — the provider
+      // immediately re-emits CONNECTING with the next endpoint.
+    },
   });
 
   const kill = () => { killed = true; };
@@ -79,8 +81,11 @@ export interface ChainState {
   status: "disconnected" | "connecting" | "connected" | "error";
   error?: string;
   client?: PolkadotClient;
-  // Using bulletin_westend as the base type; all bulletin chains share the same core pallets
-  api?: TypedApi<typeof bulletin_westend>;
+  // Base type is the newest live chain's descriptors; all bulletin chains
+  // share the same core pallets, and older chains are guarded at runtime.
+  api?: TypedApi<typeof bulletin_paseo_next_v2>;
+  /** Endpoint the WS provider is currently connected to (or attempting). */
+  connectedEndpoint?: string;
   blockNumber?: number;
   chainName?: string;
   specVersion?: number;
@@ -126,7 +131,10 @@ const networkSubject = new BehaviorSubject<Network>(initialNetwork);
 const statusSubject = new BehaviorSubject<ChainState["status"]>("disconnected");
 const errorSubject = new BehaviorSubject<string | undefined>(undefined);
 const clientSubject = new BehaviorSubject<PolkadotClient | undefined>(undefined);
-const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_westend> | undefined>(undefined);
+const apiSubject = new BehaviorSubject<TypedApi<typeof bulletin_paseo_next_v2> | undefined>(undefined);
+// URI from the latest CONNECTING/CONNECTED provider event. Undefined when
+// disconnected, before the first attempt, or on the smoldot path.
+const connectedEndpointSubject = new BehaviorSubject<string | undefined>(undefined);
 const blockNumberSubject = new BehaviorSubject<number | undefined>(undefined);
 const chainInfoSubject = new BehaviorSubject<{
   chainName?: string;
@@ -187,6 +195,7 @@ export async function connectToNetwork(
   localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   networkSubject.next(network);
   apiSubject.next(undefined);
+  connectedEndpointSubject.next(undefined);
   blockNumberSubject.next(undefined);
   chainInfoSubject.next({});
   sudoKeySubject.next(undefined);
@@ -212,7 +221,7 @@ export async function connectToNetwork(
     if (network.lightClient && network.chainSpec) {
       provider = await createSmoldotProvider(network);
     } else {
-      const killable = createKillableWsProvider(network.endpoints[0]!);
+      const killable = createKillableWsProvider(network.endpoints);
       provider = killable.provider;
       killCurrentProvider = killable.kill;
     }
@@ -220,8 +229,7 @@ export async function connectToNetwork(
     const client = createClient(provider);
     clientSubject.next(client);
 
-    const descriptor = DESCRIPTORS[networkId] ?? bulletin_westend;
-    const api = client.getTypedApi(descriptor) as TypedApi<typeof bulletin_westend>;
+    const api = client.getTypedApi(network.descriptor) as TypedApi<typeof bulletin_paseo_next_v2>;
     apiSubject.next(api);
 
     // Get chain info from runtime constants and RPC
@@ -287,6 +295,7 @@ export function disconnect(): void {
   }
   clientSubject.next(undefined);
   apiSubject.next(undefined);
+  connectedEndpointSubject.next(undefined);
   blockNumberSubject.next(undefined);
   chainInfoSubject.next({});
   sudoKeySubject.next(undefined);
@@ -301,16 +310,18 @@ const chainState$ = combineLatest([
   errorSubject,
   clientSubject,
   apiSubject,
+  connectedEndpointSubject,
   blockNumberSubject,
   chainInfoSubject,
 ]).pipe(
-  map(([networks, network, status, error, client, api, blockNumber, chainInfo]) => ({
+  map(([networks, network, status, error, client, api, connectedEndpoint, blockNumber, chainInfo]) => ({
     networks,
     network,
     status,
     error,
     client,
     api,
+    connectedEndpoint,
     blockNumber,
     ...chainInfo,
   })),
@@ -325,6 +336,7 @@ export const [useChainState] = bind(chainState$, {
   error: undefined,
   client: undefined,
   api: undefined,
+  connectedEndpoint: undefined,
   blockNumber: undefined,
   chainName: undefined,
   specVersion: undefined,
@@ -335,6 +347,7 @@ export const [useChainState] = bind(chainState$, {
 
 export const [useNetwork] = bind(networkSubject);
 export const [useConnectionStatus] = bind(statusSubject, "disconnected");
+export const [useConnectedEndpoint] = bind(connectedEndpointSubject, undefined);
 export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);
 export const [useClient] = bind(clientSubject, undefined);

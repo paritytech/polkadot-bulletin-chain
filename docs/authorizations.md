@@ -200,7 +200,7 @@ A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Examp
 
 ## Migration
 
-`STORAGE_VERSION = 4`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring, paid }`. All pre-existing entries were written by the old non-prepaying `enable_auto_renew`, so they migrate as `{ recurring: true, paid: false }` — their next `do_process_auto_renewals` cycle charges per-cycle, preserving their on-chain behaviour across the upgrade.
+`STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring, paid }`. All pre-existing entries were written by the old non-prepaying `enable_auto_renew`, so they migrate as `{ recurring: true, paid: false }` — their next `do_process_auto_renewals` cycle charges per-cycle, preserving their on-chain behaviour across the upgrade. The v5 step re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
 
 ## Capacity planning operational steps
 

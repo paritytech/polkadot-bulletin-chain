@@ -6,7 +6,7 @@ import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { cidFromBytes, buildUnixFSDagPB, convertCid } from './cid_dag_metadata.js';
 import { generateTextImage, fileToDisk, filesAreEqual, newSigner, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
-import { authorizeAccount, store, storeChunkedFile, fetchCid, TX_MODE_FINALIZED_BLOCK } from './api.js';
+import { authorizeAccount, store, storeChunkedFile, fetchCid, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { bulletin } from './.papi/descriptors/dist/index.js';
 import assert from "assert";
 
@@ -83,9 +83,11 @@ async function main() {
         await fileToDisk(downloadedFilePath, fullBuffer);
         filesAreEqual(filePath, downloadedFilePath);
 
-        // Derive CID for DAG content from rootCID (change codec from 0x70 -> 0x55)
-        const rootCidAsRaw = convertCid(rootCid, 0x55);
-        const storedDagNode = dagPB.decode(await fetchCid(HTTP_IPFS_API, rootCidAsRaw));
+        // Fetch the dag-pb root block by its real 0x70 CID. fetchAndVerifyBlock pulls
+        // the raw root node (not the gateway-composed file) over both the gateway and
+        // bitswap RPC and verifies each against the CID, so this exercises the dag-pb
+        // codec path directly.
+        const storedDagNode = dagPB.decode(await fetchAndVerifyBlock(rootCid, gatewaySource(HTTP_IPFS_API), nodeRpcSource(client)));
         const decodedDagNode = dagPB.decode(Buffer.from(dagBytes));
         console.log("✅ Reconstructed DAG file: ", storedDagNode);
         assert.deepStrictEqual(storedDagNode, decodedDagNode);

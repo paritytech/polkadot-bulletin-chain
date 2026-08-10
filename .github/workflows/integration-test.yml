@@ -37,7 +37,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -53,7 +53,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: runtime
         run: |
           TASKS=$(jq '[.[] | select(.integration_tests == true)]' scripts/runtimes-matrix.json)
@@ -79,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -95,7 +95,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -110,6 +110,14 @@ jobs:
           else
             echo "subxt-cli already installed"
           fi
+
+      - name: Build external runtime
+        if: ${{ matrix.runtime.external_runtime != null }}
+        uses: ./.github/actions/build-external-runtime
+        with:
+          name: ${{ matrix.runtime.name }}
+          repo: ${{ matrix.runtime.external_runtime.repo }}
+          ref: ${{ matrix.runtime.external_runtime.ref }}
 
       - name: Start services
         working-directory: examples
@@ -153,6 +161,15 @@ jobs:
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
 
+      # Chopsticks cannot synthesize custom pallet inherents
+      # (AcalaNetwork/chopsticks#1037), so the drain inherent is injected by hand.
+      # Skipped for external runtimes: those are already-deployed runtimes that
+      # predate `pallet-bulletin-data-renewal`.
+      - name: Test chopsticks auto-renew inherent
+        if: ${{ matrix.runtime.external_runtime == null }}
+        working-directory: examples
+        run: just run-test-auto-renew-chopsticks "ws://127.0.0.1:10000" "none" "true"
+
       # SDK Client Tests
       - name: Test Rust SDK
         working-directory: examples
@@ -164,11 +181,6 @@ jobs:
 
       - name: Test TypeScript SDK (vitest integration)
         working-directory: examples
-        # TODO: https://github.com/paritytech/polkadot-bulletin-chain/issues/443
-        # Flaky chunked-store tests hit the per-tx timeout under CI load.
-        # Remove `continue-on-error` once the vitest integration suite is
-        # stabilized.
-        continue-on-error: true
         run: just test-ts-sdk-vitest
 
       - name: Run console-ui tests

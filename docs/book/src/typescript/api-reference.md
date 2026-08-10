@@ -20,6 +20,7 @@ class AsyncBulletinClient implements BulletinClientInterface {
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   );
 }
 ```
@@ -33,12 +34,14 @@ class AsyncBulletinClient implements BulletinClientInterface {
 | `storeWithPreimageAuth(data, options?)` | `Promise<StoreResult>` | Store using preimage-based authorization |
 | `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize an account for storage |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
-| `renew(block, index)` | `CallBuilder` | Renew storage at a given block/index |
+| `renew(ref)` | `CallBuilder` | Schedule a one-shot renewal; `ref` is `{ block, index }` or a content hash (legacy immediate renew on pre-`TransactionRef` runtimes) |
+| `forceRenew(ref)` | `CallBuilder` | Renew immediately; rejects with `UNSUPPORTED_OPERATION` on runtimes without `force_renew` |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Refresh a preimage authorization expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
 | `removeExpiredPreimageAuthorization(contentHash)` | `CallBuilder` | Remove an expired preimage authorization |
 | `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Estimate authorization needed for a given data size |
+| `destroy()` | `Promise<void>` | Release resources; invokes the optional `onDestroy` callback passed to the constructor |
 
 ---
 
@@ -159,7 +162,6 @@ class MockBulletinClient implements BulletinClientInterface {
 interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean;
   simulateStorageFailure?: boolean;
-  simulateInsufficientAuth?: boolean;
 }
 ```
 
@@ -451,6 +453,18 @@ type TransactionStatusEvent =
 
 ## Utility Functions
 
+### TransactionRef Helpers
+
+```typescript
+// Accepted by renew()/forceRenew(); the variant is inferred from the shape
+type TransactionRefInput =
+  | { block: number; index: number }  // -> Position
+  | Uint8Array                        // -> ContentHash (converted to 0x-hex)
+
+// Convert an input into the on-chain tagged TransactionRef enum
+function toTransactionRef(ref: TransactionRefInput): TransactionRef;
+```
+
 ### CID Functions
 
 ```typescript
@@ -498,9 +512,6 @@ function estimateAuthorization(
 ### Data Helpers
 
 ```typescript
-// Convert Binary | Uint8Array to Uint8Array
-function toBytes(data: Binary | Uint8Array): Uint8Array;
-
 // Reassemble ordered chunks back into original data
 function reassembleChunks(chunks: Chunk[]): Uint8Array;
 ```
@@ -515,7 +526,6 @@ function reassembleChunks(chunks: Chunk[]): Uint8Array;
 | `MAX_FILE_SIZE` | `64 * 1024 * 1024` (64 MiB) | Maximum total file size |
 | `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 1048576, createManifest: true }` | Default chunking configuration |
 | `DEFAULT_STORE_OPTIONS` | `{ cidCodec: Raw, hashingAlgorithm: Blake2b256, waitFor: "in_block" }` | Default store options |
-| `VERSION` | `"0.1.0"` | SDK version string |
 
 ---
 
