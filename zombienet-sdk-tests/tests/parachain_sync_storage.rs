@@ -138,6 +138,7 @@ const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SI
 fn get_para_node_args() -> Vec<String> {
 	vec![
 		"--ipfs-server".into(),
+		"--authoring=slot-based".into(),
 		NODE_LOG_CONFIG.into(),
 		// Arguments after "--" are passed to the embedded relay chain client.
 		"--".into(),
@@ -148,6 +149,7 @@ fn get_para_node_args() -> Vec<String> {
 fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 	vec![
 		"--ipfs-server".into(),
+		"--authoring=slot-based".into(),
 		format!("--blocks-pruning={}", blocks_pruning),
 		NODE_LOG_CONFIG.into(),
 		// Arguments after "--" are passed to the embedded relay chain client.

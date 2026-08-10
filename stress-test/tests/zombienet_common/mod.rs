@@ -108,7 +108,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 				.with_id(para_id)
 				.with_chain_spec_path(chain_spec_str.as_str())
 				.cumulus_based(true)
-				// Collator 1: authors blocks
+				// Collator 1: authors blocks (slot-based for elastic scaling)
 				.with_collator(|c| {
 					c.with_name("collator-1")
 						.validator(true)
@@ -116,6 +116,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 						.with_args(vec![
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
+							"--authoring=slot-based".into(),
 							"--ipfs-server".into(),
 							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
 							// limiter so a short burst isn't throttled.
@@ -128,7 +129,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"--network-backend=libp2p".into(),
 						])
 				})
-				// Collator 2: authors blocks
+				// Collator 2: authors blocks (slot-based for elastic scaling)
 				.with_collator(|c| {
 					c.with_name("collator-2")
 						.validator(true)
@@ -136,6 +137,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 						.with_args(vec![
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
+							"--authoring=slot-based".into(),
 							"--ipfs-server".into(),
 							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
 							// limiter so a short burst isn't throttled.
