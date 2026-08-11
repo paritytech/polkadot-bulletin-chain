@@ -2983,13 +2983,11 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 	});
 }
 
-// ---- runtime-API composition helpers ----
-
-/// The runtimes compose the `account_authorization` runtime-API summary out of
-/// `get_active_authorization`; this pins what they read — the extent, the expiration,
-/// and this pallet's renew quota in `extra` — including that expiry hides the entry.
+/// What `get_active_authorization` hands its callers with this pallet wired: the
+/// expiration, both allowances, and the renew quota in `extra` — and nothing once the
+/// authorization expires.
 #[test]
-fn active_authorization_carries_the_runtime_api_summary_fields() {
+fn active_authorization_exposes_the_permanent_extent() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
@@ -3007,7 +3005,7 @@ fn active_authorization_carries_the_runtime_api_summary_fields() {
 		assert_eq!(auth.extent.transactions_allowance, 5);
 		assert_eq!(auth.extent.extra, PermanentExtent { bytes_permanent: 0 });
 
-		// Past expiry the summary must report nothing.
+		// Past expiry nothing is reported.
 		run_to_block(100, || None);
 		assert!(active().is_none());
 	});
