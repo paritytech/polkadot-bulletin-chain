@@ -41,20 +41,19 @@ pub trait BenchmarkHelper<T: Config> {
 	/// `OnObsoleteTransactions` callback do its worst-case work. Runtimes wiring the
 	/// renewal pallet should return its permanent variant so the benchmark exercises
 	/// the renewed-byte counter decrement.
-	fn worst_case_entry_meta() -> T::EntryMeta {
-		Default::default()
-	}
+	fn worst_case_entry_meta() -> T::EntryMeta;
 
 	/// Give `content_hash` the consumer-pallet state that makes
 	/// [`Config::OnObsoleteTransactions`] take its most expensive path. Without it the expiry
 	/// sweep is benchmarked with no registration to find, so the lookup and the queueing it
 	/// leads to go uncharged.
-	fn register_worst_case_entry(_content_hash: ContentHash) {}
+	fn register_worst_case_entry(content_hash: ContentHash);
 }
 
 /// Default [`BenchmarkHelper`] for runtimes using [`DEFAULT_MAX_TRANSACTION_SIZE`] and
 /// [`DEFAULT_MAX_BLOCK_TRANSACTIONS`]. Regenerate with `gen_default_check_proof` test if these
-/// change.
+/// change. Its worst-case entry hooks are no-ops, for runtimes with
+/// `OnObsoleteTransactions = ()`.
 pub struct DefaultCheckProofHelper;
 
 /// Hex-encoded [`TransactionStorageProof`] for the default configuration
@@ -107,6 +106,12 @@ impl<T: Config> BenchmarkHelper<T> for DefaultCheckProofHelper {
 		);
 		array_bytes::hex2bytes_unchecked(DEFAULT_CHECK_PROOF)
 	}
+
+	fn worst_case_entry_meta() -> T::EntryMeta {
+		Default::default()
+	}
+
+	fn register_worst_case_entry(_content_hash: ContentHash) {}
 }
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
