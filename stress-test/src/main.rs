@@ -15,7 +15,9 @@ use subxt_signer::sr25519::Keypair;
 use bulletin_stress_test::{
 	accounts, authorize, bitswap,
 	chain_info::{ChainLimits, EnvironmentInfo},
-	client, report, scenarios,
+	client,
+	metrics::PrometheusMetrics,
+	report, scenarios,
 };
 
 #[derive(Parser)]
@@ -69,6 +71,17 @@ struct Cli {
 	/// JSON output file (flushed after every variant so partial results survive crashes)
 	#[arg(long, global = true)]
 	output_file: Option<PathBuf>,
+
+	/// Serve Prometheus metrics on 0.0.0.0:<port> for the lifetime of the process
+	/// (see the "Prometheus metrics" section of the README for the metric inventory)
+	#[arg(long, global = true)]
+	prometheus_port: Option<u16>,
+
+	/// Re-run the selected command forever, sleeping this many seconds between runs
+	/// (long-running deployments; a failed run logs and continues). Pair with
+	/// --prometheus-port so the metrics endpoint stays up across runs.
+	#[arg(long, global = true)]
+	loop_interval_secs: Option<u64>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -189,6 +202,20 @@ async fn main() -> Result<()> {
 
 	let cli = Cli::parse();
 
+	// Concrete Prometheus recorder — always constructed (recording without a scraper is
+	// negligible); the exposition server only starts when --prometheus-port is given.
+	let metrics = Arc::new(PrometheusMetrics::new()?);
+	if let Some(port) = cli.prometheus_port {
+		let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+		let registry = metrics.registry().clone();
+		tokio::spawn(async move {
+			if let Err(e) = bulletin_stress_test::metrics::serve(addr, registry).await {
+				tracing::error!("Prometheus exposition server failed: {e:#}");
+			}
+		});
+		tracing::info!("Prometheus metrics exposed on http://{addr}/metrics");
+	}
+
 	// Parse comma-separated WS URLs. First URL is used for control operations
 	// (authorization, chain info, monitoring); all URLs are used for submission.
 	let ws_urls: Vec<String> = cli
@@ -197,13 +224,71 @@ async fn main() -> Result<()> {
 		.map(|s| s.trim().to_string())
 		.filter(|s| !s.is_empty())
 		.collect();
-	let control_url = &ws_urls[0];
 	tracing::info!(
-		"WS URLs: {} total (control: {control_url}{})",
+		"WS URLs: {} total (control: {}{})",
 		ws_urls.len(),
+		ws_urls[0],
 		if ws_urls.len() > 1 { format!(", submit: {}", ws_urls.join(", ")) } else { String::new() }
 	);
 
+	let cancel = Arc::new(AtomicBool::new(false));
+
+	// Spawn Ctrl+C handler that sets the cancel flag instead of killing the process.
+	// This lets the pipeline finish gracefully and produce partial results.
+	{
+		let cancel = cancel.clone();
+		tokio::spawn(async move {
+			tokio::signal::ctrl_c().await.ok();
+			tracing::warn!("Ctrl+C received — stopping gracefully to collect partial results");
+			cancel.store(true, Ordering::Relaxed);
+			tokio::signal::ctrl_c().await.ok();
+			tracing::warn!("Second Ctrl+C — force exit");
+			std::process::exit(130);
+		});
+	}
+
+	match cli.loop_interval_secs {
+		None => {
+			metrics.run_started();
+			let run = run_once(&cli, &ws_urls, &metrics, &cancel).await;
+			metrics.run_finished(run.is_ok());
+			if cancel.load(Ordering::Relaxed) {
+				std::process::exit(130);
+			}
+			run
+		},
+		Some(secs) => loop {
+			metrics.run_started();
+			let run = run_once(&cli, &ws_urls, &metrics, &cancel).await;
+			metrics.run_finished(run.is_ok());
+			if let Err(e) = run {
+				tracing::error!("Run failed (loop continues): {e:#}");
+			}
+			if cancel.load(Ordering::Relaxed) {
+				std::process::exit(130);
+			}
+			tracing::info!("Run complete — sleeping {secs}s before the next run");
+			let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+			while std::time::Instant::now() < deadline {
+				if cancel.load(Ordering::Relaxed) {
+					std::process::exit(130);
+				}
+				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+			}
+		},
+	}
+}
+
+/// Execute the selected command once: connect, query chain info, run the scenarios, print and
+/// flush the results. Extracted from `main` so `--loop-interval-secs` can re-run it indefinitely
+/// (with a fresh connection per run) while the metrics endpoint stays up.
+async fn run_once(
+	cli: &Cli,
+	ws_urls: &[String],
+	metrics: &Arc<PrometheusMetrics>,
+	cancel: &Arc<AtomicBool>,
+) -> Result<()> {
+	let control_url = &ws_urls[0];
 	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
 	let client = client::connect(control_url).await?;
@@ -241,23 +326,9 @@ async fn main() -> Result<()> {
 
 	let mut all_results = Vec::new();
 	let mut command_error = None;
-	let cancel = Arc::new(AtomicBool::new(false));
 
-	// Spawn Ctrl+C handler that sets the cancel flag instead of killing the process.
-	// This lets the pipeline finish gracefully and produce partial results.
-	{
-		let cancel = cancel.clone();
-		tokio::spawn(async move {
-			tokio::signal::ctrl_c().await.ok();
-			tracing::warn!("Ctrl+C received — stopping gracefully to collect partial results");
-			cancel.store(true, Ordering::Relaxed);
-			tokio::signal::ctrl_c().await.ok();
-			tracing::warn!("Second Ctrl+C — force exit");
-			std::process::exit(130);
-		});
-	}
-
-	// Closure that stamps metadata and flushes results to --output-file after each variant.
+	// Closure that stamps metadata, mirrors the result into the Prometheus summary gauges, and
+	// flushes results to --output-file after each variant.
 	let flush = |results: &mut Vec<report::ScenarioResult>| {
 		// Stamp chain_limits and environment onto the latest result.
 		if let Some(last) = results.last_mut() {
@@ -267,6 +338,7 @@ async fn main() -> Result<()> {
 			if last.environment.is_none() {
 				last.environment = Some(env_info.clone());
 			}
+			metrics.record_result(last);
 		}
 		if let Some(ref path) = cli.output_file {
 			if let Ok(json) = serde_json::to_string_pretty(results) {
@@ -289,7 +361,7 @@ async fn main() -> Result<()> {
 				&client,
 				&authorizer_signer,
 				&nonce_tracker,
-				&cli,
+				cli,
 				test,
 				variants.as_deref(),
 				&chain_limits,
@@ -299,7 +371,8 @@ async fn main() -> Result<()> {
 				instances,
 				&mut all_results,
 				&flush,
-				&cancel,
+				cancel,
+				metrics,
 			)
 			.await
 			{
@@ -319,7 +392,7 @@ async fn main() -> Result<()> {
 				&client,
 				&authorizer_signer,
 				&nonce_tracker,
-				&cli,
+				cli,
 				test,
 				payload_size,
 				read_size,
@@ -330,6 +403,7 @@ async fn main() -> Result<()> {
 				control_url,
 				&mut all_results,
 				&flush,
+				metrics,
 			)
 			.await
 			{
@@ -353,9 +427,10 @@ async fn main() -> Result<()> {
 						recipients,
 						duration,
 						&submitter,
+						metrics,
 						&mut all_results,
 						&flush,
-						&cancel,
+						cancel,
 					)
 					.await
 					{
@@ -387,7 +462,7 @@ async fn main() -> Result<()> {
 				&client,
 				&authorizer_signer,
 				&nonce_tracker,
-				&cli,
+				cli,
 				"block-capacity",
 				None,
 				&chain_limits,
@@ -397,7 +472,8 @@ async fn main() -> Result<()> {
 				1,
 				&mut all_results,
 				&flush,
-				&cancel,
+				cancel,
+				metrics,
 			)
 			.await
 			{
@@ -409,7 +485,7 @@ async fn main() -> Result<()> {
 					&client,
 					&authorizer_signer,
 					&nonce_tracker,
-					&cli,
+					cli,
 					"b2",
 					128 * 1024,
 					1024 * 1024 * 1024,
@@ -420,6 +496,7 @@ async fn main() -> Result<()> {
 					control_url,
 					&mut all_results,
 					&flush,
+					metrics,
 				)
 				.await
 				{
@@ -443,9 +520,10 @@ async fn main() -> Result<()> {
 							10,
 							30,
 							&submitter,
+							metrics,
 							&mut all_results,
 							&flush,
-							&cancel,
+							cancel,
 						)
 						.await
 						{
@@ -473,9 +551,9 @@ async fn main() -> Result<()> {
 	}
 
 	if cancel.load(Ordering::Relaxed) {
-		// Flush to file one last time before exiting.
+		// Flush to file one last time; the caller decides the exit code.
 		flush(&mut all_results);
-		std::process::exit(130);
+		return Ok(());
 	}
 
 	if let Some(e) = command_error {
@@ -501,6 +579,7 @@ async fn run_throughput(
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
+	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<()> {
 	match test {
 		"block-capacity" | "all" => {
@@ -518,6 +597,7 @@ async fn run_throughput(
 				results,
 				on_result,
 				cancel,
+				metrics,
 			)
 			.await?;
 		},
@@ -559,6 +639,7 @@ async fn run_bitswap(
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<()> {
 	let multiaddrs = match resolve_p2p_multiaddrs(cli, control_url).await {
 		Ok(r) => r,
@@ -578,6 +659,7 @@ async fn run_bitswap(
 				cli.iterations,
 				payload_size,
 				control_url,
+				metrics,
 			)
 			.await?;
 			for r in rs {
@@ -595,6 +677,7 @@ async fn run_bitswap(
 				max_size,
 				batch_size.clamp(1, 16),
 				control_url,
+				metrics,
 			)
 			.await?;
 			results.push(r);

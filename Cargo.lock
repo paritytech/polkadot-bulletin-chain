@@ -2147,6 +2147,7 @@ dependencies = [
  "scale-info",
  "serde",
  "serde_json",
+ "substrate-prometheus-endpoint",
  "subxt 0.43.1",
  "subxt-signer 0.43.0",
  "tokio",

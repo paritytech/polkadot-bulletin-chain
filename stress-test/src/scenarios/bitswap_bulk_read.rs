@@ -17,6 +17,7 @@ use subxt::OnlineClient;
 use crate::{
 	bitswap::{self, BitswapClient},
 	client::BulletinConfig,
+	metrics::{LatencyKind, PrometheusMetrics},
 	report::{compute_latency_stats, ScenarioResult},
 };
 
@@ -241,7 +242,9 @@ pub async fn run_bulk_read(
 	max_size: u32,
 	batch_size: usize,
 	_ws_url: &str,
+	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<ScenarioResult> {
+	let variant: Arc<str> = Arc::from("bitswap-bulk-read");
 	let items = discover_cids(client, target_bytes, min_size, max_size).await?;
 	let available_items = items.len();
 	let available_bytes: u64 = items.iter().map(|i| i.size as u64).sum();
@@ -328,6 +331,8 @@ pub async fn run_bulk_read(
 		let reads_ok = Arc::clone(&reads_ok);
 		let reads_failed = Arc::clone(&reads_failed);
 		let log_tx = log_tx.clone();
+		let metrics = Arc::clone(metrics);
+		let variant = Arc::clone(&variant);
 
 		handles.push(tokio::spawn(async move {
 			let mut timings: Vec<(Duration, bool)> = Vec::new();
@@ -368,8 +373,17 @@ pub async fn run_bulk_read(
 							batch_bytes as u64;
 						let ok_count = reads_ok.fetch_add(blocks.len() as u64, Ordering::Relaxed) +
 							blocks.len() as u64;
-						for _ in 0..blocks.len() {
-							timings.push((elapsed / blocks.len() as u32, true));
+						metrics.inc_reads(&variant, true, blocks.len() as u64, batch_bytes as u64);
+						if !blocks.is_empty() {
+							let per_block = elapsed / blocks.len() as u32;
+							for _ in 0..blocks.len() {
+								timings.push((per_block, true));
+								metrics.observe_latency(
+									&variant,
+									LatencyKind::Retrieval,
+									per_block,
+								);
+							}
 						}
 						consecutive_failures = 0;
 
@@ -387,6 +401,7 @@ pub async fn run_bulk_read(
 					Err(e) => {
 						let elapsed = start.elapsed();
 						reads_failed.fetch_add(batch_items.len() as u64, Ordering::Relaxed);
+						metrics.inc_reads(&variant, false, batch_items.len() as u64, 0);
 						let (idx, item) = &batch_items[0];
 						tracing::warn!(
 							"Client {client_idx}: batch FAILED ({} CIDs, item {idx}, \
@@ -454,6 +469,7 @@ pub async fn run_bulk_read(
 			downloaded / (1024 * 1024),
 			concurrency,
 		),
+		variant: "bitswap-bulk-read".to_string(),
 		duration: wall_time,
 		payload_size: downloaded as usize,
 		retrieval_latency: compute_latency_stats(&mut all_durations),

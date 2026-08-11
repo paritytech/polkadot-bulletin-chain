@@ -16,6 +16,7 @@ use crate::{
 	accounts::NonceTracker,
 	bitswap::{self, BitswapClient},
 	client::BulletinConfig,
+	metrics::{LatencyKind, PrometheusMetrics},
 	report::{compute_latency_stats, ScenarioResult},
 	store,
 };
@@ -30,8 +31,10 @@ async fn run_b2_concurrent_read_level(
 	items: Arc<Vec<(cid::Cid, Vec<u8>)>>,
 	payload_size: usize,
 	concurrency: usize,
+	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<ScenarioResult> {
 	let peer_id = BitswapClient::peer_id_from_multiaddr(multiaddr)?;
+	let variant: Arc<str> = Arc::from(format!("bitswap-b2-c{concurrency}"));
 
 	// Create `concurrency` independent clients
 	let mut clients = Vec::with_capacity(concurrency);
@@ -63,6 +66,8 @@ async fn run_b2_concurrent_read_level(
 	for (idx, client) in clients.into_iter().enumerate() {
 		let items = Arc::clone(&items);
 		let abort = Arc::clone(&abort);
+		let metrics = Arc::clone(metrics);
+		let variant = Arc::clone(&variant);
 		handles.push(tokio::spawn(async move {
 			let mut timings: Vec<(Duration, bool, bool)> = Vec::with_capacity(items.len());
 			let mut my_consecutive_failures = 0u32;
@@ -75,6 +80,8 @@ async fn run_b2_concurrent_read_level(
 				match client.fetch_block(peer_id, *cid, Duration::from_secs(10)).await {
 					Ok(data) => {
 						let elapsed = start.elapsed();
+						metrics.inc_reads(&variant, true, 1, data.len() as u64);
+						metrics.observe_latency(&variant, LatencyKind::Retrieval, elapsed);
 						let verified = data == *expected;
 						if !verified {
 							tracing::warn!(
@@ -88,6 +95,7 @@ async fn run_b2_concurrent_read_level(
 					},
 					Err(e) => {
 						let elapsed = start.elapsed();
+						metrics.inc_reads(&variant, false, 1, 0);
 						tracing::warn!("B2 client-{idx}: fetch failed: {e}");
 						timings.push((elapsed, false, false));
 						my_consecutive_failures += 1;
@@ -140,6 +148,7 @@ async fn run_b2_concurrent_read_level(
 
 	Ok(ScenarioResult {
 		name: format!("B2: Concurrent Read (128KB, concurrency={concurrency})"),
+		variant: format!("bitswap-b2-c{concurrency}"),
 		duration: wall_time,
 		payload_size,
 		retrieval_latency: compute_latency_stats(&mut all_durations),
@@ -163,6 +172,7 @@ pub async fn run_b2_concurrent_read_sweep(
 	item_count: u32,
 	payload_size: usize,
 	ws_url: &str,
+	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<Vec<ScenarioResult>> {
 	tracing::info!(
 		"B2: Concurrent read sweep ({item_count} items, {}KB payload)",
@@ -216,8 +226,14 @@ pub async fn run_b2_concurrent_read_sweep(
 
 	for &concurrency in B2_CONCURRENCY_LEVELS {
 		tracing::info!("=== B2 sweep: concurrency={concurrency} ===");
-		match run_b2_concurrent_read_level(multiaddr, Arc::clone(&items), payload_size, concurrency)
-			.await
+		match run_b2_concurrent_read_level(
+			multiaddr,
+			Arc::clone(&items),
+			payload_size,
+			concurrency,
+			metrics,
+		)
+		.await
 		{
 			Ok(result) => results.push(result),
 			Err(e) => {
@@ -227,6 +243,7 @@ pub async fn run_b2_concurrent_read_sweep(
 						"B2: Concurrent Read ({}KB, concurrency={concurrency} - FAILED)",
 						payload_size / 1024
 					),
+					variant: format!("bitswap-b2-c{concurrency}"),
 					payload_size,
 					total_reads: Some(0),
 					successful_reads: Some(0),
