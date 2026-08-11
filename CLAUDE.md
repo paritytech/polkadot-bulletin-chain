@@ -6,6 +6,10 @@
 - NEVER add Co-Authored-By lines to commits
 - NEVER use git push --force or git push -f
 
+**Code review rules:**
+- NEVER submit AI-generated review comments (PR reviews, inline comments, or issue comments) to GitHub automatically
+- ALWAYS present review findings to the human reviewer for triage first, and only post the ones they explicitly approve, after they explicitly ask for them to be posted
+
 **Automatic formatting:**
 - ALWAYS run `/format` after generating or modifying Rust code
 - ALWAYS run `/format` before creating any git commit
@@ -119,52 +123,9 @@ The Polkadot SDK provides:
 - IPFS idle connection timeout: 1 hour
 - Node supports litep2p/Bitswap
 
-## Code Review Guidelines (Parity Standards)
+## Code Review Guidelines
 
 For the full review criteria (Parity Standards), see the `/review` skill. The review bot and all contributors follow those guidelines.
-
-### Rust Code Quality
-
-- **Error Handling**: Use `Result` types with meaningful error enums. Avoid `unwrap()` and `expect()` in production code; they are acceptable in tests.
-- **Arithmetic Safety**: Use `checked_*`, `saturating_*`, or `wrapping_*` arithmetic to prevent overflow. Never use raw arithmetic operators on user-provided values.
-- **Naming**: Follow Rust naming conventions (snake_case for functions/variables, CamelCase for types).
-- **Complexity**: Prefer simple, readable code. Avoid over-engineering and premature abstractions.
-- **No useless comments**: Comments should mostly explain **why** things are done, not **how**. The code should be readable enough to explain the how.
-
-### FRAME Pallet Standards
-
-- **Storage**: Use appropriate storage types (`StorageValue`, `StorageMap`, `StorageDoubleMap`, `CountedStorageMap`).
-- **Events**: Emit events for all state changes that external observers need to track.
-- **Errors**: Define descriptive error types in the pallet's `Error` enum.
-- **Weights**: All extrinsics must have accurate weight annotations. Update benchmarks when logic changes.
-- **Origins**: Use the principle of least privilege for origin checks.
-- **Hooks**: Be cautious with `on_initialize` and `on_finalize`; they affect block production time. Never panic or do unbounded iteration in them. Always benchmark them properly.
-
-### Security Considerations
-
-- **No Panics in Runtime**: Runtime code must never panic. Use defensive programming with `defensive_*` macros.
-- **Bounded Collections**: Use `BoundedVec`, `BoundedBTreeMap` etc. to prevent unbounded storage growth.
-- **Input Validation**: Validate all user inputs at the entry point.
-- **Storage Deposits**: Consider requiring deposits for user-created storage items.
-- **Arithmetic**: Always use checked arithmetic for financial calculations.
-- **Access Control**: Verify origin permissions before state changes.
-
-### Testing Requirements
-
-- **Unit Tests**: All new functionality requires unit tests.
-- **Edge Cases**: Test boundary conditions, error paths, and malicious inputs.
-- **Integration Tests**: Complex features should have integration tests.
-- **Mock Tests**: Use `mock.rs` and `TestExternalities` for pallet tests.
-- **Provider Node Tests**: Test HTTP API endpoints and storage layer.
-- **Client SDK Tests**: Test all public SDK methods.
-
-### PR Requirements
-
-- **Single Responsibility**: Each PR should address one concern.
-- **Tests Pass**: All CI checks must pass (`cargo test`, `cargo clippy`, `cargo fmt`).
-- **No Warnings**: Code should compile without warnings.
-- **Documentation**: Public APIs require rustdoc comments.
-- **Changelog**: Update changelog for user-facing changes.
 
 ### Using the Claude Review Bot
 
