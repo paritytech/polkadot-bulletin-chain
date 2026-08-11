@@ -132,8 +132,8 @@ impl<BlockNumber: PartialOrd + Copy, Extra> Authorization<BlockNumber, Extra> {
 		now >= self.expiration
 	}
 
-	/// Project into the runtime-API summary. Only the runtime can read the opaque
-	/// `extra`, so it passes `bytes_permanent_used` in.
+	/// Project into the runtime-API summary. `extra` is opaque here, so the caller
+	/// passes `bytes_permanent_used` in.
 	pub fn to_account_authorization(
 		&self,
 		bytes_permanent_used: u64,

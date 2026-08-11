@@ -2195,8 +2195,8 @@ fn store_records_extrinsic_index_in_transaction_info() {
 	});
 }
 
-/// Test to make sure we can actually access everything we need for build the
-/// output times for the runtime API.
+/// `TransactionInfo` carries every field the upstream `indexed_transactions` runtime
+/// API needs.
 #[test]
 fn transaction_info_projects_into_upstream_runtime_api_type() {
 	use bulletin_transaction_storage_primitives::cids::HashingAlgorithm as PalletHashingAlgorithm;
@@ -2292,7 +2292,8 @@ fn can_store_mirrors_store_validation() {
 }
 
 /// Each field of the runtime-API summary must come from the matching extent counter — the
-/// two `u64` pairs and the two `u32` pairs are otherwise easy to transpose.
+/// three `u64` byte counters and the two `u32` transaction counters are otherwise easy to
+/// transpose.
 #[test]
 fn to_account_authorization_maps_every_field() {
 	let authorization = super::Authorization {
