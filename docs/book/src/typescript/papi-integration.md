@@ -4,7 +4,7 @@ The TypeScript SDK follows a **Bring Your Own Client (BYOC)** pattern - you prov
 
 - **Light client support** via smoldot (no RPC endpoint required)
 - **Connection reuse** - share one client across SDK and other code
-- **Browser wallet integration** - use Talisman, SubWallet, etc.
+- **Browser wallet integration** - use Talisman, SubWallet, PolkaGate, etc.
 - **Custom transports** - HTTP, WebSocket, or any PAPI-compatible provider
 
 ## Setup
