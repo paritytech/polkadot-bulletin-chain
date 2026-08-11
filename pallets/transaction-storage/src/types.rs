@@ -210,7 +210,8 @@ pub struct TransactionInfo<Meta> {
 
 	/// Opaque per-entry payload ([`crate::Config::EntryMeta`]), stored verbatim and
 	/// handed back through [`OnObsoleteTransactions::handle_obsolete`] at expiry.
-	/// Tail field; the wired type must keep `TransactionKind`'s 1-byte encoding.
+	/// Tail field; live entries store one byte here, so the wired type must keep a
+	/// 1-byte encoding.
 	pub meta: Meta,
 }
 

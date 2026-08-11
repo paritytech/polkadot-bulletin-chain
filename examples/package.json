@@ -8,7 +8,7 @@
     "papi:update": "papi"
   },
   "dependencies": {
-    "@acala-network/chopsticks-core": "^1.5.0",
+    "@acala-network/chopsticks-core": "^1.5.1",
     "@ipld/dag-pb": "^4.1.3",
     "@polkadot-api/descriptors": "file:.papi/descriptors",
     "@polkadot-api/substrate-bindings": "^0.20.2",
