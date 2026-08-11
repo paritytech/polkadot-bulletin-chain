@@ -47,7 +47,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1",
+    "@playwright/test": "~1.59.1",
     "@polkadot-api/cli": "^0.21.10",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
