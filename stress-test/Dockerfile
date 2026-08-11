@@ -1,4 +1,6 @@
-FROM rust:1.88-bookworm AS builder
+# Keep in sync with CI_IMAGE in .github/env — the workspace tracks the toolchain
+# shipped by paritytech/ci-unified.
+FROM rust:1.93-bookworm AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler && \
     rm -rf /var/lib/apt/lists/*
@@ -6,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compil
 WORKDIR /build
 COPY . .
 
-RUN cargo build --release -p bulletin-stress-test && \
+RUN cargo build --release --locked -p bulletin-stress-test && \
     cp target/release/bulletin-stress-test /usr/local/bin/
 
 # ---------------------------------------------------------------------------

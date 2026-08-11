@@ -21,17 +21,27 @@ env:
   IMAGE_NAME: docker.io/paritypr/bulletin-stress-test
 
 jobs:
+  set-image:
+    uses: ./.github/workflows/set-image.yml
+
   check:
     name: Build & verify binary
-    runs-on: ubuntu-latest
+    runs-on: parity-large
+    needs: [set-image]
     container:
-      image: paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: "bulletin-cache-stress-test"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build stress-test binary
-        run: cargo build --release -p bulletin-stress-test
+        run: cargo build --release --locked -p bulletin-stress-test
 
       - name: Verify binary runs
         run: ./target/release/bulletin-stress-test --help

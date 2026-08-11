@@ -8,3 +8,14 @@ zombienet/
 *.json
 !Cargo.lock
 !package.json
+
+# Nothing below is needed to build the stress-test binary. Workspace members
+# (pallets/, runtimes/, sdk/rust, zombienet-sdk-tests) must stay: cargo loads
+# every member manifest to resolve the workspace, even when building just one
+# package.
+chainspecs/
+console-ui/
+scripts/
+sdk/typescript/
+templates/
+utils/
