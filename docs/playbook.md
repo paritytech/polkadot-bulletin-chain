@@ -6,7 +6,7 @@
 
 ## E2E Release Process
 
-Replace `<NETWORK>` with your target: `westend`, `paseo`, `pop`, or `polkadot`.
+Replace `<NETWORK>` with your target: `westend`, `paseo`, or `pop`.
 
 ### Step 1: Pre-release Checks
 
@@ -159,7 +159,7 @@ Two separate version tracks for git tags:
 | Track | Networks | Format | Examples |
 |-------|----------|--------|----------|
 | **Testnet** | westend, paseo | `v0.0.X` | v0.0.4, v0.0.5, v0.0.6 |
-| **Production** | polkadot, pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
+| **Production** | pop | `v1.x.y` | v1.0.0, v1.0.1, v1.1.0 |
 
 **Rules:**
 - Testnet releases increment the **patch** component only: `v0.0.4` → `v0.0.5` → `v0.0.6`.

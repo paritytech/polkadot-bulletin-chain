@@ -1,5 +1,13 @@
 # Polkadot Bulletin Chain - Examples
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 Examples demonstrating how to interact with the Polkadot Bulletin Chain.
 
 ## Directory Structure
@@ -36,11 +44,11 @@ It's only needed once after checkout or when dependencies change:
 Standalone recipes handle full setup/teardown automatically:
 
 ```bash
-# Solochain (Polkadot runtime) with WebSocket + Kubo Docker IPFS (default)
-just run-authorize-and-store bulletin-polkadot-runtime ws
+# Westend parachain with WebSocket + Kubo Docker IPFS (default)
+just run-authorize-and-store bulletin-westend-runtime ws
 
-# Solochain with WebSocket + Kubo native (no Docker required)
-just run-authorize-and-store bulletin-polkadot-runtime ws kubo-native
+# Westend parachain with WebSocket + Kubo native (no Docker required)
+just run-authorize-and-store bulletin-westend-runtime ws kubo-native
 
 # Westend parachain with smoldot light client
 just run-authorize-and-store bulletin-westend-runtime smoldot
@@ -57,13 +65,13 @@ Two IPFS backends are supported:
 
 ```bash
 # Start services (zombienet + IPFS with Peering.Peers auto-reconnect)
-just start-services /tmp/my-test bulletin-polkadot-runtime kubo-native
+just start-services /tmp/my-test bulletin-westend-runtime kubo-native
 
 # Generate PAPI descriptors from running node
 just papi-generate
 
 # Run individual tests (services must be running)
-just run-test-authorize-and-store /tmp/my-test bulletin-polkadot-runtime ws
+just run-test-authorize-and-store /tmp/my-test bulletin-westend-runtime ws
 just run-test-store-chunked-data /tmp/my-test
 just run-test-store-big-data /tmp/my-test big32
 
@@ -139,7 +147,7 @@ just run-live-tests-paseo <seed> [ipfs_gateway_url] [image_size]
 ## Manually
 
 ```shell
-cd polkadot-bulletin-chain   # make you are inside the project directory for the following steps
+cd polkadot-bulletin-chain   # make sure you are inside the project directory for the following steps
 ```
 
 ### Download Zombienet
@@ -189,39 +197,6 @@ docker run -d --name ipfs-node -v ipfs-data:/data/ipfs \
 docker logs -f ipfs-node
 ```
 
-### Run Bulletin Solochain with `--ipfs-server`
-
-```shell
-cargo build --release -p polkadot-bulletin-chain
-
-POLKADOT_BULLETIN_BINARY_PATH=./target/release/polkadot-bulletin-chain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-polkadot-local.toml
-```
-
-### Connect IPFS Nodes
-
-Kubo's **Peering.Peers** feature handles automatic (re)connection to chain nodes.
-The `just` recipes configure this automatically before starting the IPFS daemon.
-
-For manual setup, configure Peering.Peers in your Kubo config:
-
-```shell
-# Local Kubo -- configure peering before starting the daemon
-./kubo/ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/ip4/127.0.0.1/tcp/10001/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/ip4/127.0.0.1/tcp/12347/ws"]}
-]'
-```
-
-```shell
-# Docker Kubo -- configure peering, then restart the container
-docker exec ipfs-node ipfs config --json Peering.Peers '[
-  {"ID":"12D3KooWQCkBm1BYtkHpocxCwMgR8yjitEeHGx8spzcDLGt2gkBm","Addrs":["/dns4/host.docker.internal/tcp/10001/ws"]},
-  {"ID":"12D3KooWRkZhiRhsqmrQ28rt73K7V3aCBpqKrLGSXmZ99PTcTZby","Addrs":["/dns4/host.docker.internal/tcp/12347/ws"]}
-]'
-docker restart ipfs-node
-```
-
 ### Run Bulletin (Westend) Parachain with `--ipfs-server`
 
 #### Prerequisites
@@ -231,8 +206,6 @@ mkdir -p ~/local_bridge_testing/bin
 
 # Ensures `polkadot` and `polkadot-parachain` exist
 git clone https://github.com/paritytech/polkadot-sdk.git
-# TODO: unless not merged: https://github.com/paritytech/polkadot-sdk/pull/10370
-git reset --hard origin/bko-bulletin-para-support
 cd polkadot-sdk
 
 cargo build -p polkadot -r
@@ -337,7 +310,7 @@ npx papi add -w ws://localhost:10000 bulletin
 ### 2. Start Services
 
 See the justfile for full setup details. At minimum you need:
-- A running Bulletin Chain node (solochain or parachain via zombienet)
+- A running Bulletin Chain node (parachain via zombienet)
 - An IPFS node connected to the chain's IPFS peers
 
 ### 3. Run Examples
@@ -352,9 +325,7 @@ node store_big_data.js [ws_url] [seed] [ipfs_gateway_url] [image_size]
 
 # Rust
 cd rust/authorize-and-store
-./fetch_metadata.sh ws://localhost:10000
-cargo build --release
-./target/release/authorize-and-store --ws ws://localhost:10000 --seed "//Alice"
+cargo run --release -- --ws ws://localhost:10000 --seed "//Eve"
 ```
 
 ## Troubleshooting
@@ -365,8 +336,12 @@ cd examples
 npx papi add -w ws://localhost:10000 bulletin
 ```
 
-**Metadata errors (Rust):**
-```bash
-cd examples/rust/authorize-and-store
-./fetch_metadata.sh ws://localhost:10000
-```
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

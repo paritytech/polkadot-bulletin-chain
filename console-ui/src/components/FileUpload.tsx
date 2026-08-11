@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useCallback, useState } from "react";
 import { Upload, File, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";

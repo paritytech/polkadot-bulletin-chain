@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 import { defineConfig } from "vitest/config"
 
@@ -18,7 +18,9 @@ export default defineConfig({
         "*.config.ts",
       ],
     },
-    testTimeout: 30000, // 30 seconds for integration tests
+    // Unit test budgets; the integration suite sets its own larger
+    // timeouts derived from the SDK's per-transaction timeout.
+    testTimeout: 30000,
     hookTimeout: 30000,
   },
 })

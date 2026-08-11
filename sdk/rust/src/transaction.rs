@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! Transaction submission for Bulletin Chain operations.
 //!
@@ -8,19 +8,62 @@
 use crate::{
 	authorization::{Authorization, AuthorizationManager},
 	cid::ContentHash,
-	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result},
+	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
-use subxt::{blocks::BlockRef, utils::AccountId32, OnlineClient, PolkadotConfig};
+use bulletin_transaction_storage_primitives::TransactionRef;
+use codec::Decode;
+use subxt::{
+	blocks::BlockRef, config::DefaultExtrinsicParamsBuilder, utils::AccountId32, OnlineClient,
+	PolkadotConfig,
+};
 use subxt_signer::sr25519::Keypair;
 
 // Subxt metadata for TransactionStorage pallet
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
+/// `TransactionStorage::Authorizations` values, decoded with plain SCALE instead of through the
+/// subxt-generated type.
+///
+/// The renewal split renamed `AuthorizationExtent::bytes_permanent` to `extra` (an opaque
+/// consumer-pallet payload) without moving it, so the encoding is byte-identical across the split
+/// but the field *names* are not. Subxt matches fields by name against the connected chain's
+/// metadata, so the generated accessor cannot read authorizations from a runtime that predates the
+/// split — which is every deployed chain until it upgrades. Decoding positionally reads both, the
+/// same compatibility the TypeScript SDK keeps for the renewal extrinsics.
+///
+/// The layout is frozen on the runtime side by
+/// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
+#[derive(Decode)]
+struct StoredAuthorization {
+	transactions: u32,
+	transactions_allowance: u32,
+	bytes: u64,
+	/// `bytes_permanent` pre-split, `extra` after it.
+	_extra: u64,
+	bytes_allowance: u64,
+	expiration: u32,
+}
+
+/// Convert the primitives `TransactionRef` into the subxt-generated one.
+fn to_runtime_ref(
+	entry: &TransactionRef<u32>,
+) -> bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef<u32> {
+	use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+	match entry {
+		TransactionRef::Position { block, index } => Gen::Position { block: *block, index: *index },
+		TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+	}
+}
+
 /// Transaction submission client for Bulletin Chain.
 ///
 /// This wraps a subxt OnlineClient and provides high-level methods
 /// for all TransactionStorage pallet operations.
+///
+/// Resolves nonces from the best block (not finalized) before each
+/// submission, matching PAPI's approach. This ensures sequential
+/// transactions work correctly with `WaitFor::InBlock`.
 pub struct TransactionClient {
 	api: OnlineClient<PolkadotConfig>,
 }
@@ -45,19 +88,192 @@ impl TransactionClient {
 		&self.api
 	}
 
-	/// Query the current authorization for an account.
+	/// Submit a transaction with the nonce resolved from the best block.
 	///
-	/// Returns `Some((transactions, bytes))` if authorization exists and is not expired,
-	/// `None` if no authorization exists or it has expired.
+	/// Subxt's default nonce resolution queries the finalized block which
+	/// lags behind actual block inclusion for sequential `WaitFor::InBlock` transactions. So we
+	/// manually override that by choosing to query at the current best block instead.
+	async fn submit_at_best_block(
+		&self,
+		tx: &impl subxt::tx::Payload,
+		signer: &Keypair,
+		make_error: &impl Fn(String) -> Error,
+	) -> Result<subxt::tx::TxProgress<PolkadotConfig, OnlineClient<PolkadotConfig>>> {
+		let account = AccountId32::from(signer.public_key().0);
+
+		// Get the best block and query nonce at that block
+		let best_block = self
+			.api
+			.blocks()
+			.subscribe_best()
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))?
+			.next()
+			.await
+			.ok_or_else(|| make_error("Best block stream ended".into()))?
+			.map_err(|e| make_error(format!("{e:?}")))?;
+
+		let nonce = best_block
+			.account_nonce(&account)
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))?;
+
+		let params = DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new().nonce(nonce).build();
+		self.api
+			.tx()
+			.sign_and_submit_then_watch(tx, signer, params)
+			.await
+			.map_err(|e| make_error(format!("{e:?}")))
+	}
+
+	/// Submit a transaction, stream status events, and return when the target
+	/// confirmation level is reached.
+	///
+	/// This is the single submission loop used by all public methods. It:
+	/// - Streams all `TxStatus` events, firing the optional progress callback
+	/// - Breaks on `InBestBlock` or `InFinalizedBlock` depending on the value of `wait_for`
+	/// - Returns block hash and extrinsic hash on success
+	async fn submit_and_watch(
+		&self,
+		tx: &impl subxt::tx::Payload,
+		signer: &Keypair,
+		wait_for: WaitFor,
+		progress_callback: Option<ProgressCallback>,
+		make_error: impl Fn(String) -> Error,
+	) -> Result<SubmitResult> {
+		let mut progress = self.submit_at_best_block(tx, signer, &make_error).await?;
+
+		let mut result_block_hash = None;
+		let mut result_extrinsic_hash = None;
+
+		while let Some(status) = progress.next().await {
+			match status {
+				Ok(status) => {
+					use subxt::tx::TxStatus;
+					match status {
+						TxStatus::Validated =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::tx_validated());
+							},
+						TxStatus::Broadcasted =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::tx_broadcasted());
+							},
+						TxStatus::InBestBlock(in_block) => {
+							let block_hash = in_block.block_hash().to_string();
+							let extrinsic_hash = in_block.extrinsic_hash().to_string();
+
+							if let Some(ref cb) = progress_callback {
+								let block_number =
+									self.get_block_number(in_block.block_hash()).await.ok();
+								cb(ProgressEvent::tx_in_best_block(
+									block_hash.clone(),
+									block_number,
+									None,
+								));
+							}
+
+							result_block_hash = Some(block_hash);
+							result_extrinsic_hash = Some(extrinsic_hash);
+
+							if wait_for == WaitFor::InBlock {
+								in_block.wait_for_success().await.map_err(|e| {
+									make_error(format!("Transaction failed: {e:?}"))
+								})?;
+								break;
+							}
+						},
+						TxStatus::InFinalizedBlock(in_block) => {
+							let block_hash = in_block.block_hash().to_string();
+							let extrinsic_hash = in_block.extrinsic_hash().to_string();
+
+							if let Some(ref cb) = progress_callback {
+								let block_number =
+									self.get_block_number(in_block.block_hash()).await.ok();
+								cb(ProgressEvent::tx_finalized(
+									block_hash.clone(),
+									block_number,
+									None,
+								));
+							}
+
+							result_block_hash = Some(block_hash);
+							result_extrinsic_hash = Some(extrinsic_hash);
+
+							in_block
+								.wait_for_success()
+								.await
+								.map_err(|e| make_error(format!("Transaction failed: {e:?}")))?;
+							break;
+						},
+						TxStatus::NoLongerInBestBlock =>
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
+								));
+							},
+						TxStatus::Invalid { message } => {
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Invalid {
+										error: message.clone(),
+									},
+								));
+							}
+							return Err(make_error(format!("Transaction invalid: {message}")));
+						},
+						TxStatus::Dropped { message } => {
+							if let Some(ref cb) = progress_callback {
+								cb(ProgressEvent::Transaction(
+									crate::types::TransactionStatusEvent::Dropped {
+										error: message.clone(),
+									},
+								));
+							}
+							return Err(make_error(format!("Transaction dropped: {message}")));
+						},
+						TxStatus::Error { message } =>
+							return Err(make_error(format!("Transaction error: {message}"))),
+					}
+				},
+				Err(e) => return Err(make_error(format!("Status error: {e:?}"))),
+			}
+		}
+
+		match (result_block_hash, result_extrinsic_hash) {
+			(Some(block_hash), Some(extrinsic_hash)) =>
+				Ok(SubmitResult { block_hash, extrinsic_hash }),
+			_ => Err(make_error("Transaction stream ended without block inclusion".into())),
+		}
+	}
+
+	/// Query the current authorization for an account and return the remaining boost-tier
+	/// capacity as `(transactions_remaining, bytes_remaining)`.
+	///
+	/// `bytes` and `transactions` on `AuthorizationExtent` are *consumed* counters; this
+	/// helper subtracts them from the granted caps (saturating to `0` if the holder is
+	/// already over-cap on either axis). Note that overshooting the caps no longer rejects
+	/// the transaction — it only forfeits the priority boost — so the returned remaining
+	/// values are a soft-budget preflight, not a hard precondition.
+	///
+	/// Returns `None` if no authorization exists or it has expired.
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_transaction_storage::AuthorizationScope as OnChainScope;
+		use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope as OnChainScope;
 
 		let storage_query = bulletin::storage()
 			.transaction_storage()
 			.authorizations(OnChainScope::Account(who.clone()));
+
+		// The key is encoded from the chain's own metadata (unchanged by the renewal split); only
+		// the value is decoded by hand — see `StoredAuthorization`.
+		let key = self
+			.api
+			.storage()
+			.address_bytes(&storage_query)
+			.map_err(|e| Error::NetworkError(format!("Failed to encode storage key: {e:?}")))?;
 
 		let latest_block = self
 			.api
@@ -69,25 +285,37 @@ impl TransactionClient {
 		let current_block_number = latest_block.number();
 
 		let maybe_auth =
-			latest_block.storage().fetch(&storage_query).await.map_err(|e| {
+			latest_block.storage().fetch_raw(key).await.map_err(|e| {
 				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
 			})?;
 
-		match maybe_auth {
-			Some(auth) if auth.expiration > current_block_number =>
-				Ok(Some((auth.extent.transactions, auth.extent.bytes))),
-			Some(_) => Ok(None), // expired
-			None => Ok(None),
+		let Some(bytes) = maybe_auth else { return Ok(None) };
+
+		let auth = StoredAuthorization::decode(&mut &bytes[..])
+			.map_err(|e| Error::NetworkError(format!("Failed to decode authorization: {e}")))?;
+
+		if auth.expiration <= current_block_number {
+			return Ok(None); // expired
 		}
+
+		let transactions_remaining = auth.transactions_allowance.saturating_sub(auth.transactions);
+		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes);
+		Ok(Some((transactions_remaining, bytes_remaining)))
 	}
 
 	/// Check that sufficient authorization exists for a store operation.
 	///
 	/// Queries the chain for the account's current authorization and validates
-	/// that it has enough transactions and bytes remaining.
+	/// that it has enough transactions and bytes remaining for the boost tier.
 	///
-	/// This is a best-effort check — if the query fails (e.g., network error),
-	/// the error is returned so the caller can decide whether to proceed.
+	/// This is a soft preflight: under the soft-cap design, on-chain validation
+	/// no longer rejects a `store` for being over-budget — it only drops the
+	/// priority boost. Use this check to decide whether to send (likely-boosted)
+	/// or to top up the authorization first; do not treat a failure here as
+	/// "the chain will reject this tx".
+	///
+	/// If the query itself fails (e.g., network error), the error is returned
+	/// so the caller can decide whether to proceed.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,
@@ -114,8 +342,13 @@ impl TransactionClient {
 	/// Store data on-chain.
 	///
 	/// Submits a `TransactionStorage.store` extrinsic.
-	pub async fn store(&self, data: Vec<u8>, signer: &Keypair) -> Result<StoreReceipt> {
-		self.store_with_progress(data, signer, None).await
+	pub async fn store(
+		&self,
+		data: Vec<u8>,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<StoreReceipt> {
+		self.store_with_progress(data, signer, wait_for, None).await
 	}
 
 	/// Store data on-chain with progress callbacks.
@@ -136,6 +369,7 @@ impl TransactionClient {
 		&self,
 		data: Vec<u8>,
 		signer: &Keypair,
+		wait_for: WaitFor,
 		progress_callback: Option<ProgressCallback>,
 	) -> Result<StoreReceipt> {
 		let data_size = data.len() as u64;
@@ -145,125 +379,15 @@ impl TransactionClient {
 		self.check_authorization_for_store(&account, 1, data_size).await?;
 
 		let tx = bulletin::tx().transaction_storage().store(data);
-
-		let mut progress = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(&tx, signer)
-			.await
-			.map_err(|e| Error::StorageFailed(format!("Transaction submission failed: {e:?}")))?;
-
-		let mut final_block_hash = None;
-		let mut final_extrinsic_hash = None;
-
-		// Stream transaction status events
-		while let Some(status) = progress.next().await {
-			match status {
-				Ok(status) => {
-					use subxt::tx::TxStatus;
-					match status {
-						TxStatus::Validated =>
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_validated());
-							},
-						TxStatus::Broadcasted =>
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_broadcasted());
-							},
-						TxStatus::InBestBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
-
-							if let Some(ref callback) = progress_callback {
-								// Only fetch block number when callback needs it
-								let block_number =
-									self.get_block_number(in_block.block_hash()).await.ok();
-								callback(ProgressEvent::tx_in_best_block(
-									block_hash.clone(),
-									block_number,
-									None, // extrinsic index not easily available here
-								));
-							}
-
-							final_block_hash = Some(block_hash);
-							final_extrinsic_hash = Some(extrinsic_hash);
-						},
-						TxStatus::InFinalizedBlock(in_block) => {
-							let block_hash = format!("{:?}", in_block.block_hash());
-							let extrinsic_hash = format!("{:?}", in_block.extrinsic_hash());
-
-							// Only fetch block number when callback needs it
-							let block_number = if progress_callback.is_some() {
-								self.get_block_number(in_block.block_hash()).await.ok()
-							} else {
-								None
-							};
-
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::tx_finalized(
-									block_hash.clone(),
-									block_number,
-									None,
-								));
-							}
-
-							final_block_hash = Some(block_hash);
-							final_extrinsic_hash = Some(extrinsic_hash);
-
-							// Check for success
-							in_block.wait_for_success().await.map_err(|e| {
-								Error::TransactionFailed(format!("Transaction failed: {e:?}"))
-							})?;
-
-							break;
-						},
-						TxStatus::NoLongerInBestBlock => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::NoLongerInBestBlock,
-								));
-							}
-						},
-						TxStatus::Invalid { message } => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Invalid {
-										error: message.clone(),
-									},
-								));
-							}
-							return Err(Error::TransactionFailed(format!(
-								"Transaction invalid: {message}"
-							)));
-						},
-						TxStatus::Dropped { message } => {
-							if let Some(ref callback) = progress_callback {
-								callback(ProgressEvent::Transaction(
-									crate::types::TransactionStatusEvent::Dropped {
-										error: message.clone(),
-									},
-								));
-							}
-							return Err(Error::TransactionFailed(format!(
-								"Transaction dropped: {message}"
-							)));
-						},
-						TxStatus::Error { message } => {
-							return Err(Error::TransactionFailed(format!(
-								"Transaction error: {message}"
-							)));
-						},
-					}
-				},
-				Err(e) => {
-					return Err(Error::TransactionFailed(format!("Status error: {e:?}")));
-				},
-			}
-		}
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, progress_callback, |e| {
+				Error::StorageFailed(format!("Store failed: {e}"))
+			})
+			.await?;
 
 		Ok(StoreReceipt {
-			block_hash: final_block_hash.unwrap_or_default(),
-			extrinsic_hash: final_extrinsic_hash.unwrap_or_default(),
+			block_hash: result.block_hash,
+			extrinsic_hash: result.extrinsic_hash,
 			data_size,
 		})
 	}
@@ -283,38 +407,6 @@ impl TransactionClient {
 		Ok(block.number())
 	}
 
-	/// Submit a transaction, wait for finalization, and return the block hash.
-	///
-	/// The `make_error` closure maps a formatted message into the appropriate
-	/// `Error` variant for the calling context (e.g. `Error::StorageFailed`,
-	/// `Error::RenewalFailed`).
-	async fn submit_and_finalize(
-		&self,
-		tx: &impl subxt::tx::Payload,
-		signer: &Keypair,
-		context: &str,
-		make_error: impl Fn(String) -> Error,
-	) -> Result<String> {
-		let in_block = self
-			.api
-			.tx()
-			.sign_and_submit_then_watch_default(tx, signer)
-			.await
-			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?
-			.wait_for_finalized()
-			.await
-			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
-
-		let block_hash = format!("{:?}", in_block.block_hash());
-
-		in_block
-			.wait_for_success()
-			.await
-			.map_err(|e| make_error(format!("{context} failed: {e:?}")))?;
-
-		Ok(block_hash)
-	}
-
 	/// Authorize an account to store data.
 	///
 	/// Requires authorizer origin (typically sudo).
@@ -324,6 +416,7 @@ impl TransactionClient {
 		transactions: u32,
 		bytes: u64,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<AuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_account(
 			who.clone(),
@@ -331,11 +424,18 @@ impl TransactionClient {
 			bytes,
 		);
 
-		let block_hash = self
-			.submit_and_finalize(&tx, signer, "Authorization", Error::TransactionFailed)
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::TransactionFailed(format!("Authorization failed: {e}"))
+			})
 			.await?;
 
-		Ok(AuthorizationReceipt { account: who, transactions, bytes, block_hash })
+		Ok(AuthorizationReceipt {
+			account: who,
+			transactions,
+			bytes,
+			block_hash: result.block_hash,
+		})
 	}
 
 	/// Authorize a preimage (by content hash) to be stored.
@@ -346,24 +446,65 @@ impl TransactionClient {
 		content_hash: ContentHash,
 		max_size: u64,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<PreimageAuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
-		let block_hash = self
-			.submit_and_finalize(&tx, signer, "Authorization", Error::TransactionFailed)
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::TransactionFailed(format!("Authorization failed: {e}"))
+			})
 			.await?;
 
-		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash })
+		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
-	/// Renew/extend the retention period for stored data.
-	pub async fn renew(&self, block: u32, index: u32, signer: &Keypair) -> Result<RenewReceipt> {
-		let tx = bulletin::tx().transaction_storage().renew(block, index);
+	/// Schedule a one-shot renewal of stored data.
+	///
+	/// The renewal fires once when the data reaches its retention boundary; it
+	/// does not renew synchronously. For immediate renewal use
+	/// [`force_renew`](Self::force_renew).
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
+	pub async fn renew(
+		&self,
+		entry: impl Into<TransactionRef<u32>>,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<RenewReceipt> {
+		let entry = entry.into();
+		let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
 
-		let block_hash =
-			self.submit_and_finalize(&tx, signer, "Renew", Error::RenewalFailed).await?;
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Renew failed: {e}"))
+			})
+			.await?;
 
-		Ok(RenewReceipt { original_block: block, transaction_index: index, block_hash })
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
+	}
+
+	/// Immediately renew stored data, extending its retention from the current block.
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
+	pub async fn force_renew(
+		&self,
+		entry: impl Into<TransactionRef<u32>>,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<RenewReceipt> {
+		let entry = entry.into();
+		let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
+
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Force renew failed: {e}"))
+			})
+			.await?;
+
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -373,10 +514,13 @@ impl TransactionClient {
 		&self,
 		who: AccountId32,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
-		self.submit_and_finalize(&tx, signer, "Refresh", Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Refresh failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -387,12 +531,15 @@ impl TransactionClient {
 		&self,
 		content_hash: ContentHash,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.refresh_preimage_authorization(content_hash);
-		self.submit_and_finalize(&tx, signer, "Refresh", Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Refresh failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -401,10 +548,13 @@ impl TransactionClient {
 		&self,
 		who: AccountId32,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
-		self.submit_and_finalize(&tx, signer, "Removal", Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Removal failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
 
@@ -413,14 +563,23 @@ impl TransactionClient {
 		&self,
 		content_hash: ContentHash,
 		signer: &Keypair,
+		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.remove_expired_preimage_authorization(content_hash);
-		self.submit_and_finalize(&tx, signer, "Removal", Error::TransactionFailed)
-			.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::TransactionFailed(format!("Removal failed: {e}"))
+		})
+		.await?;
 		Ok(())
 	}
+}
+
+/// Internal result from `submit_and_watch`.
+struct SubmitResult {
+	block_hash: String,
+	extrinsic_hash: String,
 }
 
 /// Receipt from a successful store operation.
@@ -451,7 +610,30 @@ pub struct PreimageAuthorizationReceipt {
 /// Receipt from a successful renew operation.
 #[derive(Debug, Clone)]
 pub struct RenewReceipt {
-	pub original_block: u32,
-	pub transaction_index: u32,
+	pub entry: TransactionRef<u32>,
 	pub block_hash: String,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::StoredAuthorization;
+	use codec::{Decode, Encode};
+
+	/// Mirror of the runtime-side freeze test: the bytes a pre-split chain wrote must land in the
+	/// fields `query_account_authorization` reads.
+	#[test]
+	fn stored_authorization_decodes_pre_split_layout() {
+		// extent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }
+		// followed by `expiration`.
+		let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u32).encode();
+
+		let auth = StoredAuthorization::decode(&mut &pre_split[..]).unwrap();
+
+		assert_eq!(auth.transactions, 1);
+		assert_eq!(auth.transactions_allowance, 5);
+		assert_eq!(auth.bytes, 100);
+		assert_eq!(auth._extra, 700);
+		assert_eq!(auth.bytes_allowance, 900);
+		assert_eq!(auth.expiration, 50);
+	}
 }

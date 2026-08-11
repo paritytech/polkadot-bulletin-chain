@@ -28,8 +28,13 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 });
 
 if (auth) {
-  console.log("Transactions remaining:", auth.extent.transactions);
-  console.log("Bytes remaining:", auth.extent.bytes);
+  // `*_allowance` fields are the caps; `transactions`/`bytes` are consumed so far.
+  // The caps gate transaction *priority*, not acceptance: going over doesn't
+  // reject stores, they just lose their priority boost.
+  const txBoostRemaining = auth.extent.transactions_allowance - auth.extent.transactions;
+  const bytesBoostRemaining = auth.extent.bytes_allowance - auth.extent.bytes;
+  console.log("Boost-tier transactions remaining:", txBoostRemaining);
+  console.log("Boost-tier bytes remaining:", bytesBoostRemaining);
   console.log("Expires at block:", auth.expiration ?? "Never");
 } else {
   console.log("Account not authorized");
@@ -39,10 +44,9 @@ if (auth) {
 ### Check Preimage Authorization
 
 ```typescript
-import { Binary } from "polkadot-api";
-
-// Check if a specific content hash is pre-authorized
-const contentHash = Binary.fromHex("0x...");  // Your content hash
+// Check if a specific content hash is pre-authorized.
+// Fixed-size hashes are passed as 0x-prefixed hex (PAPI SizedHex).
+const contentHash = "0x...";  // Your content hash
 
 const auth = await api.query.TransactionStorage.Authorizations.getValue({
   type: "Preimage",
@@ -50,7 +54,7 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 });
 
 if (auth) {
-  console.log("Preimage authorized for", auth.extent.bytes, "bytes");
+  console.log("Preimage authorized for", auth.extent.bytes_allowance, "bytes");
 }
 ```
 
@@ -107,16 +111,17 @@ console.log("Account authorized!");
 Pre-authorize a specific content hash. Useful for allowing anyone to store specific data:
 
 ```typescript
-import { calculateCid, getContentHash, HashAlgorithm, CidCodec } from "@parity/bulletin-sdk";
+import { getContentHash, HashAlgorithm } from "@parity/bulletin-sdk";
+import { Binary } from "polkadot-api";
 
 // Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
 const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 
-// Authorize this specific content
+// Authorize this specific content (fixed-size hashes are passed as hex)
 const authTx = api.tx.Sudo.sudo({
   call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: Binary.fromBytes(contentHash),
+    content_hash: Binary.toHex(contentHash),
     max_size: BigInt(data.length)
   })
 });
@@ -160,15 +165,16 @@ if (!auth) {
   throw new Error("Not authorized. Request authorization first.");
 }
 
-if (auth.extent.transactions < transactions) {
-  throw new Error(`Need ${transactions} transactions, have ${auth.extent.transactions}`);
+// Boost budget left = allowance (cap) - consumed. Exceeding it doesn't reject
+// stores; they just lose their priority boost — so warn, don't block.
+const availableTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
+const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
+
+if (availableTransactions < transactions || availableBytes < bytes) {
+  console.warn("Boost budget exhausted - the upload will proceed at lower priority");
 }
 
-if (auth.extent.bytes < bytes) {
-  throw new Error(`Need ${bytes} bytes, have ${auth.extent.bytes}`);
-}
-
-console.log("Authorization sufficient, proceeding with upload...");
+console.log("Proceeding with upload...");
 ```
 
 ## Authorization Expiration
@@ -197,13 +203,13 @@ if (auth?.expiration) {
 
 ```typescript
 import { createClient, Binary } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
   // Setup
-  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-rpc.polkadot.io"));
+  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
   const api = papiClient.getTypedApi(bulletin);
   const preparer = new BulletinPreparer();
 
@@ -220,9 +226,15 @@ async function storeWithAuthCheck() {
     value: myAddress
   });
 
-  if (!auth || auth.extent.bytes < estimate.bytes) {
-    console.log("Insufficient authorization. Please use the Faucet.");
+  if (!auth) {
+    console.log("Not authorized. Please use the Faucet.");
     return;
+  }
+
+  // Boost budget left = allowance (cap) - consumed (priority only, not a hard limit)
+  const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
+  if (availableBytes < estimate.bytes) {
+    console.warn("Boost budget exhausted - storing at lower priority");
   }
 
   // 3. Store via SDK

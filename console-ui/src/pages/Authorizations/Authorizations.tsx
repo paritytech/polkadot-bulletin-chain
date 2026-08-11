@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { RefreshCw, User, FileText, AlertCircle, Search, Droplet } from "lucide-react";
@@ -17,6 +20,8 @@ import {
   usePreimageAuthsLoading,
   fetchAccountAuthorization,
   fetchPreimageAuthorizations,
+  extentRemainingTransactions,
+  extentRemainingBytes,
 } from "@/state/storage.state";
 import { FileUpload } from "@/components/FileUpload";
 import { getContentHash, HashAlgorithm, WaitFor, BulletinError } from "@parity/bulletin-sdk";
@@ -54,8 +59,8 @@ function AccountAuthorizationsTab() {
         address: searchAddress,
         authorization: auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null,
@@ -397,19 +402,19 @@ function FaucetAuthorizePreimagePanel() {
     try {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
-      const alice = keyring.addFromUri("//Alice");
-      const aliceSigner = getPolkadotSigner(
-        alice.publicKey,
+      const faucet = keyring.addFromUri("//Eve");
+      const faucetSigner = getPolkadotSigner(
+        faucet.publicKey,
         "Sr25519",
-        (data: Uint8Array) => alice.sign(data)
+        (data: Uint8Array) => faucet.sign(data)
       );
 
       const normalizedHash = preimageHash.startsWith("0x") ? preimageHash.slice(2) : preimageHash;
       const contentHashBytes = hexToBytes(normalizedHash);
       const sizeValue = getSizeValue();
 
-      // Create SDK client with Alice signer
-      const bulletinClient = createBulletinClient!(aliceSigner);
+      // Create SDK client with faucet signer
+      const bulletinClient = createBulletinClient!(faucetSigner);
 
       // Use SDK to authorize preimage with progress callback
       await bulletinClient
@@ -634,8 +639,8 @@ function FaucetAuthorizeAccountPanel() {
         setAuthorization(
           auth
             ? {
-                transactions: BigInt(auth.extent.transactions),
-                bytes: auth.extent.bytes,
+                transactions: extentRemainingTransactions(auth.extent),
+                bytes: extentRemainingBytes(auth.extent),
                 expiresAt: auth.expiration ?? undefined,
               }
             : null
@@ -663,18 +668,18 @@ function FaucetAuthorizeAccountPanel() {
     try {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
-      const alice = keyring.addFromUri("//Alice");
-      const aliceSigner = getPolkadotSigner(
-        alice.publicKey,
+      const faucet = keyring.addFromUri("//Eve");
+      const faucetSigner = getPolkadotSigner(
+        faucet.publicKey,
         "Sr25519",
-        (data: Uint8Array) => alice.sign(data)
+        (data: Uint8Array) => faucet.sign(data)
       );
 
       const txCount = parseInt(transactions, 10) || 0;
       const bytesValue = getBytesValue();
 
-      // Create SDK client with Alice signer
-      const bulletinClient = createBulletinClient!(aliceSigner);
+      // Create SDK client with faucet signer
+      const bulletinClient = createBulletinClient!(faucetSigner);
 
       // Use SDK to authorize account with progress callback
       await bulletinClient
@@ -691,8 +696,8 @@ function FaucetAuthorizeAccountPanel() {
       setAuthorization(
         auth
           ? {
-              transactions: BigInt(auth.extent.transactions),
-              bytes: auth.extent.bytes,
+              transactions: extentRemainingTransactions(auth.extent),
+              bytes: extentRemainingBytes(auth.extent),
               expiresAt: auth.expiration ?? undefined,
             }
           : null

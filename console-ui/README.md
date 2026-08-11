@@ -1,5 +1,13 @@
 # Bulletin Chain Console UI
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 A web-based console for interacting with the Polkadot Bulletin Chain. Upload and download data, manage authorizations, and explore blocks.
 
 ## Features
@@ -69,6 +77,10 @@ Select "Bulletin Westend" from the network dropdown. The UI connects to `wss://b
 ### Polkadot Mainnet
 
 Select "Bulletin Polkadot" from the network dropdown. The UI connects to `wss://bulletin-rpc.polkadot.io`.
+
+### Paseo Testnet
+
+Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
 
 ## IPFS Gateway
 
@@ -150,6 +162,16 @@ This opens the SDK book at http://localhost:3000 with guides on:
 - **polkadot-api** for chain interaction
 - **@parity/bulletin-sdk** for CID calculation and storage operations
 
+## Contributing
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
+
+## Security
+
+See the [root README](../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
 ## License
 
-Apache-2.0
+GPL-3.0-only

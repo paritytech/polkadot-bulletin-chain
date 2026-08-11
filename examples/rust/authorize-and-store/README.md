@@ -1,5 +1,13 @@
 # Rust Authorize and Store Example
 
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE-APACHE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
+
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
+
 This example demonstrates using the `bulletin-sdk-rust` crate to interact with Bulletin Chain.
 
 ## Features
@@ -13,14 +21,15 @@ This example demonstrates using the `bulletin-sdk-rust` crate to interact with B
 
 1. **Running Bulletin Chain node**: You need a running Bulletin Chain node with WebSocket endpoint available
 
-   Example for local development:
+   Example for local development (see the root README quickstart):
    ```bash
    # From project root
-   cargo build --release
-   ./target/release/polkadot-bulletin-chain --dev --tmp
+   just binaries-polkadot
+   just chain-spec westend
+   $(just binaries-polkadot)/polkadot-omni-node --chain ./zombienet/bulletin-westend-spec.json --dev --ipfs-server
    ```
 
-   This typically runs on `ws://localhost:10000`.
+   This typically runs on `ws://localhost:9944`.
 
 ## Usage
 
@@ -32,7 +41,7 @@ cargo run --release -- --ws <WS_URL> --seed "<SEED>"
 
 Where:
 - `<WS_URL>`: WebSocket URL of your Bulletin Chain node (default: `ws://localhost:10000`)
-- `<SEED>`: Account seed phrase or dev seed like `//Alice` (default: `//Alice`)
+- `<SEED>`: Account seed phrase or dev seed like `//Eve` (default: `//Eve`)
 
 ### Example
 
@@ -107,7 +116,7 @@ let operation = sdk_client.prepare_store(data, options)?;
 let cid = operation.calculate_cid()?;
 
 // Store with progress tracking
-let receipt = client.store_with_progress(data, &signer, Some(callback)).await?;
+let receipt = client.store_with_progress(data, &signer, WaitFor::InBlock, Some(callback)).await?;
 ```
 
 ### Chunked Storage with DAG-PB Manifest
@@ -124,8 +133,8 @@ let chunker_config = ChunkerConfig {
 
 let options = StoreOptions {
     cid_codec: CidCodec::DagPb,
-    hash_algorithm: HashAlgorithm::Blake2b256,
-    wait_for_finalization: true,
+    hash_algorithm: HashingAlgorithm::Blake2b256,
+    wait_for: WaitFor::InBlock,
 };
 
 // Prepare chunked storage
@@ -138,13 +147,23 @@ let (batch, manifest) = sdk_client.prepare_store_chunked(
 
 // Submit each chunk
 for chunk_op in batch.operations.iter() {
-    client.store(chunk_op.data.clone(), &signer).await?;
+    client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await?;
 }
 
 // Submit the manifest
 if let Some(manifest_data) = manifest {
-    client.store(manifest_data, &signer).await?;
+    client.store(manifest_data, &signer, WaitFor::InBlock).await?;
 }
 ```
 
 The manifest CID can be used to retrieve the complete file via IPFS/Bitswap.
+
+## Security
+
+See the [root README](../../../README.md#security) for security notices and responsible deployment guidance.
+
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
+
+## License
+
+Apache-2.0

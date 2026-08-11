@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 //! CID (Content Identifier) utilities and re-exports.
 //!
@@ -12,7 +12,7 @@ use codec::{Decode, Encode};
 use scale_info::TypeInfo;
 
 // Re-export CID types from transaction-storage-primitives
-pub use transaction_storage_primitives::{
+pub use bulletin_transaction_storage_primitives::{
 	cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
 	ContentHash,
 };

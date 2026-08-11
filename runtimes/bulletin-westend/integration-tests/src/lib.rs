@@ -1,17 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: Apache-2.0
-
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// 	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// SPDX-License-Identifier: GPL-3.0-only
 
 //! XCM integration tests for Bulletin Westend parachain.
 //!
@@ -21,8 +9,10 @@
 #[cfg(test)]
 mod tests;
 
-use asset_hub_westend_emulated_chain::AssetHubWestend;
+mod chains;
+
 use bulletin_westend_runtime::SessionKeys;
+use chains::{AssetHubWestend, Westend};
 use cumulus_primitives_core::ParaId;
 use emulated_integration_tests_common::{
 	accounts::{self, ALICE, BOB},
@@ -34,13 +24,12 @@ use frame_support::traits::OnInitialize;
 use parachains_common::{AuraId, Balance};
 use sp_core::sr25519;
 use sp_keyring::Sr25519Keyring;
-use westend_emulated_chain::Westend;
 use xcm_emulator::{
 	decl_test_networks, decl_test_sender_receiver_accounts_parameter_types, Parachain,
 };
 
 /// Bulletin Westend parachain ID.
-pub const BULLETIN_PARA_ID: u32 = 2487;
+pub const BULLETIN_PARA_ID: u32 = 1010;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 WND

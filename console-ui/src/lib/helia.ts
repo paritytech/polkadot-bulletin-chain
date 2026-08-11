@@ -1,4 +1,9 @@
-import { createHelia, type Helia } from "helia";
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
+import { withBitswap } from "@helia/bitswap";
+import { withLibp2p, type HeliaWithLibp2p } from "@helia/libp2p";
+import { createHeliaLight } from "helia";
 import { CID } from "multiformats/cid";
 import { multiaddr } from "@multiformats/multiaddr";
 import { blake2b256 } from "@multiformats/blake2/blake2b";
@@ -31,7 +36,7 @@ export interface FetchResult {
 
 export class HeliaClient {
   private config: HeliaClientConfig;
-  private helia?: Helia;
+  private helia?: HeliaWithLibp2p;
   private connectedPeers: ConnectionInfo[] = [];
 
   constructor(config: HeliaClientConfig) {
@@ -63,9 +68,8 @@ export class HeliaClient {
     this.log("info", `Connection gater: allowing ${allowedPeerIds.size} whitelisted peer(s)`);
 
     // Create Helia node with blake2b256 hasher for Polkadot/Substrate CID compatibility
-    this.helia = await createHelia({
-      hashers: [blake2b256, sha256, keccak256Hasher],
-      libp2p: {
+    this.helia = withBitswap(
+      withLibp2p(createHeliaLight({ hashers: [blake2b256, sha256, keccak256Hasher] }), {
         connectionGater: {
           denyDialMultiaddr: async (maAddr) => {
             const addr = maAddr.toString();
@@ -76,8 +80,9 @@ export class HeliaClient {
             return true; // Deny all others
           },
         },
-      },
-    });
+      }),
+    );
+    await this.helia.start();
 
     const peerId = this.helia.libp2p.peerId.toString();
     this.log("success", `Helia node created with peer ID: ${peerId}`);
@@ -129,44 +134,31 @@ export class HeliaClient {
     this.log("debug", `CID parsed: version=${cid.version}, codec=0x${cid.code.toString(16)}`);
 
     this.log("debug", "Requesting block from blockstore...");
-    const blockData = await this.helia.blockstore.get(cid);
-
-    // Convert to Uint8Array
-    let data: Uint8Array;
-    if (blockData instanceof Uint8Array) {
-      data = blockData;
-    } else if (typeof blockData === "object" && Symbol.asyncIterator in Object(blockData)) {
-      // Handle async iterable (streaming response)
-      const chunks: Uint8Array[] = [];
-      const timeoutMs = 30000;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`Timeout after ${timeoutMs / 1000}s`)), timeoutMs);
-      });
-
-      const iterator = (blockData as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
-      let done = false;
-      while (!done) {
-        const result = await Promise.race([iterator.next(), timeoutPromise]);
-        if (result.done) {
-          done = true;
-        } else {
-          chunks.push(result.value);
-        }
+    const chunks: Uint8Array[] = [];
+    const timeoutMs = 30000;
+    try {
+      for await (const chunk of this.helia.blockstore.get(cid, {
+        signal: AbortSignal.timeout(timeoutMs),
+      })) {
+        chunks.push(chunk);
       }
-
-      if (chunks.length === 0) {
-        throw new Error("No data received from peer");
+    } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new Error(`Timeout after ${timeoutMs / 1000}s`);
       }
+      throw error;
+    }
 
-      const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-      data = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunks) {
-        data.set(chunk, offset);
-        offset += chunk.length;
-      }
-    } else {
-      throw new Error(`Unexpected block data type: ${typeof blockData}`);
+    if (chunks.length === 0) {
+      throw new Error("No data received from peer");
+    }
+
+    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
+    const data = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      data.set(chunk, offset);
+      offset += chunk.length;
     }
 
     this.log("success", `Fetched ${data.length} bytes`);

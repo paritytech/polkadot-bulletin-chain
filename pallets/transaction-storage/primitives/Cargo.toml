@@ -1,11 +1,13 @@
 [package]
-name = "transaction-storage-primitives"
+name = "bulletin-transaction-storage-primitives"
 version = "0.1.0"
 authors.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
+homepage.workspace = true
 repository.workspace = true
 description = "Primitives for transaction storage pallet"
+readme = "README.md"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
@@ -14,8 +16,10 @@ targets = ["x86_64-unknown-linux-gnu"]
 cid = { features = ["alloc"], workspace = true }
 codec = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
-tracing = { workspace = true }
 sp-io = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
+sp-transaction-storage-proof = { workspace = true, default-features = false }
+tracing = { workspace = true }
 
 [features]
 default = ["std"]
@@ -24,5 +28,7 @@ std = [
 	"codec/std",
 	"scale-info/std",
 	"sp-io/std",
+	"sp-runtime/std",
+	"sp-transaction-storage-proof/std",
 	"tracing/std",
 ]

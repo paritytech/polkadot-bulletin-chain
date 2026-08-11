@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{Context, Result};
 use subxt::{
 	config::{
@@ -52,6 +55,16 @@ impl BulletinExtrinsicParamsBuilder {
 		self
 	}
 
+	pub fn mortal(mut self, period: u64) -> Self {
+		self.0 = self.0.mortal(period);
+		self
+	}
+
+	pub fn immortal(mut self) -> Self {
+		self.0 = self.0.immortal();
+		self
+	}
+
 	pub fn build(self) -> <BulletinExtrinsicParams as ExtrinsicParams<BulletinConfig>>::Params {
 		self.0.build()
 	}
@@ -69,11 +82,11 @@ impl Default for BulletinExtrinsicParamsBuilder {
 const MAX_RPC_MESSAGE_SIZE: u32 = 50 * 1024 * 1024;
 
 pub async fn connect(ws_url: &str) -> Result<OnlineClient<BulletinConfig>> {
-	log::debug!("Connecting to {ws_url}");
+	tracing::debug!("Connecting to {ws_url}");
 
 	let rpc_client = connect_ws(ws_url).await?;
 	let client = OnlineClient::<BulletinConfig>::from_rpc_client(rpc_client).await?;
-	log::debug!("Connected to {ws_url}");
+	tracing::debug!("Connected to {ws_url}");
 	Ok(client)
 }
 

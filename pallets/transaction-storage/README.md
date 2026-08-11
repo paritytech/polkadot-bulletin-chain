@@ -1,82 +1,51 @@
-# Transaction Storage Pallet
+# pallet-bulletin-transaction-storage
 
-Indexes transactions and manages storage proofs.
+> [!WARNING]
+> This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
 
-Allows storing arbitrary data on the chain. Data is automatically removed after `RetentionPeriod` blocks, unless the storage is renewed.
-Validators must submit proof of storing a random chunk of data for block `N - RetentionPeriod` when producing block `N`.
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../LICENSE)
+[![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
 
-# Running a chain
+> Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
 
-The following describes how to set up a new storage chain.
+Transaction storage pallet for the Polkadot Bulletin Chain. Indexes transactions and manages storage proofs.
 
-Start with generating a chain spec.
+## Overview
 
-```bash
-cargo run --release -- build-spec --chain=local > sc_init.json
-```
+This pallet provides distributed data storage on-chain with proof-of-storage guarantees. It is designed for chains with no transaction fees and data is retrievable via the Bitswap protocol using content-addressed CIDs.
 
-Edit the json chain spec file to customise the chain. The storage chain genesis params are configured in the `transactionStorage` section.
-Note that `retentionPeriod` is specified in blocks and changing it also requires code changes at the moment.
+Key features:
+- Store arbitrary data on-chain via the `store` extrinsic
+- Automatic data removal after a configurable `RetentionPeriod` (default: 14 days at 6s block time)
+- Data renewal to extend retention via `renew`
+- Validators submit proofs of storing random data chunks when producing blocks
+- CID generation for content-addressed data retrieval via Bitswap
 
-Build a raw spec from the init spec.
+## Usage
 
-```bash
-cargo run --release build-spec --chain=sc_init.json --raw > sc.json
-```
+### Storing data
 
-Run a few validator nodes.
+Use the `transactionStorage.store` extrinsic to store data. A CID is generated from the content hash for retrieval via Bitswap.
 
-```bash
-cargo run --release -- --chain=sc.json -d /tmp/alice --storage-chain --keep-blocks=100800 --ipfs-server --validator --alice
-cargo run --release -- --chain=sc.json -d /tmp/bob --storage-chain --keep-blocks=100800 --ipfs-server --validator --bob
-```
+### Renewing data
 
-`--storage-chain` enables transaction indexing.
-`--keep-blocks=100800` enables block pruning. The value here should be greater or equal than the retention period.
-`--ipfs-server` enables serving stored content over IPFS.
+To prevent data from being removed after the retention period, use `transactionStorage.renew(entry)` where `entry` is a `TransactionRef` — either `Position { block, index }` (the block number and in-block index of the previous store or renew transaction) or `ContentHash(hash)`.
 
-Once the network is started, any other joining nodes need to sync with `--sync=fast`. Regular sync will fail because block pruning removes old blocks. The chain does not keep full block history.
+### Retrieving data
 
-```bash
-cargo run --release -- --chain=sc.json -d /tmp/charlie --storage-chain --keep-blocks=100800 --ipfs-server --validator --charlie --sync=fast
-```
+Stored data is retrievable via the Bitswap protocol using the CID generated at storage time.
 
-# Making transactions
+## Dependencies
 
-To store data use the `transactionStorage.store` extrinsic. And IPFS CID can be generated from the Blake2-256 hash of the data.
+- [`bulletin-transaction-storage-primitives`](primitives/) — CID utilities and shared types
+- `sp-transaction-storage-proof` — Storage proof verification from Polkadot SDK
 
-```js
-const util_crypto = require('@polkadot/util-crypto');
-const keyring_api = require('@polkadot/keyring');
-const polkadot_api = require('@polkadot/api');
-const fs = require('fs');
-const multihash = require('multihashes');
-const CID = require('cids')
+## Security
 
-const wsProvider = new polkadot_api.WsProvider();
-const api = await polkadot_api.ApiPromise.create({ provider: wsProvider });
+See the [root README](../../README.md#security) for security notices and responsible deployment guidance.
 
-const keyring = new keyring_api.Keyring({ type: "sr25519" });
-const alice = keyring.addFromUri("//Alice");
+For Parity's security disclosure process and Bug Bounty program, visit: https://parity.io/bug-bounty
 
-const file = fs.readFileSync('cute_kitten.jpeg');
-const hash = util_crypto.blake2AsU8a(file)
-const encoded_hash = multihash.encode(hash, 'blake2b-256');
+## License
 
-const cid = new CID(1, 'blake2b-256', encoded_hash)
-console.log(cid.toString());
-
-const txHash = await api.tx.transactionStorage.store('0x' + file.toString('hex')).signAndSend(alice);
-```
-Data can be queried over IPFS
-
-```bash
-ipfs swarm connect <substrate peer address>
-ipfs block get /ipfs/<CID> > kitten.jpeg
-```
-
-To renew data and prevent it from being disposed after the retention period, use `transactionStorage.renew(block, index)`
-where `block` is the block number of the previous store or renew transction, and index is the index of that transaction in the block.
-
-
-License: Apache-2.0
+Apache-2.0

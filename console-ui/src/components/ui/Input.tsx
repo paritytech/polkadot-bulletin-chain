@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { forwardRef, type InputHTMLAttributes } from "react";
 import { cn } from "@/utils/cn";
 

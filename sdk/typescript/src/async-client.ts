@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Async client with full transaction submission support
@@ -30,7 +30,6 @@ import {
   hashAlgorithmCodecToEnum,
   isNonDefaultCidConfig,
   type ScaleHashingAlgorithm,
-  toBytes,
 } from "./utils.js"
 
 /**
@@ -74,11 +73,61 @@ interface PapiTransaction {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
+      complete?: () => void
     }): { unsubscribe(): void }
   }
   /** SCALE-encoded bare (unsigned) transaction ready for broadcasting */
-  getBareTx(): Promise<string>
+  getBareTx(): Promise<Uint8Array>
   decodedCall: unknown
+}
+
+/**
+ * On-chain `TransactionRef` used by the renewal extrinsics.
+ *
+ * PAPI tagged-enum shape of the runtime's `TransactionRef` enum. `ContentHash`
+ * requires a runtime that ships `TransactionRef`; its value is the 32-byte
+ * content hash as a `0x`-prefixed hex string (PAPI represents fixed-size
+ * binary values as `SizedHex`, and its encoder rejects raw byte arrays).
+ */
+export type TransactionRef =
+  | { type: "Position"; value: { block: number; index: number } }
+  | { type: "ContentHash"; value: string }
+
+/**
+ * Caller-friendly reference to stored data for `renew()`/`forceRenew()`.
+ *
+ * The variant is inferred from the shape: `{ block, index }` becomes
+ * `Position`; a `Uint8Array` content hash becomes `ContentHash`.
+ */
+export type TransactionRefInput = { block: number; index: number } | Uint8Array
+
+/** Convert a {@link TransactionRefInput} into the on-chain tagged enum. */
+export function toTransactionRef(ref: TransactionRefInput): TransactionRef {
+  if (ref instanceof Uint8Array)
+    return { type: "ContentHash", value: Binary.toHex(ref) }
+  return { type: "Position", value: { block: ref.block, index: ref.index } }
+}
+
+/** Call shape of the runtime's renewal extrinsics; `unsupported` when it has none. */
+type RenewShape = "transactionRef" | "legacy" | "unsupported"
+
+/**
+ * Minimal shape of the pallet namespace carrying the renewal extrinsics, so the
+ * lookup in `resolveRenewal` does not need the generated per-pallet types.
+ */
+type RenewalPallet = {
+  renew?(
+    args: { block: number; index: number } | { entry: TransactionRef },
+  ): PapiTransaction
+  force_renew?(args: { entry: TransactionRef }): PapiTransaction
+}
+
+/** Where the runtime's renewal extrinsics live and which call shape they take. */
+type RenewalResolution = { pallet: RenewalPallet; shape: RenewShape }
+
+/** The slice of PAPI's `getStaticApis()` result the renewal resolution reads. */
+type StaticApisCompat = {
+  compat: { tx: Record<string, Record<string, { level: number }>> }
 }
 
 /**
@@ -91,10 +140,10 @@ interface PapiTransaction {
 export interface BulletinTypedApi {
   tx: {
     TransactionStorage: {
-      store(args: { data: Binary | Uint8Array }): PapiTransaction
+      store(args: { data: Uint8Array }): PapiTransaction
       store_with_cid_config(args: {
         cid: { codec: bigint; hashing: ScaleHashingAlgorithm }
-        data: Binary | Uint8Array
+        data: Uint8Array
       }): PapiTransaction
       authorize_account(args: {
         who: string
@@ -102,32 +151,57 @@ export interface BulletinTypedApi {
         bytes: bigint
       }): PapiTransaction
       authorize_preimage(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
         max_size: bigint
       }): PapiTransaction
-      renew(args: { block: number; index: number }): PapiTransaction
+      // Only on pre-split runtimes; current ones ship the renewal extrinsics
+      // on `DataRenewal`. Takes `TransactionRef` on newer runtimes and
+      // `(block, index)` on older ones; the SDK detects which at runtime.
+      renew?(
+        args: { block: number; index: number } | { entry: TransactionRef },
+      ): PapiTransaction
+      force_renew?(args: { entry: TransactionRef }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
       remove_expired_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
       refresh_account_authorization(args: { who: string }): PapiTransaction
       refresh_preimage_authorization(args: {
-        content_hash: Binary | Uint8Array
+        content_hash: string
       }): PapiTransaction
     }
+    /**
+     * Renewal extrinsics. The renewal split moved `renew` / `force_renew` here
+     * from `TransactionStorage`; absent on pre-split runtimes.
+     */
+    DataRenewal?: RenewalPallet
     Sudo?: {
       sudo(args: { call: unknown }): PapiTransaction
     }
   }
+  /**
+   * PAPI's runtime-pinned static APIs, used to resolve where the renewal
+   * extrinsics live; absent on hand-rolled api objects. Typed `unknown`
+   * because the generated `TypedApi` compat types have exact keys, not the
+   * indexed shape the SDK reads.
+   */
+  getStaticApis?(): Promise<unknown>
   /** Optional query interface for on-chain storage reads (e.g., authorization checks) */
   query?: {
     TransactionStorage: {
       Authorizations: {
         getValue(scope: { type: string; value: unknown }): Promise<
           | {
-              extent: { transactions: number; bytes: bigint }
+              extent: {
+                transactions: number
+                /** Newer chains expose the cap separately from consumed counters. */
+                transactions_allowance?: number
+                bytes: bigint
+                /** Newer chains expose the cap separately from consumed counters. */
+                bytes_allowance?: bigint
+              }
               expiration: number
             }
           | undefined
@@ -144,7 +218,7 @@ export interface BulletinTypedApi {
  * Pass `papiClient.submit` directly when constructing the client.
  */
 export type SubmitFn = (
-  transaction: string,
+  transaction: Uint8Array,
   at?: string,
 ) => Promise<{
   ok: boolean
@@ -192,6 +266,32 @@ interface MappedTxStatus {
     block: { hash: string; number: number }
     events?: RuntimeEvent[]
   }
+}
+
+interface SignSubmitResult {
+  blockHash: string
+  txHash: string
+  blockNumber?: number
+  txIndex?: number
+  events?: RuntimeEvent[]
+}
+
+// Shape-matched (not instanceof) to work across polkadot-api instances;
+// narrow on purpose: no other invalid type is safe to retry.
+function isAncientBirthBlockError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const e = (err as { error?: { type?: unknown; value?: { type?: unknown } } })
+    .error
+  return e?.type === "Invalid" && e?.value?.type === "AncientBirthBlock"
+}
+
+// Same shape-matching as isAncientBirthBlockError; only Invalid/Payment
+// is safe to retry here (see storeWithPreimageAuth).
+function isPaymentInvalidError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const e = (err as { error?: { type?: unknown; value?: { type?: unknown } } })
+    .error
+  return e?.type === "Invalid" && e?.value?.type === "Payment"
 }
 
 /**
@@ -270,24 +370,25 @@ function mapPapiEventToProgress(
 export interface BulletinClientInterface {
   /** Store data with options (used internally by StoreBuilder) */
   storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult>
   /** Store preimage-authorized content as unsigned transaction */
   storeWithPreimageAuth?(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult>
-  store(data: Binary | Uint8Array): StoreBuilder
+  store(data: Uint8Array): StoreBuilder
   authorizeAccount(
     who: string,
     transactions: number,
     bytes: bigint,
   ): AuthCallBuilder
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
-  renew(block: number, index: number): CallBuilder
+  renew(ref: TransactionRefInput): CallBuilder
+  forceRenew(ref: TransactionRefInput): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -296,6 +397,8 @@ export interface BulletinClientInterface {
     transactions: number
     bytes: number
   }
+  /** Release resources held on behalf of this client (e.g. underlying PAPI client). */
+  destroy(): Promise<void>
 }
 
 /**
@@ -303,10 +406,8 @@ export interface BulletinClientInterface {
  *
  * @example
  * ```typescript
- * import { Binary } from 'polkadot-api';
- *
  * const result = await client
- *   .store(Binary.fromText('Hello'))
+ *   .store(new TextEncoder().encode('Hello'))
  *   .withCodec(CidCodec.DagPb)
  *   .withHashAlgorithm('blake2b-256')
  *   .withCallback((event) => console.log('Progress:', event))
@@ -321,9 +422,9 @@ export class StoreBuilder {
 
   constructor(
     private executor: BulletinClientInterface,
-    data: Binary | Uint8Array,
+    data: Uint8Array,
   ) {
-    this.data = toBytes(data)
+    this.data = data
   }
 
   /** Set the CID codec. Accepts a `CidCodec` or a custom numeric multicodec code. */
@@ -407,7 +508,7 @@ export class StoreBuilder {
  * @example
  * ```typescript
  * const receipt = await client
- *   .renew(blockNumber, index)
+ *   .renew({ block, index })
  *   .withWaitFor('finalized')
  *   .withCallback((event) => console.log(event))
  *   .send();
@@ -506,7 +607,7 @@ function extractStoredIndex(events?: RuntimeEvent[]): number | undefined {
  * @example
  * ```typescript
  * import { createClient } from 'polkadot-api';
- * import { getWsProvider } from 'polkadot-api/ws-provider/web';
+ * import { getWsProvider } from 'polkadot-api/ws';
  * import { AsyncBulletinClient } from '@parity/bulletin-sdk';
  *
  * // User sets up PAPI client
@@ -532,6 +633,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig>
   /** Offline operations (chunking, CID calculation, estimation) */
   private preparer: BulletinPreparer
+  /** Optional teardown callback invoked by `destroy()` */
+  private onDestroy?: () => void | Promise<void>
 
   /**
    * Create a new async client with PAPI client and signer
@@ -543,17 +646,22 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * @param signer - Polkadot signer for transaction signing
    * @param submit - Raw transaction submit function (pass `papiClient.submit`)
    * @param config - Optional client configuration
+   * @param onDestroy - Optional teardown callback. When provided, `destroy()`
+   *   awaits it so callers (e.g. wrappers that own the underlying
+   *   `PolkadotClient`) can route cleanup through this client.
    */
   constructor(
     api: BulletinTypedApi,
     signer: PolkadotSigner,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
+    onDestroy?: () => void | Promise<void>,
   ) {
     this.api = api
     this.signer = signer
     this.submit = submit
     this.config = resolveClientConfig(config)
+    this.onDestroy = onDestroy
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
       createManifest: this.config.createManifest,
@@ -562,13 +670,26 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * Release resources held on behalf of this client.
+   *
+   * Invokes the optional `onDestroy` callback supplied at construction time.
+   * Without one, this is a no-op — the SDK itself holds no long-lived
+   * resources, so callers that own the underlying `PolkadotClient` (or other
+   * connection) can either tear it down themselves or pass `onDestroy` to
+   * route teardown through here.
+   */
+  async destroy(): Promise<void> {
+    await this.onDestroy?.()
+  }
+
+  /**
    * Best-effort authorization check before a store submission.
    *
-   * If `api.query` is not available (optional interface), this silently returns.
-   * If authorization is explicitly insufficient (numbers too low), throws
-   * `INSUFFICIENT_AUTHORIZATION`. If the query fails or returns nothing (e.g.,
-   * timing issue after recent authorization), silently proceeds and lets the
-   * chain validate.
+   * Allowances gate transaction *priority*, not acceptance — the chain never
+   * rejects a store for an exhausted boost budget. So this only warns when the
+   * budget looks insufficient and always proceeds. If `api.query` is not
+   * available, the query fails, or returns nothing, it silently proceeds and
+   * lets the chain validate.
    */
   private async checkAccountAuthorization(
     requiredTransactions: number,
@@ -576,10 +697,19 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   ): Promise<void> {
     if (!this.api.query) return
 
-    let auth: { extent: { transactions: number; bytes: bigint } } | undefined
+    let auth:
+      | {
+          extent: {
+            transactions: number
+            transactions_allowance?: number
+            bytes: bigint
+            bytes_allowance?: bigint
+          }
+        }
+      | undefined
     try {
-      const { encodeAddress } = await import("@polkadot/util-crypto")
-      const address = encodeAddress(this.signer.publicKey)
+      const { ss58Address } = await import("@polkadot-labs/hdkd-helpers")
+      const address = ss58Address(this.signer.publicKey)
 
       auth = await this.api.query.TransactionStorage.Authorizations.getValue({
         type: "Account",
@@ -594,20 +724,32 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     // so proceed and let the chain validate rather than blocking
     if (!auth) return
 
-    const availableTransactions = auth.extent.transactions
-    const availableBytes = Number(auth.extent.bytes)
+    // Newer chains expose `*_allowance` (caps) alongside `transactions`/`bytes`
+    // (consumed counters); older chains expose only the cap fields. Available
+    // = allowance - consumed; falling back to the raw field when allowance
+    // is absent keeps the SDK compatible with both shapes.
+    const txAllowance = auth.extent.transactions_allowance
+    const availableTransactions =
+      txAllowance != null
+        ? Math.max(0, txAllowance - auth.extent.transactions)
+        : auth.extent.transactions
+    const bytesAllowance = auth.extent.bytes_allowance
+    const availableBytes =
+      bytesAllowance != null
+        ? Number(
+            bytesAllowance > auth.extent.bytes
+              ? bytesAllowance - auth.extent.bytes
+              : 0n,
+          )
+        : Number(auth.extent.bytes)
 
-    if (availableTransactions < requiredTransactions) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredTransactions} transactions, have ${availableTransactions}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-
-    if (availableBytes < requiredBytes) {
-      throw new BulletinError(
-        `Insufficient authorization: need ${requiredBytes} bytes, have ${availableBytes}`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+    if (
+      availableTransactions < requiredTransactions ||
+      availableBytes < requiredBytes
+    ) {
+      console.warn(
+        `Boost budget exhausted (need ${requiredTransactions} transactions / ${requiredBytes} bytes, ` +
+          `have ${availableTransactions} / ${availableBytes}) - the store will proceed at lower priority`,
       )
     }
   }
@@ -630,9 +772,9 @@ export class AsyncBulletinClient implements BulletinClientInterface {
             codec: BigInt(cidCodec),
             hashing: hashAlgorithmCodecToEnum(hashAlgorithm),
           },
-          data: new Binary(data),
+          data,
         })
-      : this.api.tx.TransactionStorage.store({ data: new Binary(data) })
+      : this.api.tx.TransactionStorage.store({ data })
   }
 
   /**
@@ -640,6 +782,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * Uses PAPI's signSubmitAndWatch which provides real-time status updates
    * as the transaction progresses through the network.
+   *
+   * With "in_block" the promise resolves at first inclusion, but the
+   * transaction stays broadcast and watched in the background until it
+   * finalizes, so a reorg cannot silently drop it.
+   *
+   * Retries once on mortality-era expiry (AncientBirthBlock): the node's
+   * pool can silently lose a broadcast tx around a reorg, surfacing only as
+   * era expiry. Safe: past the finalized era boundary the original
+   * signature can never be included, so re-signing cannot double-store.
    *
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
@@ -650,20 +801,48 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
-  ): Promise<{
-    blockHash: string
-    txHash: string
-    blockNumber?: number
-    txIndex?: number
-    events?: RuntimeEvent[]
-  }> {
+  ): Promise<SignSubmitResult> {
+    try {
+      return await this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        true,
+      )
+    } catch (err) {
+      if (!isAncientBirthBlockError(err)) throw err
+      return this.signAndSubmitAttempt(
+        tx,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        false,
+      )
+    }
+  }
+
+  // One sign-submit-watch cycle. `willRetryEraExpiry` keeps a retried
+  // attempt from emitting a misleading Invalid signal.
+  private signAndSubmitAttempt(
+    tx: PapiTransaction,
+    progressCallback: ProgressCallback | undefined,
+    waitFor: "in_block" | "finalized",
+    chunkIndex: number | undefined,
+    willRetryEraExpiry: boolean,
+  ): Promise<SignSubmitResult> {
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
 
       const cleanup = () => {
         clearTimeout(timerId)
-        subscription.unsubscribe()
+        try {
+          subscription.unsubscribe()
+        } catch {
+          // The transport may already be gone (client destroyed while a
+          // background watch was alive); teardown must not throw.
+        }
       }
 
       const finish = (
@@ -672,7 +851,6 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       ) => {
         if (resolved) return
         resolved = true
-        cleanup()
         resolve({
           blockHash: block.hash,
           txHash: txHash || "",
@@ -684,41 +862,86 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       const subscription = tx.signSubmitAndWatch(this.signer).subscribe({
         next: (ev: TxStatusEvent) => {
-          const result = mapPapiEventToProgress(
-            ev,
-            txHash,
-            progressCallback,
-            chunkIndex,
-            waitFor,
-          )
-          if (result.txHash) txHash = result.txHash
-          if (result.finish) finish(result.finish.block, result.finish.events)
+          if (!resolved) {
+            const result = mapPapiEventToProgress(
+              ev,
+              txHash,
+              progressCallback,
+              chunkIndex,
+              waitFor,
+            )
+            if (result.txHash) txHash = result.txHash
+            if (result.finish) finish(result.finish.block, result.finish.events)
+          }
+          // An in_block resolution keeps the subscription alive until the tx
+          // finalizes: unsubscribing stops the node-side broadcast
+          // (transaction_v1_stop), and a stopped tx is not re-included if its
+          // block is reorged out, losing the data and stranding any
+          // follow-up tx already signed with the next nonce (it then dies at
+          // its mortality boundary with AncientBirthBlock).
+          if (resolved && ev.type === "finalized") cleanup()
         },
         error: (err: unknown) => {
-          if (!resolved) {
-            resolved = true
+          if (resolved) {
             cleanup()
-            if (progressCallback) {
-              const errorMsg = err instanceof Error ? err.message : String(err)
-              // Distinguish pool-related drops from other transaction errors
-              const isDropped =
-                errorMsg.includes("dropped") || errorMsg.includes("pool")
-              progressCallback({
-                type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
-                error: errorMsg,
-                chunkIndex,
-              })
-            }
-            reject(err)
+            return
           }
+          resolved = true
+          cleanup()
+          if (
+            progressCallback &&
+            !(willRetryEraExpiry && isAncientBirthBlockError(err))
+          ) {
+            const errorMsg = err instanceof Error ? err.message : String(err)
+            // Distinguish pool-related drops from other transaction errors
+            const isDropped =
+              errorMsg.includes("dropped") || errorMsg.includes("pool")
+            progressCallback({
+              type: isDropped ? TxStatus.Dropped : TxStatus.Invalid,
+              error: errorMsg,
+              chunkIndex,
+            })
+          }
+          reject(err)
+        },
+        complete: () => {
+          // PAPI can complete the Observable without a finalized/in_block
+          // event (e.g. txBestBlocksState fires with found:false after a
+          // reorg or node restart, causing the internal continueWith() to
+          // map to rxjs.EMPTY which completes immediately). Without this
+          // handler the Promise hangs until the defensive timeout fires.
+          if (resolved) {
+            cleanup()
+            return
+          }
+          resolved = true
+          cleanup()
+          progressCallback?.({
+            type: TxStatus.Dropped,
+            error:
+              "Transaction subscription ended before reaching the expected status",
+            chunkIndex,
+          })
+          reject(
+            new BulletinError(
+              "Transaction subscription ended before reaching the expected status. " +
+                "This usually means the transaction was dropped from the best block " +
+                "(e.g. due to a chain reorganization or node restart).",
+              ErrorCode.TRANSACTION_FAILED,
+            ),
+          )
         },
       })
 
       // Defensive timeout: PAPI handles reconnects and mortality, so this
-      // should rarely fire. If it does, it likely indicates a bug. Default:
-      // 7 min (above PAPI's 64-block mortality window).
+      // should rarely fire. If it does, it likely indicates a bug. Also caps
+      // the background watch of an already-resolved in_block submission.
+      // Default: 7 min (above PAPI's 64-block mortality window).
       const timerId = setTimeout(() => {
-        if (resolved) return
+        if (resolved) {
+          cleanup()
+          return
+        }
         resolved = true
         cleanup()
         reject(new BulletinError("Transaction timed out", ErrorCode.TIMEOUT))
@@ -773,29 +996,19 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    *
    * Returns a builder that allows fluent configuration of store options.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store as `Uint8Array`
    *
    * @example
    * ```typescript
-   * import { Binary } from 'polkadot-api';
-   *
-   * // Using PAPI's Binary class (recommended)
    * const result = await client
-   *   .store(Binary.fromText('Hello, Bulletin!'))
+   *   .store(new TextEncoder().encode('Hello, Bulletin!'))
    *   .withCodec(CidCodec.DagPb)
    *   .withHashAlgorithm('blake2b-256')
-   *   .withCallback((event) => {
-   *     console.log('Progress:', event);
-   *   })
-   *   .send();
-   *
-   * // Or with Uint8Array
-   * const result = await client
-   *   .store(new Uint8Array([1, 2, 3]))
+   *   .withCallback((event) => console.log('Progress:', event))
    *   .send();
    * ```
    */
-  store(data: Binary | Uint8Array): StoreBuilder {
+  store(data: Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data)
   }
 
@@ -808,26 +1021,25 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * Automatically chunks data if it exceeds the configured threshold.
    */
   async storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
     // Best-effort authorization check before submission
     {
       const willChunk =
-        !!chunkerConfig || dataBytes.length > this.config.chunkingThreshold
+        !!chunkerConfig || data.length > this.config.chunkingThreshold
       const chunkSize = chunkerConfig?.chunkSize ?? this.config.defaultChunkSize
       const createManifest =
         chunkerConfig?.createManifest ?? this.config.createManifest
       const required = willChunk
-        ? estimateAuthorization(dataBytes.length, chunkSize, createManifest)
-        : { transactions: 1, bytes: dataBytes.length }
+        ? estimateAuthorization(data.length, chunkSize, createManifest)
+        : { transactions: 1, bytes: data.length }
       await this.checkAccountAuthorization(
         required.transactions,
         required.bytes,
@@ -835,7 +1047,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     // Decide whether to chunk based on threshold or explicit chunkerConfig
-    if (chunkerConfig || dataBytes.length > this.config.chunkingThreshold) {
+    if (chunkerConfig || data.length > this.config.chunkingThreshold) {
       // Chunked uploads use structurally fixed codecs (Raw for chunks, DagPb for manifest).
       // Reject if the user explicitly set a non-default codec — it would be silently ignored.
       const userCodec = options?.cidCodec
@@ -848,14 +1060,14 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
 
       const chunked = await this.storeChunked(
-        dataBytes,
+        data,
         chunkerConfig,
         options,
         progressCallback,
       )
       return {
         cid: chunked.manifestCid,
-        size: dataBytes.length,
+        size: data.length,
         blockNumber: undefined,
         extrinsicIndex: undefined,
         chunks: {
@@ -864,7 +1076,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         },
       }
     } else {
-      return this.storeInternalSingle(dataBytes, options, progressCallback)
+      return this.storeInternalSingle(data, options, progressCallback)
     }
   }
 
@@ -926,17 +1138,15 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * check the error and `chunkCids` in the thrown error's context to understand
    * what was partially uploaded.
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store as `Uint8Array`
    */
   private async storeChunked(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     config?: Partial<ChunkerConfig>,
     options?: StoreOptions,
     progressCallback?: ProgressCallback,
   ): Promise<ChunkedStoreResult> {
-    const dataBytes = toBytes(data)
-
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
@@ -944,7 +1154,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
     // Prepare all chunks and manifest (CID calculation, chunking, DAG building)
     const prepared = await this.preparer.prepareStoreChunked(
-      dataBytes,
+      data,
       config,
       options,
     )
@@ -1038,7 +1248,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return {
       chunkCids,
       manifestCid,
-      totalSize: dataBytes.length,
+      totalSize: data.length,
       numChunks: prepared.chunks.length,
     }
   }
@@ -1079,7 +1289,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder {
     return new AuthCallBuilder((options) => {
       const authTx = this.api.tx.TransactionStorage.authorize_preimage({
-        content_hash: new Binary(contentHash),
+        content_hash: Binary.toHex(contentHash),
         max_size: maxSize,
       })
       return this.submitTx(
@@ -1091,18 +1301,125 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     })
   }
 
+  /** Cached renewal resolution; a rejected probe is not cached. */
+  private renewalPromise?: Promise<RenewalResolution>
+
   /**
-   * Renew/extend retention period for stored data
+   * Resolve which pallet carries the renewal extrinsics and which call shape
+   * they take, once per client.
    *
-   * @param block - Block number where the original storage transaction was included
-   * @param index - Extrinsic index within the block
+   * PAPI pallets and call entries are proxies that are truthy for any name,
+   * so presence proves nothing; the compatibility levels from
+   * `getStaticApis()` are the real signal. `Incompatible` (0) means the live
+   * runtime lacks the call; `Partial` (1) still counts as present, since a
+   * call missing from the descriptors cannot report higher. A runtime with
+   * the calls on neither pallet resolves `unsupported`. Api objects without
+   * `getStaticApis` (tests/mocks) resolve by entry presence.
    */
-  renew(block: number, index: number): CallBuilder {
-    return new CallBuilder((options) => {
-      const tx = this.api.tx.TransactionStorage.renew({ block, index })
+  private resolveRenewal(): Promise<RenewalResolution> {
+    this.renewalPromise ??= (async (): Promise<RenewalResolution> => {
+      const dataRenewal = this.api.tx.DataRenewal
+      const transactionStorage = this.api.tx.TransactionStorage
+      if (!this.api.getStaticApis) {
+        if (dataRenewal?.renew) {
+          return { pallet: dataRenewal, shape: "transactionRef" }
+        }
+        return {
+          pallet: transactionStorage,
+          shape: transactionStorage.force_renew ? "transactionRef" : "legacy",
+        }
+      }
+      let compat: StaticApisCompat["compat"]["tx"]
+      try {
+        compat = ((await this.api.getStaticApis()) as StaticApisCompat).compat
+          .tx
+      } catch (error) {
+        throw new BulletinError(
+          "failed to probe runtime compatibility for renew",
+          ErrorCode.TRANSACTION_FAILED,
+          error,
+        )
+      }
+      // `DataRenewal` has only ever taken `TransactionRef` arguments.
+      if (dataRenewal && (compat.DataRenewal?.renew?.level ?? 0) > 0) {
+        return { pallet: dataRenewal, shape: "transactionRef" }
+      }
+      const storageCompat = compat.TransactionStorage
+      if ((storageCompat?.force_renew?.level ?? 0) > 0) {
+        return { pallet: transactionStorage, shape: "transactionRef" }
+      }
+      return {
+        pallet: transactionStorage,
+        shape:
+          (storageCompat?.renew?.level ?? 0) > 0 ? "legacy" : "unsupported",
+      }
+    })()
+    const resolved = this.renewalPromise
+    resolved.catch(() => {
+      if (this.renewalPromise === resolved) {
+        this.renewalPromise = undefined
+      }
+    })
+    return resolved
+  }
+
+  /**
+   * Schedule a one-shot renewal of stored data.
+   *
+   * The renewal fires once when the data reaches its retention boundary; it does
+   * not renew synchronously. For immediate renewal use {@link forceRenew}.
+   */
+  renew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const entry = toTransactionRef(ref)
+      const { pallet, shape } = await this.resolveRenewal()
+      const renew = pallet.renew
+      if (shape === "unsupported" || !renew) {
+        throw new BulletinError(
+          "renew is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
+      let tx: PapiTransaction
+      if (shape === "transactionRef") {
+        tx = renew({ entry })
+      } else if (entry.type === "Position") {
+        // Pre-`TransactionRef` runtimes take the position fields directly.
+        tx = renew(entry.value)
+      } else {
+        throw new BulletinError(
+          "content-hash renewal is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
       return this.submitTx(
         tx,
         "Failed to renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * Immediately renew stored data, extending its retention from the current block.
+   *
+   * Requires a runtime that supports `force_renew`.
+   */
+  forceRenew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const { pallet, shape } = await this.resolveRenewal()
+      const forceRenew = pallet.force_renew
+      if (shape !== "transactionRef" || !forceRenew) {
+        throw new BulletinError(
+          "force_renew is not supported by this runtime",
+          ErrorCode.UNSUPPORTED_OPERATION,
+        )
+      }
+      const tx = forceRenew({ entry: toTransactionRef(ref) })
+      return this.submitTx(
+        tx,
+        "Failed to force renew",
         ErrorCode.TRANSACTION_FAILED,
         options,
       )
@@ -1140,7 +1457,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new AuthCallBuilder((options) => {
       const authTx =
         this.api.tx.TransactionStorage.refresh_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
@@ -1184,7 +1501,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     return new CallBuilder((options) => {
       const tx =
         this.api.tx.TransactionStorage.remove_expired_preimage_authorization({
-          content_hash: new Binary(contentHash),
+          content_hash: Binary.toHex(contentHash),
         })
       return this.submitTx(
         tx,
@@ -1210,24 +1527,23 @@ export class AsyncBulletinClient implements BulletinClientInterface {
    * import { blake2b256 } from '@polkadot-labs/hdkd-helpers';
    *
    * // First, authorize the content hash (requires sudo)
-   * const data = Binary.fromText('Hello, Bulletin!');
-   * const hash = blake2b256(data.asBytes());
-   * await sudoClient.authorizePreimage(hash, BigInt(data.asBytes().length));
+   * const data = new TextEncoder().encode('Hello, Bulletin!');
+   * const hash = blake2b256(data);
+   * await sudoClient.authorizePreimage(hash, BigInt(data.length));
    *
    * // Anyone can now submit without fees
    * const result = await client.store(data).sendUnsigned();
    * ```
    */
   async storeWithPreimageAuth(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    if (dataBytes.length > this.config.chunkingThreshold) {
+    if (data.length > this.config.chunkingThreshold) {
       throw new BulletinError(
         "Chunked unsigned transactions not yet supported. Use signed transactions for large files.",
         ErrorCode.UNSUPPORTED_OPERATION,
@@ -1235,12 +1551,25 @@ export class AsyncBulletinClient implements BulletinClientInterface {
     }
 
     const { cidCodec, hashAlgorithm } = resolveStoreOptions(options)
-    const { cid } = await this.preparer.prepareStore(dataBytes, options)
+    const { cid } = await this.preparer.prepareStore(data, options)
 
     try {
-      const tx = this.createStoreTx(dataBytes, cidCodec, hashAlgorithm)
-      const bareTxHex = await tx.getBareTx()
-      const finalized = await this.submit(bareTxHex)
+      const tx = this.createStoreTx(data, cidCodec, hashAlgorithm)
+      const bareTx = await tx.getBareTx()
+      let finalized: Awaited<ReturnType<SubmitFn>>
+      try {
+        finalized = await this.submit(bareTx)
+      } catch (err) {
+        // Payment here means "no authorization", which is transient when
+        // the authorization was reorg-retracted and re-included: PAPI
+        // validated the tx on the retracted fork, settled it as invalid
+        // and never re-checks, so the first submit cannot self-recover.
+        // Unlike the era-expiry retry, the original tx could still land,
+        // but resubmitting the identical bare bytes keeps the same tx
+        // hash, so inclusion stays idempotent.
+        if (!isPaymentInvalidError(err)) throw err
+        finalized = await this.submit(bareTx)
+      }
 
       if (!finalized.ok) {
         throw new BulletinError(
@@ -1262,7 +1591,7 @@ export class AsyncBulletinClient implements BulletinClientInterface {
 
       return {
         cid,
-        size: dataBytes.length,
+        size: data.length,
         blockNumber: finalized.block.number,
         extrinsicIndex,
         chunks: undefined,

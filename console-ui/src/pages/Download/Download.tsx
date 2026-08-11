@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -12,6 +15,7 @@ import {
   Loader2,
   Globe,
   History,
+  Server,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -26,28 +30,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { formatBytes, bytesToHex } from "@/utils/format";
-import { CID, parseCid } from "@parity/bulletin-sdk";
+import { formatBytes, bytesToHex, estimateBlockDate, formatBlockDuration, formatBlockNumber } from "@/utils/format";
+import { CID, CidCodec, HashAlgorithm, parseCid } from "@parity/bulletin-sdk";
+import * as digest from "multiformats/hashes/digest";
 import { HeliaClient, type ConnectionInfo } from "@/lib/helia";
-import { IPFS_GATEWAYS, PREFERRED_DOWNLOAD_METHOD, buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
-import { useNetwork } from "@/state/chain.state";
+import { buildIpfsUrl, fetchFromIpfs } from "@/lib/ipfs";
+import { fetchFromBitswapRpc } from "@/lib/bitswap-rpc";
+import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus, useConnectedEndpoint, type Network } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
-
-const P2P_MULTIADDRS: Record<string, string> = {
-  local: "/ip4/127.0.0.1/tcp/30334/ws/p2p/12D3KooWBmAwcd4PJNJvfV89HwE48nwkRmAgo8Vy3uQEyNNHBox2",
-  westend: [
-    "/dns4/westend-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSxYQRoTT9rZNZRrjCfG2fPpBwPumkQsxLroTKjX6Mvkw",
-    "/dns4/westend-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSD5tovFkmja9aFYA6QM8eU3mFhZKdAuCsa5MgSsNDmxc",
-    "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
-    "/dns4/westend-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWN8hBVUWXNiur1w6EiEPkTJibbzpagZmm4cphMxWLv9yc",
-  ].join("\n"),
-  paseo: [
-    "/dns4/paseo-bulletin-collator-node-0.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWRuKisocQ2Z5hBZagV5YGxJMYuW13xT42sUiUCWf5bRtu",
-    "/dns4/paseo-bulletin-collator-node-1.parity-testnet.parity.io/tcp/443/wss/p2p/12D3KooWSgdX2egCUiXtDUNV6hGh6JrtTb9vQ6iRfFMdnTemQDDp",
-    "/dns4/paseo-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWG7dt8yAMBaNrWh5juvHMGvJtPKTCaS87kkadWZKpV7ox",
-    "/dns4/paseo-bulletin-rpc-node-1.polkadot.io/tcp/443/wss/p2p/12D3KooWSS9QNRiLGBoZrDrtXvPyBV7QrV7F3A1V8f6xAXECSnj5",
-  ].join("\n"),
-};
+import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
 
 interface FetchResult {
   cid: string;
@@ -59,13 +50,117 @@ interface FetchResult {
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
-function getDefaultMultiaddrs(networkId: string): string {
-  return P2P_MULTIADDRS[networkId] ?? "";
+function getDefaultMultiaddrs(network: Network): string {
+  return network.peerMultiaddrs?.join("\n") ?? "";
+}
+
+function OnChainStatusContent({
+  parsedCid,
+  cidLookupLoading,
+  cidLookupDone,
+  cidLookup,
+  currentBlock,
+  retentionPeriod,
+}: {
+  parsedCid: CID | undefined;
+  cidLookupLoading: boolean;
+  cidLookupDone: boolean;
+  cidLookup: OnChainTransaction | null;
+  currentBlock: number | undefined;
+  retentionPeriod: number | null;
+}) {
+  if (!parsedCid) {
+    return <p className="text-sm text-muted-foreground">Enter a valid CID to check on-chain status</p>;
+  }
+
+  if (cidLookupLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Searching on-chain...
+      </div>
+    );
+  }
+
+  if (cidLookupDone && !cidLookup) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            Not found on-chain. The data may have expired and been removed, or was never stored on this network.
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!cidLookup || currentBlock === undefined || retentionPeriod === null) {
+    return null;
+  }
+
+  const expiresAtBlock = cidLookup.blockNumber + retentionPeriod;
+  const blocksRemaining = expiresAtBlock - currentBlock;
+  const isExpired = blocksRemaining <= 0;
+  const isExpiringSoon = !isExpired && blocksRemaining < 14400; // ~1 day
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Stored at block</span>
+        <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)} (idx {cidLookup.index})</span>
+      </div>
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Upload date</span>
+        <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+      </div>
+      {cidLookup.hashing && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Hashing / Codec</span>
+          <span className="font-mono text-xs">
+            {cidLookup.hashing}
+            {cidLookup.cidCodec !== undefined ? ` / 0x${cidLookup.cidCodec.toString(16)}` : ""}
+          </span>
+        </div>
+      )}
+      <div className="flex justify-between">
+        <span className="text-muted-foreground">Expires at block</span>
+        <span className="font-mono">{formatBlockNumber(expiresAtBlock)}</span>
+      </div>
+      <div className="flex justify-between items-center">
+        <span className="text-muted-foreground">Retention</span>
+        {isExpired ? (
+          <Badge variant="destructive">Expired</Badge>
+        ) : isExpiringSoon ? (
+          <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+            {formatBlockDuration(blocksRemaining)} left
+          </Badge>
+        ) : (
+          <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+            {formatBlockDuration(blocksRemaining)} left
+          </Badge>
+        )}
+      </div>
+      {isExpired && (
+        <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/10 p-3 rounded-md mt-2">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            This data has expired and may no longer be accessible. Consider re-uploading if needed.
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Download() {
   const [searchParams, setSearchParams] = useSearchParams();
   const network = useNetwork();
+  const connectedEndpoint = useConnectedEndpoint();
+  const blockNumber = useBlockNumber();
+  const api = useApi();
+  const client = useClient();
+  const chainStatus = useConnectionStatus();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -75,7 +170,13 @@ export function Download() {
   const [isCidValid, setIsCidValid] = useState(false);
   const [parsedCid, setParsedCid] = useState<CID | undefined>();
 
-  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network.id));
+  const [cidInputMode, setCidInputMode] = useState<"cid" | "content-hash">("cid");
+  const [contentHashInput, setContentHashInput] = useState("");
+  const [hashAlgo, setHashAlgo] = useState<HashAlgorithm>(HashAlgorithm.Blake2b256);
+  const [cidCodec, setCidCodec] = useState<CidCodec>(CidCodec.Raw);
+  const [contentHashError, setContentHashError] = useState<string | null>(null);
+
+  const [peerMultiaddrs, setPeerMultiaddrs] = useState(() => getDefaultMultiaddrs(network));
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connectedPeers, setConnectedPeers] = useState<ConnectionInfo[]>([]);
@@ -88,11 +189,15 @@ export function Download() {
   const [copied, setCopied] = useState(false);
   const [displayMode, setDisplayMode] = useState<"text" | "hex" | "preview">("text");
 
-  const [gatewayUrl, setGatewayUrl] = useState(
-    () => IPFS_GATEWAYS[network.id] ?? ""
-  );
+  // On-chain CID lookup
+  const [cidLookup, setCidLookup] = useState<OnChainTransaction | null>(null);
+  const [cidLookupLoading, setCidLookupLoading] = useState(false);
+  const [cidLookupDone, setCidLookupDone] = useState(false);
+  const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
 
-  const activeTab = searchParams.get("tab") || PREFERRED_DOWNLOAD_METHOD[network.id] || "p2p";
+  const [gatewayUrl, setGatewayUrl] = useState(() => network.ipfsGateway ?? "");
+
+  const activeTab = searchParams.get("tab") || network.preferredDownloadMethod || "p2p";
 
   const heliaClientRef = useRef<HeliaClient | null>(null);
   const prevNetworkId = useRef(network.id);
@@ -115,7 +220,7 @@ export function Download() {
     heliaClientRef.current?.stop();
     heliaClientRef.current = null;
 
-    setPeerMultiaddrs(getDefaultMultiaddrs(network.id));
+    setPeerMultiaddrs(getDefaultMultiaddrs(network));
     setConnectionStatus("disconnected");
     setConnectionError(null);
     setConnectedPeers([]);
@@ -128,7 +233,7 @@ export function Download() {
     setFetchError(null);
     setFetchResult(null);
 
-    setGatewayUrl(IPFS_GATEWAYS[network.id] ?? "");
+    setGatewayUrl(network.ipfsGateway ?? "");
 
     // Clear tab param so the new network's preferred method takes effect
     setSearchParams((prev) => {
@@ -137,7 +242,7 @@ export function Download() {
       next.delete("cid");
       return next;
     });
-  }, [network.id, setSearchParams]);
+  }, [network, setSearchParams]);
 
   // Update URL when CID changes
   useEffect(() => {
@@ -156,6 +261,47 @@ export function Download() {
     }
   }, [cidInput, setSearchParams]);
 
+  // Fetch retention period once per api change
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    api.query.TransactionStorage.RetentionPeriod.getValue().then((period: bigint | number) => {
+      if (!cancelled) setRetentionPeriod(Number(period));
+    });
+    return () => { cancelled = true; };
+  }, [api]);
+
+  // Look up CID on-chain when a valid CID is entered
+  useEffect(() => {
+    if (!parsedCid || !api) {
+      setCidLookup(null);
+      setCidLookupDone(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCidLookupLoading(true);
+    setCidLookupDone(false);
+    setCidLookup(null);
+
+    lookupCidOnChain(api, parsedCid).then((result) => {
+      if (!cancelled) {
+        setCidLookup(result);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    }).catch((err) => {
+      if (!cancelled) {
+        console.error("Failed to look up CID on chain:", err);
+        setCidLookup(null);
+        setCidLookupLoading(false);
+        setCidLookupDone(true);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [parsedCid?.toString(), api]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleCidChange = (value: string, isValid: boolean, cid?: CID) => {
     setCidInput(value);
     setIsCidValid(isValid);
@@ -163,6 +309,47 @@ export function Download() {
     setFetchResult(null);
     setFetchError(null);
   };
+
+  useEffect(() => {
+    if (cidInputMode !== "content-hash") return;
+
+    if (!contentHashInput.trim()) {
+      setContentHashError(null);
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+      setFetchResult(null);
+      setFetchError(null);
+      return;
+    }
+
+    try {
+      const cleaned = contentHashInput.trim().replace(/^0x/i, "");
+      if (!/^[0-9a-fA-F]+$/.test(cleaned) || cleaned.length % 2 !== 0) {
+        throw new Error("Content hash must be hex");
+      }
+      const bytes = new Uint8Array(cleaned.length / 2);
+      for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = parseInt(cleaned.slice(i * 2, i * 2 + 2), 16);
+      }
+      if (bytes.length !== 32) {
+        throw new Error("Content hash must be 32 bytes");
+      }
+      const mh = digest.create(hashAlgo, bytes);
+      const cid = CID.createV1(cidCodec, mh);
+      setContentHashError(null);
+      setCidInput(cid.toString());
+      setIsCidValid(true);
+      setParsedCid(cid);
+      setFetchResult(null);
+      setFetchError(null);
+    } catch (e) {
+      setContentHashError(e instanceof Error ? e.message : String(e));
+      setCidInput("");
+      setIsCidValid(false);
+      setParsedCid(undefined);
+    }
+  }, [cidInputMode, contentHashInput, hashAlgo, cidCodec]);
 
   const handleHistorySelect = (cid: string) => {
     if (cid === "none") return;
@@ -262,6 +449,14 @@ export function Download() {
           } catch {
             // not valid JSON despite content-type
           }
+        }
+      } else if (activeTab === "rpc" && client) {
+        data = await fetchFromBitswapRpc(client, parsedCid.toString());
+        try {
+          parsedJSON = JSON.parse(new TextDecoder().decode(data));
+          isJSON = true;
+        } catch {
+          // not JSON content
         }
       } else if (heliaClientRef.current) {
         const result = await heliaClientRef.current.fetchData(parsedCid);
@@ -375,13 +570,15 @@ export function Download() {
 
   const isConnected = connectionStatus === "connected";
   const hasGateway = gatewayUrl.trim().length > 0;
-  const canFetch = activeTab === "gateway" ? hasGateway : isConnected;
+  const isNodeConnected = chainStatus === "connected" && !!client;
+  const canFetch =
+    activeTab === "gateway" ? hasGateway : activeTab === "rpc" ? isNodeConnected : isConnected;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Download Data</h1>
-        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P or IPFS Gateway</p>
+        <p className="text-muted-foreground">Retrieve data from the Bulletin Chain via P2P, IPFS Gateway, or node Bitswap RPC</p>
       </div>
 
       <Tabs
@@ -404,6 +601,10 @@ export function Download() {
           <TabsTrigger value="gateway">
             <Globe className="h-4 w-4 mr-2" />
             IPFS Gateway
+          </TabsTrigger>
+          <TabsTrigger value="rpc">
+            <Server className="h-4 w-4 mr-2" />
+            Bitswap RPC
           </TabsTrigger>
         </TabsList>
 
@@ -599,6 +800,50 @@ export function Download() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        {/* Tab 3: Bitswap RPC */}
+        <TabsContent value="rpc" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Server className="h-5 w-5" />
+                Bitswap RPC
+              </CardTitle>
+              <CardDescription>
+                Fetch stored data directly from the connected node via the{" "}
+                <code>bitswap_v1_get</code> JSON-RPC method
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {isNodeConnected ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                    Connected
+                  </Badge>
+                  <span className="text-muted-foreground font-mono text-xs truncate">
+                    {connectedEndpoint ?? network.endpoints[0] ?? network.name}
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 text-sm text-amber-600 bg-amber-500/10 p-3 rounded-md">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>Not connected to a node. Select a network to fetch via RPC.</span>
+                </div>
+              )}
+
+              <div className="border-t pt-4 text-sm text-muted-foreground space-y-2">
+                <p>
+                  The node looks up the indexed transaction by the CID's hash digest and returns
+                  the exact stored block.
+                </p>
+                <p>
+                  Unlike the IPFS gateway, there is no DAG assembly: a dag-pb root CID returns the
+                  DAG node bytes, not the assembled file.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* Always visible: Fetch by CID + CID Info */}
@@ -615,7 +860,9 @@ export function Download() {
                 {canFetch
                   ? activeTab === "gateway"
                     ? "Enter a CID to retrieve data via IPFS Gateway"
-                    : "Enter a CID to retrieve data via P2P"
+                    : activeTab === "rpc"
+                      ? "Enter a CID to retrieve data via the node's Bitswap RPC"
+                      : "Enter a CID to retrieve data via P2P"
                   : "Enter a CID to retrieve data"}
               </CardDescription>
             </CardHeader>
@@ -625,19 +872,107 @@ export function Download() {
                   <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
                   <span>
                     No data source configured. Connect to a peer in the{" "}
-                    <strong>P2P Connection</strong> tab or set a gateway URL in the{" "}
-                    <strong>IPFS Gateway</strong> tab.
+                    <strong>P2P Connection</strong> tab, set a gateway URL in the{" "}
+                    <strong>IPFS Gateway</strong> tab, or connect to a network for the{" "}
+                    <strong>Bitswap RPC</strong> tab.
                   </span>
                 </div>
               )}
-              <div className="space-y-2">
-                <label className="text-sm font-medium">CID</label>
-                <CidInput
-                  value={cidInput}
-                  onChange={handleCidChange}
-                  disabled={isFetching || !canFetch}
-                />
-              </div>
+              <Tabs
+                value={cidInputMode}
+                onValueChange={(v) => {
+                  setCidInputMode(v as "cid" | "content-hash");
+                  setFetchError(null);
+                  setFetchResult(null);
+                  setContentHashError(null);
+                }}
+              >
+                <TabsList>
+                  <TabsTrigger value="cid">By CID</TabsTrigger>
+                  <TabsTrigger value="content-hash">By ContentHash</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="cid" className="mt-4 space-y-2">
+                  <label className="text-sm font-medium">CID</label>
+                  <CidInput
+                    value={cidInput}
+                    onChange={handleCidChange}
+                    disabled={isFetching || !canFetch}
+                  />
+                </TabsContent>
+
+                <TabsContent value="content-hash" className="mt-4 space-y-4">
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Hashing algorithm</label>
+                      <Select
+                        value={String(hashAlgo)}
+                        onValueChange={(v) => setHashAlgo(Number(v) as HashAlgorithm)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(HashAlgorithm.Blake2b256)}>Blake2b-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Sha2_256)}>SHA2-256</SelectItem>
+                          <SelectItem value={String(HashAlgorithm.Keccak256)}>Keccak-256</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Codec</label>
+                      <Select
+                        value={String(cidCodec)}
+                        onValueChange={(v) => setCidCodec(Number(v) as CidCodec)}
+                        disabled={isFetching || !canFetch}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={String(CidCodec.Raw)}>Raw (0x55)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagPb)}>DAG-PB (0x70)</SelectItem>
+                          <SelectItem value={String(CidCodec.DagCbor)}>DAG-CBOR (0x71)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Content hash</label>
+                    <input
+                      type="text"
+                      value={contentHashInput}
+                      onChange={(e) => setContentHashInput(e.target.value)}
+                      placeholder="0x… (32-byte hex digest)"
+                      disabled={isFetching || !canFetch}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+                    />
+                    {contentHashError ? (
+                      <p className="text-xs text-destructive">{contentHashError}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Pre-computed digest produced by the selected hashing algorithm.
+                      </p>
+                    )}
+                  </div>
+
+                  {isCidValid && cidInput && (
+                    <div className="space-y-2 border-t pt-3">
+                      <label className="text-sm font-medium">Computed CID</label>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs bg-secondary p-2 rounded-md break-all">
+                          {cidInput}
+                        </code>
+                        <Button variant="outline" size="sm" onClick={() => copyToClipboard(cidInput)}>
+                          {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
 
               <Button
                 onClick={handleFetch}
@@ -647,7 +982,11 @@ export function Download() {
                 {isFetching ? (
                   <>
                     <Spinner size="sm" className="mr-2" />
-                    {activeTab === "gateway" ? "Fetching via Gateway..." : "Fetching via P2P..."}
+                    {activeTab === "gateway"
+                      ? "Fetching via Gateway..."
+                      : activeTab === "rpc"
+                        ? "Fetching via Node RPC..."
+                        : "Fetching via P2P..."}
                   </>
                 ) : (
                   <>
@@ -854,6 +1193,27 @@ export function Download() {
               ) : (
                 <p className="text-sm text-muted-foreground">Enter a valid CID to see details</p>
               )}
+            </CardContent>
+          </Card>
+
+          {/* On-chain Status */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Search className="h-5 w-5" />
+                On-chain Status
+              </CardTitle>
+              <CardDescription>Storage and retention info from the chain</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <OnChainStatusContent
+                parsedCid={parsedCid}
+                cidLookupLoading={cidLookupLoading}
+                cidLookupDone={cidLookupDone}
+                cidLookup={cidLookup}
+                currentBlock={blockNumber}
+                retentionPeriod={retentionPeriod}
+              />
             </CardContent>
           </Card>
         </div>

@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { useState, useEffect, useCallback } from "react";
 import { Search, ChevronLeft, ChevronRight, RefreshCw, Box, Hash, ChevronDown, ChevronUp, Zap, FileText, Database } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
@@ -9,24 +12,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { useApi, useClient, useBlockNumber, useChainState } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { formatBlockNumber, bytesToHex } from "@/utils/format";
-import { Binary, type HexString } from "polkadot-api";
+import type { HexString } from "polkadot-api";
+import { buildExtrinsicDecoder, decodeExtrinsic, type ExtrinsicDecoder } from "@/lib/decode-extrinsic";
 
-// Helper to serialize args for display (handles Binary, BigInt, etc.)
 function serializeArgs(obj: unknown): Record<string, unknown> {
   if (obj === null || obj === undefined) return {};
   if (typeof obj !== "object") return { value: obj };
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (value instanceof Binary) {
-      result[key] = value.asHex();
-    } else if (typeof value === "bigint") {
+    if (typeof value === "bigint") {
       result[key] = value.toString();
     } else if (value instanceof Uint8Array) {
       result[key] = bytesToHex(value);
     } else if (Array.isArray(value)) {
       result[key] = value.map((v) =>
-        v instanceof Binary ? v.asHex() :
         typeof v === "bigint" ? v.toString() :
         v instanceof Uint8Array ? bytesToHex(v) :
         typeof v === "object" ? serializeArgs(v) : v
@@ -63,105 +63,12 @@ interface EventInfo {
   data: Record<string, unknown>;
 }
 
-// Return the byte length of a SCALE compact-encoded integer at the given offset.
-function compactLen(bytes: Uint8Array, offset: number): number {
-  const mode = bytes[offset]! & 0x03;
-  if (mode === 0) return 1;
-  if (mode === 1) return 2;
-  if (mode === 2) return 4;
-  // big-integer mode
-  const len = (bytes[offset]! >> 2) + 4;
-  return 1 + len;
-}
-
-// Decode the value of a SCALE compact-encoded integer at the given offset.
-function compactValue(bytes: Uint8Array, offset: number): number {
-  const mode = bytes[offset]! & 0x03;
-  if (mode === 0) return bytes[offset]! >> 2;
-  if (mode === 1) return ((bytes[offset + 1]! << 8) | bytes[offset]!) >> 2;
-  if (mode === 2) {
-    const val = (bytes[offset + 3]! << 24) | (bytes[offset + 2]! << 16)
-      | (bytes[offset + 1]! << 8) | bytes[offset]!;
-    return val >>> 2;
-  }
-  // big-integer: not expected for extension lengths
-  return 0;
-}
-
-// Extract call data from a SCALE-encoded extrinsic.
-// For unsigned/bare: unambiguous — call data follows the version byte directly.
-// For signed: returns null (extensions are runtime-specific, caller uses fallback).
-function extractCallData(hexExt: HexString): Uint8Array | null {
-  try {
-    const bytes = Binary.fromHex(hexExt).asBytes();
-    if (bytes.length < 3) return null;
-
-    let offset = compactLen(bytes, 0);
-    const preamble = bytes[offset]!;
-    offset += 1;
-
-    const version = preamble & 0x1f;
-
-    if (version === 5) {
-      const preambleType = (preamble >> 5) & 0x03;
-      if (preambleType === 0) return bytes.slice(offset); // Bare
-      if (preambleType === 2) {
-        // General (0x45): compact(ext_len) ++ extension_bytes ++ call_data
-        const extLenSize = compactLen(bytes, offset);
-        const extLen = compactValue(bytes, offset);
-        offset += extLenSize + extLen;
-        return bytes.slice(offset);
-      }
-      return null; // Signed v5
-    }
-
-    if (version === 4) {
-      if ((preamble & 0x80) === 0) return bytes.slice(offset); // Unsigned
-      return null; // Signed — handled by caller via fallback
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-// For signed extrinsics: skip address + signature, then try offsets from the
-// most likely position outward until txFromCallData succeeds.
-function getSignedExtOffsetRange(hexExt: HexString): { bytes: Uint8Array; minOffset: number } | null {
-  try {
-    const bytes = Binary.fromHex(hexExt).asBytes();
-    if (bytes.length < 3) return null;
-
-    let offset = compactLen(bytes, 0);
-    const preamble = bytes[offset]!;
-    offset += 1;
-
-    const version = preamble & 0x1f;
-    const isSigned = version === 4 ? (preamble & 0x80) !== 0 : ((preamble >> 5) & 0x03) !== 0;
-    if (!isSigned) return null;
-
-    // Skip address
-    const addrType = bytes[offset]!;
-    offset += 1;
-    if (addrType === 0) offset += 32;
-    else return null;
-
-    // Skip signature
-    const sigType = bytes[offset]!;
-    offset += 1 + (sigType === 2 ? 65 : 64);
-
-    return { bytes, minOffset: offset };
-  } catch {
-    return null;
-  }
-}
 
 export function Explorer() {
   const api = useApi();
   const client = useClient();
   const currentBlockNumber = useBlockNumber();
-  const { storageType, network } = useChainState();
+  const { network } = useChainState();
   const storageHistory = useStorageHistory();
 
   // Filter history for current network
@@ -179,6 +86,19 @@ export function Explorer() {
   const [isLoadingBlock, setIsLoadingBlock] = useState(false);
   const [expandedExtrinsic, setExpandedExtrinsic] = useState<number | null>(null);
   const [detailsTab, setDetailsTab] = useState<"extrinsics" | "events">("extrinsics");
+  const [extDecoder, setExtDecoder] = useState<ExtrinsicDecoder | null>(null);
+
+  useEffect(() => {
+    if (!client) {
+      setExtDecoder(null);
+      return;
+    }
+    let cancelled = false;
+    buildExtrinsicDecoder(client)
+      .then((d) => { if (!cancelled) setExtDecoder(d); })
+      .catch((err) => console.error("[explorer] failed to build extrinsic decoder:", err));
+    return () => { cancelled = true; };
+  }, [client]);
 
   // Load recent blocks using the client's block data
   const loadRecentBlocks = useCallback(async () => {
@@ -231,23 +151,22 @@ export function Explorer() {
         ?? recentBlocks.find((b) => b.number === blockNumber)?.hash
         ?? "";
 
-      // Fall back to System.BlockHash storage query
+      // Fall back to System.BlockHash storage query.
       if (!hashHex && api) {
         const blockHash = await api.query.System.BlockHash.getValue(blockNumber);
         if (blockHash) {
-          const hex = blockHash.asHex();
           // Ignore zero hash (block not in storage)
-          if (hex !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
-            hashHex = hex;
+          if (blockHash !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+            hashHex = blockHash;
           }
         }
       }
 
-      // Try to get block body - may fail for blocks not pinned by chainHead
-      let body: string[] = [];
+      // Try to get block body - may fail for blocks not pinned by chainHead.
+      let body: Uint8Array[] = [];
       try {
         if (hashHex) {
-          body = await client.getBlockBody(hashHex);
+          body = await client.getBlockBody(hashHex as HexString);
         }
       } catch {
         // Block body not available (e.g. unpinned finalized block)
@@ -259,61 +178,22 @@ export function Explorer() {
         extrinsicsCount: body.length,
       });
 
-      // Decode each extrinsic to extract pallet + call name + args
-      const extrinsics: ExtrinsicInfo[] = await Promise.all(
-        body.map(async (hex, index) => {
-          if (!api) return { index, pallet: "", call: "" };
-          try {
-            // Try direct extraction (works for unsigned/bare/general)
-            const callData = extractCallData(hex as HexString);
-            if (callData) {
-              const tx = await api.txFromCallData(Binary.fromBytes(callData));
-              const pallet = tx.decodedCall.type;
-              const callValue = tx.decodedCall.value as { type: string; value?: unknown };
-              const call = callValue.type;
-              const args = callValue.value as Record<string, unknown> | undefined;
-              return { index, pallet, call, args: args ? serializeArgs(args) : undefined };
-            }
-
-            // Signed extrinsic: try offsets after the signature, starting from
-            // the end (shortest call data first to avoid false positives)
-            const range = getSignedExtOffsetRange(hex as HexString);
-            if (range) {
-              for (let i = range.bytes.length - 2; i >= range.minOffset; i--) {
-                try {
-                  const slice = range.bytes.slice(i);
-                  const tx = await api.txFromCallData(Binary.fromBytes(slice));
-                  const pallet = tx.decodedCall.type;
-                  const callValue = tx.decodedCall.value as { type: string; value?: unknown };
-                  const call = callValue.type;
-                  const args = callValue.value as Record<string, unknown> | undefined;
-
-                  // Try to extract signer from the original hex
-                  let signer: string | undefined;
-                  try {
-                    const bytes = Binary.fromHex(hex as HexString).asBytes();
-                    let offset = compactLen(bytes, 0) + 1; // Skip length + preamble
-                    const addrType = bytes[offset]!;
-                    if (addrType === 0) {
-                      const addrBytes = bytes.slice(offset + 1, offset + 33);
-                      signer = bytesToHex(addrBytes);
-                    }
-                  } catch {
-                    // Ignore signer extraction errors
-                  }
-
-                  return { index, pallet, call, args: args ? serializeArgs(args) : undefined, signer };
-                } catch {
-                  // Try next offset
-                }
-              }
-            }
-          } catch (e) {
-            console.error(`[ext ${index}] decoding failed:`, e);
-          }
+      const extrinsics: ExtrinsicInfo[] = body.map((extBytes, index) => {
+        if (!extDecoder) return { index, pallet: "", call: "" };
+        try {
+          const d = decodeExtrinsic(extBytes, extDecoder);
+          return {
+            index,
+            pallet: d.pallet,
+            call: d.call,
+            args: d.args ? serializeArgs(d.args) : undefined,
+            signer: d.signer,
+          };
+        } catch (e) {
+          console.error(`[ext ${index}] decoding failed:`, e);
           return { index, pallet: "", call: "" };
-        })
-      );
+        }
+      });
       setBlockExtrinsics(extrinsics);
 
       // Load events for this block
@@ -408,13 +288,9 @@ export function Explorer() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
-          {storageType === "web3storage" ? "Web3 Storage Explorer" : "Block Explorer"}
-        </h1>
+        <h1 className="text-3xl font-bold tracking-tight">Block Explorer</h1>
         <p className="text-muted-foreground">
-          {storageType === "web3storage"
-            ? "Browse blocks and storage transactions on Web3 Storage"
-            : "Browse blocks and storage transactions on the Bulletin Chain"}
+          Browse blocks and storage transactions on the Bulletin Chain
         </p>
       </div>
 

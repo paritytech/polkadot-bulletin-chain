@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{anyhow, Result};
 use std::time::Duration;
 use subxt::{
@@ -46,7 +49,7 @@ pub async fn authorize_account_batch(
 		let nonce = nonce_tracker.next_nonce(&authorizer_id);
 		let params = BulletinExtrinsicParamsBuilder::new().nonce(nonce).build();
 
-		log::info!("Authorizing batch of {} accounts (nonce={})", accounts.len(), nonce);
+		tracing::info!("Authorizing batch of {} accounts (nonce={})", accounts.len(), nonce);
 
 		let result = tokio::time::timeout(Duration::from_secs(AUTHORIZE_TIMEOUT_SECS), async {
 			let progress =
@@ -58,7 +61,7 @@ pub async fn authorize_account_batch(
 
 		match result {
 			Ok(Ok(block_hash)) => {
-				log::info!(
+				tracing::info!(
 					"Batch of {} accounts included in best block {block_hash:?}",
 					accounts.len()
 				);
@@ -66,13 +69,13 @@ pub async fn authorize_account_batch(
 			},
 			Ok(Err(e)) if is_nonce_error(&e) && attempts < MAX_NONCE_RETRIES => {
 				attempts += 1;
-				log::warn!(
+				tracing::warn!(
 					"Authorization failed (attempt {attempts}/{MAX_NONCE_RETRIES}), \
 					 waiting for block then refreshing nonce: {e}"
 				);
 				tokio::time::sleep(Duration::from_secs(6)).await;
 				nonce_tracker.refresh(client, &authorizer_id).await?;
-				log::info!("Nonce refreshed from chain after retry delay");
+				tracing::info!("Nonce refreshed from chain after retry delay");
 			},
 			Ok(Err(e)) => return Err(e),
 			Err(_) => return Err(anyhow!("authorize_account_batch timed out")),
@@ -83,7 +86,7 @@ pub async fn authorize_account_batch(
 /// Authorize multiple accounts for transaction storage.
 ///
 /// The signer must be a member of the runtime's `Authorizer` origin (e.g. Alice
-/// is in `TestAccounts` on both bulletin-polkadot and bulletin-westend runtimes).
+/// is in `TestAccounts` on the bulletin-westend runtime).
 /// No sudo wrapping is needed — `authorize_account` is called directly.
 ///
 /// Splits into batches of AUTHORIZE_BATCH_SIZE to stay within block weight limits.

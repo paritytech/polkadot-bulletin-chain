@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use subxt::{
@@ -135,15 +138,15 @@ impl ChainLimits {
 		signer: &Keypair,
 		nonce_tracker: &NonceTracker,
 	) -> Result<Self> {
-		log::info!("ChainLimits: querying block limits...");
+		tracing::info!("ChainLimits: querying block limits...");
 		let (max_normal_weight, extrinsic_base_weight, normal_block_length) =
 			query_block_limits(client).await?;
-		log::info!("ChainLimits: querying storage limits...");
+		tracing::info!("ChainLimits: querying storage limits...");
 		let (max_block_transactions, max_transaction_size) = query_storage_limits(client).await?;
-		log::info!("ChainLimits: measuring store weight (builds + queries 2 txs)...");
+		tracing::info!("ChainLimits: measuring store weight (builds + queries 2 txs)...");
 		let (store_weight_base, store_weight_per_byte, extrinsic_length_overhead) =
 			measure_store_weight(client, signer, nonce_tracker).await?;
-		log::info!("ChainLimits: all queries complete");
+		tracing::info!("ChainLimits: all queries complete");
 
 		Ok(Self {
 			max_normal_weight,
@@ -177,6 +180,11 @@ impl ChainLimits {
 		};
 
 		TheoreticalLimits { weight_cap, length_cap, count_cap, effective_cap, bottleneck }
+	}
+
+	/// Estimate how many store txs of `payload_size` bytes fit in one block.
+	pub fn estimate_block_capacity(&self, payload_size: usize) -> usize {
+		self.compute_theoretical_limits(payload_size).effective_cap as usize
 	}
 
 	/// Print a human-readable summary of the queried limits.
@@ -265,7 +273,7 @@ async fn query_block_limits(client: &OnlineClient<BulletinConfig>) -> Result<(u6
 		.and_then(|v| value_to_u64(&v.value))
 		.ok_or_else(|| anyhow!("Cannot extract BlockLength.max.normal"))?;
 
-	log::info!(
+	tracing::info!(
 		"Block limits: max_normal_weight={max_total_ref_time}, base_extrinsic={base_extrinsic_ref_time}, normal_length={normal_length}"
 	);
 
@@ -294,7 +302,7 @@ async fn query_storage_limits(client: &OnlineClient<BulletinConfig>) -> Result<(
 		.ok_or_else(|| anyhow!("Cannot decode MaxTransactionSize"))?
 		as u32;
 
-	log::info!(
+	tracing::info!(
 		"Storage limits: max_block_transactions={max_block_transactions}, max_transaction_size={max_transaction_size}"
 	);
 
@@ -340,7 +348,7 @@ async fn measure_store_weight(
 		(size_large as u64).saturating_sub(size_small as u64);
 	let base = weight_small.saturating_sub(per_byte * size_small as u64);
 
-	log::info!(
+	tracing::info!(
 		"Store weight regression: base={base}, per_byte={per_byte}, overhead={extrinsic_length_overhead}"
 	);
 

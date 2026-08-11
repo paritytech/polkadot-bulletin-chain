@@ -1,3 +1,6 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 use anyhow::Result;
 use std::{
 	collections::HashMap,
@@ -106,7 +109,7 @@ pub async fn batch_init_nonces(
 						true
 					},
 					Err(e) => {
-						log::warn!("batch_init_nonces: failed for account {i}: {e}");
+						tracing::warn!("batch_init_nonces: failed for account {i}: {e}");
 						false
 					},
 				}

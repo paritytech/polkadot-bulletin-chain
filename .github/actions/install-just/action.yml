@@ -1,0 +1,8 @@
+name: Install just
+description: Ensure `just` is on PATH. Downloads from GitHub releases if missing.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: command -v just || ./scripts/install_just.sh

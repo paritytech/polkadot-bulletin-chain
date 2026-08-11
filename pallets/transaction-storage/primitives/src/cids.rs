@@ -59,6 +59,16 @@ pub enum HashingAlgorithm {
 	Keccak256,
 }
 
+impl From<HashingAlgorithm> for sp_transaction_storage_proof::HashingAlgorithm {
+	fn from(value: HashingAlgorithm) -> Self {
+		match value {
+			HashingAlgorithm::Blake2b256 => Self::Blake2b256,
+			HashingAlgorithm::Sha2_256 => Self::Sha2_256,
+			HashingAlgorithm::Keccak256 => Self::Keccak256,
+		}
+	}
+}
+
 impl HashingAlgorithm {
 	/// Compute the hash of the given data using the selected algorithm.
 	pub fn hash(&self, data: &[u8]) -> ContentHash {

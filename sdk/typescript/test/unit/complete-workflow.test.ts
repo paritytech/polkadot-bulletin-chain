@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Simulates the examples/complete-workflow.ts flow using MockBulletinClient.
@@ -8,7 +8,7 @@
  * called with correct argument types and produce the expected results.
  */
 
-import { blake2AsU8a } from "@polkadot/util-crypto"
+import { blake2b } from "@noble/hashes/blake2.js"
 import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
 import { MockBulletinClient, type MockOperation } from "../../src/mock-client"
@@ -40,14 +40,14 @@ describe("Complete workflow (MockBulletinClient)", () => {
     const data = Binary.fromText(message)
     const storeResult = await client.store(data).send()
     expect(storeResult.cid).toBeDefined()
-    expect(storeResult.size).toBe(data.asBytes().length)
+    expect(storeResult.size).toBe(data.length)
 
     // 3. Authorize preimage
     const specificData = Binary.fromText("Preimage-authorized content")
-    const contentHash = blake2AsU8a(specificData.asBytes())
+    const contentHash = blake2b(specificData, { dkLen: 32 })
 
     const preimageReceipt = await client
-      .authorizePreimage(contentHash, BigInt(specificData.asBytes().length))
+      .authorizePreimage(contentHash, BigInt(specificData.length))
       .send()
     expect(preimageReceipt.blockHash).toBeDefined()
 
@@ -124,7 +124,7 @@ describe("Complete workflow (MockBulletinClient)", () => {
       .send()
 
     expect(result.cid).toBeDefined()
-    expect(result.size).toBe(data.asBytes().length)
+    expect(result.size).toBe(data.length)
 
     // The CID should be different from default (Raw + Blake2b256)
     const defaultResult = await client.store(data).send()
@@ -140,6 +140,34 @@ describe("Complete workflow (MockBulletinClient)", () => {
 
     await expect(
       client.refreshPreimageAuthorization(new Uint8Array(32)).send(),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
+  })
+
+  it("should record renew and forceRenew operations with TransactionRef entries", async () => {
+    const client = new MockBulletinClient()
+
+    await client.renew({ block: 100, index: 5 }).send()
+    await client.forceRenew(new Uint8Array(32).fill(7)).send()
+
+    const ops = client.getOperations()
+    expect(ops).toContainEqual({
+      type: "renew",
+      entry: { type: "Position", value: { block: 100, index: 5 } },
+    })
+    expect(ops).toContainEqual({
+      type: "force_renew",
+      entry: { type: "ContentHash", value: `0x${"07".repeat(32)}` },
+    })
+  })
+
+  it("should simulate auth failure for store as a chain-side rejection", async () => {
+    // The real client never throws INSUFFICIENT_AUTHORIZATION for store —
+    // boost exhaustion only warns; an actual chain rejection surfaces as
+    // AUTHORIZATION_FAILED. The mock must model the reachable path.
+    const client = new MockBulletinClient({ simulateAuthFailure: true })
+
+    await expect(
+      client.store(Binary.fromText("auth failure")).send(),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
   })
 

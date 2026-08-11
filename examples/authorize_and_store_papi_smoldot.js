@@ -1,14 +1,18 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
 import assert from "assert";
 import * as smoldot from 'smoldot';
 import { readFileSync } from 'fs';
 import { createClient } from 'polkadot-api';
 import { getSmProvider } from 'polkadot-api/sm-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { cryptoWaitReady } from '@polkadot/util-crypto';
-import { authorizeAccount, fetchCid, store } from './api.js';
+import { authorizeAccount, fetchAndVerifyBlock, gatewaySource, nodeRpcSource, smoldotRpcSource, store, TX_MODE_FINALIZED_BLOCK } from './api.js';
 import { setupKeyringAndSigners, waitForChainReady, waitForBlockProduction, DEFAULT_IPFS_GATEWAY_URL } from './common.js';
 import { logHeader, logConfig, logSuccess, logError, logTestResult } from './logger.js';
 import { cidFromBytes } from "./cid_dag_metadata.js";
-import { bulletin } from './.papi/descriptors/dist/index.mjs';
+import { bulletin } from './.papi/descriptors/dist/index.js';
 
 // Constants
 // Increased sync time for parachain mode where smoldot needs more time to sync relay + para
@@ -77,19 +81,24 @@ function initSmoldot() {
 async function createSmoldotClient(chainSpecPath, parachainSpecPath = null) {
     const sd = initSmoldot();
 
-    const mainChain = await sd.addChain({ chainSpec: readChainSpec(chainSpecPath) });
-    console.log(`✅ Added main chain: ${chainSpecPath}`);
+    const mainChainSpec = readChainSpec(chainSpecPath);
+    const parachainSpec = parachainSpecPath ? readChainSpec(parachainSpecPath) : null;
 
-    let targetChain = mainChain;
-    if (parachainSpecPath) {
-        targetChain = await sd.addChain({
-            chainSpec: readChainSpec(parachainSpecPath),
-            potentialRelayChains: [mainChain]
-        });
-        console.log(`✅ Added parachain: ${parachainSpecPath}`);
-    }
+    const provider = getSmProvider(async () => {
+        const mainChain = await sd.addChain({ chainSpec: mainChainSpec });
+        console.log(`✅ Added main chain: ${chainSpecPath}`);
+        if (parachainSpec) {
+            const parachain = await sd.addChain({
+                chainSpec: parachainSpec,
+                potentialRelayChains: [mainChain]
+            });
+            console.log(`✅ Added parachain: ${parachainSpecPath}`);
+            return parachain;
+        }
+        return mainChain;
+    });
 
-    return { client: createClient(getSmProvider(targetChain)), sd };
+    return { client: createClient(provider), sd };
 }
 
 async function main() {
@@ -101,9 +110,9 @@ async function main() {
     const chainSpecPath = process.argv[2];
     if (!chainSpecPath) {
         logError('Chain spec path is required as first argument');
-        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url]');
-        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url]');
-        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url]');
+        console.error('Usage: node authorize_and_store_papi_smoldot.js <chain-spec-path> [parachain-spec-path] [ipfs-api-url] [node-ws-url]');
+        console.error('  For parachains: <relay-chain-spec-path> <parachain-spec-path> [ipfs-api-url] [node-ws-url]');
+        console.error('  For solochains: <solo-chain-spec-path> [ipfs-api-url] [node-ws-url]');
         process.exit(1);
     }
 
@@ -111,15 +120,18 @@ async function main() {
     const parachainSpecPath = process.argv[3] || null;
     // Optional IPFS API URL
     const HTTP_IPFS_API = process.argv[4] || DEFAULT_IPFS_GATEWAY_URL;
+    // Optional node WS URL; adds the node's bitswap_v1_get RPC to the read-back cross-check
+    const NODE_WS_URL = process.argv[5] || null;
 
     logConfig({
         'Mode': 'Smoldot Light Client',
         'Chain Spec': chainSpecPath,
         'Parachain Spec': parachainSpecPath || 'N/A (solochain)',
-        'IPFS API': HTTP_IPFS_API
+        'IPFS API': HTTP_IPFS_API,
+        'Node WS': NODE_WS_URL || 'N/A (smoldot-only cross-check)'
     });
     
-    let sd, client, resultCode;
+    let sd, client, nodeClient, resultCode;
     try {
         // Init Smoldot PAPI client and typed api.
         ({ client, sd } = await createSmoldotClient(chainSpecPath, parachainSpecPath));
@@ -134,7 +146,7 @@ async function main() {
 
         // Signers: Use Bob for the account being authorized to avoid nonce conflicts
         // when running after ws test (which uses Alice) on the same chain.
-        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Alice', '//Papismoldosigner');
+        const { authorizationSigner, whoSigner, whoAddress } = setupKeyringAndSigners('//Eve', '//Papismoldotsigner');
 
         // Data to store.
         const dataToStore = "Hello, Bulletin with PAPI + Smoldot - " + new Date().toString();
@@ -147,14 +159,22 @@ async function main() {
             whoAddress,
             100,
             BigInt(100 * 1024 * 1024), // 100 MiB
+            TX_MODE_FINALIZED_BLOCK,
         );
 
         // Store data.
         const { cid } = await store(bulletinAPI, whoSigner, dataToStore);
         logSuccess(`Data stored successfully with CID: ${cid}`);
 
-        // Read back from IPFS
-        let downloadedContent = await fetchCid(HTTP_IPFS_API, cid);
+        // Read back from IPFS, smoldot's bitswap_v1_get (forwarded to peers
+        // over p2p bitswap) and, when a node WS URL is given, the node's
+        // bitswap_v1_get RPC, verifying all match.
+        const sources = [gatewaySource(HTTP_IPFS_API), smoldotRpcSource(client)];
+        if (NODE_WS_URL) {
+            nodeClient = createClient(getWsProvider(NODE_WS_URL));
+            sources.push(nodeRpcSource(nodeClient));
+        }
+        let downloadedContent = await fetchAndVerifyBlock(cid, ...sources);
         logSuccess(`Downloaded content: ${downloadedContent.toString()}`);
         assert.deepStrictEqual(
             cid,
@@ -175,6 +195,7 @@ async function main() {
         console.error(error);
         resultCode = 1;
     } finally {
+        if (nodeClient) nodeClient.destroy();
         if (client) client.destroy();
         if (sd) sd.terminate();
         process.exit(resultCode);

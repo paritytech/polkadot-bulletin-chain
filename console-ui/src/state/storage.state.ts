@@ -1,13 +1,28 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: GPL-3.0-only
+
 import { BehaviorSubject, combineLatest, switchMap, of, from, catchError } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { api$ } from "./chain.state";
 import { selectedAccount$ } from "./wallet.state";
-import { SS58String, Enum, Binary } from "polkadot-api";
+import { SS58String, Enum, Binary, type HexString } from "polkadot-api";
 
 export interface Authorization {
+  // Remaining quota; used by Upload precheck and similar flows.
   transactions: bigint;
   bytes: bigint;
   expiresAt?: number;
+  // Raw consumed values straight from the on-chain extent, for display.
+  used: {
+    transactions: bigint;
+    bytesEphemeral: bigint;
+    bytesPermanent: bigint;
+  };
+  // Raw caps from the extent, for display.
+  allowance: {
+    transactions: bigint;
+    bytes: bigint;
+  };
 }
 
 export interface PreimageAuthorization {
@@ -15,11 +30,84 @@ export interface PreimageAuthorization {
   maxSize: bigint;
 }
 
+/**
+ * Backwards-compatible read of an `AuthorizationExtent`: newer chains track
+ * consumption separately (`*_allowance` for the cap, `transactions`/`bytes` for
+ * usage); older chains expose only the cap. The UI surfaces "remaining"
+ * everywhere, so we compute `allowance - consumed` when both are present and
+ * fall back to the raw value otherwise.
+ */
+export function extentRemainingTransactions(extent: any): bigint {
+  const allowance = extent?.transactions_allowance;
+  if (allowance != null) {
+    const used = BigInt(extent.transactions ?? 0);
+    const cap = BigInt(allowance);
+    return cap > used ? cap - used : 0n;
+  }
+  return BigInt(extent?.transactions ?? 0);
+}
+
+export function extentRemainingBytes(extent: any): bigint {
+  const allowance = extent?.bytes_allowance;
+  if (allowance != null) {
+    const used = BigInt(extent.bytes ?? 0n);
+    const cap = BigInt(allowance);
+    return cap > used ? cap - used : 0n;
+  }
+  return BigInt(extent?.bytes ?? 0n);
+}
+
+export function extentAllowanceBytes(extent: any): bigint {
+  const allowance = extent?.bytes_allowance;
+  return BigInt(allowance ?? extent?.bytes ?? 0n);
+}
+
+export function extentAllowanceTransactions(extent: any): bigint {
+  const allowance = extent?.transactions_allowance;
+  return BigInt(allowance ?? extent?.transactions ?? 0);
+}
+
+function buildAuthorization(extent: any, expiration: number | null | undefined): Authorization {
+  return {
+    transactions: extentRemainingTransactions(extent),
+    bytes: extentRemainingBytes(extent),
+    expiresAt: expiration ?? undefined,
+    used: {
+      transactions: BigInt(extent?.transactions ?? 0),
+      bytesEphemeral: BigInt(extent?.bytes ?? 0n),
+      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+    },
+    allowance: {
+      transactions: extentAllowanceTransactions(extent),
+      bytes: extentAllowanceBytes(extent),
+    },
+  };
+}
+
+export type EntryKind = "Store" | "Renew";
+
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
   contentHash: Uint8Array;
   size: number;
   blockChunks: number;
+}
+
+/**
+ * Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we
+ * read. `meta` is the current runtime's field name; `kind` is the pre-split name still
+ * used by live chains (and by descriptors generated from them). The variant names are
+ * identical on both sides — read via [`entryKindOf`].
+ */
+export interface RawTransactionInfo {
+  size: number;
+  meta?: { type: EntryKind };
+  kind?: { type: EntryKind };
+}
+
+/** Entry kind of a raw `Transactions` entry, tolerant of pre-split runtimes. */
+export function entryKindOf(info: RawTransactionInfo | undefined): EntryKind | undefined {
+  return info?.meta?.type ?? info?.kind?.type;
 }
 
 // Account authorization state
@@ -44,11 +132,7 @@ export async function fetchAccountAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: BigInt(auth.extent.transactions),
-      bytes: auth.extent.bytes,
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     authorizationSubject.next(authorization);
     return authorization;
@@ -74,7 +158,7 @@ export async function checkPreimageAuthorization(
 
   try {
     const auth = await api.query.TransactionStorage.Authorizations.getValue(
-      Enum("Preimage", Binary.fromBytes(contentHash))
+      Enum("Preimage", Binary.toHex(contentHash))
     );
 
     if (!auth) {
@@ -82,11 +166,7 @@ export async function checkPreimageAuthorization(
       return null;
     }
 
-    const authorization: Authorization = {
-      transactions: BigInt(auth.extent.transactions),
-      bytes: auth.extent.bytes,
-      expiresAt: auth.expiration ?? undefined,
-    };
+    const authorization = buildAuthorization(auth.extent, auth.expiration);
 
     preimageAuthSubject.next(authorization);
     return authorization;
@@ -118,20 +198,14 @@ export async function fetchPreimageAuthorizations(
     const preimageAuths: PreimageAuthorization[] = entries
       .filter(({ keyArgs }: any) => keyArgs[0].type === "Preimage")
       .map(({ keyArgs, value }: any) => {
-        // Extract content hash from the preimage key
         const preimageValue = keyArgs[0].value;
-        let contentHash: Uint8Array;
-        if (typeof preimageValue === "object" && preimageValue !== null && "content_hash" in preimageValue) {
-          const ch = (preimageValue as { content_hash: { asBytes: () => Uint8Array } }).content_hash;
-          contentHash = ch.asBytes();
-        } else if (typeof preimageValue === "object" && preimageValue !== null && "asBytes" in preimageValue) {
-          contentHash = (preimageValue as { asBytes: () => Uint8Array }).asBytes();
-        } else {
-          contentHash = new Uint8Array(32);
-        }
+        const contentHash =
+          typeof preimageValue === "string"
+            ? Binary.fromHex(preimageValue as HexString)
+            : new Uint8Array(32);
         return {
           contentHash,
-          maxSize: value.extent.bytes,
+          maxSize: extentAllowanceBytes(value.extent),
         };
       });
 
@@ -165,8 +239,8 @@ export async function fetchTransactionInfo(
     }
 
     return {
-      chunkRoot: info.chunk_root.asBytes(),
-      contentHash: info.content_hash.asBytes(),
+      chunkRoot: Binary.fromHex(info.chunk_root as HexString),
+      contentHash: Binary.fromHex(info.content_hash as HexString),
       size: info.size,
       blockChunks: info.block_chunks,
     };

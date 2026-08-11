@@ -1,5 +1,5 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
-// SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Mock client for testing without a blockchain connection
@@ -11,13 +11,15 @@
  * - Development and prototyping
  */
 
-import type { Binary } from "polkadot-api"
 import {
   AuthCallBuilder,
   type BulletinClientInterface,
   CallBuilder,
   StoreBuilder,
   type TransactionReceipt,
+  type TransactionRef,
+  type TransactionRefInput,
+  toTransactionRef,
 } from "./async-client.js"
 import { BulletinPreparer } from "./preparer.js"
 import {
@@ -32,7 +34,7 @@ import {
   type StoreOptions,
   type StoreResult,
 } from "./types.js"
-import { calculateCid, estimateAuthorization, toBytes } from "./utils.js"
+import { calculateCid, estimateAuthorization } from "./utils.js"
 
 /**
  * Configuration for the mock Bulletin client
@@ -42,8 +44,6 @@ export interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
   simulateStorageFailure?: boolean
-  /** Simulate insufficient authorization (for testing pre-check error path) */
-  simulateInsufficientAuth?: boolean
 }
 
 /**
@@ -63,7 +63,8 @@ export type MockOperation =
       type: "refresh_preimage_authorization"
       contentHash: Uint8Array
     }
-  | { type: "renew"; block: number; index: number }
+  | { type: "renew"; entry: TransactionRef }
+  | { type: "force_renew"; entry: TransactionRef }
   | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
@@ -108,7 +109,6 @@ export class MockBulletinClient implements BulletinClientInterface {
   public config: Required<ClientConfig> & {
     simulateAuthFailure: boolean
     simulateStorageFailure: boolean
-    simulateInsufficientAuth: boolean
   }
   /** Operations performed (for testing verification) */
   private operations: MockOperation[] = []
@@ -121,7 +121,6 @@ export class MockBulletinClient implements BulletinClientInterface {
       ...resolveClientConfig(config),
       simulateAuthFailure: config?.simulateAuthFailure ?? false,
       simulateStorageFailure: config?.simulateStorageFailure ?? false,
-      simulateInsufficientAuth: config?.simulateInsufficientAuth ?? false,
     }
   }
 
@@ -140,11 +139,16 @@ export class MockBulletinClient implements BulletinClientInterface {
   }
 
   /**
+   * No-op for the mock client — present to satisfy `BulletinClientInterface`.
+   */
+  async destroy(): Promise<void> {}
+
+  /**
    * Store data using builder pattern
    *
-   * @param data - Data to store (PAPI Binary or Uint8Array)
+   * @param data - Data to store as `Uint8Array`
    */
-  store(data: Binary | Uint8Array): StoreBuilder {
+  store(data: Uint8Array): StoreBuilder {
     return new StoreBuilder(this, data)
   }
 
@@ -152,31 +156,21 @@ export class MockBulletinClient implements BulletinClientInterface {
    * Store data with custom options (internal, used by builder)
    */
   async storeWithOptions(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
     _progressCallback?: ProgressCallback,
     chunkerConfig?: Partial<ChunkerConfig>,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
-    // Simulate insufficient authorization (pre-submission check)
-    if (this.config.simulateInsufficientAuth) {
-      throw new BulletinError(
-        "Insufficient authorization: need 1 transactions, have 0",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      )
-    }
-
-    // Simulate authorization failure
+    // Chain-side rejection: the real client never throws
+    // INSUFFICIENT_AUTHORIZATION for store (boost exhaustion only warns).
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
-        "Insufficient authorization: need 100 bytes, have 0 bytes",
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        { need: 100, available: 0 },
+        "Simulated authorization failure",
+        ErrorCode.AUTHORIZATION_FAILED,
       )
     }
 
@@ -189,7 +183,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     }
 
     // Handle chunked uploads (mirrors AsyncBulletinClient logic)
-    if (chunkerConfig || dataBytes.length > this.config.chunkingThreshold) {
+    if (chunkerConfig || data.length > this.config.chunkingThreshold) {
       const userCodec = options?.cidCodec
       if (userCodec !== undefined && userCodec !== CidCodec.Raw) {
         throw new BulletinError(
@@ -201,20 +195,20 @@ export class MockBulletinClient implements BulletinClientInterface {
 
       const preparer = new BulletinPreparer(this.config)
       const prepared = await preparer.prepareStoreChunked(
-        dataBytes,
+        data,
         chunkerConfig,
         options,
       )
 
       this.operations.push({
         type: "store",
-        dataSize: dataBytes.length,
+        dataSize: data.length,
         cid: prepared.manifest?.cid.toString() ?? "",
       })
 
       return {
         cid: prepared.manifest?.cid,
-        size: dataBytes.length,
+        size: data.length,
         blockNumber: 1,
         chunks: {
           chunkCids: prepared.chunks
@@ -233,19 +227,19 @@ export class MockBulletinClient implements BulletinClientInterface {
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
-    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
     // Record the operation
     this.operations.push({
       type: "store",
-      dataSize: dataBytes.length,
+      dataSize: data.length,
       cid: cid.toString(),
     })
 
     // Return a mock receipt
     return {
       cid,
-      size: dataBytes.length,
+      size: data.length,
       blockNumber: 1,
     }
   }
@@ -327,9 +321,19 @@ export class MockBulletinClient implements BulletinClientInterface {
     })
   }
 
-  renew(block: number, index: number): CallBuilder {
+  renew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async () => {
-      this.operations.push({ type: "renew", block, index })
+      this.operations.push({ type: "renew", entry: toTransactionRef(ref) })
+      return mockReceipt()
+    })
+  }
+
+  forceRenew(ref: TransactionRefInput): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({
+        type: "force_renew",
+        entry: toTransactionRef(ref),
+      })
       return mockReceipt()
     })
   }
@@ -338,12 +342,10 @@ export class MockBulletinClient implements BulletinClientInterface {
    * Store preimage-authorized content (mock)
    */
   async storeWithPreimageAuth(
-    data: Binary | Uint8Array,
+    data: Uint8Array,
     options?: StoreOptions,
   ): Promise<StoreResult> {
-    const dataBytes = toBytes(data)
-
-    if (dataBytes.length === 0) {
+    if (data.length === 0) {
       throw new BulletinError("Data cannot be empty", ErrorCode.EMPTY_DATA)
     }
 
@@ -359,17 +361,17 @@ export class MockBulletinClient implements BulletinClientInterface {
     const hashAlgorithm =
       opts.hashingAlgorithm ?? DEFAULT_STORE_OPTIONS.hashingAlgorithm
 
-    const cid = await calculateCid(dataBytes, cidCodec, hashAlgorithm)
+    const cid = await calculateCid(data, cidCodec, hashAlgorithm)
 
     this.operations.push({
       type: "store_preimage_auth",
-      dataSize: dataBytes.length,
+      dataSize: data.length,
       cid: cid.toString(),
     })
 
     return {
       cid,
-      size: dataBytes.length,
+      size: data.length,
       blockNumber: 1,
     }
   }

@@ -57,7 +57,7 @@ error.code === 'EMPTY_DATA'          // still works
 
 | Error Code | Description | Recovery Hint |
 |---|---|---|
-| `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient | Request additional authorization via authorizeAccount() |
+| `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient. Not thrown by `store()` — an exhausted boost budget only warns and stores at lower priority | Request additional authorization via authorizeAccount() |
 | `AUTHORIZATION_FAILED` | Authorization call failed | Check that the account has authorizer privileges |
 
 ### Transaction & Upload Errors
@@ -221,11 +221,6 @@ try {
   if (!(error instanceof BulletinError)) throw error
 
   switch (error.code) {
-    case ErrorCode.INSUFFICIENT_AUTHORIZATION:
-      // Not enough quota remaining — the SDK checks this before submission
-      console.error('Need more authorization:', error.message)
-      console.error('Hint:', error.recoveryHint)
-      break
     case ErrorCode.AUTHORIZATION_FAILED:
       // Authorization call itself failed
       console.error('Authorization failed:', error.message)
