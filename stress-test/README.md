@@ -260,7 +260,7 @@ Run lifecycle:
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `bulletin_stress_runs_total` | counter | `outcome` | Completed runs (`ok` / `failed`); one run per invocation or loop iteration |
+| `bulletin_stress_runs_total` | counter | `outcome` | Finished runs (`ok` / `failed` / `cancelled`); one run per invocation or loop iteration |
 | `bulletin_stress_run_in_progress` | gauge | — | 1 while a run is executing |
 | `bulletin_stress_run_start_timestamp_seconds` | gauge | — | Unix timestamp of the most recent run start |
 | `bulletin_stress_variant_active` | gauge | `variant` | 1 while the labeled block-capacity variant is running |

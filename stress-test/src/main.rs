@@ -16,7 +16,7 @@ use bulletin_stress_test::{
 	accounts, authorize, bitswap,
 	chain_info::{ChainLimits, EnvironmentInfo},
 	client,
-	metrics::PrometheusMetrics,
+	metrics::{self, metrics, RunOutcome},
 	report, scenarios,
 };
 
@@ -202,14 +202,12 @@ async fn main() -> Result<()> {
 
 	let cli = Cli::parse();
 
-	// Concrete Prometheus recorder — always constructed (recording without a scraper is
-	// negligible); the exposition server only starts when --prometheus-port is given.
-	let metrics = Arc::new(PrometheusMetrics::new()?);
+	// Recording happens unconditionally (it is negligible without a scraper); the exposition
+	// server only starts when --prometheus-port is given.
 	if let Some(port) = cli.prometheus_port {
 		let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
-		let registry = metrics.registry().clone();
 		tokio::spawn(async move {
-			if let Err(e) = bulletin_stress_test::metrics::serve(addr, registry).await {
+			if let Err(e) = metrics::serve(addr).await {
 				tracing::error!("Prometheus exposition server failed: {e:#}");
 			}
 		});
@@ -247,47 +245,40 @@ async fn main() -> Result<()> {
 		});
 	}
 
-	match cli.loop_interval_secs {
-		None => {
-			metrics.run_started();
-			let run = run_once(&cli, &ws_urls, &metrics, &cancel).await;
-			metrics.run_finished(run.is_ok());
+	loop {
+		// Also covers a Ctrl+C landing in the last sleep tick below, which leaves the sleep
+		// loop through its deadline rather than through the cancel check.
+		if cancel.load(Ordering::Relaxed) {
+			std::process::exit(130);
+		}
+		metrics().run_started();
+		let run = run_once(&cli, &ws_urls, &cancel).await;
+		// `run_once` reports cancellation as `Ok` (partial results were flushed), so the flag —
+		// not the result — decides the outcome label.
+		if cancel.load(Ordering::Relaxed) {
+			metrics().run_finished(RunOutcome::Cancelled);
+			std::process::exit(130);
+		}
+		metrics().run_finished(if run.is_ok() { RunOutcome::Ok } else { RunOutcome::Failed });
+		let Some(secs) = cli.loop_interval_secs else { return run };
+		if let Err(e) = run {
+			tracing::error!("Run failed (loop continues): {e:#}");
+		}
+		tracing::info!("Run complete — sleeping {secs}s before the next run");
+		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+		while std::time::Instant::now() < deadline {
 			if cancel.load(Ordering::Relaxed) {
 				std::process::exit(130);
 			}
-			run
-		},
-		Some(secs) => loop {
-			metrics.run_started();
-			let run = run_once(&cli, &ws_urls, &metrics, &cancel).await;
-			metrics.run_finished(run.is_ok());
-			if let Err(e) = run {
-				tracing::error!("Run failed (loop continues): {e:#}");
-			}
-			if cancel.load(Ordering::Relaxed) {
-				std::process::exit(130);
-			}
-			tracing::info!("Run complete — sleeping {secs}s before the next run");
-			let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
-			while std::time::Instant::now() < deadline {
-				if cancel.load(Ordering::Relaxed) {
-					std::process::exit(130);
-				}
-				tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-			}
-		},
+			tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+		}
 	}
 }
 
 /// Execute the selected command once: connect, query chain info, run the scenarios, print and
 /// flush the results. Extracted from `main` so `--loop-interval-secs` can re-run it indefinitely
 /// (with a fresh connection per run) while the metrics endpoint stays up.
-async fn run_once(
-	cli: &Cli,
-	ws_urls: &[String],
-	metrics: &Arc<PrometheusMetrics>,
-	cancel: &Arc<AtomicBool>,
-) -> Result<()> {
+async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Result<()> {
 	let control_url = &ws_urls[0];
 	let ws_url_refs: Vec<&str> = ws_urls.iter().map(|s| s.as_str()).collect();
 
@@ -338,7 +329,7 @@ async fn run_once(
 			if last.environment.is_none() {
 				last.environment = Some(env_info.clone());
 			}
-			metrics.record_result(last);
+			metrics().record_result(last);
 		}
 		if let Some(ref path) = cli.output_file {
 			if let Ok(json) = serde_json::to_string_pretty(results) {
@@ -372,7 +363,6 @@ async fn run_once(
 				&mut all_results,
 				&flush,
 				cancel,
-				metrics,
 			)
 			.await
 			{
@@ -403,7 +393,6 @@ async fn run_once(
 				control_url,
 				&mut all_results,
 				&flush,
-				metrics,
 			)
 			.await
 			{
@@ -427,7 +416,6 @@ async fn run_once(
 						recipients,
 						duration,
 						&submitter,
-						metrics,
 						&mut all_results,
 						&flush,
 						cancel,
@@ -473,7 +461,6 @@ async fn run_once(
 				&mut all_results,
 				&flush,
 				cancel,
-				metrics,
 			)
 			.await
 			{
@@ -496,7 +483,6 @@ async fn run_once(
 					control_url,
 					&mut all_results,
 					&flush,
-					metrics,
 				)
 				.await
 				{
@@ -520,7 +506,6 @@ async fn run_once(
 							10,
 							30,
 							&submitter,
-							metrics,
 							&mut all_results,
 							&flush,
 							cancel,
@@ -579,7 +564,6 @@ async fn run_throughput(
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
-	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<()> {
 	match test {
 		"block-capacity" | "all" => {
@@ -597,7 +581,6 @@ async fn run_throughput(
 				results,
 				on_result,
 				cancel,
-				metrics,
 			)
 			.await?;
 		},
@@ -639,7 +622,6 @@ async fn run_bitswap(
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
-	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<()> {
 	let multiaddrs = match resolve_p2p_multiaddrs(cli, control_url).await {
 		Ok(r) => r,
@@ -659,7 +641,6 @@ async fn run_bitswap(
 				cli.iterations,
 				payload_size,
 				control_url,
-				metrics,
 			)
 			.await?;
 			for r in rs {
@@ -677,7 +658,6 @@ async fn run_bitswap(
 				max_size,
 				batch_size.clamp(1, 16),
 				control_url,
-				metrics,
 			)
 			.await?;
 			results.push(r);

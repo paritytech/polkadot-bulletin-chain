@@ -3,45 +3,76 @@
 
 //! Prometheus metrics for long-running stress runs (`--prometheus-port`).
 //!
-//! [`PrometheusMetrics`] is a concrete recorder (no trait, no `Option<_>` plumbing) constructed
-//! once at startup and threaded into the scenario drivers. Hot paths increment live counters at
-//! event time (submission, block confirmation, read completion) so a scraping Prometheus sees the
-//! run as a live time series that can be correlated with node-side metrics
-//! (`substrate_sub_txpool_*`, `substrate_proposer_*`, ...). End-of-variant summaries from
-//! [`ScenarioResult`] are mirrored into `bulletin_stress_result_*` gauges for "last run" panels.
+//! [`PrometheusMetrics`] is a concrete recorder reached through the process-wide [`metrics`]
+//! accessor — one recorder per process, never optional, so there is nothing to thread through the
+//! scenario drivers. Hot paths increment live counters at event time (submission, block
+//! confirmation, read completion) so a scraping Prometheus sees the run as a live time series that
+//! can be correlated with node-side metrics (`substrate_sub_txpool_*`, `substrate_proposer_*`,
+//! ...). End-of-variant summaries from [`ScenarioResult`] are mirrored into
+//! `bulletin_stress_result_*` gauges for "last run" panels.
 //!
 //! All metrics carry a `variant` label (payload-size labels like `1KB` for the block-capacity
 //! sweep, scenario slugs like `hop-full-cycle` otherwise) so one metric shape serves every test
 //! variant. Tests construct a throwaway recorder with [`PrometheusMetrics::for_tests`].
 //!
-//! [`serve`] is a thin wrapper around `substrate_prometheus_endpoint::init_prometheus` that binds
-//! a hyper exposition server to a socket address.
+//! [`serve`] binds a hyper exposition server for the global recorder's registry.
 
 use anyhow::{Context, Result};
 use std::{
 	net::SocketAddr,
+	sync::OnceLock,
 	time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use substrate_prometheus_endpoint::{
-	register, CounterVec, Gauge, GaugeVec, HistogramOpts, HistogramVec, Opts, Registry, F64, U64,
+	prometheus::core::{Atomic, Collector},
+	register, CounterVec, Gauge, GaugeVec, HistogramOpts, HistogramVec, Opts, PrometheusError,
+	Registry, F64, U64,
 };
 
 use crate::report::{LatencyStats, ScenarioResult};
 
 /// Buckets for the per-block transaction-count histogram. The runtime's hard extrinsic count
 /// limit (`MaxBlockTransactions`) is 512, so the top bucket is the full block.
-pub const BLOCK_TXS_BUCKETS: &[f64] =
+const BLOCK_TXS_BUCKETS: &[f64] =
 	&[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 192.0, 256.0, 384.0, 512.0];
 
-/// Buckets for end-to-end latency histograms in seconds. Inclusion/retrieval latencies span from
-/// sub-second (bitswap reads) to multiple block intervals under pool saturation.
-pub const LATENCY_BUCKETS_SECS: &[f64] =
-	&[0.25, 0.5, 1.0, 2.0, 3.0, 4.5, 6.0, 9.0, 12.0, 18.0, 24.0, 36.0, 60.0, 120.0];
+/// Buckets for end-to-end latency histograms in seconds. Retrieval latencies are sub-second on a
+/// warm bitswap peer; inclusion latencies span multiple block intervals under pool saturation.
+const LATENCY_BUCKETS_SECS: &[f64] = &[
+	0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.5, 6.0, 9.0, 12.0, 18.0, 24.0, 36.0, 60.0, 120.0,
+];
 
-const OUTCOME_OK: &str = "ok";
-const OUTCOME_FAILED: &str = "failed";
-const READ_SUCCESS: &str = "success";
-const READ_FAILURE: &str = "failure";
+static METRICS: OnceLock<PrometheusMetrics> = OnceLock::new();
+
+/// The process-wide recorder. Registration happens on first use and cannot fail: every metric name,
+/// label and bucket list is a literal registered on a fresh [`Registry`].
+pub fn metrics() -> &'static PrometheusMetrics {
+	METRICS.get_or_init(|| {
+		PrometheusMetrics::new().expect("metric registration on a fresh registry cannot fail")
+	})
+}
+
+/// How a run ended. Mapped to the `outcome` label of `bulletin_stress_runs_total`.
+#[derive(Debug, Clone, Copy)]
+pub enum RunOutcome {
+	/// Ran to completion without an error.
+	Ok,
+	/// The command returned an error; in loop mode the next run still starts.
+	Failed,
+	/// Interrupted by Ctrl+C — partial results were flushed, so this is neither a clean run
+	/// nor a failure and must not pollute either series.
+	Cancelled,
+}
+
+impl RunOutcome {
+	fn as_label(self) -> &'static str {
+		match self {
+			Self::Ok => "ok",
+			Self::Failed => "failed",
+			Self::Cancelled => "cancelled",
+		}
+	}
+}
 
 /// Which end-to-end duration a latency observation measures. Mapped to the `kind` label.
 #[derive(Debug, Clone, Copy)]
@@ -95,32 +126,36 @@ pub struct PrometheusMetrics {
 	result_read_bytes_per_sec: GaugeVec<F64>,
 }
 
-fn counter_vec(
+fn reg<M: Clone + Collector + 'static>(
 	registry: &Registry,
 	name: &str,
-	help: &str,
-	labels: &[&str],
-) -> Result<CounterVec<U64>> {
-	register(
-		CounterVec::new(Opts::new(name, help), labels)
-			.with_context(|| format!("failed to build {name}"))?,
-		registry,
-	)
-	.with_context(|| format!("failed to register {name}"))
+	metric: Result<M, PrometheusError>,
+) -> Result<M> {
+	metric
+		.and_then(|m| register(m, registry))
+		.with_context(|| format!("failed to register {name}"))
 }
 
-fn gauge_vec_f64(
+fn counter_vec<T: Atomic + 'static>(
 	registry: &Registry,
 	name: &str,
 	help: &str,
 	labels: &[&str],
-) -> Result<GaugeVec<F64>> {
-	register(
-		GaugeVec::new(Opts::new(name, help), labels)
-			.with_context(|| format!("failed to build {name}"))?,
-		registry,
-	)
-	.with_context(|| format!("failed to register {name}"))
+) -> Result<CounterVec<T>> {
+	reg(registry, name, CounterVec::new(Opts::new(name, help), labels))
+}
+
+fn gauge<T: Atomic + 'static>(registry: &Registry, name: &str, help: &str) -> Result<Gauge<T>> {
+	reg(registry, name, Gauge::new(name, help))
+}
+
+fn gauge_vec<T: Atomic + 'static>(
+	registry: &Registry,
+	name: &str,
+	help: &str,
+	labels: &[&str],
+) -> Result<GaugeVec<T>> {
+	reg(registry, name, GaugeVec::new(Opts::new(name, help), labels))
 }
 
 fn histogram_vec(
@@ -130,198 +165,150 @@ fn histogram_vec(
 	labels: &[&str],
 	buckets: &[f64],
 ) -> Result<HistogramVec> {
-	register(
-		HistogramVec::new(HistogramOpts::new(name, help).buckets(buckets.to_vec()), labels)
-			.with_context(|| format!("failed to build {name}"))?,
+	reg(
 		registry,
+		name,
+		HistogramVec::new(HistogramOpts::new(name, help).buckets(buckets.to_vec()), labels),
 	)
-	.with_context(|| format!("failed to register {name}"))
 }
 
 impl PrometheusMetrics {
-	/// Construct a new recorder, registering every metric family on a fresh [`Registry`].
-	pub fn new() -> Result<Self> {
-		let registry = Registry::new();
-
-		let tx_submitted = counter_vec(
-			&registry,
-			"bulletin_stress_tx_submitted_total",
-			"Store extrinsics accepted by the node RPC, incremented at submission time.",
-			&["variant"],
-		)?;
-		let tx_submitted_bytes = counter_vec(
-			&registry,
-			"bulletin_stress_tx_submitted_bytes_total",
-			"Encoded extrinsic bytes accepted by the node RPC (offered load).",
-			&["variant"],
-		)?;
-		let tx_errors = counter_vec(
-			&registry,
-			"bulletin_stress_tx_errors_total",
-			"Submission error/retry events by class; retriable classes (pool_full, banned, ...) \
-			 are counted once per occurrence.",
-			&["variant", "class"],
-		)?;
-		let tx_confirmed = counter_vec(
-			&registry,
-			"bulletin_stress_tx_confirmed_total",
-			"Store transactions confirmed in finalized blocks observed by the block monitor.",
-			&["variant"],
-		)?;
-		let tx_confirmed_bytes = counter_vec(
-			&registry,
-			"bulletin_stress_tx_confirmed_bytes_total",
-			"Uncompressed payload bytes confirmed in finalized blocks.",
-			&["variant"],
-		)?;
-		let blocks_observed = counter_vec(
-			&registry,
-			"bulletin_stress_blocks_observed_total",
-			"Finalized blocks observed by the block monitor during a variant (including empty \
-			 ones).",
-			&["variant"],
-		)?;
-		let block_txs = histogram_vec(
-			&registry,
-			"bulletin_stress_block_txs",
-			"Store transactions per observed finalized block (block fullness distribution).",
-			&["variant"],
-			BLOCK_TXS_BUCKETS,
-		)?;
-
-		let latency = histogram_vec(
-			&registry,
-			"bulletin_stress_latency_seconds",
-			"End-to-end latency by kind (inclusion, finalization, retrieval).",
-			&["variant", "kind"],
-			LATENCY_BUCKETS_SECS,
-		)?;
-
-		let reads = counter_vec(
-			&registry,
-			"bulletin_stress_reads_total",
-			"Bitswap read attempts, partitioned by outcome.",
-			&["variant", "outcome"],
-		)?;
-		let read_bytes = counter_vec(
-			&registry,
-			"bulletin_stress_read_bytes_total",
-			"Bytes downloaded via bitswap reads.",
-			&["variant"],
-		)?;
-
-		let runs = counter_vec(
-			&registry,
-			"bulletin_stress_runs_total",
-			"Completed stress runs, partitioned by outcome (one run = one command invocation or \
-			 one --loop-interval-secs iteration).",
-			&["outcome"],
-		)?;
-		let run_in_progress = register(
-			Gauge::<U64>::new(
-				"bulletin_stress_run_in_progress",
-				"1 while a stress run is executing, 0 between --loop-interval-secs iterations.",
-			)
-			.context("failed to build run_in_progress")?,
-			&registry,
-		)
-		.context("failed to register run_in_progress")?;
-		let run_start_timestamp = register(
-			Gauge::<F64>::new(
-				"bulletin_stress_run_start_timestamp_seconds",
-				"Unix timestamp of the most recent run start.",
-			)
-			.context("failed to build run_start_timestamp")?,
-			&registry,
-		)
-		.context("failed to register run_start_timestamp")?;
-		let variant_active = register(
-			GaugeVec::<U64>::new(
-				Opts::new(
-					"bulletin_stress_variant_active",
-					"1 while the labeled variant is running (timeline segmentation for \
-					 dashboards).",
-				),
-				&["variant"],
-			)
-			.context("failed to build variant_active")?,
-			&registry,
-		)
-		.context("failed to register variant_active")?;
-
-		let result_throughput_tps = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_throughput_tx_per_sec",
-			"Measured throughput of the variant's last completed run (tx/s).",
-			&["variant"],
-		)?;
-		let result_throughput_bps = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_throughput_bytes_per_sec",
-			"Measured throughput of the variant's last completed run (payload bytes/s).",
-			&["variant"],
-		)?;
-		let result_avg_tx_per_block = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_avg_tx_per_block",
-			"Average store transactions per measured block in the variant's last completed run.",
-			&["variant"],
-		)?;
-		let result_peak_tx_per_block = register(
-			GaugeVec::<U64>::new(
-				Opts::new(
-					"bulletin_stress_result_peak_tx_per_block",
-					"Peak store transactions in a single block in the variant's last completed \
-					 run.",
-				),
-				&["variant"],
-			)
-			.context("failed to build result_peak_tx_per_block")?,
-			&registry,
-		)
-		.context("failed to register result_peak_tx_per_block")?;
-		let result_latency = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_latency_seconds",
-			"Latency summary of the variant's last completed run, by kind and quantile.",
-			&["variant", "kind", "quantile"],
-		)?;
-		let result_reads_per_sec = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_reads_per_sec",
-			"Read throughput of the variant's last completed run (successful reads/s).",
-			&["variant"],
-		)?;
-		let result_read_bytes_per_sec = gauge_vec_f64(
-			&registry,
-			"bulletin_stress_result_read_bytes_per_sec",
-			"Read bandwidth of the variant's last completed run (bytes/s).",
-			&["variant"],
-		)?;
+	/// Register every metric family on a fresh [`Registry`]. Use [`metrics`] outside tests.
+	fn new() -> Result<Self> {
+		let r = Registry::new();
 
 		Ok(Self {
-			registry,
-			tx_submitted,
-			tx_submitted_bytes,
-			tx_errors,
-			tx_confirmed,
-			tx_confirmed_bytes,
-			blocks_observed,
-			block_txs,
-			latency,
-			reads,
-			read_bytes,
-			runs,
-			run_in_progress,
-			run_start_timestamp,
-			variant_active,
-			result_throughput_tps,
-			result_throughput_bps,
-			result_avg_tx_per_block,
-			result_peak_tx_per_block,
-			result_latency,
-			result_reads_per_sec,
-			result_read_bytes_per_sec,
+			tx_submitted: counter_vec(
+				&r,
+				"bulletin_stress_tx_submitted_total",
+				"Store extrinsics accepted by the node RPC, incremented at submission time.",
+				&["variant"],
+			)?,
+			tx_submitted_bytes: counter_vec(
+				&r,
+				"bulletin_stress_tx_submitted_bytes_total",
+				"Encoded extrinsic bytes accepted by the node RPC (offered load).",
+				&["variant"],
+			)?,
+			tx_errors: counter_vec(
+				&r,
+				"bulletin_stress_tx_errors_total",
+				"Submission error/retry events by class; retriable classes (pool_full, banned, ...) \
+				 are counted once per occurrence.",
+				&["variant", "class"],
+			)?,
+			tx_confirmed: counter_vec(
+				&r,
+				"bulletin_stress_tx_confirmed_total",
+				"Store transactions confirmed in finalized blocks observed by the block monitor.",
+				&["variant"],
+			)?,
+			tx_confirmed_bytes: counter_vec(
+				&r,
+				"bulletin_stress_tx_confirmed_bytes_total",
+				"Uncompressed payload bytes confirmed in finalized blocks.",
+				&["variant"],
+			)?,
+			blocks_observed: counter_vec(
+				&r,
+				"bulletin_stress_blocks_observed_total",
+				"Finalized blocks observed by the block monitor during a variant (including empty \
+				 ones).",
+				&["variant"],
+			)?,
+			block_txs: histogram_vec(
+				&r,
+				"bulletin_stress_block_txs",
+				"Store transactions per observed finalized block (block fullness distribution).",
+				&["variant"],
+				BLOCK_TXS_BUCKETS,
+			)?,
+			latency: histogram_vec(
+				&r,
+				"bulletin_stress_latency_seconds",
+				"End-to-end latency by kind (inclusion, finalization, retrieval).",
+				&["variant", "kind"],
+				LATENCY_BUCKETS_SECS,
+			)?,
+			reads: counter_vec(
+				&r,
+				"bulletin_stress_reads_total",
+				"Bitswap read attempts, partitioned by outcome.",
+				&["variant", "outcome"],
+			)?,
+			read_bytes: counter_vec(
+				&r,
+				"bulletin_stress_read_bytes_total",
+				"Bytes downloaded via bitswap reads.",
+				&["variant"],
+			)?,
+			runs: counter_vec(
+				&r,
+				"bulletin_stress_runs_total",
+				"Completed stress runs, partitioned by outcome (one run = one command invocation \
+				 or one --loop-interval-secs iteration).",
+				&["outcome"],
+			)?,
+			run_in_progress: gauge(
+				&r,
+				"bulletin_stress_run_in_progress",
+				"1 while a stress run is executing, 0 between --loop-interval-secs iterations.",
+			)?,
+			run_start_timestamp: gauge(
+				&r,
+				"bulletin_stress_run_start_timestamp_seconds",
+				"Unix timestamp of the most recent run start.",
+			)?,
+			variant_active: gauge_vec(
+				&r,
+				"bulletin_stress_variant_active",
+				"1 while the labeled variant is running (timeline segmentation for dashboards).",
+				&["variant"],
+			)?,
+			result_throughput_tps: gauge_vec(
+				&r,
+				"bulletin_stress_result_throughput_tx_per_sec",
+				"Measured throughput of the variant's last completed run (tx/s).",
+				&["variant"],
+			)?,
+			result_throughput_bps: gauge_vec(
+				&r,
+				"bulletin_stress_result_throughput_bytes_per_sec",
+				"Measured throughput of the variant's last completed run (payload bytes/s).",
+				&["variant"],
+			)?,
+			result_avg_tx_per_block: gauge_vec(
+				&r,
+				"bulletin_stress_result_avg_tx_per_block",
+				"Average store transactions per measured block in the variant's last completed \
+				 run.",
+				&["variant"],
+			)?,
+			result_peak_tx_per_block: gauge_vec(
+				&r,
+				"bulletin_stress_result_peak_tx_per_block",
+				"Peak store transactions in a single block in the variant's last completed run.",
+				&["variant"],
+			)?,
+			result_latency: gauge_vec(
+				&r,
+				"bulletin_stress_result_latency_seconds",
+				"Latency summary of the variant's last completed run, by kind and quantile.",
+				&["variant", "kind", "quantile"],
+			)?,
+			result_reads_per_sec: gauge_vec(
+				&r,
+				"bulletin_stress_result_reads_per_sec",
+				"Read throughput of the variant's last completed run (successful reads/s).",
+				&["variant"],
+			)?,
+			result_read_bytes_per_sec: gauge_vec(
+				&r,
+				"bulletin_stress_result_read_bytes_per_sec",
+				"Read bandwidth of the variant's last completed run (bytes/s).",
+				&["variant"],
+			)?,
+			registry: r,
 		})
 	}
 
@@ -329,11 +316,6 @@ impl PrometheusMetrics {
 	#[cfg(test)]
 	pub fn for_tests() -> Self {
 		Self::new().expect("metric registration on a fresh registry never fails")
-	}
-
-	/// Return the registry — used to spawn the exposition HTTP server ([`serve`]).
-	pub fn registry(&self) -> &Registry {
-		&self.registry
 	}
 
 	// ---- run lifecycle ---------------------------------------------------
@@ -346,10 +328,9 @@ impl PrometheusMetrics {
 	}
 
 	/// Mark the current run as finished and count its outcome.
-	pub fn run_finished(&self, ok: bool) {
+	pub fn run_finished(&self, outcome: RunOutcome) {
 		self.run_in_progress.set(0);
-		let outcome = if ok { OUTCOME_OK } else { OUTCOME_FAILED };
-		self.runs.with_label_values(&[outcome]).inc();
+		self.runs.with_label_values(&[outcome.as_label()]).inc();
 	}
 
 	/// Flag `variant` as (in)active — drives dashboard timeline panels.
@@ -382,9 +363,22 @@ impl PrometheusMetrics {
 
 	/// Record a single end-to-end latency observation.
 	pub fn observe_latency(&self, variant: &str, kind: LatencyKind, duration: Duration) {
-		self.latency
-			.with_label_values(&[variant, kind.as_label()])
-			.observe(duration.as_secs_f64());
+		self.observe_latency_repeated(variant, kind, duration, 1);
+	}
+
+	/// Record the same latency `count` times (batched reads that share one measured duration).
+	pub fn observe_latency_repeated(
+		&self,
+		variant: &str,
+		kind: LatencyKind,
+		duration: Duration,
+		count: usize,
+	) {
+		let hist = self.latency.with_label_values(&[variant, kind.as_label()]);
+		let secs = duration.as_secs_f64();
+		for _ in 0..count {
+			hist.observe(secs);
+		}
 	}
 
 	/// Record a batch of latency observations (scenarios that collect `Vec<Duration>`).
@@ -399,8 +393,9 @@ impl PrometheusMetrics {
 
 	/// Record `count` bitswap read completions and `bytes` downloaded.
 	pub fn inc_reads(&self, variant: &str, ok: bool, count: u64, bytes: u64) {
-		let outcome = if ok { READ_SUCCESS } else { READ_FAILURE };
-		self.reads.with_label_values(&[variant, outcome]).inc_by(count);
+		self.reads
+			.with_label_values(&[variant, if ok { "success" } else { "failure" }])
+			.inc_by(count);
 		if bytes > 0 {
 			self.read_bytes.with_label_values(&[variant]).inc_by(bytes);
 		}
@@ -410,8 +405,7 @@ impl PrometheusMetrics {
 
 	/// Mirror a completed [`ScenarioResult`] into the `bulletin_stress_result_*` gauges.
 	pub fn record_result(&self, result: &ScenarioResult) {
-		let variant =
-			if result.variant.is_empty() { result.name.as_str() } else { result.variant.as_str() };
+		let variant = result.variant.as_str();
 		self.result_throughput_tps
 			.with_label_values(&[variant])
 			.set(result.throughput_tps);
@@ -458,10 +452,10 @@ impl PrometheusMetrics {
 	}
 }
 
-/// Spawn an HTTP exposition server on `addr` serving `/metrics` from the recorder's registry.
-/// The returned future runs until the underlying hyper server exits (typically: never).
-pub async fn serve(addr: SocketAddr, registry: Registry) -> Result<()> {
-	substrate_prometheus_endpoint::init_prometheus(addr, registry)
+/// Serve `/metrics` for the global recorder on `addr`. The returned future runs until the
+/// underlying hyper server exits (typically: never).
+pub async fn serve(addr: SocketAddr) -> Result<()> {
+	substrate_prometheus_endpoint::init_prometheus(addr, metrics().registry.clone())
 		.await
 		.map_err(|e| anyhow::anyhow!("prometheus exposition server failed: {e}"))
 }
@@ -473,7 +467,7 @@ mod tests {
 
 	fn encode(m: &PrometheusMetrics) -> String {
 		let mut buf = Vec::new();
-		TextEncoder::new().encode(&m.registry().gather(), &mut buf).expect("encode");
+		TextEncoder::new().encode(&m.registry.gather(), &mut buf).expect("encode");
 		String::from_utf8(buf).expect("utf8")
 	}
 
@@ -487,7 +481,7 @@ mod tests {
 		m.observe_latency("hop-full-cycle", LatencyKind::Inclusion, Duration::from_secs(6));
 		m.inc_reads("bitswap-bulk-read", true, 3, 3 * 128 * 1024);
 		m.run_started();
-		m.run_finished(true);
+		m.run_finished(RunOutcome::Ok);
 		m.set_variant_active("1KB", true);
 		m.record_result(&ScenarioResult {
 			name: "block-cap: Block Capacity (1KB)".into(),
@@ -555,25 +549,30 @@ mod tests {
 	#[test]
 	fn run_outcomes_are_separate_series() {
 		let m = PrometheusMetrics::for_tests();
-		m.run_finished(true);
-		m.run_finished(true);
-		m.run_finished(false);
+		m.run_finished(RunOutcome::Ok);
+		m.run_finished(RunOutcome::Ok);
+		m.run_finished(RunOutcome::Failed);
+		m.run_finished(RunOutcome::Cancelled);
 
 		let txt = encode(&m);
 		assert!(txt.contains("bulletin_stress_runs_total{outcome=\"ok\"} 2"));
 		assert!(txt.contains("bulletin_stress_runs_total{outcome=\"failed\"} 1"));
+		assert!(txt.contains("bulletin_stress_runs_total{outcome=\"cancelled\"} 1"));
 	}
 
 	#[test]
-	fn record_result_falls_back_to_name_when_variant_empty() {
+	fn repeated_latency_observations_share_one_series() {
 		let m = PrometheusMetrics::for_tests();
-		m.record_result(&ScenarioResult {
-			name: "Renew stress".into(),
-			throughput_tps: 10.0,
-			..Default::default()
-		});
+		m.observe_latency_repeated(
+			"bitswap-bulk-read",
+			LatencyKind::Retrieval,
+			Duration::from_millis(40),
+			3,
+		);
+
 		let txt = encode(&m);
-		assert!(txt
-			.contains("bulletin_stress_result_throughput_tx_per_sec{variant=\"Renew stress\"} 10"));
+		assert!(txt.contains(
+			"bulletin_stress_latency_seconds_count{kind=\"retrieval\",variant=\"bitswap-bulk-read\"} 3"
+		));
 	}
 }

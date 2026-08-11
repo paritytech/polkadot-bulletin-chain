@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use crate::{
 	client,
 	hop::{self, RecipientKeypair},
-	metrics::{LatencyKind, PrometheusMetrics},
+	metrics::{metrics, LatencyKind},
 	report::{self, ScenarioResult},
 };
 
@@ -49,7 +49,6 @@ pub async fn run_submit_throughput(
 	payload_size: usize,
 	concurrency: usize,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -130,11 +129,12 @@ pub async fn run_submit_throughput(
 	let tps =
 		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
-	let variant = format!("hop-submit-{}", format_payload_label(payload_size));
-	metrics.observe_latencies(&variant, LatencyKind::Inclusion, &lats);
+	let label = format_payload_label(payload_size);
+	let variant = format!("hop-submit-{label}");
+	metrics().observe_latencies(&variant, LatencyKind::Inclusion, &lats);
 
 	let result = ScenarioResult {
-		name: format!("HOP submit {}", format_payload_label(payload_size)),
+		name: format!("HOP submit {label}"),
 		variant,
 		duration,
 		total_submitted: submitted,
@@ -183,7 +183,6 @@ pub async fn run_full_cycle(
 	payload_size: usize,
 	concurrency: usize,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -301,12 +300,12 @@ pub async fn run_full_cycle(
 	};
 
 	let variant = "hop-full-cycle";
-	metrics.observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
-	metrics.observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
 
 	let result = ScenarioResult {
 		name: format!("HOP full-cycle {}", format_payload_label(payload_size)),
-		variant: variant.to_string(),
+		variant: variant.into(),
 		duration: total_duration,
 		total_submitted: submitted,
 		total_confirmed: claimed,
@@ -335,7 +334,6 @@ pub async fn run_group(
 	payload_size: usize,
 	num_recipients: usize,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -435,12 +433,12 @@ pub async fn run_group(
 	};
 
 	let variant = "hop-group";
-	metrics.observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
-	metrics.observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
 
 	let result = ScenarioResult {
 		name: format!("HOP group ×{num_recipients} {}", format_payload_label(payload_size)),
-		variant: variant.to_string(),
+		variant: variant.into(),
 		duration: claim_duration,
 		total_submitted: submitted.len() as u64,
 		total_confirmed: claimed,
@@ -472,7 +470,6 @@ pub async fn run_pool_fill(
 	ws_urls: &[&str],
 	payload_size: usize,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -557,7 +554,7 @@ pub async fn run_pool_fill(
 		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
 	let variant = "hop-pool-fill";
-	metrics.observe_latencies(variant, LatencyKind::Inclusion, &lats);
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &lats);
 
 	let result = ScenarioResult {
 		name: format!(
@@ -565,7 +562,7 @@ pub async fn run_pool_fill(
 			format_payload_label(payload_size),
 			if pool_full { " (full)" } else { "" }
 		),
-		variant: variant.to_string(),
+		variant: variant.into(),
 		duration,
 		total_submitted: submitted,
 		total_confirmed: submitted,
@@ -604,7 +601,6 @@ pub async fn run_mixed(
 	concurrency: usize,
 	duration_secs: u64,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -781,12 +777,12 @@ pub async fn run_mixed(
 	let claim_tps = claimed as f64 / duration.as_secs_f64();
 
 	let variant = "hop-mixed";
-	metrics.observe_latencies(variant, LatencyKind::Inclusion, &s_lats);
-	metrics.observe_latencies(variant, LatencyKind::Retrieval, &c_lats);
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &s_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &c_lats);
 
 	let result = ScenarioResult {
 		name: format!("HOP mixed {}s {}", duration_secs, format_payload_label(payload_size)),
-		variant: variant.to_string(),
+		variant: variant.into(),
 		duration,
 		total_submitted: submitted,
 		total_confirmed: claimed,
@@ -947,7 +943,6 @@ pub async fn run_hop_sweep(
 	num_recipients: usize,
 	duration_secs: u64,
 	submitter: &Keypair,
-	metrics: &PrometheusMetrics,
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
@@ -968,7 +963,6 @@ pub async fn run_hop_sweep(
 					*size,
 					concurrency,
 					submitter,
-					metrics,
 					results,
 					on_result,
 					cancel,
@@ -984,7 +978,6 @@ pub async fn run_hop_sweep(
 				size,
 				concurrency,
 				submitter,
-				metrics,
 				results,
 				on_result,
 				cancel,
@@ -993,22 +986,12 @@ pub async fn run_hop_sweep(
 		},
 		"group" => {
 			let size = payload_size.unwrap_or(100 * 1024);
-			run_group(
-				ws_urls,
-				items,
-				size,
-				num_recipients,
-				submitter,
-				metrics,
-				results,
-				on_result,
-				cancel,
-			)
-			.await?;
+			run_group(ws_urls, items, size, num_recipients, submitter, results, on_result, cancel)
+				.await?;
 		},
 		"pool-fill" => {
 			let size = payload_size.unwrap_or(10 * 1024);
-			run_pool_fill(ws_urls, size, submitter, metrics, results, on_result, cancel).await?;
+			run_pool_fill(ws_urls, size, submitter, results, on_result, cancel).await?;
 		},
 		"mixed" => {
 			let size = payload_size.unwrap_or(10 * 1024);
@@ -1018,7 +1001,6 @@ pub async fn run_hop_sweep(
 				concurrency,
 				duration_secs,
 				submitter,
-				metrics,
 				results,
 				on_result,
 				cancel,
@@ -1042,7 +1024,6 @@ pub async fn run_hop_sweep(
 					*size,
 					concurrency,
 					submitter,
-					metrics,
 					results,
 					on_result,
 					cancel,
@@ -1057,7 +1038,6 @@ pub async fn run_hop_sweep(
 					size,
 					concurrency,
 					submitter,
-					metrics,
 					results,
 					on_result,
 					cancel,
@@ -1072,7 +1052,6 @@ pub async fn run_hop_sweep(
 					size,
 					num_recipients,
 					submitter,
-					metrics,
 					results,
 					on_result,
 					cancel,
@@ -1087,7 +1066,6 @@ pub async fn run_hop_sweep(
 					concurrency,
 					duration_secs,
 					submitter,
-					metrics,
 					results,
 					on_result,
 					cancel,

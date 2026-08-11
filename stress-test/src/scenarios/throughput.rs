@@ -13,7 +13,7 @@ use crate::{
 	accounts::NonceTracker,
 	chain_info::ChainLimits,
 	client::BulletinConfig,
-	metrics::PrometheusMetrics,
+	metrics::metrics,
 	pipeline::{self, IterationPlan, PayloadSizeMix, StorePayloadMode, StressWorkItem},
 	report::{BlockStats, ScenarioResult, SubmissionStats},
 	store,
@@ -261,7 +261,6 @@ pub async fn run_block_capacity_sweep(
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
-	metrics: &Arc<PrometheusMetrics>,
 ) -> Result<()> {
 	let iteration_blocks = iteration_blocks.max(1);
 	let block_usable_bytes = chain_limits.normal_block_length as usize;
@@ -364,7 +363,7 @@ pub async fn run_block_capacity_sweep(
 			plans.len(),
 			crate::authorize::AUTHORIZE_BATCH_SIZE,
 		);
-		metrics.set_variant_active(label, true);
+		metrics().set_variant_active(label, true);
 		let variant_result: Result<ScenarioResult> = async {
 			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
 			let (work_tx, work_rx) =
@@ -396,7 +395,6 @@ pub async fn run_block_capacity_sweep(
 				nonce_tracker,
 				cancel,
 				Some(target_blocks),
-				metrics,
 				label,
 			)
 			.await;
@@ -448,7 +446,7 @@ pub async fn run_block_capacity_sweep(
 				on_result(results);
 			},
 		}
-		metrics.set_variant_active(label, false);
+		metrics().set_variant_active(label, false);
 
 		// Drain the transaction pool before the next variant (skip if stopping).
 		if cancel.load(Ordering::Relaxed) {
