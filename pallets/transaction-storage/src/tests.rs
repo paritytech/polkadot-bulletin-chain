@@ -2292,8 +2292,7 @@ fn can_store_mirrors_store_validation() {
 }
 
 /// Each field of the runtime-API summary must come from the matching extent counter — the
-/// two `u64` pairs and the two `u32` pairs are otherwise easy to transpose. `charged_bytes`
-/// is what the runtime supplies for its own `extra`.
+/// two `u64` pairs and the two `u32` pairs are otherwise easy to transpose.
 #[test]
 fn to_account_authorization_maps_every_field() {
 	let authorization = super::Authorization {
@@ -2307,7 +2306,7 @@ fn to_account_authorization_maps_every_field() {
 		expiration: 6u32,
 	};
 
-	let summary = authorization.to_account_authorization(|extra| *extra);
+	let summary = authorization.to_account_authorization(authorization.extent.extra);
 
 	assert_eq!(summary.transactions_used, 1);
 	assert_eq!(summary.transactions_allowance, 2);

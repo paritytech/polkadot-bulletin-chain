@@ -990,7 +990,7 @@ impl_runtime_apis! {
 			use pallet_bulletin_transaction_storage::AuthorizationScope;
 
 			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
-				.map(|auth| auth.to_account_authorization(|extra| extra.bytes_permanent))
+				.map(|auth| auth.to_account_authorization(auth.extent.extra.bytes_permanent))
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {

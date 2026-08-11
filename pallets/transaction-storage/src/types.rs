@@ -132,17 +132,17 @@ impl<BlockNumber: PartialOrd + Copy, Extra> Authorization<BlockNumber, Extra> {
 		now >= self.expiration
 	}
 
-	/// Project into the runtime-API summary. `charged_bytes` reads the opaque `extra`,
-	/// which only the runtime can interpret.
+	/// Project into the runtime-API summary. Only the runtime can read the opaque
+	/// `extra`, so it passes `bytes_permanent_used` in.
 	pub fn to_account_authorization(
 		&self,
-		charged_bytes: impl FnOnce(&Extra) -> u64,
+		bytes_permanent_used: u64,
 	) -> AccountAuthorization<BlockNumber> {
 		AccountAuthorization {
 			expires_at: self.expiration,
 			bytes_allowance: self.extent.bytes_allowance,
 			bytes_used: self.extent.bytes,
-			bytes_permanent_used: charged_bytes(&self.extent.extra),
+			bytes_permanent_used,
 			transactions_allowance: self.extent.transactions_allowance,
 			transactions_used: self.extent.transactions,
 		}
