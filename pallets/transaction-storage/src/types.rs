@@ -23,6 +23,7 @@ use bulletin_transaction_storage_primitives::{
 	ContentHash,
 };
 use codec::{Decode, Encode, MaxEncodedLen};
+use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 #[cfg(feature = "runtime-benchmarks")]
 use polkadot_sdk_frame::deps::frame_benchmarking;
 use polkadot_sdk_frame::{
@@ -129,6 +130,22 @@ impl<BlockNumber: PartialOrd + Copy, Extra> Authorization<BlockNumber, Extra> {
 	/// permits `store`/`renew` and is eligible for `remove_expired_*`.
 	pub fn expired(&self, now: BlockNumber) -> bool {
 		now >= self.expiration
+	}
+
+	/// Project into the runtime-API summary. `extra` is opaque here, so the caller
+	/// passes `bytes_permanent_used` in.
+	pub fn to_account_authorization(
+		&self,
+		bytes_permanent_used: u64,
+	) -> AccountAuthorization<BlockNumber> {
+		AccountAuthorization {
+			expires_at: self.expiration,
+			bytes_allowance: self.extent.bytes_allowance,
+			bytes_used: self.extent.bytes,
+			bytes_permanent_used,
+			transactions_allowance: self.extent.transactions_allowance,
+			transactions_used: self.extent.transactions,
+		}
 	}
 }
 
