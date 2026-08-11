@@ -32,7 +32,7 @@
 //! ## Cross-pallet contract
 //!
 //! The storage pallet has no renewal vocabulary; this pallet owns all of it through
-//! two opaque payloads the runtime wires ([`EntryKind`] as `EntryMeta`,
+//! two opaque payloads the runtime wires (an `EntryMeta` implementing [`RenewMeta`],
 //! [`PermanentExtent`] as `AuthorizationExtra`):
 //!
 //! - **Down → storage:** dispatchables use the storage pallet's public API; the per-account renew
@@ -67,7 +67,7 @@ mod mock;
 mod tests;
 
 pub use pallet::*;
-pub use types::{EntryKind, PermanentExtent, RenewalData};
+pub use types::{PermanentExtent, RenewMeta, RenewalData};
 pub use weights::WeightInfo;
 
 use bulletin_transaction_storage_primitives::ContentHash;
@@ -76,7 +76,6 @@ use pallet_bulletin_transaction_storage::{
 	OnObsoleteTransactions, TransactionInfoFor, TransactionRef, ValidTransactionParams,
 	BAD_DATA_SIZE,
 };
-use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 use polkadot_sdk_frame::{deps::*, prelude::*};
 
 #[cfg(feature = "try-runtime")]
@@ -117,7 +116,7 @@ pub mod pallet {
 	pub trait Config:
 		frame_system::Config
 		+ pallet_bulletin_transaction_storage::Config<
-			EntryMeta = EntryKind,
+			EntryMeta: RenewMeta,
 			AuthorizationExtra = PermanentExtent,
 		>
 	{
@@ -126,7 +125,7 @@ pub mod pallet {
 		/// Weight info for renewal dispatchables.
 		type WeightInfo: WeightInfo;
 		/// Cap, in bytes, on total permanent storage (via `renew`) committed across
-		/// all authorizations. Tracks chain-wide capacity for permanent data.
+		/// all authorizations.
 		#[pallet::constant]
 		type MaxPermanentStorageSize: Get<u64>;
 		/// Pool params for every renewal call. One prefix, so at most one of `renew`,
@@ -481,7 +480,7 @@ impl<T: Config> Pallet<T> {
 		let extrinsic_index =
 			<frame_system::Pallet<T>>::extrinsic_index().ok_or(Error::<T>::BadContext)?;
 		pallet_bulletin_transaction_storage::Pallet::<T>::with_block_transactions(|entries| {
-			entries.renew(&info, extrinsic_index, EntryKind::Renew)
+			entries.renew(&info, extrinsic_index, T::EntryMeta::renew())
 		})
 		.ok_or(Error::<T>::TooManyTransactions)
 	}
@@ -528,7 +527,7 @@ impl<T: Config> Pallet<T> {
 				let charged =
 					was_paid || Self::check_renew_authorization(&scope, tx_info.size, true).is_ok();
 				let new_index = if charged {
-					entries.renew(&tx_info, extrinsic_index, EntryKind::Renew)
+					entries.renew(&tx_info, extrinsic_index, T::EntryMeta::renew())
 				} else {
 					None
 				};
@@ -691,25 +690,6 @@ impl<T: Config> Pallet<T> {
 			.then(|| <T as Config>::RenewTxParams::get().provides(info.content_hash)))
 	}
 
-	/// Active-authorization summary for the `BulletinTransactionStorageApi` runtime
-	/// API; composed here because `bytes_permanent_used` reads [`PermanentExtent`].
-	/// `None` when missing or expired.
-	pub fn account_authorization(
-		who: T::AccountId,
-	) -> Option<AccountAuthorization<BlockNumberFor<T>>> {
-		let auth = pallet_bulletin_transaction_storage::Pallet::<T>::get_active_authorization(
-			&AuthorizationScope::Account(who),
-		)?;
-		Some(AccountAuthorization {
-			expires_at: auth.expiration,
-			bytes_allowance: auth.extent.bytes_allowance,
-			bytes_used: auth.extent.bytes,
-			bytes_permanent_used: auth.extent.extra.bytes_permanent,
-			transactions_allowance: auth.extent.transactions_allowance,
-			transactions_used: auth.extent.transactions,
-		})
-	}
-
 	/// `true` iff `renew(entry)` would currently pass validation for `who`: `entry`
 	/// resolves, size in range, unexpired authorization, and both hard caps clear.
 	pub fn can_renew(who: &T::AccountId, entry: &TransactionRef<BlockNumberFor<T>>) -> bool {
@@ -742,7 +722,7 @@ impl<T: Config> Pallet<T> {
 			|acc, (_, entries)| {
 				entries
 					.iter()
-					.filter(|t| t.meta == EntryKind::Renew)
+					.filter(|t| t.meta.is_renew())
 					.fold(acc, |inner, t| inner.saturating_add(t.size as u64))
 			},
 		);
@@ -794,17 +774,17 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-/// Obsolete-block sweep callback: decrements the chain-wide counter for aged-out
+/// Obsolete-block sweep callback: decrements [`PermanentStorageUsed`] for aged-out
 /// `Renew` entries and queues `is_latest` entries with a [`Renewals`] registration
 /// into [`PendingAutoRenewals`] for the same block's inherent.
-impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, EntryKind> for Pallet<T> {
+impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pallet<T> {
 	fn handle_obsolete(_obsolete: BlockNumberFor<T>, items: &[(TransactionInfoFor<T>, bool)]) {
 		// Renewed bytes leaving the retention window free up permanent capacity.
 		// Stale shadows (`is_latest == false`) count too: their sizes were charged
 		// when their renew was consumed.
 		let renewed_sum: u64 = items
 			.iter()
-			.filter(|(tx_info, _)| tx_info.meta == EntryKind::Renew)
+			.filter(|(tx_info, _)| tx_info.meta.is_renew())
 			.fold(0u64, |acc, (tx_info, _)| acc.saturating_add(tx_info.size as u64));
 		if renewed_sum > 0 {
 			Self::update_permanent_storage_used(|used| used.saturating_sub(renewed_sum));
@@ -888,7 +868,7 @@ impl<T: Config> txs_benchmarking::BenchmarkHelper<T> for RenewalBenchmarkHelper 
 	}
 
 	fn worst_case_entry_meta() -> T::EntryMeta {
-		EntryKind::Renew
+		T::EntryMeta::renew()
 	}
 
 	fn register_worst_case_entry(content_hash: ContentHash) {
