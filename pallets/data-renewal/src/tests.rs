@@ -2994,7 +2994,7 @@ fn active_authorization_carries_the_runtime_api_summary_fields() {
 		run_to_block(1, || None);
 		let who = 1;
 		let scope = AuthorizationScope::Account(who);
-		let active = || txs::Pallet::<Test>::get_active_authorization(&scope);
+		let active = || TransactionStorage::get_active_authorization(&scope);
 
 		// No authorization yet.
 		assert!(active().is_none());
