@@ -1457,10 +1457,10 @@ pub mod pallet {
 		) -> Option<BoundedVec<TransactionInfoFor<T>, T::MaxBlockTransactions>> {
 			let raw = sp_io::storage::get(&Transactions::<T>::hashed_key_for(block))?;
 
-			if let Ok(v3) =
+			if let Ok(txs) =
 				BoundedVec::<TransactionInfoFor<T>, T::MaxBlockTransactions>::decode(&mut &raw[..])
 			{
-				return Some(v3);
+				return Some(txs);
 			}
 
 			let v2 = BoundedVec::<
