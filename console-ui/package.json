@@ -36,14 +36,14 @@
     "clsx": "^2.1.1",
     "helia": "^7.1.3",
     "ipfs-unixfs": "^12.0.0",
-    "lucide-react": "^1.28.0",
+    "lucide-react": "^1.30.0",
     "multiformats": "^14.0.4",
     "polkadot-api": "^2.1.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
     "rxjs": "^7.8.1",
-    "smoldot": "^3.3.2",
+    "smoldot": "^3.4.0",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
@@ -56,6 +56,6 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-lsp": "^0.0.7",
-    "vite": "^8.2.0"
+    "vite": "^8.2.1"
   }
 }
