@@ -990,9 +990,6 @@ impl_runtime_apis! {
 			use pallet_bulletin_transaction_storage::AuthorizationScope;
 			use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 
-			// The storage pallet owns every field but `bytes_permanent_used`, which lives in
-			// the opaque `AuthorizationExtra` it never interprets. This is the one place both
-			// halves are named, so the summary is composed here rather than in either pallet.
 			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
 				.map(|auth| AccountAuthorization {
 					expires_at: auth.expiration,
