@@ -19,8 +19,11 @@
 
 #![allow(deprecated)]
 
-use crate::{mock::*, EntryKind, PendingAutoRenewals, PermanentExtent, RenewalData, Renewals};
-use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
+use crate::{mock::*, PendingAutoRenewals, PermanentExtent, RenewalData, Renewals};
+use bulletin_transaction_storage_primitives::{
+	cids::{CidConfig, HashingAlgorithm},
+	EntryKind,
+};
 use codec::{Decode, Encode};
 use pallet_bulletin_transaction_storage::{
 	self as txs, pallet::Origin, AuthorizationExtent, AuthorizationScope, TransactionInfo,
@@ -288,6 +291,31 @@ fn relocation_migration_try_runtime_checks_pass() {
 		let extent = txs::Authorizations::<Test>::get(&scope).expect("still present").extent;
 		assert_eq!(extent.extra.bytes_permanent, 700);
 		assert_eq!(extent.bytes_allowance, 900);
+	});
+}
+
+/// The try-runtime checks must also pass on a chain that already ran the relocation and has
+/// taken renewals since: the old prefix is empty, so the scan moves nothing, and the entries
+/// under the new prefix are the chain's own — not evidence of a dropped entry.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn relocation_migration_try_runtime_checks_pass_when_already_relocated() {
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+	new_test_ext().execute_with(|| {
+		let hash: ContentHash = BlakeTwo256::hash(b"already-relocated").into();
+		Renewals::<Test>::insert(
+			hash,
+			RenewalData::<u64> { account: 7, recurring: true, paid: false },
+		);
+
+		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
+			.expect("pre_upgrade must accept already-relocated state");
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
+			.expect("post_upgrade checks must pass");
+
+		assert!(Renewals::<Test>::get(hash).is_some(), "pre-existing entry must survive");
 	});
 }
 
@@ -1904,8 +1932,8 @@ fn renew_bumps_permanent_used_and_records_kind() {
 }
 
 /// `renew` rejects with [`crate::PERMANENT_ALLOWANCE_EXCEEDED`] when the per-account hard cap is
-/// reached: `bytes_permanent + size > bytes_allowance`. The chain-wide counter must remain
-/// untouched.
+/// reached: `bytes_permanent + size > bytes_allowance`. [`crate::PermanentStorageUsed`] must
+/// remain untouched.
 #[test]
 fn renew_rejects_when_per_account_allowance_exceeded() {
 	new_test_ext().execute_with(|| {
@@ -2110,20 +2138,18 @@ fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 	});
 }
 
-/// `EntryKind` must keep the retired `TransactionKind`'s exact encoding (1 byte;
-/// `Store = 0`, `Renew = 1`): live `Transactions` entries written before the split
-/// decode through `TransactionInfo<EntryKind>` without a storage migration.
+/// Live `Transactions` entries carry this exact layout (1-byte `kind` tail) and must
+/// decode through `TransactionInfo<EntryKind>` as-is; the enum's byte values are
+/// pinned in the primitives' `entry_kind_encoding_is_frozen`.
 #[test]
-fn entry_kind_encoding_is_frozen() {
+fn transaction_info_encoding_matches_pre_split_layout() {
+	use crate::RenewMeta;
 	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
 
-	assert_eq!(EntryKind::Store.encode(), vec![0u8]);
-	assert_eq!(EntryKind::Renew.encode(), vec![1u8]);
-	assert_eq!(EntryKind::default(), EntryKind::Store);
+	// This pallet's writes must hit the frozen `Renew` byte.
+	assert_eq!(EntryKind::renew(), EntryKind::Renew);
 
-	// Frozen copy of the pre-split `TransactionInfo` layout (tail field was
-	// `kind: TransactionKind`). Bytes written by the old runtime must decode
-	// as the new generic type.
+	// The layout live entries were encoded with.
 	#[derive(Encode)]
 	struct FrozenTransactionInfo {
 		chunk_root: <BlakeTwo256 as Hash>::Output,
@@ -2133,7 +2159,7 @@ fn entry_kind_encoding_is_frozen() {
 		size: u32,
 		extrinsic_index: u32,
 		block_chunks: u32,
-		kind: u8, // TransactionKind::Renew
+		kind: u8, // EntryKind::Renew
 	}
 	let frozen = FrozenTransactionInfo {
 		chunk_root: BlakeTwo256::hash(b"root"),
@@ -2154,7 +2180,7 @@ fn entry_kind_encoding_is_frozen() {
 }
 
 /// Renew emits `PermanentStorageUsedUpdated { used }` so off-chain capacity-planning
-/// dashboards can track the chain-wide counter without polling storage.
+/// dashboards can track [`crate::PermanentStorageUsed`] without polling storage.
 #[test]
 fn renew_emits_permanent_storage_used_updated() {
 	new_test_ext().execute_with(|| {
@@ -2384,7 +2410,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
 
-		// Cycle 1 (prepaid) fires free at block 12 — chain-wide counter is not bumped.
+		// Cycle 1 (prepaid) fires free at block 12 — PermanentStorageUsed is not bumped.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),

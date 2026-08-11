@@ -170,8 +170,8 @@ pub mod pallet {
 		type RemoveExhaustedAuthorizerTxParams: Get<ValidTransactionParams>;
 		/// Opaque per-entry payload on [`TransactionInfo`], never interpreted here:
 		/// `store` writes `Default::default()`, expiry hands it back through
-		/// [`Config::OnObsoleteTransactions`]. Wire `()` or the renewal pallet's
-		/// `EntryKind`.
+		/// [`Config::OnObsoleteTransactions`]. Wire `()` or the primitives'
+		/// [`EntryKind`](bulletin_transaction_storage_primitives::EntryKind).
 		type EntryMeta: Member + codec::FullCodec + MaxEncodedLen + scale_info::TypeInfo + Default;
 		/// Opaque per-authorization payload inside [`AuthorizationExtent`], never
 		/// interpreted here: reset with the other counters, mutated only through
@@ -1172,9 +1172,9 @@ pub mod pallet {
 		/// Authorize data storage for a scope. Behaviour for an existing entry:
 		/// - **Expired-but-present**: re-grant the caps and reset **all** consumed counters
 		///   (`bytes`, `transactions`, and the opaque `extra`) to their defaults. The new window is
-		///   fully independent of the old one. Pre-existing renewed bytes from the old window are
-		///   tracked by the renewal pallet's chain-wide counter and aged out when their
-		///   `Transactions` block becomes obsolete; they do not spend the new window's quota.
+		///   fully independent of the old one. Pre-existing renewed bytes from the old window stay
+		///   in the renewal pallet's `PermanentStorageUsed` until their `Transactions` block
+		///   becomes obsolete; they do not spend the new window's quota.
 		/// - **Unexpired Account**: caps are additive — `claim_long_term_storage` (and similar
 		///   flows on caller chains) calls this once per claim and expects each to extend the caps.
 		///   Consumed counters (`bytes`, `bytes_permanent`, `transactions`) are preserved. Expiry
