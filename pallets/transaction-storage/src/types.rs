@@ -132,10 +132,8 @@ impl<BlockNumber: PartialOrd + Copy, Extra> Authorization<BlockNumber, Extra> {
 		now >= self.expiration
 	}
 
-	/// Project into the `BulletinTransactionStorageApi` summary, so each runtime serving
-	/// that API states only what its `extra` means: `charged_bytes` reports how much of
-	/// `bytes_allowance` the consumer pallet has taken (`|extra| extra.bytes_permanent`
-	/// with the renewal pallet wired, `|_| 0` without).
+	/// Project into the runtime-API summary. `charged_bytes` reads the opaque `extra`,
+	/// which only the runtime can interpret.
 	pub fn to_account_authorization(
 		&self,
 		charged_bytes: impl FnOnce(&Extra) -> u64,
