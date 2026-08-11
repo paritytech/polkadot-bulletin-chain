@@ -98,6 +98,21 @@ pub enum Error {
 	/// Invalid chunk size.
 	#[cfg_attr(feature = "std", error("Invalid chunk size: {0}"))]
 	InvalidChunkSize(String),
+
+	/// Upload pipeline received no chainHead progress within the stall window
+	/// (the RPC connection is likely unhealthy).
+	#[cfg_attr(feature = "std", error("Store stalled: {0}"))]
+	StoreStalled(String),
+
+	/// An item's nonce slot was repeatedly taken by other transactions from the
+	/// same signer; the per-item retry budget was exhausted.
+	#[cfg_attr(feature = "std", error("Hijack budget exceeded: {0}"))]
+	HijackBudgetExceeded(String),
+
+	/// The upload run completed, but some items exhausted their retry budget
+	/// and were NOT stored (their `ItemFailed` events carry the per-item cause).
+	#[cfg_attr(feature = "std", error("Upload incomplete: {0}"))]
+	UploadIncomplete(String),
 }
 
 impl Error {
@@ -122,6 +137,9 @@ impl Error {
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
 			Error::TransactionFailed(_) => "TRANSACTION_FAILED",
 			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
+			Error::StoreStalled(_) => "STORE_STALLED",
+			Error::HijackBudgetExceeded(_) => "HIJACK_BUDGET_EXCEEDED",
+			Error::UploadIncomplete(_) => "UPLOAD_INCOMPLETE",
 		}
 	}
 
@@ -134,7 +152,8 @@ impl Error {
 				Error::StorageFailed(_) |
 				Error::TransactionFailed(_) |
 				Error::RetrievalFailed(_) |
-				Error::RenewalFailed(_)
+				Error::RenewalFailed(_) |
+				Error::StoreStalled(_)
 		)
 	}
 
@@ -162,6 +181,12 @@ impl Error {
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
 			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
 			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
+			Error::StoreStalled(_) =>
+				"The RPC connection sent no chainHead progress; retry on a fresh client",
+			Error::HijackBudgetExceeded(_) =>
+				"Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account",
+			Error::UploadIncomplete(_) =>
+				"Some items were not stored; re-run estimate_upload with skip_existing, then submit to retry only the missing items",
 		}
 	}
 }
@@ -192,6 +217,9 @@ impl Default for ChunkerConfig {
 pub struct Chunk {
 	/// The chunk data.
 	pub data: Vec<u8>,
+	/// CID of this chunk as bytes (computed after encoding); `None` until set.
+	/// Mirrors the TypeScript SDK's optional `Chunk.cid`.
+	pub cid: Option<Vec<u8>>,
 	/// Index of this chunk in the sequence.
 	pub index: u32,
 	/// Total number of chunks.
@@ -201,7 +229,7 @@ pub struct Chunk {
 impl Chunk {
 	/// Create a new chunk.
 	pub fn new(data: Vec<u8>, index: u32, total_chunks: u32) -> Self {
-		Self { data, index, total_chunks }
+		Self { data, cid: None, index, total_chunks }
 	}
 
 	/// Get the size of this chunk.
@@ -225,6 +253,10 @@ pub struct StoreResult {
 	pub size: u64,
 	/// Block number where data was stored (or last chunk was stored).
 	pub block_number: Option<u32>,
+	/// Transaction index from the `Stored` event — the storage slot among the
+	/// block's stored transactions that `renew(block_number, transaction_index)`
+	/// targets. This is NOT the extrinsic index in the block body.
+	pub transaction_index: Option<u32>,
 	/// Chunk details (only present for chunked uploads).
 	pub chunks: Option<ChunkDetails>,
 }
@@ -343,33 +375,54 @@ pub enum ChunkProgressEvent {
 	Completed { manifest_cid: Option<Vec<u8>> },
 }
 
-/// Transaction status event types (mirrors subxt's TxStatus).
+/// Transaction status event types.
+///
+/// Mirrors the TypeScript SDK's `TxStatus` / `TransactionStatusEvent` union
+/// name-for-name. `chunk_index` is an optional trace id correlating an event to
+/// a chunk in a multi-item upload; `tx_index` is the `Stored`-event transaction
+/// index (the `renew` slot), NOT the extrinsic index in the block body. (TS
+/// marks `blockNumber` required; here it stays optional because the client
+/// fetches it fallibly.)
 #[derive(Debug, Clone)]
 pub enum TransactionStatusEvent {
+	/// Transaction has been signed.
+	Signed { tx_hash: String, chunk_index: Option<u32> },
 	/// Transaction has been validated and added to the transaction pool.
-	Validated,
+	Validated { chunk_index: Option<u32> },
 	/// Transaction has been broadcast to peers.
-	Broadcasted,
+	Broadcasted { chunk_index: Option<u32> },
 	/// Transaction is now in a best block.
-	InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
+	InBlock {
+		block_hash: String,
+		block_number: Option<u32>,
+		tx_index: Option<u32>,
+		chunk_index: Option<u32>,
+	},
 	/// Transaction has been finalized.
-	Finalized { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
+	Finalized {
+		block_hash: String,
+		block_number: Option<u32>,
+		tx_index: Option<u32>,
+		chunk_index: Option<u32>,
+	},
 	/// Transaction was in a block that got reorganized.
-	NoLongerInBestBlock,
+	NoLongerInBlock { chunk_index: Option<u32> },
 	/// Transaction is not valid anymore (e.g., nonce too low).
-	Invalid { error: String },
+	Invalid { error: String, chunk_index: Option<u32> },
 	/// Transaction was dropped from the pool.
-	Dropped { error: String },
+	Dropped { error: String, chunk_index: Option<u32> },
 }
 
 impl TransactionStatusEvent {
 	/// Returns a human-readable description of this transaction status event.
 	pub fn description(&self) -> String {
 		match self {
-			TransactionStatusEvent::Validated =>
+			TransactionStatusEvent::Signed { tx_hash, .. } =>
+				alloc::format!("Transaction signed ({tx_hash})"),
+			TransactionStatusEvent::Validated { .. } =>
 				"Transaction validated and added to the pool".into(),
-			TransactionStatusEvent::Broadcasted => "Transaction broadcast to peers".into(),
-			TransactionStatusEvent::InBestBlock { block_hash, block_number, .. } =>
+			TransactionStatusEvent::Broadcasted { .. } => "Transaction broadcast to peers".into(),
+			TransactionStatusEvent::InBlock { block_hash, block_number, .. } =>
 				match block_number {
 					Some(n) => alloc::format!("Transaction in best block #{n} ({block_hash})"),
 					None => alloc::format!("Transaction in best block ({block_hash})"),
@@ -379,11 +432,11 @@ impl TransactionStatusEvent {
 					Some(n) => alloc::format!("Transaction finalized in block #{n} ({block_hash})"),
 					None => alloc::format!("Transaction finalized in block ({block_hash})"),
 				},
-			TransactionStatusEvent::NoLongerInBestBlock =>
+			TransactionStatusEvent::NoLongerInBlock { .. } =>
 				"Transaction no longer in best block (reorg occurred)".into(),
-			TransactionStatusEvent::Invalid { error } =>
+			TransactionStatusEvent::Invalid { error, .. } =>
 				alloc::format!("Transaction invalid: {error}"),
-			TransactionStatusEvent::Dropped { error } =>
+			TransactionStatusEvent::Dropped { error, .. } =>
 				alloc::format!("Transaction dropped from pool: {error}"),
 		}
 	}
@@ -432,24 +485,25 @@ impl ProgressEvent {
 
 	/// Create a Validated transaction event.
 	pub fn tx_validated() -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Validated)
+		ProgressEvent::Transaction(TransactionStatusEvent::Validated { chunk_index: None })
 	}
 
 	/// Create a Broadcasted transaction event.
 	pub fn tx_broadcasted() -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted)
+		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted { chunk_index: None })
 	}
 
-	/// Create an InBestBlock transaction event.
-	pub fn tx_in_best_block(
+	/// Create an InBlock transaction event.
+	pub fn tx_in_block(
 		block_hash: String,
 		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
+		tx_index: Option<u32>,
 	) -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::InBestBlock {
+		ProgressEvent::Transaction(TransactionStatusEvent::InBlock {
 			block_hash,
 			block_number,
-			extrinsic_index,
+			tx_index,
+			chunk_index: None,
 		})
 	}
 
@@ -457,12 +511,13 @@ impl ProgressEvent {
 	pub fn tx_finalized(
 		block_hash: String,
 		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
+		tx_index: Option<u32>,
 	) -> Self {
 		ProgressEvent::Transaction(TransactionStatusEvent::Finalized {
 			block_hash,
 			block_number,
-			extrinsic_index,
+			tx_index,
+			chunk_index: None,
 		})
 	}
 }
@@ -511,6 +566,9 @@ mod tests {
 			Error::CidCalculationFailed("calc fail".into()),
 			Error::TransactionFailed("tx fail".into()),
 			Error::InvalidChunkSize("zero".into()),
+			Error::StoreStalled("no events".into()),
+			Error::HijackBudgetExceeded("slot taken".into()),
+			Error::UploadIncomplete("1 of 3 items failed".into()),
 		]
 	}
 
@@ -535,6 +593,9 @@ mod tests {
 			"CID_CALCULATION_FAILED",
 			"TRANSACTION_FAILED",
 			"INVALID_CHUNK_SIZE",
+			"STORE_STALLED",
+			"HIJACK_BUDGET_EXCEEDED",
+			"UPLOAD_INCOMPLETE",
 		];
 
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
@@ -551,6 +612,7 @@ mod tests {
 			"TRANSACTION_FAILED",
 			"RETRIEVAL_FAILED",
 			"RENEWAL_FAILED",
+			"STORE_STALLED",
 		];
 
 		for error in all_errors() {
@@ -576,13 +638,14 @@ mod tests {
 	#[test]
 	fn test_transaction_status_event_description() {
 		let events = vec![
-			(TransactionStatusEvent::Validated, "validated"),
-			(TransactionStatusEvent::Broadcasted, "broadcast"),
+			(TransactionStatusEvent::Validated { chunk_index: None }, "validated"),
+			(TransactionStatusEvent::Broadcasted { chunk_index: None }, "broadcast"),
 			(
-				TransactionStatusEvent::InBestBlock {
+				TransactionStatusEvent::InBlock {
 					block_hash: "0xabc".into(),
 					block_number: Some(42),
-					extrinsic_index: None,
+					tx_index: None,
+					chunk_index: None,
 				},
 				"#42",
 			),
@@ -590,13 +653,17 @@ mod tests {
 				TransactionStatusEvent::Finalized {
 					block_hash: "0xdef".into(),
 					block_number: Some(100),
-					extrinsic_index: None,
+					tx_index: None,
+					chunk_index: None,
 				},
 				"#100",
 			),
-			(TransactionStatusEvent::NoLongerInBestBlock, "no longer"),
-			(TransactionStatusEvent::Invalid { error: "nonce".into() }, "nonce"),
-			(TransactionStatusEvent::Dropped { error: "pool full".into() }, "pool full"),
+			(TransactionStatusEvent::NoLongerInBlock { chunk_index: None }, "no longer"),
+			(TransactionStatusEvent::Invalid { error: "nonce".into(), chunk_index: None }, "nonce"),
+			(
+				TransactionStatusEvent::Dropped { error: "pool full".into(), chunk_index: None },
+				"pool full",
+			),
 		];
 
 		for (event, expected_substring) in events {
@@ -610,10 +677,11 @@ mod tests {
 
 	#[test]
 	fn test_transaction_status_event_description_without_block_number() {
-		let event = TransactionStatusEvent::InBestBlock {
+		let event = TransactionStatusEvent::InBlock {
 			block_hash: "0xabc".into(),
 			block_number: None,
-			extrinsic_index: None,
+			tx_index: None,
+			chunk_index: None,
 		};
 		let desc = event.description();
 		assert!(desc.contains("0xabc"));
@@ -622,7 +690,8 @@ mod tests {
 		let event = TransactionStatusEvent::Finalized {
 			block_hash: "0xdef".into(),
 			block_number: None,
-			extrinsic_index: None,
+			tx_index: None,
+			chunk_index: None,
 		};
 		let desc = event.description();
 		assert!(desc.contains("0xdef"));

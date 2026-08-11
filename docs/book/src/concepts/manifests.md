@@ -65,19 +65,18 @@ The root manifest contains links to all chunks with their sizes, allowing client
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { blobFromBytes } from "@parity/bulletin-sdk";
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
-const largeFile = new Uint8Array(10_000_000); // 10 MB
+const src = blobFromBytes(new Uint8Array(10_000_000)); // 10 MB
 
-// Automatically chunks and creates a DAG-PB manifest
-const result = await client
-  .store(largeFile)
-  .withChunkSize(1024 * 1024) // 1 MiB chunks
-  .send();
+// estimateUpload streams the source once, chunking it and building the
+// DAG-PB manifest; submit stores the chunks + manifest.
+const estimate = await client.estimateUpload(src);
+const { cids } = await client.submit(estimate, src).send();
 
-// result.cid is the manifest CID
-// result.chunks contains individual chunk CIDs
+// cids holds one entry per chunk plus the manifest last; that last CID
+// (the manifest root) is the retrieval id for the whole file.
+const manifestCid = cids[cids.length - 1];
 ```
 
 ### Rust

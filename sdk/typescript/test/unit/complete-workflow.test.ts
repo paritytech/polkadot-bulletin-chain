@@ -4,20 +4,20 @@
 /**
  * Simulates the examples/complete-workflow.ts flow using MockBulletinClient.
  *
- * Verifies that all 10 pallet extrinsics exposed by the SDK can be
- * called with correct argument types and produce the expected results.
+ * Verifies that the SDK's pallet extrinsics + the estimateUpload → submit
+ * flow can be called with correct argument types and produce expected results.
  */
 
 import { blake2b } from "@noble/hashes/blake2.js"
-import { Binary } from "polkadot-api"
 import { describe, expect, it } from "vitest"
+import { blobFromBytes, blobFromItems } from "../../src/blob-source"
 import { MockBulletinClient, type MockOperation } from "../../src/mock-client"
-import { CidCodec, HashAlgorithm } from "../../src/types"
+import { CidCodec, HashAlgorithm, UploadStatus } from "../../src/types"
 
 describe("Complete workflow (MockBulletinClient)", () => {
   const bobAddress = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty"
 
-  it("should execute the full authorization → store → lifecycle workflow", async () => {
+  it("should execute the full authorization → upload → lifecycle workflow", async () => {
     const client = new MockBulletinClient()
 
     // 1. Authorize Bob's account
@@ -35,15 +35,17 @@ describe("Complete workflow (MockBulletinClient)", () => {
     expect(authReceipt.blockHash).toBeDefined()
     expect(authReceipt.txHash).toBeDefined()
 
-    // 2. Store data (signed)
+    // 2. Upload data via estimateUpload → submit
     const message = "Hello from Bob!"
-    const data = Binary.fromText(message)
-    const storeResult = await client.store(data).send()
-    expect(storeResult.cid).toBeDefined()
-    expect(storeResult.size).toBe(data.length)
+    const data = new TextEncoder().encode(message)
+    const src = blobFromBytes(data)
+    const { cids: uploadCids } = await client
+      .submit(await client.estimateUpload(src), src)
+      .send()
+    expect(uploadCids[uploadCids.length - 1]).toBeDefined()
 
     // 3. Authorize preimage
-    const specificData = Binary.fromText("Preimage-authorized content")
+    const specificData = new TextEncoder().encode("Preimage-authorized content")
     const contentHash = blake2b(specificData, { dkLen: 32 })
 
     const preimageReceipt = await client
@@ -89,7 +91,6 @@ describe("Complete workflow (MockBulletinClient)", () => {
       "remove_expired_preimage_authorization",
     ])
 
-    // Verify operation details
     const authOp = ops[0] as Extract<
       MockOperation,
       { type: "authorize_account" }
@@ -111,24 +112,59 @@ describe("Complete workflow (MockBulletinClient)", () => {
     expect(removePreimageOp.contentHash).toEqual(contentHash)
   })
 
-  it("should store with non-default CID options", async () => {
+  it("should upload with custom per-item CID config via submit()", async () => {
     const client = new MockBulletinClient()
+    const data = new TextEncoder().encode("Custom CID config test")
 
-    const data = Binary.fromText("Custom CID config test")
-
-    // Store with DagPb codec and SHA2-256 hash
-    const result = await client
-      .store(data)
-      .withCodec(CidCodec.DagPb)
-      .withHashAlgorithm(HashAlgorithm.Sha2_256)
+    // Default codec (Raw + Blake2b-256)
+    const def = [{ data }]
+    const { cids: defaultCids } = await client
+      .submit(await client.estimateUpload(def), blobFromItems(def))
       .send()
 
-    expect(result.cid).toBeDefined()
-    expect(result.size).toBe(data.length)
+    // DagPb codec + SHA2-256 → different CID
+    const cust = [
+      { data, codec: CidCodec.DagPb, hashAlgo: HashAlgorithm.Sha2_256 },
+    ]
+    const { cids: customCids } = await client
+      .submit(await client.estimateUpload(cust), blobFromItems(cust))
+      .send()
 
-    // The CID should be different from default (Raw + Blake2b256)
-    const defaultResult = await client.store(data).send()
-    expect(result.cid.toString()).not.toBe(defaultResult.cid.toString())
+    expect(defaultCids).toHaveLength(1)
+    expect(customCids).toHaveLength(1)
+    expect(customCids[0]!.toString()).not.toBe(defaultCids[0]!.toString())
+  })
+
+  it("should reject uploads with empty data", async () => {
+    const client = new MockBulletinClient()
+    await expect(
+      client.estimateUpload(blobFromBytes(new Uint8Array(0))),
+    ).rejects.toMatchObject({ code: "EMPTY_DATA" })
+    // An empty item list is now a no-op estimate (nothing to submit), not an error.
+    const empty = await client.estimateUpload([])
+    expect(empty.total).toBe(0)
+  })
+
+  it("should emit ItemStarted + ItemFinalized events through the mock", async () => {
+    const client = new MockBulletinClient()
+    const items = [
+      { data: new TextEncoder().encode("a") },
+      { data: new TextEncoder().encode("b") },
+      { data: new TextEncoder().encode("c") },
+    ]
+    const events: Array<{ type: UploadStatus; index: number }> = []
+    const { cids } = await client
+      .submit(await client.estimateUpload(items), blobFromItems(items))
+      .withCallback((ev) => events.push({ type: ev.type, index: ev.index }))
+      .send()
+    expect(cids).toHaveLength(3)
+    // 3 started + 3 finalized = 6 events
+    expect(
+      events.filter((e) => e.type === UploadStatus.ItemStarted),
+    ).toHaveLength(3)
+    expect(
+      events.filter((e) => e.type === UploadStatus.ItemFinalized),
+    ).toHaveLength(3)
   })
 
   it("should simulate auth failure for lifecycle methods", async () => {
@@ -160,21 +196,9 @@ describe("Complete workflow (MockBulletinClient)", () => {
     })
   })
 
-  it("should simulate auth failure for store as a chain-side rejection", async () => {
-    // The real client never throws INSUFFICIENT_AUTHORIZATION for store —
-    // boost exhaustion only warns; an actual chain rejection surfaces as
-    // AUTHORIZATION_FAILED. The mock must model the reachable path.
-    const client = new MockBulletinClient({ simulateAuthFailure: true })
-
-    await expect(
-      client.store(Binary.fromText("auth failure")).send(),
-    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
-  })
-
   it("should allow remove_expired calls even with simulateAuthFailure", async () => {
     const client = new MockBulletinClient({ simulateAuthFailure: true })
 
-    // remove_expired methods don't require auth — they should succeed
     const receipt = await client
       .removeExpiredAccountAuthorization(bobAddress)
       .send()
@@ -184,33 +208,5 @@ describe("Complete workflow (MockBulletinClient)", () => {
       .removeExpiredPreimageAuthorization(new Uint8Array(32))
       .send()
     expect(receipt2.blockHash).toBeDefined()
-  })
-
-  it("should reject withCodec on chunked uploads", async () => {
-    // Use a small chunkingThreshold so we don't need a huge buffer
-    const client = new MockBulletinClient({ chunkingThreshold: 1024 })
-    const data = new Uint8Array(2048) // exceeds 1024 threshold
-
-    await expect(
-      client.store(data).withCodec(CidCodec.DagPb).send(),
-    ).rejects.toMatchObject({ code: "INVALID_CONFIG" })
-  })
-
-  it("should store chunked without manifest when withManifest(false)", async () => {
-    const client = new MockBulletinClient({ chunkingThreshold: 1024 })
-    const data = new Uint8Array(2048).fill(0xab)
-
-    const result = await client
-      .store(data)
-      .withChunkSize(1024)
-      .withManifest(false)
-      .send()
-
-    // Without manifest, cid should be undefined
-    expect(result.cid).toBeUndefined()
-    // Chunks should be present
-    expect(result.chunks).toBeDefined()
-    expect(result.chunks?.numChunks).toBe(2)
-    expect(result.chunks?.chunkCids).toHaveLength(2)
   })
 })

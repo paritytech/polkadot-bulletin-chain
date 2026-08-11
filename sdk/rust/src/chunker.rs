@@ -244,8 +244,8 @@ mod tests {
 
 		// Create chunks where total_chunks doesn't match actual count
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 3 },
-			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 },
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 3 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 },
 			// Missing third chunk - only 2 chunks but total_chunks says 3
 		];
 
@@ -260,8 +260,8 @@ mod tests {
 
 		// Create chunks from different files (inconsistent total_chunks)
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 2 },
-			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 }, // Wrong total
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 2 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 }, // Wrong total
 		];
 
 		let result = reassemble_chunks(&chunks);

@@ -16,7 +16,7 @@
 use anyhow::{anyhow, Result};
 use bulletin_sdk_rust::prelude::*;
 use clap::Parser;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 use subxt::utils::AccountId32;
 use subxt_signer::sr25519::Keypair;
 use tracing::info;
@@ -90,8 +90,8 @@ async fn main() -> Result<()> {
 	let cid_data = operation
 		.calculate_cid()
 		.map_err(|e| anyhow!("CID calculation error: {:?}", e))?;
-	let cid_bytes = cid_to_bytes(&cid_data)
-		.map_err(|e| anyhow!("CID serialization error: {:?}", e))?;
+	let cid_bytes =
+		cid_to_bytes(&cid_data).map_err(|e| anyhow!("CID serialization error: {:?}", e))?;
 	info!("Pre-calculated CID: {}", hex::encode(&cid_bytes));
 	info!("Content hash: {}", hex::encode(&cid_data.content_hash));
 
@@ -121,55 +121,54 @@ async fn main() -> Result<()> {
 	let large_data: Vec<u8> = (0..large_data_size).map(|i| (i % 256) as u8).collect();
 	info!("Large data size: {} bytes ({} MiB)", large_data.len(), large_data.len() / 1024 / 1024);
 
-	// Configure chunking
+	// Plan the upload offline: chunk boundaries, per-chunk CIDs, the DAG-PB
+	// manifest, and the authorization cost.
 	let chunker_config = ChunkerConfig {
 		chunk_size: 1024 * 1024, // 1 MiB chunks
 		max_parallel: 4,
 		create_manifest: true, // Create DAG-PB manifest
 	};
+	let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(large_data));
+	let estimate = client
+		.estimate_upload(
+			UploadInput::Source(source.clone()),
+			UploadEstimateOptions { chunker: chunker_config, ..Default::default() },
+		)
+		.await
+		.map_err(|e| anyhow!("Estimate failed: {:?}", e))?;
+	info!(
+		"Planned {} chunks + manifest: {} transactions, {} bytes of authorization",
+		estimate.plan.chunk_cids.len(),
+		estimate.base.transactions,
+		estimate.base.bytes,
+	);
 
-	let dag_options = StoreOptions {
-		cid_codec: CidCodec::DagPb, // Use DAG-PB codec for manifest
-		hash_algorithm: HashingAlgorithm::Blake2b256,
-		wait_for: WaitFor::InBlock,
+	// Submit through the pipeline. A hand-rolled per-chunk store() loop is
+	// exposed to nonce reuse under fork churn ("usurped"); the pipeline owns
+	// nonce assignment, retries, and reorg recovery.
+	let upload_config = UploadConfig {
+		complete_on: WaitFor::InBlock,
+		on_event: Some(Arc::new(|ev: UploadEvent| match ev {
+			UploadEvent::ItemInBlock { index, total, block_hash, .. } => {
+				info!("  item {}/{} in block: {}", index + 1, total, block_hash);
+			},
+			UploadEvent::ItemFailed { index, total, error, .. } => {
+				info!("  item {}/{} FAILED: {}", index + 1, total, error);
+			},
+			_ => {},
+		})),
+		..Default::default()
 	};
+	let result = client
+		.submit(&keypair, estimate, source, upload_config)
+		.await
+		.map_err(|e| anyhow!("Chunked upload failed: {:?}", e))?;
 
-	// Prepare chunked storage using SDK
-	let progress_callback = std::sync::Arc::new(|event: ProgressEvent| {
-		info!("Chunk progress: {:?}", event);
-	});
-
-	let (batch_operation, manifest_data) = sdk_client
-		.prepare_store_chunked(&large_data, Some(chunker_config), dag_options, Some(progress_callback))
-		.map_err(|e| anyhow!("Chunking failed: {:?}", e))?;
-
-	info!("Prepared {} chunks", batch_operation.operations.len());
-
-	// Submit each chunk
-	for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
-		info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
-
-		let chunk_receipt = client
-			.store(chunk_op.data.clone(), &keypair, WaitFor::InBlock)
-			.await
-			.map_err(|e| anyhow!("Chunk {} store failed: {:?}", i + 1, e))?;
-
-		info!("  Chunk {} stored in block: {}", i + 1, chunk_receipt.block_hash);
-	}
-
-	// Submit the manifest if created
-	if let Some(manifest) = manifest_data {
-		info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
-
-		let manifest_receipt = client
-			.store(manifest, &keypair, WaitFor::InBlock)
-			.await
-			.map_err(|e| anyhow!("Manifest store failed: {:?}", e))?;
-
-		info!("✅ DAG-PB manifest stored!");
-		info!("  Manifest block hash: {}", manifest_receipt.block_hash);
-		info!("  Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
-	}
+	// CIDs are returned in plan order; the manifest root is last.
+	let root_cid = result.cids.last().expect("manifest root CID");
+	info!("✅ Chunked upload complete: {} stores (chunks + manifest)", result.cids.len());
+	info!("  Manifest root CID: {}", hex::encode(root_cid));
+	info!("  Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
 
 	info!("\n✅ All examples completed successfully!");
 
