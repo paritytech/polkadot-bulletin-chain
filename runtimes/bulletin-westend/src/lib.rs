@@ -988,17 +988,9 @@ impl_runtime_apis! {
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
 			use pallet_bulletin_transaction_storage::AuthorizationScope;
-			use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 
 			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
-				.map(|auth| AccountAuthorization {
-					expires_at: auth.expiration,
-					bytes_allowance: auth.extent.bytes_allowance,
-					bytes_used: auth.extent.bytes,
-					bytes_permanent_used: auth.extent.extra.bytes_permanent,
-					transactions_allowance: auth.extent.transactions_allowance,
-					transactions_used: auth.extent.transactions,
-				})
+				.map(|auth| auth.to_account_authorization(|extra| extra.bytes_permanent))
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
