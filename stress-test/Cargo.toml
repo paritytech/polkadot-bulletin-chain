@@ -41,6 +41,10 @@ bytes = "1"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 
+# Prometheus exposition (--prometheus-port); same crates.io release train as the
+# node's polkadot-sdk crates (already pinned in Cargo.lock)
+substrate-prometheus-endpoint = "0.17"
+
 # Hashing
 blake2 = "0.10"
 twox-hash = "2"

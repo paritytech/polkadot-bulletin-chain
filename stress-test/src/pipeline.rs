@@ -32,6 +32,7 @@ use crate::{
 	accounts::NonceTracker,
 	authorize::{self, AUTHORIZE_BATCH_SIZE},
 	client::BulletinConfig,
+	metrics::metrics,
 	report::BlockStats,
 	store::{
 		classify_tx_error, read_timestamp_at, sign_store_extrinsic_blocking,
@@ -283,6 +284,7 @@ fn spawn_pipeline_dual_monitor(
 	target_reached: Arc<AtomicBool>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	confirmed_count: Arc<AtomicU64>,
+	variant: &'static str,
 ) -> tokio::task::JoinHandle<()> {
 	let DualBlockSubscription { mut best_rx, mut finalized_rx, monitor_client, ws_url } = dual;
 
@@ -305,6 +307,7 @@ fn spawn_pipeline_dual_monitor(
 				*prev_ts = pb.timestamp_ms;
 			}
 			confirmed_count.fetch_add(pb.tx_count, Ordering::Relaxed);
+			metrics().observe_confirmed_block(variant, pb.tx_count, pb.payload_bytes);
 			block_stats.lock().unwrap().push(BlockStats {
 				number: pb.number,
 				tx_count: pb.tx_count,
@@ -495,6 +498,7 @@ struct StoreWorker {
 	counters: Arc<SubmitCounters>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	new_block_notify: Arc<Notify>,
+	variant: &'static str,
 }
 
 impl StoreWorker {
@@ -510,6 +514,7 @@ impl StoreWorker {
 					let ext_len = msg.extrinsic.len() as u64;
 					let n = self.counters.submitted.fetch_add(1, Ordering::Relaxed) + 1;
 					self.counters.submitted_bytes.fetch_add(ext_len, Ordering::Relaxed);
+					metrics().inc_submitted(self.variant, ext_len);
 					self.content_hash_map.lock().unwrap().insert(msg.content_hash, ext_len);
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
@@ -521,6 +526,7 @@ impl StoreWorker {
 				},
 				Err(e) => {
 					let class = classify_tx_error(&e);
+					metrics().inc_error(self.variant, class.metric_class());
 					tracing::debug!(
 						"pipeline store: worker {id} class={class:?} account={} err={e:#}",
 						msg.account_id
@@ -636,6 +642,7 @@ fn spawn_store_submit_workers(
 	counters: Arc<SubmitCounters>,
 	content_hash_map: Arc<Mutex<ContentHashMap>>,
 	new_block_notify: Arc<Notify>,
+	variant: &'static str,
 ) -> (Vec<mpsc::Sender<StoreWorkMsg>>, Vec<tokio::task::JoinHandle<Result<()>>>) {
 	let per_worker_cap = 2;
 	let mut txs = Vec::with_capacity(num_workers);
@@ -653,6 +660,7 @@ fn spawn_store_submit_workers(
 			counters: counters.clone(),
 			content_hash_map: content_hash_map.clone(),
 			new_block_notify: new_block_notify.clone(),
+			variant,
 		};
 
 		handles.push(tokio::spawn(async move {
@@ -683,6 +691,7 @@ pub async fn run_block_capacity_pipeline(
 	authorizer_nonce_tracker: &NonceTracker,
 	cancel: &Arc<AtomicBool>,
 	target_blocks: Option<u32>,
+	variant: &'static str,
 ) -> Result<BulkStoreResult> {
 	let authorize_bytes = store_payload.authorize_bytes_per_account();
 
@@ -707,6 +716,7 @@ pub async fn run_block_capacity_pipeline(
 		target_reached.clone(),
 		content_hash_map.clone(),
 		confirmed_count.clone(),
+		variant,
 	);
 
 	monitor_ready.notified().await;
@@ -733,6 +743,7 @@ pub async fn run_block_capacity_pipeline(
 		counters.clone(),
 		content_hash_map.clone(),
 		new_block_notify.clone(),
+		variant,
 	);
 
 	let start = Instant::now();
