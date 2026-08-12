@@ -241,17 +241,40 @@ for block-capacity variants (`1KB` ... `2MB`, `mixed`), or a scenario slug other
 (`sequential-upload`, `renew`, `hop-submit-100KB`, `hop-full-cycle`, `hop-group`,
 `hop-pool-fill`, `hop-mixed`, `bitswap-b2-c<concurrency>`, `bitswap-bulk-read`).
 
+The write path is counted along two axes. The `tx_offered_*`, `tx_accepted_*`, `tx_abandoned_*`
+and `tx_confirmed_*` families count **unique transactions** — each is incremented exactly once per
+extrinsic — while `submit_attempts_total` counts **RPC calls**, so a transaction that needed five
+tries contributes one `offered` and five `attempts`:
+
+```text
+attempts >= offered                          # equality means no retries at all
+retries per transaction = attempts / offered - 1
+offered = accepted + abandoned + in-flight   # in-flight = still being retried by a worker
+```
+
+`abandoned` does not mean lost data in every case: `reason="already_imported"` means the node
+already had the transaction and only this worker stopped tracking it. Every write-path
+`_bytes_total` counts uncompressed **payload** bytes so offered / accepted / abandoned / confirmed
+bytes are directly comparable; wire size is exposed separately as
+`bulletin_stress_tx_accepted_encoded_bytes_total`.
+
 Live metrics (updated at event time while a run is in flight):
 
 | Metric | Type | Labels | Description |
 |--------|------|--------|-------------|
-| `bulletin_stress_tx_submitted_total` | counter | `variant` | Store extrinsics accepted by the node RPC (block-capacity pipeline) |
-| `bulletin_stress_tx_submitted_bytes_total` | counter | `variant` | Encoded extrinsic bytes accepted (offered load) |
-| `bulletin_stress_tx_errors_total` | counter | `variant`, `class` | Submission error/retry events (`pool_full`, `banned`, `exhausts_resources`, `dropped`, `already_imported`, `stale_nonce`, `future_nonce`, `connection_dead`, `other`) |
+| `bulletin_stress_tx_offered_total` | counter | `variant` | Store extrinsics the tool started trying to place, once per extrinsic (block-capacity pipeline) |
+| `bulletin_stress_tx_offered_bytes_total` | counter | `variant` | Uncompressed payload bytes offered |
+| `bulletin_stress_tx_accepted_total` | counter | `variant` | Store extrinsics accepted into a transaction pool, once per extrinsic |
+| `bulletin_stress_tx_accepted_bytes_total` | counter | `variant` | Uncompressed payload bytes accepted into a pool |
+| `bulletin_stress_tx_accepted_encoded_bytes_total` | counter | `variant` | SCALE-encoded extrinsic bytes accepted (wire size, incl. signature/call overhead) |
+| `bulletin_stress_tx_abandoned_total` | counter | `variant`, `reason` | Store extrinsics the worker stopped tracking, once per extrinsic (`dropped`, `already_imported`, `stale_nonce`, `future_nonce`, `connection_dead`, `other`) |
+| `bulletin_stress_tx_abandoned_bytes_total` | counter | `variant`, `reason` | Uncompressed payload bytes of abandoned extrinsics |
+| `bulletin_stress_submit_attempts_total` | counter | `variant`, `outcome` | Submission RPC calls, one per call (`accepted`, `pool_full`, `banned`, `exhausts_resources`, `dropped`, `already_imported`, `stale_nonce`, `future_nonce`, `connection_dead`, `other`) |
 | `bulletin_stress_tx_confirmed_total` | counter | `variant` | Store transactions confirmed in finalized blocks |
 | `bulletin_stress_tx_confirmed_bytes_total` | counter | `variant` | Uncompressed payload bytes confirmed in finalized blocks |
 | `bulletin_stress_blocks_observed_total` | counter | `variant` | Finalized blocks observed by the block monitor (including empty ones) |
 | `bulletin_stress_block_txs` | histogram | `variant` | Store transactions per observed block (block-fullness distribution; buckets up to the 512-tx cap) |
+| `bulletin_stress_block_bytes` | histogram | `variant` | Uncompressed payload bytes per observed block (buckets 64 KB → 12 MB, tight around the 8–9 MB band); Substrate exposes no block-size-in-bytes metric, so this is the only per-block size distribution |
 | `bulletin_stress_latency_seconds` | histogram | `variant`, `kind` | End-to-end latency (`inclusion`, `finalization`, `retrieval`) |
 | `bulletin_stress_reads_total` | counter | `variant`, `outcome` | Bitswap read attempts (`success` / `failure`) |
 | `bulletin_stress_read_bytes_total` | counter | `variant` | Bytes downloaded via Bitswap |

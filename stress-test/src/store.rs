@@ -215,7 +215,8 @@ pub enum TxPoolError {
 }
 
 impl TxPoolError {
-	/// Stable `class` label value for `bulletin_stress_tx_errors_total`.
+	/// Stable label value for the `outcome` of `bulletin_stress_submit_attempts_total` and the
+	/// `reason` of `bulletin_stress_tx_abandoned_total`.
 	pub fn metric_class(self) -> &'static str {
 		match self {
 			Self::PoolFull => "pool_full",
