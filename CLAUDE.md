@@ -6,6 +6,10 @@
 - NEVER add Co-Authored-By lines to commits
 - NEVER use git push --force or git push -f
 
+**Code review rules:**
+- NEVER submit AI-generated review comments (PR reviews, inline comments, or issue comments) to GitHub automatically
+- ALWAYS present review findings to the human reviewer for triage first, and only post the ones they explicitly approve, after they explicitly ask for them to be posted
+
 **Automatic formatting:**
 - ALWAYS run `/format` after generating or modifying Rust code
 - ALWAYS run `/format` before creating any git commit

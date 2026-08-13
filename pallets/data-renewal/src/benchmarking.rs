@@ -260,7 +260,7 @@ mod benchmarks {
 					cid_codec: RAW_CODEC,
 					extrinsic_index: 0,
 					block_chunks: 0,
-					meta: EntryKind::Store,
+					meta: Default::default(),
 				};
 				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
 				pending

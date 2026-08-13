@@ -43,7 +43,7 @@ Both SDKs follow a **BYOC (Bring Your Own Client)** pattern - you provide the bl
 **This enables:**
 - ✅ **Light client support** - Use smoldot instead of RPC endpoints
 - ✅ **Connection reuse** - Share one client across your entire app
-- ✅ **Browser wallets** - TypeScript SDK works with Talisman, SubWallet, etc.
+- ✅ **Browser wallets** - TypeScript SDK works with Talisman, SubWallet, PolkaGate, etc.
 - ✅ **Custom transports** - HTTP, WebSocket, or any compatible provider
 - ✅ **No hidden connections** - You control all network access
 

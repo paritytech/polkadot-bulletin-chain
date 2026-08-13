@@ -120,7 +120,7 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
-	type EntryMeta = crate::EntryKind;
+	type EntryMeta = bulletin_transaction_storage_primitives::EntryKind;
 	type AuthorizationExtra = crate::PermanentExtent;
 	type OnObsoleteTransactions = DataRenewal;
 	// The runtimes wire this, so the benchmark tests exercise it too.

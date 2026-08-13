@@ -9,9 +9,12 @@ import {
 } from "../../src/async-client"
 import { ErrorCode } from "../../src/types"
 
-// The renewal extrinsics changed shape: old runtimes take `renew({block, index})`,
-// current ones take `renew({entry: TransactionRef})` and add `force_renew`.
-// These tests pin the client's runtime detection for both shapes.
+// The renewal extrinsics moved pallet and changed shape across runtimes:
+// TransactionStorage.renew({block, index}), then TransactionStorage
+// renew({entry}) plus force_renew, now both calls on DataRenewal. PAPI proxies
+// are truthy for any name, so the client resolves pallet and shape from
+// getStaticApis() compat levels; api objects without it (like these mocks)
+// resolve by entry presence. These tests pin that resolution.
 
 const positionInput: TransactionRefInput = { block: 100, index: 5 }
 const positionEntry = toTransactionRef(positionInput)
@@ -56,8 +59,35 @@ const submitFn = async () => ({
   events: [],
 })
 
-function createClient(txPallet: Record<string, unknown>) {
-  const api = { tx: { TransactionStorage: txPallet } }
+// Compat levels as getStaticApis() reports them; 0 = the live runtime lacks
+// the call.
+const staticApis = (levels: {
+  dataRenewalRenew?: number
+  renew?: number
+  forceRenew?: number
+}) => ({
+  compat: {
+    tx: {
+      DataRenewal: { renew: { level: levels.dataRenewalRenew ?? 0 } },
+      TransactionStorage: {
+        renew: { level: levels.renew ?? 1 },
+        force_renew: { level: levels.forceRenew ?? 0 },
+      },
+    },
+  },
+})
+
+function createClient(
+  txPallet: Record<string, unknown>,
+  opts: {
+    dataRenewal?: Record<string, unknown>
+    getStaticApis?: () => Promise<unknown>
+  } = {},
+) {
+  const api = {
+    tx: { TransactionStorage: txPallet, DataRenewal: opts.dataRenewal },
+    getStaticApis: opts.getStaticApis,
+  }
   // biome-ignore lint/suspicious/noExplicitAny: testing with mock objects
   return new AsyncBulletinClient(api as any, signer as any, submitFn)
 }
@@ -87,7 +117,16 @@ describe("renew argument shape detection", () => {
     })
   })
 
-  it("passes {entry} when force_renew exists without a compatibility probe", async () => {
+  it("rejects when the resolved pallet has no renew entry", async () => {
+    const client = createClient({})
+
+    await expect(client.renew(positionInput).send()).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "renew is not supported by this runtime",
+    })
+  })
+
+  it("passes {entry} when force_renew is present without getStaticApis", async () => {
     let arg: unknown
     const client = createClient({
       renew: (a: unknown) => {
@@ -100,77 +139,159 @@ describe("renew argument shape detection", () => {
     await client.renew(positionInput).send()
     expect(arg).toEqual({ entry: positionEntry })
   })
+})
 
-  it("unpacks Position when the PAPI probe reports Incompatible", async () => {
-    // A real PAPI proxy returns a truthy entry for any name; only
-    // getCompatibilityLevel() reveals that the runtime lacks force_renew.
+describe("renewal pallet resolution", () => {
+  it("uses DataRenewal with {entry} when present without getStaticApis", async () => {
     let arg: unknown
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => 0
-    const client = createClient({
-      renew: (a: unknown) => {
-        arg = a
-        return mockTx
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
       },
-      force_renew: forceRenew,
-    })
+    )
 
     await client.renew(positionInput).send()
-    expect(arg).toEqual({ block: 100, index: 5 })
+    expect(arg).toEqual({ entry: positionEntry })
   })
 
-  it("passes {entry} when the PAPI probe reports compatible", async () => {
+  it("uses DataRenewal when compat reports it present", async () => {
     let arg: unknown
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => 3
-    const client = createClient({
-      renew: (a: unknown) => {
-        arg = a
-        return mockTx
+    const client = createClient(
+      {
+        renew: () => {
+          throw new Error("wrong pallet")
+        },
+        force_renew: () => {
+          throw new Error("wrong pallet")
+        },
       },
-      force_renew: forceRenew,
-    })
+      {
+        dataRenewal: {
+          renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+        getStaticApis: async () => staticApis({ dataRenewalRenew: 1 }),
+      },
+    )
 
     await client.renew(hashInput).send()
     expect(arg).toEqual({ entry: hashEntry })
   })
 
-  it("fails fast when the probe throws instead of guessing the shape", async () => {
-    // A transient RPC error must not silently pick the legacy shape: against
-    // a TransactionRef runtime that submits wrong args with an opaque error.
+  it("falls back to TransactionStorage when compat reports DataRenewal Incompatible", async () => {
     let arg: unknown
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => {
-      throw new Error("no entry point")
-    }
-    const client = createClient({
-      renew: (a: unknown) => {
-        arg = a
-        return mockTx
+    const client = createClient(
+      {
+        renew: (a: unknown) => {
+          arg = a
+          return mockTx
+        },
+        force_renew: () => mockTx,
       },
-      force_renew: forceRenew,
-    })
+      {
+        dataRenewal: {
+          renew: () => {
+            throw new Error("wrong pallet")
+          },
+        },
+        getStaticApis: async () => staticApis({ forceRenew: 1 }),
+      },
+    )
+
+    await client.renew(positionInput).send()
+    expect(arg).toEqual({ entry: positionEntry })
+  })
+
+  it("resolves the legacy shape when compat reports only TransactionStorage.renew", async () => {
+    let arg: unknown
+    const client = createClient(
+      {
+        renew: (a: unknown) => {
+          arg = a
+          return mockTx
+        },
+        force_renew: () => mockTx,
+      },
+      {
+        dataRenewal: { renew: () => mockTx },
+        getStaticApis: async () => staticApis({}),
+      },
+    )
+
+    await client.renew(positionInput).send()
+    expect(arg).toEqual({ block: 100, index: 5 })
+  })
+
+  it("rejects renew when compat reports renewal on neither pallet", async () => {
+    // Entries exist on both pallets (real PAPI proxies always do); only the
+    // compat levels reveal the runtime has no renewal calls at all.
+    let called = false
+    const client = createClient(
+      {
+        renew: () => {
+          called = true
+          return mockTx
+        },
+        force_renew: () => mockTx,
+      },
+      {
+        dataRenewal: { renew: () => mockTx },
+        getStaticApis: async () => staticApis({ renew: 0 }),
+      },
+    )
 
     await expect(client.renew(positionInput).send()).rejects.toMatchObject({
-      code: ErrorCode.TRANSACTION_FAILED,
-      message: expect.stringContaining("probe"),
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "renew is not supported by this runtime",
     })
-    expect(arg).toBeUndefined()
+    expect(called).toBe(false)
+  })
+
+  it("submits force_renew on DataRenewal when resolved there", async () => {
+    let arg: unknown
+    const client = createClient(
+      {
+        force_renew: () => {
+          throw new Error("wrong pallet")
+        },
+      },
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          force_renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+        getStaticApis: async () => staticApis({ dataRenewalRenew: 1 }),
+      },
+    )
+
+    await client.forceRenew(positionInput).send()
+    expect(arg).toEqual({ entry: positionEntry })
   })
 })
 
 describe("probe caching", () => {
   it("probes the runtime once per client across renew and forceRenew calls", async () => {
     let probes = 0
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => {
-      probes++
-      return 3
-    }
-    const client = createClient({
-      renew: () => mockTx,
-      force_renew: forceRenew,
-    })
+    const client = createClient(
+      { renew: () => mockTx, force_renew: () => mockTx },
+      {
+        getStaticApis: async () => {
+          probes++
+          return staticApis({ forceRenew: 1 })
+        },
+      },
+    )
 
     await client.renew(positionInput).send()
     await client.renew(hashInput).send()
@@ -184,16 +305,16 @@ describe("probe caching", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => {
-      probes++
-      await gate
-      return 3
-    }
-    const client = createClient({
-      renew: () => mockTx,
-      force_renew: forceRenew,
-    })
+    const client = createClient(
+      { renew: () => mockTx, force_renew: () => mockTx },
+      {
+        getStaticApis: async () => {
+          probes++
+          await gate
+          return staticApis({ forceRenew: 1 })
+        },
+      },
+    )
 
     const both = Promise.all([
       client.renew(positionInput).send(),
@@ -204,26 +325,34 @@ describe("probe caching", () => {
     expect(probes).toBe(1)
   })
 
-  it("retries the probe on the next call after a failure", async () => {
+  it("fails fast on a probe failure and retries on the next call", async () => {
+    // A transient probe error must not silently pick a shape — the wrong
+    // guess submits wrong args with an opaque error — and is not cached.
     let arg: unknown
     let probes = 0
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => {
-      probes++
-      if (probes === 1) throw new Error("transient rpc error")
-      return 3
-    }
-    const client = createClient({
-      renew: (a: unknown) => {
-        arg = a
-        return mockTx
+    const client = createClient(
+      {
+        renew: (a: unknown) => {
+          arg = a
+          return mockTx
+        },
+        force_renew: () => mockTx,
       },
-      force_renew: forceRenew,
-    })
+      {
+        getStaticApis: async () => {
+          probes++
+          if (probes === 1) throw new Error("transient rpc error")
+          return staticApis({ forceRenew: 1 })
+        },
+      },
+    )
 
     await expect(client.renew(positionInput).send()).rejects.toMatchObject({
       code: ErrorCode.TRANSACTION_FAILED,
+      message: expect.stringContaining("probe"),
     })
+    expect(arg).toBeUndefined()
+
     await client.renew(positionInput).send()
     expect(probes).toBe(2)
     expect(arg).toEqual({ entry: positionEntry })
@@ -233,27 +362,26 @@ describe("probe caching", () => {
 describe("forceRenew", () => {
   it("submits force_renew({entry}) on supporting runtimes", async () => {
     let arg: unknown
-    const forceRenew = (a: unknown) => {
-      arg = a
-      return mockTx
-    }
-    forceRenew.getCompatibilityLevel = async () => 2
     const client = createClient({
       renew: () => mockTx,
-      force_renew: forceRenew,
+      force_renew: (a: unknown) => {
+        arg = a
+        return mockTx
+      },
     })
 
     await client.forceRenew(positionInput).send()
     expect(arg).toEqual({ entry: positionEntry })
   })
 
-  it("rejects with a clear error when the runtime lacks force_renew", async () => {
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => 0
-    const client = createClient({
-      renew: () => mockTx,
-      force_renew: forceRenew,
-    })
+  it("rejects with a clear error when compat reports force_renew Incompatible", async () => {
+    const client = createClient(
+      { renew: () => mockTx, force_renew: () => mockTx },
+      {
+        dataRenewal: { renew: () => mockTx },
+        getStaticApis: async () => staticApis({}),
+      },
+    )
 
     await expect(client.forceRenew(positionInput).send()).rejects.toMatchObject(
       {
@@ -277,14 +405,14 @@ describe("forceRenew", () => {
   })
 
   it("surfaces a probe failure rather than reporting force_renew unsupported", async () => {
-    const forceRenew = () => mockTx
-    forceRenew.getCompatibilityLevel = async () => {
-      throw new Error("boom")
-    }
-    const client = createClient({
-      renew: () => mockTx,
-      force_renew: forceRenew,
-    })
+    const client = createClient(
+      { renew: () => mockTx, force_renew: () => mockTx },
+      {
+        getStaticApis: async () => {
+          throw new Error("boom")
+        },
+      },
+    )
 
     await expect(client.forceRenew(positionInput).send()).rejects.toMatchObject(
       {
