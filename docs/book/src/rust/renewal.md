@@ -1,10 +1,10 @@
 # Renewal
 
-This guide shows how to renew stored data using the Rust SDK to extend the retention period.
+Extending the retention of stored data with the Rust SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `TransactionClient::renew` schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `TransactionClient::force_renew` (same arguments). Recurring `enable_auto_renew` is not exposed by the SDK; call it via subxt against the live runtime if you need it (see [concepts](../concepts/renewal.md)).
+> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — call it via subxt (see [concepts](../concepts/renewal.md)).
 
 ## Two Clients
 
@@ -69,7 +69,7 @@ let storage_ref = StorageRef::new(block_number, index);
 
 ## Using RenewalTracker
 
-For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — submitting again before the boundary rejects with `AutoRenewalAlreadyEnabled`:
+For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — submitting again before the boundary rejects with `RenewalAlreadyEnabled`:
 
 ```rust
 let mut tracker = RenewalTracker::new();
@@ -158,7 +158,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant, including on-chain rejections such as `AutoRenewalAlreadyEnabled` (a renewal is already scheduled for the content hash):
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash):
 
 ```rust
 match client.prepare_renew(storage_ref) {

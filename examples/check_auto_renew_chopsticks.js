@@ -12,10 +12,10 @@
  *  4. Tests disable_auto_renew: removes the entry, verifies it's cleared
  *  5. Re-enables auto-renewal for the expiry test
  *  6. Advances to the expiry block. There `TransactionStorage::on_initialize`
- *     ages the data out and queues it into `DataRenewal.PendingAutoRenewals`
+ *     ages the data out and queues it into `DataRenewal.PendingRenewals`
  *     for the same block's `process_pending_renewals` mandatory inherent.
  *  7. Builds the expiry block and verifies the drain:
- *       - PendingAutoRenewals is emptied (taken by the inherent)
+ *       - PendingRenewals is emptied (taken by the inherent)
  *       - TransactionByContentHash now points at the expiry block (renewed)
  *       - the recurring registration survives with `paid = false`
  *
@@ -180,7 +180,7 @@ async function main() {
   const testData = new Uint8Array(2000).fill(42);
   const contentHash = blake2AsU8a(testData, 256);
   const renewalsKey = mapKey("DataRenewal", "Renewals", contentHash);
-  const pendingKey = storageKey("DataRenewal", "PendingAutoRenewals");
+  const pendingKey = storageKey("DataRenewal", "PendingRenewals");
   const contentHashKey = mapKey("TransactionStorage", "TransactionByContentHash", contentHash);
   console.log(`  Content hash: 0x${toHex(contentHash).slice(0, 16)}...`);
 
@@ -293,7 +293,7 @@ async function main() {
     logOk(`Block #${chain.head.number} produced`);
   }
 
-  // ── Expiry block: on_initialize queues PendingAutoRenewals, and the
+  // ── Expiry block: on_initialize queues PendingRenewals, and the
   //    process_pending_renewals inherent (synthesized by Chopsticks) drains it
   //    in the same block. ──
   logStep(7, "Building the expiry block (Chopsticks supplies the process_pending_renewals inherent)...");
@@ -305,14 +305,14 @@ async function main() {
   logOk(`Block #${chain.head.number} produced (on_finalize did not panic)`);
 
   // ── Verify the drain results ──
-  logStep(8, "Verifying the inherent drained PendingAutoRenewals and renewed the data...");
+  logStep(8, "Verifying the inherent drained PendingRenewals and renewed the data...");
 
   const pendingAfter = await provider.send("state_getStorage", [pendingKey], false);
   if (!pendingAfter || pendingAfter === "0x00") {
-    logOk("PendingAutoRenewals is empty (drained by the inherent)");
+    logOk("PendingRenewals is empty (drained by the inherent)");
   } else {
-    logFail(`PendingAutoRenewals not drained: ${pendingAfter}`);
-    throw new Error("process_pending_renewals did not drain PendingAutoRenewals");
+    logFail(`PendingRenewals not drained: ${pendingAfter}`);
+    throw new Error("process_pending_renewals did not drain PendingRenewals");
   }
 
   const contentHashAfter = await provider.send("state_getStorage", [contentHashKey], false);
@@ -348,7 +348,7 @@ async function main() {
   console.log("  Verified:");
   console.log("  - enable_auto_renew: DataRenewal.Renewals entry created");
   console.log("  - disable_auto_renew: DataRenewal.Renewals entry removed");
-  console.log("  - on_initialize queues expiring data into PendingAutoRenewals");
+  console.log("  - on_initialize queues expiring data into PendingRenewals");
   console.log("  - process_pending_renewals inherent drains it and renews the data");
   console.log("  - recurring registration survives with the prepayment consumed");
   console.log("");
