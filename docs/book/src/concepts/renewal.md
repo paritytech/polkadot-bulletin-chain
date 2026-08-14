@@ -11,15 +11,13 @@ Renewal extrinsics identify the data with a `TransactionRef` (`entry`). It has t
 
 ## Renewal Extrinsics
 
-The pallet exposes three distinct renewal operations. They behave differently — pick the one that matches your needs.
+Three renewal operations, with different behaviour:
 
 ### `renew(entry)` — one-shot scheduled renewal
 
-Schedules a **single** auto-renewal that fires once when the data reaches its retention boundary. After that one renewal the registration is removed and the data is no longer renewed.
+Schedules a **single** renewal that fires when the data reaches its retention boundary. The registration is then removed.
 
-- Does **not** renew synchronously at dispatch time.
-- Emits `RenewalEnabled { content_hash, who, recurring: false }`.
-- Does **not** emit `Renewed`.
+- Emits `RenewalEnabled { content_hash, who, recurring: false }` — not `Renewed`, since nothing is renewed at dispatch time.
 - Rejects with `RenewalAlreadyEnabled` if a renewal is already registered for this content hash.
 
 ### `force_renew(entry)` — immediate synchronous renewal
@@ -31,7 +29,7 @@ Renews the data **immediately** at dispatch time, extending its retention from t
 
 ### `enable_auto_renew(content_hash)` — continuous renewal
 
-Registers the data (identified by content hash, not a `TransactionRef`) for **recurring** auto-renewal. The chain renews it automatically at each retention cycle until disabled.
+Registers the data — by content hash, not a `TransactionRef` — for **recurring** renewal at each retention cycle until disabled.
 
 - Emits `RenewalEnabled { content_hash, who, recurring: true }`.
 - Emits `DataRenewed { index, content_hash, account }` at each cycle.
@@ -90,29 +88,15 @@ api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
 
 ## When to Renew
 
-**Renew when you need:**
-- Guaranteed on-chain availability beyond the retention period
-- Validators to continue providing storage proofs
-- Chain-level data guarantees for your application
-
-**You don't need to renew if:**
-- The data only needs to exist temporarily
-- You've replicated the data to external storage
-- The retention period is sufficient for your use case
+Renew if you need on-chain availability — and validator storage proofs — beyond the retention period. If the retention period covers your use case, or you keep a copy in external storage, you don't.
 
 ## Authorization
 
-Like `store`, renewal requires **authorization**:
-- The account must have sufficient authorized bytes/transactions
-- Authorization is consumed based on the data size
-- Pre-authorize enough capacity if you plan multiple renewals
+Like `store`, renewal consumes **authorization** based on the data size, so pre-authorize enough capacity for the renewals you plan.
 
 ## Data Availability After Expiration
 
-Even after data expires on-chain:
-- Validator nodes may still have the data cached temporarily
-- The CID remains valid; only on-chain storage guarantees expire
-- Consider replicating critical data to external storage as backup
+Only the on-chain guarantee expires: the CID stays valid, and validators may still serve the data from cache for a while. Replicate critical data externally.
 
 ## SDK Support
 
@@ -122,7 +106,5 @@ Both SDKs provide a `renew` helper:
 
 ## Next Steps
 
-- [Rust SDK: Renewal](../rust/renewal.md) - SDK-specific implementation
-- [TypeScript SDK: Renewal](../typescript/renewal.md) - SDK-specific implementation
 - [Storage Model](./storage.md) - How data is stored
 - [Data Retrieval](./retrieval.md) - Fetching from validator nodes

@@ -1,10 +1,10 @@
 # Renewal
 
-This guide shows how to renew stored data using the Rust SDK to extend the retention period.
+Extending the retention of stored data with the Rust SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `TransactionClient::renew` schedules a one-shot renewal — it fires once when the data reaches its retention boundary. For immediate renewal use `TransactionClient::force_renew` (same arguments). Recurring `enable_auto_renew` is not exposed by the SDK; call it via subxt against the live runtime if you need it (see [concepts](../concepts/renewal.md)).
+> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — call it via subxt (see [concepts](../concepts/renewal.md)).
 
 ## Two Clients
 

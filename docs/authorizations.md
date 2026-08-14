@@ -126,11 +126,9 @@ That obsolete-block cleanup is the only path that ever decrements `PermanentStor
 
 ## Why renewed bytes can't grow unboundedly
 
-Stated up front: at any block `n`, total renewed bytes on chain are bounded by `MaxPermanentStorageSize` (chain-wide cap) and a single account's renewed bytes are bounded by `(K + 1) × bytes_allowance` where `K = RetentionPeriod / AuthorizationPeriod` (so `2 × bytes_allowance` for the aligned Westend / Paseo configs where `K = 1`).
+At any block `n`, total renewed bytes on chain are bounded by `MaxPermanentStorageSize` (chain-wide cap) and a single account's renewed bytes are bounded by `(K + 1) × bytes_allowance` where `K = RetentionPeriod / AuthorizationPeriod` (so `2 × bytes_allowance` for the aligned Westend / Paseo configs where `K = 1`).
 
 Why: every renewed byte ages out exactly `RetentionPeriod` blocks after its renew block (the obsolete-block cleanup in `on_initialize`). New renews are gated by the chain-wide cap, so the counter can only enter the in-bounds region. As old data ages out, the cap recovers.
-
-The examples below trace the counters block-by-block to make the bound visible.
 
 ### Example 1 — single user, single window
 
@@ -161,7 +159,7 @@ From here Alice's path branches:
 - **PoP re-authorizes** (`authorize_account` on the expired-but-present path) — the caps are re-granted and **all** consumed counters (`bytes`, `bytes_permanent`, `transactions`) reset to `0`. Alice gets a fresh window and can `store` / `force_renew` again. Repeating the pattern every window gives steady-state on-chain footprint = `bytes_allowance` per account (= 10 MiB).
 - **PoP does not re-authorize** — the authorization sits expired-but-present until anyone calls `remove_expired_account_authorization`. Alice cannot `store` or `force_renew`. Her renewed data has already aged out.
 
-Two things worth noting:
+Two consequences:
 
 1. `bytes_permanent` is **not** decremented when the renewed data ages out — that is the chain-wide `PermanentStorageUsed`'s job. The per-account counter only resets on re-authorize (expired-but-present path). While the authorization is expired, `check_authorization` rejects on the expiration check before reading `bytes_permanent`, so the staleness is unobservable.
 2. `Transactions` is the source of truth for on-chain renewed bytes. The chain-wide counter mirrors that same total via increments at renew time and decrements at obsolete-block cleanup; the per-account counter does not need to.
@@ -190,7 +188,7 @@ Peak on-chain bytes per account: `2 × bytes_allowance`. Generalising, with `Ret
 | n+k | further renews would exceed 1.7 TiB | 1.7 TiB | `ChainPermanentCapReached` rejects new renews |
 | n+k+RetentionPeriod | obsolete cleanup decrements as old renewals age out | < 1.7 TiB | new renews accepted again |
 
-The chain-wide cap is a hard ceiling on `PermanentStorageUsed`; the on-chain renewed bytes equal the counter (modulo a transient lag inside `on_initialize`). The system self-corrects: as soon as the counter falls below the cap, renewals resume.
+The chain-wide cap is a hard ceiling on `PermanentStorageUsed`, and the on-chain renewed bytes equal the counter (modulo a transient lag inside `on_initialize`). Renewals resume as soon as the counter falls back below the cap.
 
 ### Example 5 — adversarial single-user renew spam
 
@@ -211,9 +209,9 @@ When `PermanentStorageNearCap` fires governance can either:
 
 ## Auto-renewal
 
-Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization` (called by the extension's `check_signed` for the manual flow and by `do_process_pending_renewals` for the auto flow); the unified renewal mechanics live in `do_renew_in_memory` (called by `do_renew` and by the auto-renewal drain loop).
+Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization`, called by the extension's `check_signed` for the manual flow and by `do_process_pending_renewals` for the auto flow. The shared renewal mechanics live in `do_renew_in_memory`, called by `do_renew` and by the drain loop.
 
-Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::RenewalFailed` is emitted, and the data expires normally. If the slot cap rejects a cycle after the charge has been applied, `do_process_pending_renewals` refunds the chain-wide `PermanentStorageUsed` bump so the cap does not leak; the per-account `bytes_permanent` / `transactions` increments are left in place — slot-cap rejection at inherent time is pathological (the inherent runs before user txs and `len(pending) <= MaxBlockTransactions`), so the simpler accounting is preferred over a per-auth refund that would silently apply across roll-overs.
+Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::RenewalFailed` is emitted, and the data expires normally. If the slot cap rejects a cycle after the charge has been applied, `do_process_pending_renewals` refunds the chain-wide `PermanentStorageUsed` bump so the cap does not leak; the per-account `bytes_permanent` / `transactions` increments are left in place. Slot-cap rejection at inherent time is pathological — the inherent runs before user txs and `len(pending) <= MaxBlockTransactions` — so the simpler accounting is preferred over a per-auth refund that would silently apply across roll-overs.
 
 The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
