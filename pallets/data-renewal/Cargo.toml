@@ -1,6 +1,6 @@
 [package]
 name = "pallet-bulletin-data-renewal"
-version = "0.1.0"
+version = "0.10.0-draft"
 authors = ["Parity Technologies <admin@parity.io>"]
 edition.workspace = true
 license = "Apache-2.0"
