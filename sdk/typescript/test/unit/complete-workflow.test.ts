@@ -143,6 +143,34 @@ describe("Complete workflow (MockBulletinClient)", () => {
     ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
   })
 
+  it("should record renew and forceRenew operations with TransactionRef entries", async () => {
+    const client = new MockBulletinClient()
+
+    await client.renew({ block: 100, index: 5 }).send()
+    await client.forceRenew(new Uint8Array(32).fill(7)).send()
+
+    const ops = client.getOperations()
+    expect(ops).toContainEqual({
+      type: "renew",
+      entry: { type: "Position", value: { block: 100, index: 5 } },
+    })
+    expect(ops).toContainEqual({
+      type: "force_renew",
+      entry: { type: "ContentHash", value: `0x${"07".repeat(32)}` },
+    })
+  })
+
+  it("should simulate auth failure for store as a chain-side rejection", async () => {
+    // The real client never throws INSUFFICIENT_AUTHORIZATION for store —
+    // boost exhaustion only warns; an actual chain rejection surfaces as
+    // AUTHORIZATION_FAILED. The mock must model the reachable path.
+    const client = new MockBulletinClient({ simulateAuthFailure: true })
+
+    await expect(
+      client.store(Binary.fromText("auth failure")).send(),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
+  })
+
   it("should allow remove_expired calls even with simulateAuthFailure", async () => {
     const client = new MockBulletinClient({ simulateAuthFailure: true })
 

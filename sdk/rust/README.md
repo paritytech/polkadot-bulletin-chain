@@ -25,48 +25,46 @@ let data = b"Hello, Bulletin!".to_vec();
 let operation = client.prepare_store(data, StoreOptions::default())?;
 
 // Submit via your subxt setup
-// let tx = your_runtime::tx().transaction_storage().store(operation.data, None);
+// let tx = your_runtime::tx().transaction_storage().store(operation.data);
 // api.tx().sign_and_submit_then_watch_default(&tx, &signer).await?;
 ```
 
-### For Testing (Mock Client)
+### Submit via the Transaction Client (std only)
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-// Create mock client for testing without a node
-let client = MockBulletinClient::new();
+// Prepare locally, then submit over the network
+let client = BulletinClient::new();
+let operation = client.prepare_store(b"Hello!".to_vec(), StoreOptions::default())?;
 
-let result = client
-    .store(b"Hello!".to_vec())
-    .send()
-    .await?;
+let tx_client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
+let receipt = tx_client.store(operation.data, &signer, WaitFor::InBlock).await?;
 
-println!("Mock CID: {:?}", result.cid);
+println!("Stored in block: {}", receipt.block_hash);
 ```
 
 ## Installation
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust" }
+bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
 ```
 
 For no_std environments:
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
+bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain", default-features = false }
 ```
 
 ## Architecture
 
 The SDK is split into layers:
 
-- **`BulletinClient`** - Prepares operations (chunking, CID calculation, manifests)
-- **`AsyncBulletinClient`** - ⚠️ Experimental, placeholder implementation
-- **`MockBulletinClient`** - Mock client for testing
+- **`BulletinClient`** - Prepares operations (chunking, CID calculation, manifests); `no_std` compatible
+- **`TransactionClient`** - Submits store/renew/authorize extrinsics over subxt (`std` only)
 
-For production use, prepare operations with `BulletinClient` and submit via subxt directly.
+Prepare operations with `BulletinClient`, then submit them with `TransactionClient` or via subxt directly.
 
 ## Build & Test
 
@@ -85,9 +83,8 @@ cargo test --all-features
 - ✅ CID calculation (Blake2b-256, SHA2-256, Keccak-256)
 - ✅ Authorization estimation
 - ✅ Progress callbacks with closure support
-- ✅ Mock client for testing
+- ✅ Transaction submission via `TransactionClient` (`std` only)
 - ✅ no_std compatible core
-- ⚠️ Direct transaction submission (experimental)
 
 ## API Overview
 

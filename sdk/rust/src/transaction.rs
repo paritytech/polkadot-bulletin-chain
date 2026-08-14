@@ -10,6 +10,8 @@ use crate::{
 	cid::ContentHash,
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
+use bulletin_transaction_storage_primitives::TransactionRef;
+use codec::Decode;
 use subxt::{
 	blocks::BlockRef, config::DefaultExtrinsicParamsBuilder, utils::AccountId32, OnlineClient,
 	PolkadotConfig,
@@ -19,6 +21,40 @@ use subxt_signer::sr25519::Keypair;
 // Subxt metadata for TransactionStorage pallet
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
+
+/// `TransactionStorage::Authorizations` values, decoded with plain SCALE instead of through the
+/// subxt-generated type.
+///
+/// The renewal split renamed `AuthorizationExtent::bytes_permanent` to `extra` (an opaque
+/// consumer-pallet payload) without moving it, so the encoding is byte-identical across the split
+/// but the field *names* are not. Subxt matches fields by name against the connected chain's
+/// metadata, so the generated accessor cannot read authorizations from a runtime that predates the
+/// split — which is every deployed chain until it upgrades. Decoding positionally reads both, the
+/// same compatibility the TypeScript SDK keeps for the renewal extrinsics.
+///
+/// The layout is frozen on the runtime side by
+/// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
+#[derive(Decode)]
+struct StoredAuthorization {
+	transactions: u32,
+	transactions_allowance: u32,
+	bytes: u64,
+	/// `bytes_permanent` pre-split, `extra` after it.
+	_extra: u64,
+	bytes_allowance: u64,
+	expiration: u32,
+}
+
+/// Convert the primitives `TransactionRef` into the subxt-generated one.
+fn to_runtime_ref(
+	entry: &TransactionRef<u32>,
+) -> bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef<u32> {
+	use bulletin::runtime_types::bulletin_transaction_storage_primitives::TransactionRef as Gen;
+	match entry {
+		TransactionRef::Position { block, index } => Gen::Position { block: *block, index: *index },
+		TransactionRef::ContentHash(hash) => Gen::ContentHash(*hash),
+	}
+}
 
 /// Transaction submission client for Bulletin Chain.
 ///
@@ -225,11 +261,19 @@ impl TransactionClient {
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_bulletin_transaction_storage::AuthorizationScope as OnChainScope;
+		use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope as OnChainScope;
 
 		let storage_query = bulletin::storage()
 			.transaction_storage()
 			.authorizations(OnChainScope::Account(who.clone()));
+
+		// The key is encoded from the chain's own metadata (unchanged by the renewal split); only
+		// the value is decoded by hand — see `StoredAuthorization`.
+		let key = self
+			.api
+			.storage()
+			.address_bytes(&storage_query)
+			.map_err(|e| Error::NetworkError(format!("Failed to encode storage key: {e:?}")))?;
 
 		let latest_block = self
 			.api
@@ -241,20 +285,22 @@ impl TransactionClient {
 		let current_block_number = latest_block.number();
 
 		let maybe_auth =
-			latest_block.storage().fetch(&storage_query).await.map_err(|e| {
+			latest_block.storage().fetch_raw(key).await.map_err(|e| {
 				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
 			})?;
 
-		match maybe_auth {
-			Some(auth) if auth.expiration > current_block_number => {
-				let transactions_remaining =
-					auth.extent.transactions_allowance.saturating_sub(auth.extent.transactions);
-				let bytes_remaining = auth.extent.bytes_allowance.saturating_sub(auth.extent.bytes);
-				Ok(Some((transactions_remaining, bytes_remaining)))
-			},
-			Some(_) => Ok(None), // expired
-			None => Ok(None),
+		let Some(bytes) = maybe_auth else { return Ok(None) };
+
+		let auth = StoredAuthorization::decode(&mut &bytes[..])
+			.map_err(|e| Error::NetworkError(format!("Failed to decode authorization: {e}")))?;
+
+		if auth.expiration <= current_block_number {
+			return Ok(None); // expired
 		}
+
+		let transactions_remaining = auth.transactions_allowance.saturating_sub(auth.transactions);
+		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes);
+		Ok(Some((transactions_remaining, bytes_remaining)))
 	}
 
 	/// Check that sufficient authorization exists for a store operation.
@@ -413,15 +459,22 @@ impl TransactionClient {
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
-	/// Renew/extend the retention period for stored data.
+	/// Schedule a one-shot renewal of stored data.
+	///
+	/// The renewal fires once when the data reaches its retention boundary; it
+	/// does not renew synchronously. For immediate renewal use
+	/// [`force_renew`](Self::force_renew).
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
 	pub async fn renew(
 		&self,
-		block: u32,
-		index: u32,
+		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
-		let tx = bulletin::tx().transaction_storage().renew(block, index);
+		let entry = entry.into();
+		let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -429,11 +482,29 @@ impl TransactionClient {
 			})
 			.await?;
 
-		Ok(RenewReceipt {
-			original_block: block,
-			transaction_index: index,
-			block_hash: result.block_hash,
-		})
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
+	}
+
+	/// Immediately renew stored data, extending its retention from the current block.
+	///
+	/// `entry` accepts anything convertible to [`TransactionRef`]: a
+	/// `(block, index)` tuple or a [`ContentHash`].
+	pub async fn force_renew(
+		&self,
+		entry: impl Into<TransactionRef<u32>>,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<RenewReceipt> {
+		let entry = entry.into();
+		let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
+
+		let result = self
+			.submit_and_watch(&tx, signer, wait_for, None, |e| {
+				Error::RenewalFailed(format!("Force renew failed: {e}"))
+			})
+			.await?;
+
+		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
 	/// Refresh an account authorization (extends expiry).
@@ -539,7 +610,30 @@ pub struct PreimageAuthorizationReceipt {
 /// Receipt from a successful renew operation.
 #[derive(Debug, Clone)]
 pub struct RenewReceipt {
-	pub original_block: u32,
-	pub transaction_index: u32,
+	pub entry: TransactionRef<u32>,
 	pub block_hash: String,
+}
+
+#[cfg(test)]
+mod tests {
+	use super::StoredAuthorization;
+	use codec::{Decode, Encode};
+
+	/// Mirror of the runtime-side freeze test: the bytes a pre-split chain wrote must land in the
+	/// fields `query_account_authorization` reads.
+	#[test]
+	fn stored_authorization_decodes_pre_split_layout() {
+		// extent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }
+		// followed by `expiration`.
+		let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u32).encode();
+
+		let auth = StoredAuthorization::decode(&mut &pre_split[..]).unwrap();
+
+		assert_eq!(auth.transactions, 1);
+		assert_eq!(auth.transactions_allowance, 5);
+		assert_eq!(auth.bytes, 100);
+		assert_eq!(auth._extra, 700);
+		assert_eq!(auth.bytes_allowance, 900);
+		assert_eq!(auth.expiration, 50);
+	}
 }

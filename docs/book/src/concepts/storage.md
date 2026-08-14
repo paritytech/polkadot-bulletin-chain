@@ -4,7 +4,7 @@ The SDK supports two primary modes of operation.
 
 ## Simple Storage (Direct)
 
-For small data (less than 8 MiB), you can store the data directly in a single transaction.
+For small data (less than 2 MiB), you can store the data directly in a single transaction.
 
 - **Pros**: Simple, atomic (all or nothing).
 - **Cons**: Limited by block size and transaction size limits.

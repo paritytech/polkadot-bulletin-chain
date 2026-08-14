@@ -17,6 +17,7 @@ cid = { features = ["alloc"], workspace = true }
 codec = { workspace = true }
 scale-info = { features = ["derive"], workspace = true }
 sp-io = { workspace = true, default-features = false }
+sp-runtime = { workspace = true, default-features = false }
 sp-transaction-storage-proof = { workspace = true, default-features = false }
 tracing = { workspace = true }
 
@@ -27,6 +28,7 @@ std = [
 	"codec/std",
 	"scale-info/std",
 	"sp-io/std",
+	"sp-runtime/std",
 	"sp-transaction-storage-proof/std",
 	"tracing/std",
 ]

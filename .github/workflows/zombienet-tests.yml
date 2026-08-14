@@ -19,6 +19,12 @@ permissions:
 
 jobs:
   changes:
+    # `zombienet-sync-tests` is the only label that changes what runs, so ignore
+    # every other `labeled` event — otherwise labelling races `opened` and the
+    # duplicate run gets cancelled by `cancel-in-progress`.
+    if: >-
+      github.event.action != 'labeled' ||
+      github.event.label.name == 'zombienet-sync-tests'
     uses: ./.github/workflows/check-changed-files.yml
     permissions:
       contents: read
@@ -38,7 +44,7 @@ jobs:
       image: ${{ needs.set-image.outputs.CI_IMAGE }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -81,10 +87,12 @@ jobs:
           - archive
           - pruning
           - restart
-          - mixed
+          - mixed-1
+          - mixed-2
+          - mixed-3
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -93,7 +101,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
@@ -118,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-sync-tests:
@@ -142,7 +152,7 @@ jobs:
             para_id: 1501
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -151,7 +161,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
@@ -178,7 +188,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-hop-tests:
@@ -198,7 +210,7 @@ jobs:
             para_id: 1501
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -207,7 +219,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-hop-tests-${{ matrix.runtime.name }}"
@@ -232,5 +244,19 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
+
+  zombienet-tests-complete:
+    name: All zombienet tests passed
+    needs: [changes, zombienet-auto-renew-tests, zombienet-sync-tests, zombienet-hop-tests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide outcome
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: |
+          echo "Zombienet tests failed or were cancelled"
+          exit 1

@@ -4,3 +4,4 @@
 //! Test modules for Bulletin Westend XCM integration tests.
 
 pub mod teleports;
+pub mod transact;

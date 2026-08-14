@@ -214,6 +214,23 @@ pub enum TxPoolError {
 	Other,
 }
 
+impl TxPoolError {
+	/// Stable `class` label value for `bulletin_stress_tx_errors_total`.
+	pub fn metric_class(self) -> &'static str {
+		match self {
+			Self::PoolFull => "pool_full",
+			Self::TxDropped => "dropped",
+			Self::AlreadyImported => "already_imported",
+			Self::StaleNonce => "stale_nonce",
+			Self::FutureNonce => "future_nonce",
+			Self::Banned => "banned",
+			Self::ExhaustsResources => "exhausts_resources",
+			Self::ConnectionDead => "connection_dead",
+			Self::Other => "other",
+		}
+	}
+}
+
 pub(crate) fn classify_tx_error(e: &anyhow::Error) -> TxPoolError {
 	let msg = format!("{e}").to_lowercase();
 
@@ -1094,7 +1111,7 @@ pub async fn submit_sequential_wave(
 				},
 				Err(e) => {
 					let msg = format!("{e}");
-					let class = classify_tx_error(&anyhow::anyhow!("{}", &msg));
+					let class = classify_tx_error(&anyhow::anyhow!("{}", msg));
 					// Keep first 5 raw errors for log output.
 					{
 						let mut errs = raw_errs.lock().unwrap();

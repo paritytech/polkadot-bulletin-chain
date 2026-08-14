@@ -12,7 +12,7 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 ## Features
 
-- **Wallet Connection**: Connect Polkadot.js, Talisman, SubWallet, or other browser wallets
+- **Wallet Connection**: Connect Polkadot.js, Talisman, SubWallet, PolkaGate, or other browser wallets
 - **Data Upload**: Store data on-chain with configurable CID formats (hash algorithm, codec)
 - **Data Download**: Retrieve data by CID via IPFS gateway
 - **Authorization Management**: View account and preimage authorizations
@@ -23,7 +23,7 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 - Node.js 18+ or Bun
 - A running Bulletin Chain node (for local development)
-- A browser wallet extension (Polkadot.js, Talisman, etc.)
+- A browser wallet extension (Polkadot.js, Talisman, PolkaGate, etc.)
 
 ## Getting Started
 
@@ -77,6 +77,10 @@ Select "Bulletin Westend" from the network dropdown. The UI connects to `wss://b
 ### Polkadot Mainnet
 
 Select "Bulletin Polkadot" from the network dropdown. The UI connects to `wss://bulletin-rpc.polkadot.io`.
+
+### Paseo Testnet
+
+Select "Products Devnet" from the network dropdown. The UI connects to `wss://bullet.sik.rocks`.
 
 ## IPFS Gateway
 

@@ -29,7 +29,7 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data (auto-chunks if > 2 MiB) |
+| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data in a single `store` extrinsic (no chunking; use `BulletinClient::prepare_store_chunked` for large files) |
 | `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
 
 **Authorization:**
@@ -54,7 +54,8 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(block, index, signer, wait_for)` | `Result<RenewReceipt>` | Renew storage at block/index |
+| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary); `entry` is `impl Into<TransactionRef<u32>>` — a `(block, index)` tuple or a `ContentHash` |
+| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time (same `entry` conversions) |
 
 ---
 
@@ -366,13 +367,19 @@ pub fn calculate_cid_default(data: &[u8]) -> Result<CidData>;
 pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid>;
 ```
 
-**Re-exported from `transaction_storage_primitives`:**
+**Re-exported from `bulletin_transaction_storage_primitives`:**
 
 ```rust
-pub use transaction_storage_primitives::cids::{
-    calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm,
+pub use bulletin_transaction_storage_primitives::{
+    cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
+    ContentHash, TransactionRef,
 };
-pub use transaction_storage_primitives::ContentHash;
+
+// TransactionRef identifies a stored entry for the renewal extrinsics:
+pub enum TransactionRef<BlockNumber> {
+    Position { block: BlockNumber, index: u32 },
+    ContentHash(ContentHash),
+}
 ```
 
 ---
@@ -410,7 +417,7 @@ impl CidCodec {
 
 ### HashingAlgorithm
 
-Re-exported from `transaction_storage_primitives`. Variants:
+Re-exported from `bulletin_transaction_storage_primitives`. Variants:
 - `Blake2b256` — BLAKE2b-256 (default, Substrate-native)
 - `Sha2_256` — SHA2-256
 - `Keccak256` — Keccak-256
@@ -538,8 +545,7 @@ pub struct PreimageAuthorizationReceipt {
 
 ```rust
 pub struct RenewReceipt {
-    pub original_block: u32,
-    pub transaction_index: u32,
+    pub entry: TransactionRef<u32>,
     pub block_hash: String,
 }
 ```
@@ -559,7 +565,4 @@ pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `MAX_CHUNK_SIZE` | `2 * 1024 * 1024` (2 MiB) | Maximum single chunk size |
-| `MAX_FILE_SIZE` | `64 * 1024 * 1024` (64 MiB) | Maximum total file size |
-| `DEFAULT_CHUNK_SIZE` | `1024 * 1024` (1 MiB) | Default chunk size |
 | `VERSION` | `env!("CARGO_PKG_VERSION")` | Crate version string |

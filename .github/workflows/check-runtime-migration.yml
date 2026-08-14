@@ -34,7 +34,7 @@ jobs:
       runtime: ${{ steps.runtime.outputs.runtime }}
     name: Extract tasks from matrix
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - id: runtime
         run: |
           # Expand each runtime into one task per try_runtime instance,
@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Polkadot binaries
         uses: ./.github/actions/use-polkadot-binaries
@@ -83,7 +83,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Snapshot lookup uses a deliberately-non-matching primary `key:` so
       # `restore-keys` always falls through to the most recent dated entry.
@@ -168,7 +168,7 @@ jobs:
         runtime: ${{ fromJSON(needs.runtime-matrix.outputs.runtime) }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: "Fetch upstream tags"
         if: github.event_name == 'pull_request'
@@ -185,7 +185,7 @@ jobs:
           mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
@@ -198,20 +198,35 @@ jobs:
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: true
 
+      - name: Build external runtime (try-runtime)
+        if: ${{ matrix.runtime.external_runtime != null }}
+        id: external-runtime
+        uses: ./.github/actions/build-external-runtime
+        with:
+          name: ${{ matrix.runtime.name }}
+          repo: ${{ matrix.runtime.external_runtime.repo }}
+          ref: ${{ matrix.runtime.external_runtime.ref }}
+          features: try-runtime
+
       - name: Run ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }}) Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          IS_EXTERNAL: ${{ matrix.runtime.external_runtime != null }}
+          RUNTIME_BLOB_PATH: ${{ steps.external-runtime.outputs.wasm-path }}
           TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
           TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
-          FEATURES="try-runtime"
-          echo "Setting features: ${FEATURES}"
-          cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
+          # External runtimes get RUNTIME_BLOB_PATH from the build action.
+          if [ "$IS_EXTERNAL" != "true" ]; then
+            FEATURES="try-runtime"
+            echo "Setting features: ${FEATURES}"
+            cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
+            RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
+            RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
+          fi
 
-          RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
-          RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
           export RUST_LOG=remote-ext=debug,runtime=trace
 
           (set -x; try-runtime \

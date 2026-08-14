@@ -3,8 +3,9 @@
 
 import type { CID } from "@parity/bulletin-sdk";
 import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
-import { bulletin_westend } from "@polkadot-api/descriptors";
+import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import { Binary, type HexString, type SizedHex, type TypedApi } from "polkadot-api";
+import { entryKindOf } from "@/state/storage.state";
 
 /** Chain truth for a single stored transaction. */
 export interface OnChainTransaction {
@@ -37,7 +38,7 @@ export function contentHashHex(cid: CID): string {
   return Binary.toHex(cid.multihash.digest);
 }
 
-type Api = TypedApi<typeof bulletin_westend>;
+type Api = TypedApi<typeof bulletin_paseo_next_v2>;
 
 async function locateContentHashes(
   api: Api,
@@ -74,7 +75,7 @@ async function locateContentHashes(
       blockNumber,
       index: txIndex,
       size: info?.size != null ? Number(info.size) : undefined,
-      kind: info?.kind?.type,
+      kind: entryKindOf(info),
       cidCodec: info?.cid_codec != null ? Number(info.cid_codec) : undefined,
       hashing: info?.hashing?.type,
     });

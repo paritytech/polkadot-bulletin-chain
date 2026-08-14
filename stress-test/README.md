@@ -38,11 +38,11 @@ The binary is at `./target/release/bulletin-stress-test`.
 
 ### Parachain Binaries (for zombienet tests)
 
-Parachain tests require two external binaries from the Polkadot SDK. These must be compatible with the SDK revision pinned in this repo's `Cargo.toml` (`f9df3236...`).
+Parachain tests require two external binaries from the Polkadot SDK. These must be compatible with the node version tracked in `.github/env` as `POLKADOT_NODE_VERSION` (`a6871c6d...`).
 
 **Option A: Download from Polkadot SDK releases**
 
-Download `polkadot` and `polkadot-parachain` from the [polkadot-sdk releases](https://github.com/paritytech/polkadot-sdk/releases) page. Pick a release whose tag matches (or is close to) the pinned revision.
+Download `polkadot` and `polkadot-parachain` from the [polkadot-sdk releases](https://github.com/paritytech/polkadot-sdk/releases) page. Pick a release whose tag matches (or is close to) that commit.
 
 ```bash
 # Example: download and make executable
@@ -54,7 +54,7 @@ chmod +x polkadot polkadot-parachain
 ```bash
 git clone https://github.com/paritytech/polkadot-sdk.git
 cd polkadot-sdk
-git checkout f9df32360c6c22747f60b3ff58243890eecafc8e
+git checkout a6871c6d1cba2be86b611ca1084bff2b28e7f16d
 
 # Build the relay chain validator
 cargo build --release -p polkadot
@@ -117,6 +117,8 @@ bulletin-stress-test [OPTIONS] <COMMAND>
 | `--mix-seed <N>` | OS entropy | Seed for random payload-size draws in MIXED mode (reproducible runs) |
 | `--output <FORMAT>` | `text` | Output format: `text` or `json` |
 | `--output-file <PATH>` | none | JSON output file, flushed after every variant so partial results survive crashes |
+| `--prometheus-port <PORT>` | disabled | Serve Prometheus metrics on `0.0.0.0:<PORT>` for the lifetime of the process (see [Prometheus metrics](#prometheus-metrics)) |
+| `--loop-interval-secs <N>` | disabled | Re-run the selected command forever, sleeping `N` seconds between runs. A failed run logs and continues. Pair with `--prometheus-port` for long-running deployments. |
 
 ### Commands
 
@@ -217,6 +219,72 @@ For parachains or multi-validator networks, submit to multiple RPC endpoints to 
 
 The first URL is used for control operations (authorization, block monitoring); all URLs are used for transaction submission. Submitters are distributed round-robin across URLs.
 
+## Prometheus Metrics
+
+With `--prometheus-port <PORT>` the tool serves a Prometheus exposition endpoint on
+`0.0.0.0:<PORT>/metrics` for the lifetime of the process. Combined with
+`--loop-interval-secs <N>` this turns the tool into a long-running load generator (e.g. a
+Kubernetes Deployment) whose live counters can be graphed next to node-side metrics
+(`substrate_sub_txpool_*`, `substrate_proposer_*`, `substrate_block_height`, ...):
+
+```bash
+./target/release/bulletin-stress-test \
+  --ws-url 'wss://rpc1.example.com,wss://rpc2.example.com' \
+  --prometheus-port 9615 \
+  --loop-interval-secs 300 \
+  --target-blocks 50 \
+  throughput --variants "32KB,1MB"
+```
+
+All metrics are prefixed `bulletin_stress_` and carry a `variant` label: the payload-size label
+for block-capacity variants (`1KB` ... `2MB`, `mixed`), or a scenario slug otherwise
+(`sequential-upload`, `renew`, `hop-submit-100KB`, `hop-full-cycle`, `hop-group`,
+`hop-pool-fill`, `hop-mixed`, `bitswap-b2-c<concurrency>`, `bitswap-bulk-read`).
+
+Live metrics (updated at event time while a run is in flight):
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `bulletin_stress_tx_submitted_total` | counter | `variant` | Store extrinsics accepted by the node RPC (block-capacity pipeline) |
+| `bulletin_stress_tx_submitted_bytes_total` | counter | `variant` | Encoded extrinsic bytes accepted (offered load) |
+| `bulletin_stress_tx_errors_total` | counter | `variant`, `class` | Submission error/retry events (`pool_full`, `banned`, `exhausts_resources`, `dropped`, `already_imported`, `stale_nonce`, `future_nonce`, `connection_dead`, `other`) |
+| `bulletin_stress_tx_confirmed_total` | counter | `variant` | Store transactions confirmed in finalized blocks |
+| `bulletin_stress_tx_confirmed_bytes_total` | counter | `variant` | Uncompressed payload bytes confirmed in finalized blocks |
+| `bulletin_stress_blocks_observed_total` | counter | `variant` | Finalized blocks observed by the block monitor (including empty ones) |
+| `bulletin_stress_block_txs` | histogram | `variant` | Store transactions per observed block (block-fullness distribution; buckets up to the 512-tx cap) |
+| `bulletin_stress_latency_seconds` | histogram | `variant`, `kind` | End-to-end latency (`inclusion`, `finalization`, `retrieval`) |
+| `bulletin_stress_reads_total` | counter | `variant`, `outcome` | Bitswap read attempts (`success` / `failure`) |
+| `bulletin_stress_read_bytes_total` | counter | `variant` | Bytes downloaded via Bitswap |
+
+Run lifecycle:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `bulletin_stress_runs_total` | counter | `outcome` | Finished runs (`ok` / `failed` / `cancelled`); one run per invocation or loop iteration |
+| `bulletin_stress_run_in_progress` | gauge | — | 1 while a run is executing |
+| `bulletin_stress_run_start_timestamp_seconds` | gauge | — | Unix timestamp of the most recent run start |
+| `bulletin_stress_variant_active` | gauge | `variant` | 1 while the labeled block-capacity variant is running |
+
+End-of-variant summaries (mirrors of the JSON report, set once per completed variant):
+
+| Metric | Type | Labels |
+|--------|------|--------|
+| `bulletin_stress_result_throughput_tx_per_sec` | gauge | `variant` |
+| `bulletin_stress_result_throughput_bytes_per_sec` | gauge | `variant` |
+| `bulletin_stress_result_avg_tx_per_block` | gauge | `variant` |
+| `bulletin_stress_result_peak_tx_per_block` | gauge | `variant` |
+| `bulletin_stress_result_latency_seconds` | gauge | `variant`, `kind`, `quantile` (`p50`, `p90`, `p99`, `min`, `max`, `mean`) |
+| `bulletin_stress_result_reads_per_sec` | gauge | `variant` |
+| `bulletin_stress_result_read_bytes_per_sec` | gauge | `variant` |
+
+Notes:
+- Live write-path counters are currently wired into the block-capacity pipeline (the
+  `throughput` command); `sequential-upload`, `renew`, and HOP submissions report through the
+  `bulletin_stress_result_*` summaries (HOP and Bitswap additionally feed the live latency
+  histogram and read counters).
+- In loop mode, `--output-file` is rewritten each run with that run's results; counters and
+  histograms accumulate monotonically across runs, so `rate()` / `increase()` work as usual.
+
 ## Zombienet Integration Tests
 
 Automated tests that spawn ephemeral local networks, run the stress test CLI as a subprocess, and validate results against expectations tables.
@@ -246,7 +314,7 @@ Before running zombienet tests, ensure you have:
 | `POLKADOT_PARACHAIN_BINARY_PATH` | `polkadot-parachain` (on PATH) | Path to the parachain omni-node binary |
 | `PARACHAIN_CHAIN_SPEC_PATH` | `./zombienet/bulletin-westend-spec.json` | Path to the parachain chain spec |
 | `RELAY_CHAIN` | `westend-local` | Relay chain identifier |
-| `PARACHAIN_ID` | `2487` | Parachain ID |
+| `PARACHAIN_ID` | `1010` | Parachain ID |
 
 ### Running Tests
 
@@ -358,10 +426,6 @@ Returns an array of `ScenarioResult` objects. Each contains:
 - `blocks`: Per-block data (number, tx count, payload bytes, prefill flag, on-chain timestamp, block hash, finalized status, block interval)
 - `chain_limits`: Runtime constants (block weight/length limits, storage limits, weight regression)
 - `environment`: Chain name, version, node role
-
-## Architecture
-
-See [DESIGN.md](DESIGN.md) for detailed architecture, data flow diagrams, and module dependency graph.
 
 ## Security
 

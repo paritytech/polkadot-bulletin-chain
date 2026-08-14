@@ -40,8 +40,8 @@ use scale_info::TypeInfo;
 /// Fungible currency implementation that does not support any balance operations.
 /// Works only with zero balances.
 ///
-/// Note: This is a workaround to satisfy the `pallet-session::Config::Currency` and
-/// `pallet-proxy::Config::Currency` trait requirements.
+/// Note: This is a workaround to satisfy currency trait bounds (e.g.
+/// `pallet_bulletin_transaction_storage::Config::Currency`) in runtimes that hold no balances.
 pub struct NoCurrency<AccountId, HoldReason = ()>(
 	core::marker::PhantomData<(AccountId, HoldReason)>,
 );
@@ -340,28 +340,6 @@ pub fn inspect_utility_wrapper<T: pallet_utility::Config>(
 	Some(inner)
 }
 
-/// Inspect a sudo call for wrapper semantics: returns inner calls.
-pub fn inspect_sudo_wrapper<T: pallet_sudo::Config>(
-	call: &pallet_sudo::Call<T>,
-) -> Option<Vec<&<T as pallet_sudo::Config>::RuntimeCall>> {
-	let inner = sudo_inner_calls(call);
-	if inner.is_empty() {
-		return None;
-	}
-	Some(inner)
-}
-
-/// Inspect a proxy call for wrapper semantics: returns inner calls.
-pub fn inspect_proxy_wrapper<T: pallet_proxy::Config>(
-	call: &pallet_proxy::Call<T>,
-) -> Option<Vec<&<T as pallet_proxy::Config>::RuntimeCall>> {
-	let inner = proxy_inner_calls(call);
-	if inner.is_empty() {
-		return None;
-	}
-	Some(inner)
-}
-
 /// Extract inner calls from a utility call variant.
 pub fn utility_inner_calls<T: pallet_utility::Config>(
 	call: &pallet_utility::Call<T>,
@@ -385,38 +363,5 @@ pub fn utility_inner_calls<T: pallet_utility::Config>(
 		// unreachable). Listing it explicitly instead of `_` ensures that new
 		// upstream variants cause a compile error, forcing a conscious decision.
 		pallet_utility::Call::__Ignore(..) => vec![],
-	}
-}
-
-/// Extract inner calls from a proxy call variant.
-pub fn proxy_inner_calls<T: pallet_proxy::Config>(
-	call: &pallet_proxy::Call<T>,
-) -> Vec<&<T as pallet_proxy::Config>::RuntimeCall> {
-	match call {
-		pallet_proxy::Call::proxy { call, .. } |
-		pallet_proxy::Call::proxy_announced { call, .. } => vec![call.as_ref()],
-		pallet_proxy::Call::add_proxy { .. } |
-		pallet_proxy::Call::remove_proxy { .. } |
-		pallet_proxy::Call::remove_proxies { .. } |
-		pallet_proxy::Call::create_pure { .. } |
-		pallet_proxy::Call::kill_pure { .. } |
-		pallet_proxy::Call::announce { .. } |
-		pallet_proxy::Call::remove_announcement { .. } |
-		pallet_proxy::Call::reject_announcement { .. } |
-		pallet_proxy::Call::poke_deposit { .. } => vec![],
-		pallet_proxy::Call::__Ignore(..) => vec![],
-	}
-}
-
-/// Extract inner calls from a sudo call variant.
-pub fn sudo_inner_calls<T: pallet_sudo::Config>(
-	call: &pallet_sudo::Call<T>,
-) -> Vec<&<T as pallet_sudo::Config>::RuntimeCall> {
-	match call {
-		pallet_sudo::Call::sudo { call } |
-		pallet_sudo::Call::sudo_as { call, .. } |
-		pallet_sudo::Call::sudo_unchecked_weight { call, .. } => vec![call.as_ref()],
-		pallet_sudo::Call::set_key { .. } | pallet_sudo::Call::remove_key {} => vec![],
-		pallet_sudo::Call::__Ignore(..) => vec![],
 	}
 }

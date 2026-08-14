@@ -13,6 +13,7 @@ use crate::{
 	accounts::NonceTracker,
 	chain_info::ChainLimits,
 	client::BulletinConfig,
+	metrics::metrics,
 	pipeline::{self, IterationPlan, PayloadSizeMix, StorePayloadMode, StressWorkItem},
 	report::{BlockStats, ScenarioResult, SubmissionStats},
 	store,
@@ -197,6 +198,7 @@ fn scenario_result_from_bulk(
 
 	ScenarioResult {
 		name: format!("block-cap: Block Capacity ({label}, {account_count} accounts)"),
+		variant: label.to_string(),
 		duration: result.duration,
 		total_submitted: result.total_submitted,
 		total_confirmed: result.total_confirmed,
@@ -361,6 +363,7 @@ pub async fn run_block_capacity_sweep(
 			plans.len(),
 			crate::authorize::AUTHORIZE_BATCH_SIZE,
 		);
+		metrics().set_variant_active(label, true);
 		let variant_result: Result<ScenarioResult> = async {
 			let dual = store::subscribe_blocks_dual(ws_urls[0]).await?;
 			let (work_tx, work_rx) =
@@ -392,6 +395,7 @@ pub async fn run_block_capacity_sweep(
 				nonce_tracker,
 				cancel,
 				Some(target_blocks),
+				label,
 			)
 			.await;
 
@@ -434,6 +438,7 @@ pub async fn run_block_capacity_sweep(
 				tracing::error!("{label}: variant failed: {e}");
 				results.push(ScenarioResult {
 					name: format!("block-cap: Block Capacity ({label}) — ERROR"),
+					variant: label.to_string(),
 					payload_size: payload_size_report,
 					theoretical: Some(chain_limits.compute_theoretical_limits(payload_size_report)),
 					..Default::default()
@@ -441,6 +446,7 @@ pub async fn run_block_capacity_sweep(
 				on_result(results);
 			},
 		}
+		metrics().set_variant_active(label, false);
 
 		// Drain the transaction pool before the next variant (skip if stopping).
 		if cancel.load(Ordering::Relaxed) {
@@ -565,7 +571,7 @@ pub async fn run_sequential_upload(
 	let ws_owned: Vec<String> = ws_urls.iter().map(|s| s.to_string()).collect();
 	let futures: Vec<_> = signers
 		.iter()
-		.zip(all_payloads.into_iter())
+		.zip(all_payloads)
 		.enumerate()
 		.map(|(i, (signer, payloads))| {
 			let ws = ws_owned.clone();
@@ -701,6 +707,7 @@ pub async fn run_sequential_upload(
 			chunk_size / 1024,
 			if instances > 1 { "s" } else { "" },
 		),
+		variant: "sequential-upload".to_string(),
 		duration: result.duration,
 		total_submitted: result.total_submitted,
 		total_confirmed: result.total_confirmed,

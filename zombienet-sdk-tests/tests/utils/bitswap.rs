@@ -429,6 +429,35 @@ pub async fn verify_node_bitswap(
 		anyhow::bail!("Bitswap fetch from {} returned wrong data", node_name);
 	}
 	tracing::info!("✓ Data successfully fetched from {} via bitswap", node_name);
+	verify_node_bitswap_rpc(node, expected_data, node_name).await
+}
+
+/// Cross-check via the node's `bitswap_v1_get` JSON-RPC: same indexed data must be
+/// served over RPC as over the bitswap p2p protocol.
+pub async fn verify_node_bitswap_rpc(
+	node: &zombienet_sdk::NetworkNode,
+	expected_data: &[u8],
+	node_name: &str,
+) -> Result<()> {
+	use subxt::{backend::rpc::RpcClient, ext::subxt_rpcs::client::rpc_params};
+
+	let (_, cid) = content_hash_and_cid(expected_data);
+	tracing::info!("=== Verifying bitswap_v1_get RPC fetch of {} from {} ===", cid, node_name);
+
+	let rpc = RpcClient::from_insecure_url(node.ws_uri())
+		.await
+		.with_context(|| format!("connect to {} RPC at {}", node_name, node.ws_uri()))?;
+	let hex_data: String = rpc
+		.request("bitswap_v1_get", rpc_params![cid.clone()])
+		.await
+		.with_context(|| format!("bitswap_v1_get({}) on {}", cid, node_name))?;
+	let fetched = hex::decode(hex_data.trim_start_matches("0x"))
+		.context("decode bitswap_v1_get hex response")?;
+
+	if !verify_data_matches(&fetched, expected_data)? {
+		anyhow::bail!("bitswap_v1_get on {} returned wrong data for {}", node_name, cid);
+	}
+	tracing::info!("✓ Data successfully fetched from {} via bitswap_v1_get RPC", node_name);
 	Ok(())
 }
 
