@@ -1,0 +1,85 @@
+name: Build external runtime
+description: |
+  Resolve an external runtime ref to a commit sha, restore the per-sha WASM
+  build cache, and build the runtime via `just build-external-runtime`.
+  Outputs the resolved sha and the built WASM path. Callers only need to
+  checkout the repo first.
+
+inputs:
+  name:
+    description: Runtime name in scripts/runtimes-matrix.json.
+    required: true
+  repo:
+    description: Git URL of the external runtime repo.
+    required: true
+  ref:
+    description: Branch, tag, or pinned commit sha.
+    required: true
+  features:
+    description: Cargo features to build with. Each feature set uses its own checkout and cache.
+    required: false
+    default: ""
+
+outputs:
+  sha:
+    description: Resolved commit sha of the external runtime.
+    value: ${{ steps.resolve.outputs.sha }}
+  wasm-path:
+    description: Path to the built compact.compressed runtime WASM.
+    value: ${{ steps.build.outputs.wasm-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install just
+      uses: ./.github/actions/install-just
+
+    # Key the WASM cache on the commit sha so re-runs skip the multi-minute
+    # out-of-tree build.
+    - name: Resolve external runtime ref
+      id: resolve
+      shell: bash
+      env:
+        REPO: ${{ inputs.repo }}
+        REF: ${{ inputs.ref }}
+        FEATURES: ${{ inputs.features }}
+      run: |
+        set -euo pipefail
+        # A pinned commit sha needs no resolution (ls-remote only sees refs).
+        # POSIX sh here, no [[ =~ ]].
+        if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
+          SHA="$REF"
+        else
+          SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+        fi
+        if [ -z "$SHA" ]; then
+          echo "Failed to resolve $REF in $REPO"
+          exit 1
+        fi
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        # Mirror the checkout-dir suffix logic of `build-external-runtime` in
+        # examples/justfile so the cache path matches the recipe's output dir.
+        if [ -n "$FEATURES" ]; then
+          SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
+        else
+          SUFFIX=""
+        fi
+        echo "variant-suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+
+    - name: Cache external runtime build
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: target/external-runtimes/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}
+        key: external-runtime-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
+
+    - name: Build external runtime
+      id: build
+      shell: bash
+      working-directory: examples
+      env:
+        NAME: ${{ inputs.name }}
+        FEATURES: ${{ inputs.features }}
+      run: |
+        set -euo pipefail
+        WASM_PATH="$(just build-external-runtime "$NAME" "$FEATURES")"
+        echo "wasm-path=$WASM_PATH" >> "$GITHUB_OUTPUT"

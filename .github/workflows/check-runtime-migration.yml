@@ -185,7 +185,7 @@ jobs:
           mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
@@ -198,20 +198,35 @@ jobs:
           key: try-runtime-snapshot-${{ matrix.runtime.name }}-${{ matrix.runtime.instance }}-
           fail-on-cache-miss: true
 
+      - name: Build external runtime (try-runtime)
+        if: ${{ matrix.runtime.external_runtime != null }}
+        id: external-runtime
+        uses: ./.github/actions/build-external-runtime
+        with:
+          name: ${{ matrix.runtime.name }}
+          repo: ${{ matrix.runtime.external_runtime.repo }}
+          ref: ${{ matrix.runtime.external_runtime.ref }}
+          features: try-runtime
+
       - name: Run ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }}) Runtime Checks
         env:
           PACKAGE_NAME: ${{ matrix.runtime.package }}
+          IS_EXTERNAL: ${{ matrix.runtime.external_runtime != null }}
+          RUNTIME_BLOB_PATH: ${{ steps.external-runtime.outputs.wasm-path }}
           TRY_RUNTIME_SPEC_NAME_CHECK: ${{ matrix.runtime.try_runtime.spec_name_check}}
           TRY_RUNTIME_EXTRA_FLAGS: ${{ matrix.runtime.try_runtime.extra_flags }}
         run: |
           try-runtime --version
 
-          FEATURES="try-runtime"
-          echo "Setting features: ${FEATURES}"
-          cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
+          # External runtimes get RUNTIME_BLOB_PATH from the build action.
+          if [ "$IS_EXTERNAL" != "true" ]; then
+            FEATURES="try-runtime"
+            echo "Setting features: ${FEATURES}"
+            cargo build --release -p "$PACKAGE_NAME" --features "$FEATURES" -q --locked
+            RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
+            RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
+          fi
 
-          RUNTIME_BLOB_NAME=$(echo "$PACKAGE_NAME" | sed 's/-/_/g').compact.compressed.wasm
-          RUNTIME_BLOB_PATH="./target/release/wbuild/$PACKAGE_NAME/$RUNTIME_BLOB_NAME"
           export RUST_LOG=remote-ext=debug,runtime=trace
 
           (set -x; try-runtime \

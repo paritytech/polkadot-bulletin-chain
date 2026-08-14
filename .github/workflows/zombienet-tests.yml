@@ -101,7 +101,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-auto-renew-tests-${{ matrix.runtime.name }}"
@@ -126,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-auto-renew-test-logs-${{ matrix.runtime.name }}-${{ matrix.group }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-sync-tests:
@@ -159,7 +161,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-sync-tests-${{ matrix.runtime.name }}"
@@ -186,7 +188,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-sync-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-hop-tests:
@@ -215,7 +219,7 @@ jobs:
           mode: consume
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-zombienet-hop-tests-${{ matrix.runtime.name }}"
@@ -240,7 +244,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: zombienet-hop-test-logs-bulletin-${{ matrix.runtime.name }}
-          path: /tmp/zombie-*/**/*.log
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
   zombienet-tests-complete:

@@ -212,6 +212,7 @@ pub async fn run_renew_stress(
 
 	results.push(ScenarioResult {
 		name: format!("Renew stress: {items_per_wave} items/block × {confirmed_blocks} blocks"),
+		variant: "renew".to_string(),
 		duration,
 		total_submitted: total_renewed,
 		total_confirmed: total_renewed,

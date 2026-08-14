@@ -1,9 +1,11 @@
 # This workflow publishes bulletin-pallets-common, bulletin-transaction-storage-primitives,
-# pallet-bulletin-transaction-storage-runtime-api, pallet-bulletin-transaction-storage, and
-# pallet-bulletin-hop-promotion crates to crates.io.
+# pallet-bulletin-transaction-storage-runtime-api, pallet-bulletin-transaction-storage,
+# pallet-bulletin-data-renewal, and pallet-bulletin-hop-promotion crates to crates.io.
 # The workflow uses a manual trigger.
 # On triggering the workflow, the release branch name and the versions of the crates should
 # be provided as input parameters.
+# The release is cut from `commit_hash` if given, otherwise from the tip of the branch the
+# workflow was dispatched on.
 # In dry-run mode, no remote branch is created, no commit is pushed, and no crate is published.
 # The release branch is created on the first run if it does not exist. If a branch with the
 # same name already exists (e.g. for a patch release), it is reused.
@@ -21,6 +23,10 @@ on:
         description: "Release branch name"
         type: string
         required: true
+      commit_hash:
+        description: "Commit to release from (defaults to the tip of the selected branch)"
+        type: string
+        required: false
       common_version:
         description: "Version for bulletin-pallets-common"
         type: string
@@ -35,6 +41,10 @@ on:
         required: true
       pallet_version:
         description: "Version for pallet-bulletin-transaction-storage"
+        type: string
+        required: true
+      data_renewal_version:
+        description: "Version for pallet-bulletin-data-renewal"
         type: string
         required: true
       hop_promotion_version:
@@ -61,17 +71,23 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so an arbitrary commit of the branch can be checked out.
+          ref: ${{ inputs.commit_hash || github.ref }}
+          fetch-depth: 0
 
       - name: Validate inputs
         env:
           RELEASE_BRANCH: ${{ inputs.release_branch }}
+          COMMIT_HASH: ${{ inputs.commit_hash }}
           COMMON_VERSION: ${{ inputs.common_version }}
           PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
           RUNTIME_API_VERSION: ${{ inputs.runtime_api_version }}
           PALLET_VERSION: ${{ inputs.pallet_version }}
+          DATA_RENEWAL_VERSION: ${{ inputs.data_renewal_version }}
           HOP_PROMOTION_VERSION: ${{ inputs.hop_promotion_version }}
         run: |
-          for v in "$COMMON_VERSION" "$PRIMITIVES_VERSION" "$RUNTIME_API_VERSION" "$PALLET_VERSION" "$HOP_PROMOTION_VERSION"; do
+          for v in "$COMMON_VERSION" "$PRIMITIVES_VERSION" "$RUNTIME_API_VERSION" "$PALLET_VERSION" "$DATA_RENEWAL_VERSION" "$HOP_PROMOTION_VERSION"; do
             echo "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' || {
               echo "Invalid semver: $v" >&2; exit 1;
             }
@@ -83,6 +99,11 @@ jobs:
             main|master|HEAD|-*|*..*|*" "*)
               echo "Disallowed branch name: $RELEASE_BRANCH" >&2; exit 1 ;;
           esac
+          if [ -n "$COMMIT_HASH" ]; then
+            echo "$COMMIT_HASH" | grep -qE '^[0-9a-fA-F]{7,40}$' || {
+              echo "Invalid commit hash: $COMMIT_HASH" >&2; exit 1;
+            }
+          fi
 
       - name: Configure git
         run: |
@@ -90,17 +111,29 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Resolve release commit
+        env:
+          COMMIT_HASH: ${{ inputs.commit_hash }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+        run: |
+          if [ -n "$COMMIT_HASH" ]; then
+            git merge-base --is-ancestor "$COMMIT_HASH" "origin/$SOURCE_BRANCH" || {
+              echo "Commit $COMMIT_HASH is not on branch $SOURCE_BRANCH" >&2; exit 1;
+            }
+          fi
+          echo "Releasing from $(git rev-parse HEAD) (branch $SOURCE_BRANCH)"
+
       - name: Create or checkout release branch
         if: ${{ !inputs.dry_run }}
         env:
           RELEASE_BRANCH: ${{ inputs.release_branch }}
         run: |
           if git ls-remote --exit-code --heads origin "$RELEASE_BRANCH" > /dev/null 2>&1; then
-            echo "Branch $RELEASE_BRANCH already exists, checking out"
+            echo "Branch $RELEASE_BRANCH already exists, checking out its tip"
             git fetch origin "$RELEASE_BRANCH"
             git checkout "$RELEASE_BRANCH"
           else
-            echo "Creating new branch $RELEASE_BRANCH"
+            echo "Creating new branch $RELEASE_BRANCH at $(git rev-parse HEAD)"
             git checkout -b "$RELEASE_BRANCH"
           fi
 
@@ -110,6 +143,7 @@ jobs:
           PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
           RUNTIME_API_VERSION: ${{ inputs.runtime_api_version }}
           PALLET_VERSION: ${{ inputs.pallet_version }}
+          DATA_RENEWAL_VERSION: ${{ inputs.data_renewal_version }}
           HOP_PROMOTION_VERSION: ${{ inputs.hop_promotion_version }}
         run: |
           # Update versions in individual crate Cargo.toml files
@@ -117,6 +151,7 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$PRIMITIVES_VERSION\"/" pallets/transaction-storage/primitives/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$RUNTIME_API_VERSION\"/" pallets/transaction-storage/runtime-api/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$PALLET_VERSION\"/" pallets/transaction-storage/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$DATA_RENEWAL_VERSION\"/" pallets/data-renewal/Cargo.toml
           sed -i "s/^version = \".*\"/version = \"$HOP_PROMOTION_VERSION\"/" pallets/hop-promotion/Cargo.toml
 
           # Add or update versions in workspace path dependencies
@@ -124,6 +159,7 @@ jobs:
           sed -i "s|bulletin-transaction-storage-primitives = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage/primitives\"|bulletin-transaction-storage-primitives = { version = \"$PRIMITIVES_VERSION\", path = \"pallets/transaction-storage/primitives\"|" Cargo.toml
           sed -i "s|pallet-bulletin-transaction-storage-runtime-api = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage/runtime-api\"|pallet-bulletin-transaction-storage-runtime-api = { version = \"$RUNTIME_API_VERSION\", path = \"pallets/transaction-storage/runtime-api\"|" Cargo.toml
           sed -i "s|pallet-bulletin-transaction-storage = { \(version = \"[^\"]*\", \)\?path = \"pallets/transaction-storage\"|pallet-bulletin-transaction-storage = { version = \"$PALLET_VERSION\", path = \"pallets/transaction-storage\"|" Cargo.toml
+          sed -i "s|pallet-bulletin-data-renewal = { \(version = \"[^\"]*\", \)\?path = \"pallets/data-renewal\"|pallet-bulletin-data-renewal = { version = \"$DATA_RENEWAL_VERSION\", path = \"pallets/data-renewal\"|" Cargo.toml
           sed -i "s|pallet-bulletin-hop-promotion = { \(version = \"[^\"]*\", \)\?path = \"pallets/hop-promotion\"|pallet-bulletin-hop-promotion = { version = \"$HOP_PROMOTION_VERSION\", path = \"pallets/hop-promotion\"|" Cargo.toml
 
           echo "--- Updated crate versions ---"
@@ -131,12 +167,13 @@ jobs:
           grep '^version' pallets/transaction-storage/primitives/Cargo.toml
           grep '^version' pallets/transaction-storage/runtime-api/Cargo.toml
           grep '^version' pallets/transaction-storage/Cargo.toml
+          grep '^version' pallets/data-renewal/Cargo.toml
           grep '^version' pallets/hop-promotion/Cargo.toml
           echo "--- Updated workspace dependencies ---"
-          grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage|pallet-bulletin-hop-promotion' Cargo.toml
+          grep -E 'bulletin-pallets-common|bulletin-transaction-storage-primitives|pallet-bulletin-transaction-storage|pallet-bulletin-data-renewal|pallet-bulletin-hop-promotion' Cargo.toml
 
           # Regenerate Cargo.lock so the pinned path-dep versions match the bumped Cargo.toml files.
-          cargo check -p bulletin-pallets-common -p bulletin-transaction-storage-primitives -p pallet-bulletin-transaction-storage-runtime-api -p pallet-bulletin-transaction-storage -p pallet-bulletin-hop-promotion
+          cargo check -p bulletin-pallets-common -p bulletin-transaction-storage-primitives -p pallet-bulletin-transaction-storage-runtime-api -p pallet-bulletin-transaction-storage -p pallet-bulletin-data-renewal -p pallet-bulletin-hop-promotion
 
       - name: Commit and push release branch
         if: ${{ !inputs.dry_run }}
@@ -146,13 +183,14 @@ jobs:
           PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
           RUNTIME_API_VERSION: ${{ inputs.runtime_api_version }}
           PALLET_VERSION: ${{ inputs.pallet_version }}
+          DATA_RENEWAL_VERSION: ${{ inputs.data_renewal_version }}
           HOP_PROMOTION_VERSION: ${{ inputs.hop_promotion_version }}
         run: |
-          git add Cargo.toml Cargo.lock pallets/common/Cargo.toml pallets/transaction-storage/Cargo.toml pallets/transaction-storage/primitives/Cargo.toml pallets/transaction-storage/runtime-api/Cargo.toml pallets/hop-promotion/Cargo.toml
+          git add Cargo.toml Cargo.lock pallets/common/Cargo.toml pallets/transaction-storage/Cargo.toml pallets/transaction-storage/primitives/Cargo.toml pallets/transaction-storage/runtime-api/Cargo.toml pallets/data-renewal/Cargo.toml pallets/hop-promotion/Cargo.toml
           if git diff --cached --quiet; then
             echo "No version changes to commit — branch already at requested versions"
           else
-            git commit -m "Prepare crates release: common=$COMMON_VERSION, primitives=$PRIMITIVES_VERSION, runtime-api=$RUNTIME_API_VERSION, pallet=$PALLET_VERSION, hop-promotion=$HOP_PROMOTION_VERSION"
+            git commit -m "Prepare crates release: common=$COMMON_VERSION, primitives=$PRIMITIVES_VERSION, runtime-api=$RUNTIME_API_VERSION, pallet=$PALLET_VERSION, data-renewal=$DATA_RENEWAL_VERSION, hop-promotion=$HOP_PROMOTION_VERSION"
             git push origin "$RELEASE_BRANCH"
           fi
 
@@ -228,12 +266,26 @@ jobs:
             cargo publish --locked -p "$NAME"
           fi
 
-      # pallet-bulletin-hop-promotion depends on pallet-bulletin-transaction-storage (just
-      # published) and bulletin-transaction-storage-primitives, so both must be indexed on
-      # crates.io before it can resolve them.
+      # pallet-bulletin-data-renewal and pallet-bulletin-hop-promotion both depend on
+      # pallet-bulletin-transaction-storage (just published), so it must be indexed on
+      # crates.io before either can resolve it. They do not depend on each other.
       - name: Wait for crates.io to index pallet-bulletin-transaction-storage
         if: ${{ !inputs.dry_run }}
         run: sleep 30
+
+      - name: Publish pallet-bulletin-data-renewal
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+          NAME: pallet-bulletin-data-renewal
+          VERSION: ${{ inputs.data_renewal_version }}
+        run: |
+          status=$(curl -so /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${NAME}/${VERSION}")
+          if [ "$status" = "200" ]; then
+            echo "$NAME $VERSION already on crates.io — skipping"
+          else
+            cargo publish --locked -p "$NAME"
+          fi
 
       - name: Publish pallet-bulletin-hop-promotion
         if: ${{ !inputs.dry_run }}
@@ -256,6 +308,7 @@ jobs:
           PRIMITIVES_VERSION: ${{ inputs.primitives_version }}
           RUNTIME_API_VERSION: ${{ inputs.runtime_api_version }}
           PALLET_VERSION: ${{ inputs.pallet_version }}
+          DATA_RENEWAL_VERSION: ${{ inputs.data_renewal_version }}
           HOP_PROMOTION_VERSION: ${{ inputs.hop_promotion_version }}
         run: |
           set -e
@@ -264,6 +317,7 @@ jobs:
             "bulletin-transaction-storage-primitives-v$PRIMITIVES_VERSION" \
             "pallet-bulletin-transaction-storage-runtime-api-v$RUNTIME_API_VERSION" \
             "pallet-bulletin-transaction-storage-v$PALLET_VERSION" \
+            "pallet-bulletin-data-renewal-v$DATA_RENEWAL_VERSION" \
             "pallet-bulletin-hop-promotion-v$HOP_PROMOTION_VERSION"; do
             if git ls-remote --exit-code --tags origin "$tag" > /dev/null 2>&1; then
               echo "Tag $tag already exists on origin — skipping"
@@ -284,5 +338,6 @@ jobs:
           # sequential publish + index wait.
           cargo package --locked --no-verify -p pallet-bulletin-transaction-storage-runtime-api --allow-dirty
           cargo package --locked --no-verify -p pallet-bulletin-transaction-storage --allow-dirty
+          cargo package --locked --no-verify -p pallet-bulletin-data-renewal --allow-dirty
           cargo package --locked --no-verify -p pallet-bulletin-hop-promotion --allow-dirty
           echo "Dry run complete - all crates packaged successfully"

@@ -88,7 +88,7 @@ jobs:
           mode: consume
 
       - name: Rust cache (Bulletin)
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: .
           shared-key: "bulletin-cache-bulletin-integration-tests"
@@ -110,6 +110,14 @@ jobs:
           else
             echo "subxt-cli already installed"
           fi
+
+      - name: Build external runtime
+        if: ${{ matrix.runtime.external_runtime != null }}
+        uses: ./.github/actions/build-external-runtime
+        with:
+          name: ${{ matrix.runtime.name }}
+          repo: ${{ matrix.runtime.external_runtime.repo }}
+          ref: ${{ matrix.runtime.external_runtime.ref }}
 
       - name: Start services
         working-directory: examples
@@ -152,6 +160,15 @@ jobs:
       - name: Test chopsticks compatibility
         working-directory: examples
         run: just run-test-chopsticks "ws://127.0.0.1:10000"
+
+      # Chopsticks cannot synthesize custom pallet inherents
+      # (AcalaNetwork/chopsticks#1037), so the drain inherent is injected by hand.
+      # Skipped for external runtimes: those are already-deployed runtimes that
+      # predate `pallet-bulletin-data-renewal`.
+      - name: Test chopsticks auto-renew inherent
+        if: ${{ matrix.runtime.external_runtime == null }}
+        working-directory: examples
+        run: just run-test-auto-renew-chopsticks "ws://127.0.0.1:10000" "none" "true"
 
       # SDK Client Tests
       - name: Test Rust SDK

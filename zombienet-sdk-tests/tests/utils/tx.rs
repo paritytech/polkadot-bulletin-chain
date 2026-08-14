@@ -579,7 +579,7 @@ pub async fn submit_renew_pair(
 			("index".to_string(), Value::u128(index as u128)),
 		],
 	);
-	let renew_call = tx("TransactionStorage", "force_renew", vec![entry]);
+	let renew_call = tx("DataRenewal", "force_renew", vec![entry]);
 	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
 	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
 
@@ -623,6 +623,60 @@ pub async fn submit_renew_pair(
 	Ok((block_alice, block_bob))
 }
 
+/// Signed one-shot `renew(ContentHash)` from Alice: schedules a single prepaid renewal
+/// that fires at the `RetentionPeriod` boundary, then unregisters.
+pub async fn submit_renew_one_shot(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	nonce: u64,
+) -> Result<()> {
+	let signer = dev::alice();
+	let entry = Value::unnamed_variant("ContentHash", [Value::from_bytes(content_hash.as_slice())]);
+	let call = tx("DataRenewal", "renew", vec![entry]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!("Submitting one-shot renew (nonce={})...", nonce);
+
+	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
+		wait_for_in_best_block(progress).await?;
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow!("renew transaction timed out"))??;
+
+	tracing::info!("one-shot renew included in block");
+	Ok(())
+}
+
+/// Signed `force_renew(ContentHash)` from Alice — synchronous renewal at dispatch. Returns
+/// the inclusion block read from `TransactionByContentHash` at the best-block hash (see
+/// [`canonical_store_block`]); callers re-anchor against finality for cycle math.
+pub async fn submit_force_renew(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	nonce: u64,
+) -> Result<u64> {
+	let signer = dev::alice();
+	let entry = Value::unnamed_variant("ContentHash", [Value::from_bytes(content_hash.as_slice())]);
+	let call = tx("DataRenewal", "force_renew", vec![entry]);
+	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+
+	tracing::info!("Submitting force_renew (nonce={})...", nonce);
+
+	let (block_hash, _events) =
+		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
+			let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
+			wait_for_in_best_block(progress).await
+		})
+		.await
+		.map_err(|_| anyhow!("force_renew transaction timed out"))??;
+
+	let block_number = canonical_store_block(client, block_hash, content_hash).await?;
+	tracing::info!("force_renew included at block {}", block_number);
+	Ok(block_number)
+}
+
 /// Signed `enable_auto_renew(content_hash)` from Alice.
 pub async fn enable_auto_renew(
 	client: &OnlineClient<SubstrateConfig>,
@@ -630,11 +684,8 @@ pub async fn enable_auto_renew(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let call = tx(
-		"TransactionStorage",
-		"enable_auto_renew",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
+	let call =
+		tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tracing::info!("Submitting enable_auto_renew (nonce={})...", nonce);
@@ -659,11 +710,8 @@ pub async fn disable_auto_renew(
 	nonce: u64,
 ) -> Result<()> {
 	let signer = dev::alice();
-	let call = tx(
-		"TransactionStorage",
-		"disable_auto_renew",
-		vec![Value::from_bytes(content_hash.as_slice())],
-	);
+	let call =
+		tx("DataRenewal", "disable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
 	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
 
 	tracing::info!("Submitting disable_auto_renew (nonce={})...", nonce);
