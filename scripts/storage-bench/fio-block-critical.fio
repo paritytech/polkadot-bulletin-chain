@@ -5,7 +5,8 @@
 # Usage:
 #   sudo TARGET=/mnt/data/bench fio scripts/storage-bench/fio-block-critical.fio
 # Set SIZE to your retention footprint (default 1700g). Needs SIZE + ~100g free on TARGET.
-# Compare p99 (clat) across NVMe / gp3 / SATA. Budget: p99 must sit well inside the block time.
+# Compare across NVMe / capacity-flash / HDD. Budget: block-critical latencies (state, proof)
+# must sit well inside the block time while the sync-serve read (below) saturates the tier.
 
 [global]
 directory=${TARGET}
@@ -40,9 +41,9 @@ rate=1398101
 # ^ 8 MiB per 6 s in bytes/s; 2 s blocks = 4194304, 500 ms = 16777216.
 
 # Proof challenge: one random read of a few KB from anywhere in the retention set, per block
-# (rate_iops=1 is ~6x the 6 s block rate, deliberately conservative). This is the cold
-# random-read latency test, the number most likely to differ by tier. Shares the blob file
-# so reads hit the written set.
+# (rate_iops=1 is ~6x the 6 s block rate, deliberately conservative). The proof's target block
+# is deterministic (now - RetentionPeriod), so the node can prefetch it - this is a floor, not
+# the real risk (that's sync-serve, below). Shares the blob file so reads hit the written set.
 [proof-random-read]
 filename=blob-set
 rw=randread
@@ -50,3 +51,15 @@ bs=16k
 iodepth=1
 numjobs=1
 rate_iops=1
+
+# Serving syncing peers: THE read that matters. A peer catching up pulls historical bodies, so
+# this is high-volume concurrent random reads across the whole retention set - the load a cheap
+# tier (especially HDD) is most likely to fail, and what the go/no-go hinges on. No rate cap:
+# measure sustained random-read throughput (bw) and p99 clat, and check it does not push the
+# block-critical jobs above (state, proof) past the block-time budget.
+[sync-serve-random-read]
+filename=blob-set
+rw=randread
+bs=256k
+iodepth=32
+numjobs=4

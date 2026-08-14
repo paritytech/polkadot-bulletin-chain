@@ -9,13 +9,17 @@
 # Usage:
 #   sudo scripts/storage-bench/throttle.sh gp3   /sys/fs/cgroup/bulletin-bench <device>
 #   sudo scripts/storage-bench/throttle.sh sata  /sys/fs/cgroup/bulletin-bench <device>
+#   sudo scripts/storage-bench/throttle.sh hdd   /sys/fs/cgroup/bulletin-bench <device>
 #   sudo scripts/storage-bench/throttle.sh clear /sys/fs/cgroup/bulletin-bench <device>
+# NB: io.max caps IOPS/bandwidth, NOT per-IO latency. An HDD's real killer is seek latency, so
+# the `hdd` cap here is only a random-IOPS proxy - for a faithful HDD run use hdd-emulate.sh
+# (dm-delay), which injects per-read latency.
 # <device> e.g. /dev/nvme0n1 (the disk backing the node's data volume).
 # Then launch the node inside the cgroup: sudo cgexec -g io:bulletin-bench <node cmd>
 # (or: echo <node_pid> > $CGROUP/cgroup.procs).
 set -euo pipefail
 
-TIER="${1:?tier: gp3|sata|clear}"
+TIER="${1:?tier: gp3|sata|hdd|clear}"
 CGROUP="${2:?cgroup path, e.g. /sys/fs/cgroup/bulletin-bench}"
 DEV="${3:?block device, e.g. /dev/nvme0n1}"
 
@@ -36,6 +40,11 @@ case "$TIER" in
   sata)
     # Representative SATA SSD ceiling: ~550 MB/s, SATA-limited IOPS.
     echo "$MAJMIN riops=80000 wiops=80000 rbps=576716800 wbps=576716800" > "$CGROUP/io.max"
+    ;;
+  hdd)
+    # Nearline HDD random-IOPS ceiling (~200, seek-bound) + ~200 MB/s sequential. This only
+    # models the IOPS wall; use hdd-emulate.sh for the latency that actually breaks sync-serve.
+    echo "$MAJMIN riops=200 wiops=200 rbps=209715200 wbps=209715200" > "$CGROUP/io.max"
     ;;
   clear)
     echo "$MAJMIN riops=max wiops=max rbps=max wbps=max" > "$CGROUP/io.max"
