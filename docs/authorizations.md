@@ -31,7 +31,7 @@ Without bounds, at sustained-peak block usage one window of fresh `store` data a
 ## Storage types
 
 - **Temporary storage** — happens through the `store` call. Lives on chain for one `RetentionPeriod` from its `store` block.
-- **Renewed storage** — happens through `force_renew` (sync, at dispatch time) or via the auto-renewal cycle (`enable_auto_renew` + `do_process_auto_renewals`). The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
+- **Renewed storage** — happens through `force_renew` (sync, at dispatch time) or via the auto-renewal cycle (`enable_auto_renew` + `do_process_pending_renewals`). The renewed entry itself also lives one `RetentionPeriod` (from its renewal block); the original `Transactions` entry it pointed at ages out on its own clock.
 
 The renew-family extrinsics:
 
@@ -55,7 +55,7 @@ PoP grants two numbers per account: `bytes_allowance` (size budget) and `transac
 
 - One `AuthorizationExtent` per scope is kept in `Authorizations`, keyed by `AuthorizationScope::{Account, Preimage}`.
 - `AuthorizationExtent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }` holds the soft-side counters (`bytes`, `transactions`), the per-window renew quota (`bytes_permanent`), and the caps.
-- `bytes` and `transactions` bump on `store` / `store_with_cid_config`. `bytes_permanent` bumps on `force_renew`, on the `renew` one-shot scheduler at registration, on `enable_auto_renew`'s registration (prepayment for the first cycle), and on each cycle-2-onward recurring cycle in `do_process_auto_renewals`. The `transactions` axis bumps on all of those.
+- `bytes` and `transactions` bump on `store` / `store_with_cid_config`. `bytes_permanent` bumps on `force_renew`, on the `renew` one-shot scheduler at registration, on `enable_auto_renew`'s registration (prepayment for the first cycle), and on each cycle-2-onward recurring cycle in `do_process_pending_renewals`. The `transactions` axis bumps on all of those.
 
 ### `authorize_account` semantics
 
@@ -91,7 +91,7 @@ The hard cap is enforced at two levels, and a renewal that would breach **either
 
 "Renew" here means any path that consumes the per-window renew quota: `force_renew`,
 the `renew` one-shot scheduler at registration, `enable_auto_renew`'s registration
-(prepaying the first cycle), and each per-cycle charge in `do_process_auto_renewals`
+(prepaying the first cycle), and each per-cycle charge in `do_process_pending_renewals`
 (cycle 2 onward for recurring registrations; the prepaid first cycle does not
 re-consume).
 
@@ -200,7 +200,7 @@ A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Examp
 
 ## Migration
 
-`STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring, paid }`. All pre-existing entries were written by the old non-prepaying `enable_auto_renew`, so they migrate as `{ recurring: true, paid: false }` — their next `do_process_auto_renewals` cycle charges per-cycle, preserving their on-chain behaviour across the upgrade. The v5 step re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
+`STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring, paid }`. All pre-existing entries were written by the old non-prepaying `enable_auto_renew`, so they migrate as `{ recurring: true, paid: false }` — their next `do_process_pending_renewals` cycle charges per-cycle, preserving their on-chain behaviour across the upgrade. The v5 step re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
 
 ## Capacity planning operational steps
 
@@ -211,14 +211,14 @@ When `PermanentStorageNearCap` fires governance can either:
 
 ## Auto-renewal
 
-Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization` (called by the extension's `check_signed` for the manual flow and by `do_process_auto_renewals` for the auto flow); the unified renewal mechanics live in `do_renew_in_memory` (called by `do_renew` and by the auto-renewal drain loop).
+Auto-renewal reuses the manual renew code path so the [Hard limit on renewed storage](#hard-limit-on-renewed-storage) accounting fires consistently — per-account `bytes_permanent` increment, chain-wide `PermanentStorageUsed` cap check, `kind = Renew` stamp in `Transactions`, obsolete-cleanup decrement. Hard-cap checks live in `check_authorization` (called by the extension's `check_signed` for the manual flow and by `do_process_pending_renewals` for the auto flow); the unified renewal mechanics live in `do_renew_in_memory` (called by `do_renew` and by the auto-renewal drain loop).
 
-Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::AutoRenewalFailed` is emitted, and the data expires normally. If the slot cap rejects a cycle after the charge has been applied, `do_process_auto_renewals` refunds the chain-wide `PermanentStorageUsed` bump so the cap does not leak; the per-account `bytes_permanent` / `transactions` increments are left in place — slot-cap rejection at inherent time is pathological (the inherent runs before user txs and `len(pending) <= MaxBlockTransactions`), so the simpler accounting is preferred over a per-auth refund that would silently apply across roll-overs.
+Behaviour on auto-renewal failure (per-account quota or chain-wide cap rejected at cycle time, or `MaxBlockTransactions` reached): the registration is dropped from `AutoRenewals`, `Event::RenewalFailed` is emitted, and the data expires normally. If the slot cap rejects a cycle after the charge has been applied, `do_process_pending_renewals` refunds the chain-wide `PermanentStorageUsed` bump so the cap does not leak; the per-account `bytes_permanent` / `transactions` increments are left in place — slot-cap rejection at inherent time is pathological (the inherent runs before user txs and `len(pending) <= MaxBlockTransactions`), so the simpler accounting is preferred over a per-auth refund that would silently apply across roll-overs.
 
 The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
 ## TODO
 
-- **Reserve block-transaction slots for user txs.** `do_process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
+- **Reserve block-transaction slots for user txs.** `do_process_pending_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
 - **Per-content dedup of re-renewals (nice-to-have).** On a renew of `X`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.
 

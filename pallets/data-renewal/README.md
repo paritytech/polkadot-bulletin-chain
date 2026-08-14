@@ -20,7 +20,7 @@ Dispatchables:
 - `force_renew(entry)` — renew synchronously, during block execution
 - `process_pending_renewals` — mandatory inherent that drains the current block's renewal queue
 
-Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` hook queues registered entries into `PendingAutoRenewals`, and the inherent renews them in the same block.
+Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` hook queues registered entries into `PendingRenewals`, and the inherent renews them in the same block.
 
 `renew` and `enable_auto_renew` are feeless. The transaction extension charges one transaction slot plus `size` bytes at registration, which prepays the first cycle; recurring registrations are charged per cycle thereafter.
 

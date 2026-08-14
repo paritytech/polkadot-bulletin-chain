@@ -49,7 +49,7 @@ console.log(`Data expires at block ${expiresAtBlock} (${blocksRemaining} blocks 
 
 ## Building a Renewal Tracker
 
-For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `AutoRenewalAlreadyEnabled`, so drop entries once scheduled:
+For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `RenewalAlreadyEnabled`, so drop entries once scheduled:
 
 ```typescript
 interface StoredItem {
@@ -129,7 +129,7 @@ try {
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");
-  } else if (error.message.includes("AutoRenewalAlreadyEnabled")) {
+  } else if (error.message.includes("RenewalAlreadyEnabled")) {
     console.log("A renewal is already scheduled for this data");
   } else if (error.message.includes("AuthorizationNotFound")) {
     console.log("Insufficient authorization - request more via Faucet");
