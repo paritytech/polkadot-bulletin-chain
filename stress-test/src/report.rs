@@ -85,6 +85,11 @@ pub struct LatencyStats {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScenarioResult {
 	pub name: String,
+	/// Short stable variant slug used as the Prometheus `variant` label (e.g. `1KB`,
+	/// `hop-full-cycle`). Unlike `name` it must stay stable across releases — dashboard queries
+	/// key on it.
+	#[serde(default, skip_serializing_if = "String::is_empty")]
+	pub variant: String,
 	pub duration: Duration,
 	#[serde(default, skip_serializing_if = "is_zero_u64")]
 	pub total_submitted: u64,

@@ -236,7 +236,7 @@ mod benchmarks {
 		System::<T>::set_extrinsic_index(0);
 
 		if n > 0 {
-			let mut pending = PendingAutoRenewals::<T>::get();
+			let mut pending = PendingRenewals::<T>::get();
 			for i in 0..n {
 				// Unique caller per item so each `check_authorization` hits a distinct
 				// `Authorizations` key.
@@ -267,13 +267,13 @@ mod benchmarks {
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;
 			}
-			PendingAutoRenewals::<T>::put(&pending);
+			PendingRenewals::<T>::put(&pending);
 		}
 
 		#[extrinsic_call]
 		_(RawOrigin::None);
 
-		assert!(PendingAutoRenewals::<T>::get().is_empty());
+		assert!(PendingRenewals::<T>::get().is_empty());
 		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<T>::block_transactions_count(), n);
 		Ok(())
 	}

@@ -12,7 +12,7 @@ Extends the retention of data stored in `pallet-bulletin-transaction-storage`, m
 
 ## Overview
 
-Stored data is removed once its `RetentionPeriod` elapses. This pallet is the renewal layer on top of the storage pallet: the storage pallet has no renewal vocabulary of its own, and instead exposes two opaque payloads (`EntryMeta`, `AuthorizationExtra`) that the runtime wires to this pallet's `EntryKind` and `PermanentExtent`.
+Stored data is removed once its `RetentionPeriod` elapses. This pallet is the renewal layer on top of the storage pallet, which has no renewal vocabulary of its own: it exposes two opaque payloads (`EntryMeta`, `AuthorizationExtra`) that the runtime wires to this pallet's `EntryKind` and `PermanentExtent`.
 
 Dispatchables:
 - `renew(entry)` — register a one-shot renewal for an entry, identified by `Position { block, index }` or `ContentHash(hash)`
@@ -20,7 +20,7 @@ Dispatchables:
 - `force_renew(entry)` — renew synchronously, during block execution
 - `process_pending_renewals` — mandatory inherent that drains the current block's renewal queue
 
-Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` hook queues registered entries into `PendingAutoRenewals`, and the inherent renews them in the same block.
+Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` hook queues registered entries into `PendingRenewals`, and the inherent renews them in the same block.
 
 `renew` and `enable_auto_renew` are feeless. The transaction extension charges one transaction slot plus `size` bytes at registration, which prepays the first cycle; recurring registrations are charged per cycle thereafter.
 

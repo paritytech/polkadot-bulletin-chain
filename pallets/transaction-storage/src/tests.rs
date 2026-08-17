@@ -1280,7 +1280,7 @@ fn genesis_populates_allowed_authorizers() {
 }
 
 /// Verify that `ProvideInherent::create_inherent` actually emits the composite inherent call
-/// when `PendingAutoRenewals` is non-empty, even with no storage proof in `InherentData`.
+/// when `PendingRenewals` is non-empty, even with no storage proof in `InherentData`.
 ///
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
