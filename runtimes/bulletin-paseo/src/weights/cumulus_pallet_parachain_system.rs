@@ -19,7 +19,7 @@
 //! THIS FILE WAS AUTO-GENERATED USING THE SUBSTRATE BENCHMARK CLI VERSION 54.0.0
 //! DATE: 2026-08-18, STEPS: `50`, REPEAT: `20`, LOW RANGE: `[]`, HIGH RANGE: `[]`
 //! WORST CASE MAP SIZE: `1000000`
-//! HOSTNAME: `ed8af8d7b3fc`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
+//! HOSTNAME: `fad65b4a7a9b`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
 //! WASM-EXECUTION: `Compiled`, CHAIN: `None`, DB CACHE: 1024
 
 // Executed Command:
@@ -67,11 +67,11 @@ impl<T: frame_system::Config> cumulus_pallet_parachain_system::WeightInfo for We
 		// Proof Size summary in bytes:
 		//  Measured:  `6`
 		//  Estimated: `3517`
-		// Minimum execution time: 1_333_000 picoseconds.
-		Weight::from_parts(1_356_000, 0)
+		// Minimum execution time: 1_277_000 picoseconds.
+		Weight::from_parts(5_250_220, 0)
 			.saturating_add(Weight::from_parts(0, 3517))
-			// Standard Error: 24_321
-			.saturating_add(Weight::from_parts(168_215_941, 0).saturating_mul(n.into()))
+			// Standard Error: 27_648
+			.saturating_add(Weight::from_parts(168_167_261, 0).saturating_mul(n.into()))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(5))
 			.saturating_add(T::DbWeight::get().writes((1_u64).saturating_mul(n.into())))
@@ -80,24 +80,24 @@ impl<T: frame_system::Config> cumulus_pallet_parachain_system::WeightInfo for We
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
 		//  Estimated: `0`
-		// Minimum execution time: 16_650_000 picoseconds.
-		Weight::from_parts(19_600_000, 0)
+		// Minimum execution time: 16_788_000 picoseconds.
+		Weight::from_parts(19_426_000, 0)
 			.saturating_add(Weight::from_parts(0, 0))
 	}
 	fn block_weight_tx_extension_stays_fraction_of_core() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
 		//  Estimated: `0`
-		// Minimum execution time: 9_406_000 picoseconds.
-		Weight::from_parts(9_950_000, 0)
+		// Minimum execution time: 9_176_000 picoseconds.
+		Weight::from_parts(9_930_000, 0)
 			.saturating_add(Weight::from_parts(0, 0))
 	}
 	fn block_weight_tx_extension_full_core() -> Weight {
 		// Proof Size summary in bytes:
 		//  Measured:  `0`
 		//  Estimated: `0`
-		// Minimum execution time: 4_533_000 picoseconds.
-		Weight::from_parts(4_910_000, 0)
+		// Minimum execution time: 4_435_000 picoseconds.
+		Weight::from_parts(4_865_000, 0)
 			.saturating_add(Weight::from_parts(0, 0))
 	}
 }
