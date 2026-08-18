@@ -253,8 +253,12 @@ jobs:
         id: subweight
         if: startsWith(github.event.inputs.cmd, 'bench')
         shell: bash
+        env:
+          BASE_REPO: ${{ github.repository }}
         run: |
-          git fetch
+          git remote add upstream "https://github.com/${BASE_REPO}" 2>/dev/null || \
+            git remote set-url upstream "https://github.com/${BASE_REPO}"
+          git fetch --depth=1 upstream main
           git remote -v
           echo $(git log -n 2 --oneline)
 
@@ -265,7 +269,7 @@ jobs:
             --no-color \
             --change added changed \
             --ignore-errors \
-            refs/remotes/origin/main $PR_BRANCH)
+            refs/remotes/upstream/main $PR_BRANCH)
 
           echo $result
 
