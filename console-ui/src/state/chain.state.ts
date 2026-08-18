@@ -5,6 +5,8 @@ import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot
 import { getWsProvider, WsEvent } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
+import type { Chain } from "polkadot-api/smoldot";
+import SmWorker from "polkadot-api/smoldot/worker?worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
 import { bind } from "@react-rxjs/core";
 import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
@@ -42,6 +44,9 @@ class NullWebSocket {
 let killCurrentProvider: (() => void) | null = null;
 // Track the bestBlocks$ subscription so we can clean it up on disconnect/reconnect
 let blockSubscription: { unsubscribe(): void } | null = null;
+// Bumped on every connect/disconnect; stale connectToNetwork continuations
+// compare against it and bail so they can't clobber a newer connection.
+let connectGeneration = 0;
 
 function createKillableWsProvider(endpoints: string[]) {
   let killed = false;
@@ -84,6 +89,8 @@ export interface ChainState {
   // Base type is the newest live chain's descriptors; all bulletin chains
   // share the same core pallets, and older chains are guarded at runtime.
   api?: TypedApi<typeof bulletin_paseo_next_v2>;
+  /** Active connection transport; "light-client" only on smoldot networks. */
+  transport: Transport;
   /** Endpoint the WS provider is currently connected to (or attempting). */
   connectedEndpoint?: string;
   blockNumber?: number;
@@ -96,6 +103,25 @@ export interface ChainState {
 
 const STORAGE_KEY_NETWORK = "bulletin-network";
 const STORAGE_KEY_CUSTOM_URL = "bulletin-network-custom-url";
+const STORAGE_KEY_TRANSPORT = "bulletin-transport";
+
+export type Transport = "light-client" | "rpc";
+
+// Default to RPC: smoldot currently breaks Download and old-block Explorer
+// (polkadot-sdk#10812). The preference is stored per network.
+function resolveTransport(network: Network): Transport {
+  if (!network.lightClient || !network.chainSpec) return "rpc";
+  return localStorage.getItem(`${STORAGE_KEY_TRANSPORT}-${network.id}`) ===
+    "light-client"
+    ? "light-client"
+    : "rpc";
+}
+
+export function setTransport(transport: Transport): void {
+  const network = networkSubject.getValue();
+  localStorage.setItem(`${STORAGE_KEY_TRANSPORT}-${network.id}`, transport);
+  connectToNetwork(network.id);
+}
 
 export function getCustomNetworkUrl(): string {
   return localStorage.getItem(STORAGE_KEY_CUSTOM_URL) ?? "";
@@ -144,27 +170,65 @@ const chainInfoSubject = new BehaviorSubject<{
   ss58Format?: number;
 }>({});
 const sudoKeySubject = new BehaviorSubject<string | undefined>(undefined);
+const transportSubject = new BehaviorSubject<Transport>(
+  resolveTransport(initialNetwork),
+);
 
-let smoldotWorker: Worker | null = null;
+// Smoldot worker lives for the app lifetime; chains are added/removed per network.
+let smoldot: ReturnType<typeof startFromWorker> | null = null;
 
-async function createSmoldotProvider(network: Network) {
-  if (!smoldotWorker) {
-    smoldotWorker = new Worker(
-      new URL("polkadot-api/smoldot/worker", import.meta.url),
-      { type: "module" }
-    );
-  }
+function getSmoldot() {
+  if (!smoldot) smoldot = startFromWorker(new SmWorker());
+  return smoldot;
+}
 
-  const smoldot = startFromWorker(smoldotWorker);
-  const chainSpec = await fetch(`/chain-specs/${network.id}.json`).then(r => r.text());
+function createSmoldotProvider(specs: { para: string; relay: string }) {
+  let killed = false;
+  const chains: Promise<Chain>[] = [];
 
-  return getSmProvider(() => smoldot.addChain({ chainSpec }));
+  // The provider may invoke the factory again after a halt; each invocation
+  // must return a fresh chain (smoldot dedups the relay internally).
+  const provider = getSmProvider(async () => {
+    try {
+      const sd = getSmoldot();
+      if (killed) throw new Error("provider killed");
+      const relay = sd.addChain({ chainSpec: specs.relay, disableJsonRpc: true });
+      chains.push(relay);
+      const relayChain = await relay;
+      if (killed) throw new Error("provider killed");
+      const para = sd.addChain({
+        chainSpec: specs.para,
+        potentialRelayChains: [relayChain],
+      });
+      chains.push(para);
+      return para;
+    } catch (e) {
+      // getSmProvider swallows factory errors; without this the UI would
+      // stay on "connecting" forever after a failed addChain.
+      if (!killed) {
+        statusSubject.next("error");
+        errorSubject.next(e instanceof Error ? e.message : String(e));
+      }
+      throw e;
+    }
+  });
+
+  const kill = () => {
+    killed = true;
+    // Reverse order: para before relay. The provider's own teardown may have
+    // already removed the para chain; the double-remove throws harmlessly.
+    for (const chain of chains.splice(0).reverse()) {
+      chain.then((c) => c.remove()).catch(() => {});
+    }
+  };
+  return { provider, kill };
 }
 
 export async function connectToNetwork(
   networkId: NetworkId,
   endpointOverride?: string,
 ): Promise<void> {
+  const gen = ++connectGeneration;
   const networks = networksSubject.getValue();
   const baseNetwork = networks[networkId];
   if (!baseNetwork) {
@@ -192,6 +256,9 @@ export async function connectToNetwork(
     existingClient.destroy();
   }
 
+  const useLightClient =
+    resolveTransport(network) === "light-client" && !endpointOverride;
+
   localStorage.setItem(STORAGE_KEY_NETWORK, networkId);
   networkSubject.next(network);
   apiSubject.next(undefined);
@@ -199,8 +266,9 @@ export async function connectToNetwork(
   blockNumberSubject.next(undefined);
   chainInfoSubject.next({});
   sudoKeySubject.next(undefined);
+  transportSubject.next(useLightClient ? "light-client" : "rpc");
 
-  if (network.endpoints.length === 0) {
+  if (!useLightClient && network.endpoints.length === 0) {
     blockSubscription?.unsubscribe();
     blockSubscription = null;
     clientSubject.next(undefined);
@@ -218,8 +286,17 @@ export async function connectToNetwork(
   try {
     let provider;
 
-    if (network.lightClient && network.chainSpec) {
-      provider = await createSmoldotProvider(network);
+    if (useLightClient && network.chainSpec) {
+      // Resolve specs here rather than inside the provider factory: errors
+      // thrown there are swallowed and would leave the UI stuck on "connecting".
+      const [para, relay] = await Promise.all([
+        network.chainSpec.para(),
+        network.chainSpec.relay(),
+      ]);
+      if (gen !== connectGeneration) return;
+      const killable = createSmoldotProvider({ para, relay });
+      provider = killable.provider;
+      killCurrentProvider = killable.kill;
     } else {
       const killable = createKillableWsProvider(network.endpoints);
       provider = killable.provider;
@@ -239,6 +316,7 @@ export async function connectToNetwork(
         api.constants.System.SS58Prefix(),
         client._request<{ tokenSymbol?: string; tokenDecimals?: number }>("system_properties", []),
       ]);
+      if (gen !== connectGeneration) return;
 
       chainInfoSubject.next({
         chainName: version.spec_name,
@@ -248,6 +326,7 @@ export async function connectToNetwork(
         ss58Format,
       });
     } catch {
+      if (gen !== connectGeneration) return;
       // Constants may not be available immediately
       chainInfoSubject.next({});
     }
@@ -255,8 +334,10 @@ export async function connectToNetwork(
     // Get sudo key
     try {
       const sudoKey = await api.query.Sudo.Key.getValue();
+      if (gen !== connectGeneration) return;
       sudoKeySubject.next(sudoKey ?? undefined);
     } catch {
+      if (gen !== connectGeneration) return;
       // Sudo pallet may not be available
       sudoKeySubject.next(undefined);
     }
@@ -276,6 +357,7 @@ export async function connectToNetwork(
 
     statusSubject.next("connected");
   } catch (err) {
+    if (gen !== connectGeneration) return;
     const message = err instanceof Error ? err.message : "Unknown error";
     errorSubject.next(message);
     statusSubject.next("error");
@@ -283,6 +365,7 @@ export async function connectToNetwork(
 }
 
 export function disconnect(): void {
+  connectGeneration++;
   blockSubscription?.unsubscribe();
   blockSubscription = null;
   if (killCurrentProvider) {
@@ -310,17 +393,19 @@ const chainState$ = combineLatest([
   errorSubject,
   clientSubject,
   apiSubject,
+  transportSubject,
   connectedEndpointSubject,
   blockNumberSubject,
   chainInfoSubject,
 ]).pipe(
-  map(([networks, network, status, error, client, api, connectedEndpoint, blockNumber, chainInfo]) => ({
+  map(([networks, network, status, error, client, api, transport, connectedEndpoint, blockNumber, chainInfo]) => ({
     networks,
     network,
     status,
     error,
     client,
     api,
+    transport,
     connectedEndpoint,
     blockNumber,
     ...chainInfo,
@@ -336,6 +421,7 @@ export const [useChainState] = bind(chainState$, {
   error: undefined,
   client: undefined,
   api: undefined,
+  transport: resolveTransport(initialNetwork),
   connectedEndpoint: undefined,
   blockNumber: undefined,
   chainName: undefined,
@@ -347,6 +433,7 @@ export const [useChainState] = bind(chainState$, {
 
 export const [useNetwork] = bind(networkSubject);
 export const [useConnectionStatus] = bind(statusSubject, "disconnected");
+export const [useTransport] = bind(transportSubject, resolveTransport(initialNetwork));
 export const [useConnectedEndpoint] = bind(connectedEndpointSubject, undefined);
 export const [useBlockNumber] = bind(blockNumberSubject, undefined);
 export const [useApi] = bind(apiSubject, undefined);

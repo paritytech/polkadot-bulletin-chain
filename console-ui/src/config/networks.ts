@@ -38,7 +38,8 @@ export interface Network {
   name: string;
   endpoints: string[];
   lightClient: boolean;
-  chainSpec?: string;
+  /** Raw chainspec loaders; presence + lightClient enables the smoldot path. */
+  chainSpec?: { para: () => Promise<string>; relay: () => Promise<string> };
   /** PAPI descriptor used for the typed API. */
   descriptor: ChainDefinition;
   /** IPFS HTTP gateway serving this network's data. */
@@ -204,7 +205,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       "wss://bulletin-paseo.tservices.es:8443",
       "wss://bulletin-paseo-02.tservices.es:9443",
     ],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/products-devnet-raw.json?raw").then(
+          (m) => m.default,
+        ),
+      relay: () =>
+        import("polkadot-api/chains/paseo").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_products_devnet,
     peerMultiaddrs: [
       "/dns/bulletin-paseo.faradaynodes.com/tcp/35507/wss/p2p/12D3KooWRVrepgbKXa8qUq1NAR6ehqZr1tZZK8Y7NynaruNJy9gA",
@@ -229,7 +238,15 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     id: "paseo-next-v2",
     name: "Bulletin Paseo Next v2",
     endpoints: ["wss://paseo-bulletin-next-rpc.polkadot.io"],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/paseo-next-v2-raw.json?raw").then(
+          (m) => m.default,
+        ),
+      relay: () =>
+        import("polkadot-api/chains/paseo").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_paseo_next_v2,
     ipfsGateway: "https://paseo-bulletin-next-ipfs.polkadot.io",
     peerMultiaddrs: [
@@ -276,7 +293,13 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     id: "polkadot",
     name: "Bulletin Polkadot",
     endpoints: ["wss://bulletin-rpc.polkadot.io"],
-    lightClient: false,
+    lightClient: true,
+    chainSpec: {
+      para: () =>
+        import("../chainspecs/polkadot-raw.json?raw").then((m) => m.default),
+      relay: () =>
+        import("polkadot-api/chains/polkadot").then((m) => m.chainSpec),
+    },
     descriptor: bulletin_polkadot,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
