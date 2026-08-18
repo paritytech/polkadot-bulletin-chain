@@ -9259,9 +9259,9 @@ dependencies = [
 
 [[package]]
 name = "pallet-utility"
-version = "49.0.0"
+version = "49.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8d582c88d4fc00b4da016ca20495061c28e41e0eda077f4aa8195345c03a435"
+checksum = "6d8a0496d186e80259a51e70787126dbe7150869908097e2c14fee68cf3f3166"
 dependencies = [
  "frame-benchmarking",
  "frame-support",
@@ -11800,9 +11800,9 @@ dependencies = [
 
 [[package]]
 name = "sc-client-db"
-version = "0.54.0"
+version = "0.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df55e3a51db7a4dd6ce35f18a48d036283600daaf9e78f34aeead4186b138c4b"
+checksum = "56be3bf34142332cbf931a5c814d01e3747f7260c5a1ea1776e97f509f1b368c"
 dependencies = [
  "hash-db",
  "kvdb",
@@ -11852,9 +11852,9 @@ dependencies = [
 
 [[package]]
 name = "sc-consensus-grandpa"
-version = "0.43.0"
+version = "0.43.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8bbb04e8601291170606f79b26f8ddc56fc4ed4d2fad4c827c69cdb101ee67f"
+checksum = "146d81fd65e1175f4ab41b22bb39aae5665476e47d455dc73ff27ad5340a8df1"
 dependencies = [
  "ahash",
  "array-bytes 6.2.3",
@@ -13587,9 +13587,9 @@ dependencies = [
 
 [[package]]
 name = "sp-database"
-version = "10.0.1"
+version = "10.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c702cc7679fbaf0469d40251917cd27bfc165c506a8cd96fb4a9dd3947f06d70"
+checksum = "5b7d8129ad3a40b645dc446aae80cf485c521cb8fb54ea670baca41d4e4350e2"
 dependencies = [
  "kvdb",
  "parking_lot 0.12.5",

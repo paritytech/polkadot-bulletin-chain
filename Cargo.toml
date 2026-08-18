@@ -105,7 +105,7 @@ frame-metadata-hash-extension = { version = "0.16.0", default-features = false }
 parachains-runtimes-test-utils = { version = "33.0.0", default-features = true }
 polkadot-primitives = { version = "25.0.0", default-features = false }
 polkadot-runtime-common = { version = "29.0.0", default-features = false }
-sc-consensus-grandpa = { version = "0.43.0" }
+sc-consensus-grandpa = { version = "0.43.1" }
 sp-consensus-aura = { version = "0.49.0", default-features = false }
 xcm-runtime-apis = { version = "0.16.0", default-features = false }
 
@@ -114,7 +114,7 @@ pallet-aura = { version = "48.0.0", default-features = false }
 pallet-balances = { version = "50.0.0", default-features = false }
 pallet-collator-selection = { version = "30.0.0", default-features = false }
 pallet-message-queue = { version = "52.0.0", default-features = false }
-pallet-utility = { version = "49.0.0", default-features = false }
+pallet-utility = { version = "49.0.1", default-features = false }
 pallet-xcm-benchmarks = { version = "29.0.0", default-features = false }
 
 # Substrate tooling
