@@ -196,60 +196,22 @@ fn relocation_migration_moves_permanent_storage_used() {
 	});
 }
 
-/// `PendingRenewals` is relocated byte-exactly to the key the pallet reads.
-///
-/// The value is produced by encoding through the storage item itself and then moved to the
-/// legacy prefix, so the test never has to name the (`Config`-dependent) value type.
+/// `pre_upgrade` rejects a leftover legacy `PendingRenewals` value: the migration drops
+/// the transient queue instead of relocating it, so a surviving value must fail the dry-run.
+#[cfg(feature = "try-runtime")]
 #[test]
-fn relocation_migration_moves_pending_renewals() {
-	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::{
-		frame_support::traits::StorageVersion,
-		sp_runtime::traits::{BlakeTwo256, Hash},
-	};
+fn relocation_migration_pre_upgrade_rejects_leftover_pending_queue() {
 	new_test_ext().execute_with(|| {
-		let content_hash: ContentHash = BlakeTwo256::hash(b"pending-relocation").into();
-		let info = TransactionInfo {
-			chunk_root: BlakeTwo256::hash(b"chunk-root"),
-			content_hash,
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 16,
-			extrinsic_index: 0,
-			block_chunks: 1,
-			meta: EntryKind::Renew,
-		};
-		PendingRenewals::<Test>::mutate(|pending| {
-			pending
-				.try_push((
-					content_hash,
-					info,
-					RenewalData { account: 5, recurring: true, paid: false },
-				))
-				.expect("bound is >= 1");
-		});
+		// Any bytes at the old key trip the check; the value is never decoded.
+		sp_io::storage::set(&storage_prefix(b"TransactionStorage", b"PendingRenewals"), &[1u8]);
 
-		// Relocate the encoded value back to the legacy prefix to build the pre-migration
-		// state, then reset the version gate.
-		let new_key = PendingRenewals::<Test>::hashed_key();
-		let raw = sp_io::storage::get(&new_key).expect("just written").to_vec();
-		sp_io::storage::clear(&new_key);
-		let old_key = storage_prefix(b"TransactionStorage", b"PendingAutoRenewals");
-		sp_io::storage::set(&old_key, &raw);
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-
-		let pending = PendingRenewals::<Test>::get();
-		assert_eq!(pending.len(), 1, "pending entry must be readable through the storage item");
-		assert_eq!(pending[0].0, content_hash);
-		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
+		assert!(crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade().is_err());
 	});
 }
 
-/// `pre_upgrade`/`post_upgrade` accept a full legacy state: an `AutoRenewals` entry, both
-/// relocated `StorageValue`s, and a pre-split `Authorizations` entry. Exercises the
-/// try-runtime checks themselves, which are otherwise compiled out.
+/// `pre_upgrade`/`post_upgrade` accept a full legacy state: an `AutoRenewals` entry, the
+/// relocated `PermanentStorageUsed` counter, and a pre-split `Authorizations` entry. Exercises
+/// the try-runtime checks themselves, which are otherwise compiled out.
 #[cfg(feature = "try-runtime")]
 #[test]
 fn relocation_migration_try_runtime_checks_pass() {
@@ -267,7 +229,7 @@ fn relocation_migration_try_runtime_checks_pass() {
 			&RenewalData::<u64> { account: 3, recurring: false, paid: true }.encode(),
 		);
 
-		// Both relocated `StorageValue`s. `PendingRenewals` is left absent, which is
+		// The relocated counter. The legacy `PendingRenewals` key is left absent, which is
 		// the real-world case the `on_finalize` drain invariant guarantees.
 		sp_io::storage::set(
 			&storage_prefix(b"TransactionStorage", b"PermanentStorageUsed"),
