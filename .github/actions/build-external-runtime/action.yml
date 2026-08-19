@@ -69,8 +69,10 @@ runs:
     - name: Cache external runtime build
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
-        path: target/external-runtimes/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}
-        key: external-runtime-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
+        path: .external-runtimes/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}
+        # `-v2`: an archive from the old `target/external-runtimes` layout restores to
+        # that path and still counts as a hit, leaving this path empty and unsaved.
+        key: external-runtime-v2-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
 
     - name: Build external runtime
       id: build
