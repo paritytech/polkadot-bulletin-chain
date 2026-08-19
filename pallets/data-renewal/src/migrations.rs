@@ -285,3 +285,54 @@ fn count_keys(prefix: &[u8]) -> u64 {
 	}
 	count
 }
+
+/// v1 → v2: start refcounting renewed bytes per content hash.
+///
+/// Stamps the upgrade block into [`crate::RefcountFrom`], which is all `handle_obsolete`
+/// needs to credit v1 entries and refcounted ones under their own rules. One write, no scan:
+/// seeding [`crate::RenewRefCount`] from live `Transactions` instead would walk a full
+/// `RetentionPeriod` of blocks.
+///
+/// Accounting the two populations independently leaves a blob straddling the upgrade
+/// double-counted exactly as v1 left it, until its pre-upgrade entries age out. Nothing is
+/// mis-credited, and the drift is gone one `RetentionPeriod` later.
+pub mod v2 {
+	use super::*;
+	use crate::{pallet::Pallet, RefcountFrom};
+	use polkadot_sdk_frame::deps::{
+		frame_support::{migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade},
+		frame_system,
+	};
+
+	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let now = <frame_system::Pallet<T>>::block_number();
+			RefcountFrom::<T>::put(now);
+			tracing::info!(target: LOG_TARGET, ?now, "v1->v2: refcounting renewed bytes from here");
+			T::DbWeight::get().reads_writes(1, 1)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			_state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			polkadot_sdk_frame::prelude::ensure!(
+				RefcountFrom::<T>::get().is_some(),
+				"RefcountFrom must be set after the v1->v2 migration"
+			);
+			Ok(())
+		}
+	}
+
+	/// Chains created at v2 or later have no pre-refcount entries, so they skip this and
+	/// leave [`crate::RefcountFrom`] unset — "refcount everything".
+	pub type MigrateV1ToV2<T> = VersionedMigration<
+		1,
+		2,
+		VersionUncheckedMigrateV1ToV2<T>,
+		Pallet<T>,
+		<T as frame_system::Config>::DbWeight,
+	>;
+}

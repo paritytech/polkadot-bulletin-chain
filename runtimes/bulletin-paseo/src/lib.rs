@@ -139,8 +139,10 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased =
-		(pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
+	pub type Unreleased = (
+		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+		pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,
+	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (

@@ -52,7 +52,7 @@ fn pallet_compiles_and_storage_is_separate_from_transaction_storage() {
 		use polkadot_sdk_frame::deps::frame_support::traits::GetStorageVersion;
 		assert_eq!(
 			crate::Pallet::<Test>::on_chain_storage_version(),
-			polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(1),
+			polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(2),
 		);
 	});
 }
@@ -2014,9 +2014,11 @@ fn renew_rejects_when_chain_wide_cap_reached() {
 #[test]
 fn renews_across_multiple_blocks_decrement_independently() {
 	new_test_ext().execute_with(|| {
-		let renew_entry = |size: u32| TransactionInfo {
+		// Distinct content, so each blob holds its own reference: this covers per-block
+		// independence, not overlapping renewals of one blob.
+		let renew_entry = |tag: u8, size: u32| TransactionInfo {
 			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
+			content_hash: [tag; 32],
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size,
@@ -2027,12 +2029,16 @@ fn renews_across_multiple_blocks_decrement_independently() {
 		// 1000 bytes renewed at block 3, 700 at block 5.
 		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
 			3u64,
-			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(1000)]).unwrap(),
+			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(1, 1000)])
+				.unwrap(),
 		);
 		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
 			5u64,
-			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(700)]).unwrap(),
+			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(2, 700)])
+				.unwrap(),
 		);
+		crate::RenewRefCount::<Test>::insert([1u8; 32], 1);
+		crate::RenewRefCount::<Test>::insert([2u8; 32], 1);
 		crate::PermanentStorageUsed::<Test>::put(1700);
 
 		// Block 14: obsolete = 3 → drop 1000.
@@ -2073,6 +2079,7 @@ fn obsolete_sweep_decrements_only_permanent_entries() {
 			])
 			.unwrap(),
 		);
+		crate::RenewRefCount::<Test>::insert([0u8; 32], 1);
 		crate::PermanentStorageUsed::<Test>::put(2000);
 
 		// `RetentionPeriod = 10`. At block 14, `obsolete = 14 - 11 = 3` so
@@ -2097,9 +2104,10 @@ fn obsolete_sweep_decrements_only_permanent_entries() {
 #[test]
 fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 	new_test_ext().execute_with(|| {
-		let renew_entry = |size: u32, block_chunks| TransactionInfo {
+		// Three distinct blobs: the batching under test is per block, not per content hash.
+		let renew_entry = |tag: u8, size: u32, block_chunks| TransactionInfo {
 			chunk_root: Default::default(),
-			content_hash: [0u8; 32],
+			content_hash: [tag; 32],
 			hashing: HashingAlgorithm::Blake2b256,
 			cid_codec: 0x55,
 			size,
@@ -2111,12 +2119,15 @@ fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
 			3u64,
 			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![
-				renew_entry(500, chunks_per),
-				renew_entry(500, 2 * chunks_per),
-				renew_entry(500, 3 * chunks_per),
+				renew_entry(1, 500, chunks_per),
+				renew_entry(2, 500, 2 * chunks_per),
+				renew_entry(3, 500, 3 * chunks_per),
 			])
 			.unwrap(),
 		);
+		for tag in 1..=3u8 {
+			crate::RenewRefCount::<Test>::insert([tag; 32], 1);
+		}
 		crate::PermanentStorageUsed::<Test>::put(1500);
 
 		System::set_block_number(14);
@@ -3113,7 +3124,7 @@ fn try_state_detects_counter_drift() {
 		crate::PermanentStorageUsed::<Test>::put(2000);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
+			"PermanentStorageUsed != Σ refcounted content sizes + Σ legacy renewed sizes",
 		);
 
 		// Counter below the on-chain renewed sum: under-count, the direction that lets real
@@ -3133,9 +3144,11 @@ fn try_state_detects_counter_drift() {
 			1u64,
 			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renewed]).unwrap(),
 		);
+		// Reference intact, so only the counter is wrong — the drift this test is about.
+		crate::RenewRefCount::<Test>::insert([0u8; 32], 1);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
+			"PermanentStorageUsed != Σ refcounted content sizes + Σ legacy renewed sizes",
 		);
 	});
 }
@@ -3197,14 +3210,178 @@ fn try_state_holds_for_paid_registration_of_force_renewed_content() {
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
 		assert_ok!(DataRenewal::do_try_state(System::block_number()));
 
-		// Register a prepaid one-shot for the same content (prepaid term = 2000).
+		// Register a prepaid one-shot for the same content. The prepayment takes a second
+		// reference on bytes the `force_renew` above already counted, so the chain-wide
+		// counter does not move — the per-account quota still charges for it.
 		let renew_call =
 			crate::Call::<Test>::renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
 		assert_ok!(Into::<RuntimeCall>::into(renew_call).dispatch(
 			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into()
 		));
-		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 4000);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
 		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+	});
+}
+
+/// `PermanentStorageUsed` proxies renewed bytes on disk, so overlapping renewals of the
+/// *same* content contribute that content's size once. Renewing a blob while an earlier
+/// renewal is still inside its `RetentionPeriod` adds a reference, not bytes.
+#[test]
+fn overlapping_renewals_of_same_content_count_once() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+
+		let force_renew = |who: u64| {
+			let call = crate::Call::<Test>::force_renew {
+				entry: TransactionRef::ContentHash(content_hash),
+			};
+			assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &call));
+			assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
+		};
+
+		run_to_block(3, || None);
+		force_renew(who);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+
+		// Well inside the 10-block retention period, so the block-3 entry is still live.
+		run_to_block(4, || None);
+		force_renew(who);
+
+		let sealed = pallet_bulletin_transaction_storage::Transactions::<Test>::get(3).unwrap();
+		let in_block = pallet_bulletin_transaction_storage::Pallet::<Test>::block_transactions();
+		let live_renews = sealed
+			.iter()
+			.chain(in_block.iter())
+			.filter(|t| t.meta == EntryKind::Renew && t.content_hash == content_hash)
+			.count();
+		assert_eq!(live_renews, 2, "the overlap this test is about");
+
+		assert_eq!(
+			crate::PermanentStorageUsed::<Test>::get(),
+			2000,
+			"one blob must occupy its size once, not once per overlapping renewal",
+		);
+
+		// The per-account quota is a rate control, not a disk proxy, so it still charges
+		// every renewal — duplicates stay costly to the caller.
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			4000,
+		);
+	});
+}
+
+/// Entries from before [`crate::RefcountFrom`] are credited one by one; later ones go through
+/// [`crate::RenewRefCount`].
+///
+/// Exercised on a hash straddling the cutoff — the case that leaks if both populations share
+/// one rule. It stays double-counted, as v1 left it, until the pre-upgrade entry ages out.
+#[test]
+fn legacy_and_refcounted_entries_are_credited_under_their_own_rules() {
+	new_test_ext().execute_with(|| {
+		let hash = [9u8; 32];
+		let size: u32 = 1000;
+		let renew_entry = |block_chunks| TransactionInfo {
+			chunk_root: Default::default(),
+			content_hash: hash,
+			hashing: HashingAlgorithm::Blake2b256,
+			cid_codec: 0x55,
+			size,
+			extrinsic_index: u32::MAX,
+			block_chunks,
+			meta: EntryKind::Renew,
+		};
+
+		// Upgrade landed at block 5.
+		crate::RefcountFrom::<Test>::put(5u64);
+
+		// Pre-upgrade entry at block 3: charged individually, holds no reference.
+		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
+			3u64,
+			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(num_chunks(
+				size,
+			))])
+			.unwrap(),
+		);
+		// Post-upgrade renewal of the *same* content at block 6: takes the first reference.
+		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
+			6u64,
+			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![renew_entry(num_chunks(
+				size,
+			))])
+			.unwrap(),
+		);
+		crate::RenewRefCount::<Test>::insert(hash, 1);
+		crate::PermanentStorageUsed::<Test>::put(2 * size as u64);
+
+		// Block 14: obsolete = 3, before the cutoff → credited per entry, reference untouched.
+		System::set_block_number(14);
+		<TransactionStorage as Hooks<u64>>::on_initialize(14);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), size as u64);
+		assert_eq!(crate::RenewRefCount::<Test>::get(hash), Some(1));
+
+		// Block 17: obsolete = 6, at or after the cutoff → the last reference frees the bytes.
+		System::set_block_number(17);
+		<TransactionStorage as Hooks<u64>>::on_initialize(17);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+		assert_eq!(crate::RenewRefCount::<Test>::get(hash), None, "reference must be cleared");
+	});
+}
+
+/// `RefcountFrom` unset means "refcount everything" — the state a chain created at v2 starts
+/// in, having no pre-refcount entries to account for.
+#[test]
+fn refcount_from_unset_treats_all_entries_as_refcounted() {
+	new_test_ext().execute_with(|| {
+		assert!(crate::RefcountFrom::<Test>::get().is_none());
+
+		let hash = [4u8; 32];
+		pallet_bulletin_transaction_storage::Transactions::<Test>::insert(
+			3u64,
+			BoundedVec::<TransactionInfo<EntryKind>, _>::try_from(vec![TransactionInfo {
+				chunk_root: Default::default(),
+				content_hash: hash,
+				hashing: HashingAlgorithm::Blake2b256,
+				cid_codec: 0x55,
+				size: 800,
+				extrinsic_index: u32::MAX,
+				block_chunks: num_chunks(800),
+				meta: EntryKind::Renew,
+			}])
+			.unwrap(),
+		);
+		crate::RenewRefCount::<Test>::insert(hash, 1);
+		crate::PermanentStorageUsed::<Test>::put(800);
+
+		System::set_block_number(14);
+		<TransactionStorage as Hooks<u64>>::on_initialize(14);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+		assert_eq!(crate::RenewRefCount::<Test>::get(hash), None);
+	});
+}
+
+/// The v1→v2 migration stamps the upgrade block and nothing else — no scan of live
+/// `Transactions`.
+#[test]
+fn v1_to_v2_migration_stamps_the_upgrade_block() {
+	new_test_ext().execute_with(|| {
+		use polkadot_sdk_frame::deps::frame_support::traits::UncheckedOnRuntimeUpgrade;
+		System::set_block_number(42);
+		assert!(crate::RefcountFrom::<Test>::get().is_none());
+		crate::migrations::v2::VersionUncheckedMigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(crate::RefcountFrom::<Test>::get(), Some(42));
+		assert!(
+			crate::RenewRefCount::<Test>::iter().next().is_none(),
+			"the migration must not build references"
+		);
 	});
 }

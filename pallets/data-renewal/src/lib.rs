@@ -159,7 +159,7 @@ pub mod pallet {
 		BadDataSize,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -194,6 +194,27 @@ pub mod pallet {
 	/// `size` to the decrement.
 	#[pallet::storage]
 	pub type PermanentStorageUsed<T: Config> = StorageValue<_, u64, ValueQuery>;
+
+	/// Live references to `content_hash`'s renewed bytes: one per refcounted `Renew` entry,
+	/// plus one per outstanding prepaid registration — charged before its entry exists, and
+	/// converting into exactly one.
+	///
+	/// [`PermanentStorageUsed`] moves only on the 0↔1 edge, keeping it a proxy for bytes on
+	/// disk rather than for references to them.
+	#[pallet::storage]
+	pub type RenewRefCount<T: Config> =
+		StorageMap<_, Blake2_128Concat, ContentHash, u32, OptionQuery>;
+
+	/// First block whose aged-out `Renew` entries are credited through [`RenewRefCount`].
+	/// Earlier entries were charged one by one, so they are credited one by one.
+	///
+	/// Splitting per aged-out block rather than per entry is what lets the two populations
+	/// coexist without marking entries or scanning them at upgrade — `handle_obsolete`
+	/// already knows which block it is sweeping. Set by [`migrations::v2::MigrateV1ToV2`];
+	/// `None` reads as "refcount everything". Inert one `RetentionPeriod` after the upgrade,
+	/// and removable then.
+	#[pallet::storage]
+	pub type RefcountFrom<T: Config> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
 
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -518,8 +539,9 @@ impl<T: Config> Pallet<T> {
 				// `enable_auto_renew`). All other recurring cycles charge here.
 				let was_paid = renewal_data.paid;
 				let scope = AuthorizationScope::Account(renewal_data.account.clone());
-				let charged =
-					was_paid || Self::check_renew_authorization(&scope, tx_info.size, true).is_ok();
+				let charged = was_paid ||
+					Self::check_renew_authorization(&scope, content_hash, tx_info.size, true)
+						.is_ok();
 				let new_index = if charged {
 					entries.renew(&tx_info, extrinsic_index, T::EntryMeta::renew())
 				} else {
@@ -547,13 +569,14 @@ impl<T: Config> Pallet<T> {
 					});
 				} else {
 					if charged {
-						// Reverse the chain-wide `PermanentStorageUsed` bump that
-						// `check_renew_authorization` applied for this cycle. The per-account
-						// `bytes_permanent` / `transactions` increments are intentionally
-						// left burned: slot-cap rejection at inherent time is a chain-level
-						// pathological event.
-						let size_u64: u64 = tx_info.size.into();
-						Self::update_permanent_storage_used(|used| used.saturating_sub(size_u64));
+						// The reference was taken above, or at registration when prepaid. The
+						// per-account `bytes_permanent` / `transactions` increments are
+						// intentionally left burned: slot-cap rejection at inherent time is a
+						// chain-level pathological event.
+						let freed = Self::release_renew_ref(content_hash, tx_info.size.into());
+						if freed > 0 {
+							Self::update_permanent_storage_used(|used| used.saturating_sub(freed));
+						}
 					}
 					Renewals::<T>::remove(content_hash);
 					Self::deposit_event(Event::RenewalFailed {
@@ -575,10 +598,14 @@ impl<T: Config> Pallet<T> {
 	/// `handle_obsolete` when the renewed entry ages out.
 	pub(crate) fn check_renew_authorization(
 		scope: &AuthorizationScopeFor<T>,
+		content_hash: ContentHash,
 		size: u32,
 		consume: bool,
 	) -> Result<(), TransactionValidityError> {
 		let size_u64: u64 = size.into();
+		// Already-referenced content adds nothing to the chain-wide total, so it must not be
+		// tested against the chain-wide cap either.
+		let chain_delta = if Self::renew_refs(content_hash) > 0 { 0 } else { size_u64 };
 		let chain_used = PermanentStorageUsed::<T>::get();
 		let chain_cap = T::MaxPermanentStorageSize::get();
 
@@ -592,7 +619,7 @@ impl<T: Config> Pallet<T> {
 					return Err(PERMANENT_ALLOWANCE_EXCEEDED.into());
 				}
 				// Chain-wide hard cap.
-				if chain_used.saturating_add(size_u64) > chain_cap {
+				if chain_used.saturating_add(chain_delta) > chain_cap {
 					return Err(CHAIN_PERMANENT_CAP_REACHED.into());
 				}
 				authorization.extra_mut().bytes_permanent = used.saturating_add(size_u64);
@@ -602,9 +629,41 @@ impl<T: Config> Pallet<T> {
 		)?;
 
 		if consume {
-			Self::update_permanent_storage_used(|used| used.saturating_add(size_u64));
+			Self::acquire_renew_ref(content_hash, size_u64);
 		}
 		Ok(())
+	}
+
+	fn renew_refs(content_hash: ContentHash) -> u32 {
+		RenewRefCount::<T>::get(content_hash).unwrap_or(0)
+	}
+
+	/// Charges `size` only on the 0→1 edge.
+	fn acquire_renew_ref(content_hash: ContentHash, size: u64) {
+		let refs = Self::renew_refs(content_hash).saturating_add(1);
+		RenewRefCount::<T>::insert(content_hash, refs);
+		if refs == 1 {
+			Self::update_permanent_storage_used(|used| used.saturating_add(size));
+		}
+	}
+
+	/// Returns the bytes freed: `size` on the 1→0 edge, zero otherwise — callers fold the
+	/// total into one counter write.
+	///
+	/// An absent reference frees nothing. Crediting it would under-count, the direction that
+	/// lets renewed bytes past the chain-wide cap.
+	fn release_renew_ref(content_hash: ContentHash, size: u64) -> u64 {
+		match Self::renew_refs(content_hash) {
+			0 => 0,
+			1 => {
+				RenewRefCount::<T>::remove(content_hash);
+				size
+			},
+			n => {
+				RenewRefCount::<T>::insert(content_hash, n.saturating_sub(1));
+				0
+			},
+		}
 	}
 
 	/// Update [`PermanentStorageUsed`] via `f`, emitting
@@ -646,6 +705,7 @@ impl<T: Config> Pallet<T> {
 		}
 		if Self::check_renew_authorization(
 			&AuthorizationScope::Preimage(content_hash),
+			content_hash,
 			size,
 			consume,
 		)
@@ -653,7 +713,12 @@ impl<T: Config> Pallet<T> {
 		{
 			return Ok(AuthorizationScope::Preimage(content_hash));
 		}
-		Self::check_renew_authorization(&AuthorizationScope::Account(who.clone()), size, consume)?;
+		Self::check_renew_authorization(
+			&AuthorizationScope::Account(who.clone()),
+			content_hash,
+			size,
+			consume,
+		)?;
 		Ok(AuthorizationScope::Account(who.clone()))
 	}
 
@@ -676,6 +741,7 @@ impl<T: Config> Pallet<T> {
 		}
 		Self::check_renew_authorization(
 			&AuthorizationScope::Preimage(info.content_hash),
+			info.content_hash,
 			info.size,
 			context.consume_authorization(),
 		)?;
@@ -695,15 +761,23 @@ impl<T: Config> Pallet<T> {
 		if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(info.size as usize) {
 			return false;
 		}
-		Self::check_renew_authorization(&AuthorizationScope::Account(who.clone()), info.size, false)
-			.is_ok()
+		Self::check_renew_authorization(
+			&AuthorizationScope::Account(who.clone()),
+			info.content_hash,
+			info.size,
+			false,
+		)
+		.is_ok()
 	}
 }
 
 impl<T: Config> Pallet<T> {
 	/// try-state invariants:
-	/// - `PermanentStorageUsed <= Σ Renew entry sizes + Σ paid registration sizes` (prepaid
-	///   registrations are charged before their `Renew` entry exists).
+	/// - `PermanentStorageUsed` == Σ distinct refcounted content sizes + Σ legacy `Renew` entry
+	///   sizes. Prepaid registrations need no term of their own — their charge already holds a
+	///   reference.
+	/// - `RenewRefCount[hash]` == live refcounted `Renew` entries for `hash`, plus any outstanding
+	///   prepaid registration.
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	#[cfg(any(feature = "try-runtime", test))]
 	pub(crate) fn do_try_state(_n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
@@ -711,19 +785,39 @@ impl<T: Config> Pallet<T> {
 
 		let used = PermanentStorageUsed::<T>::get();
 
-		let renewed_sum: u64 = pallet_bulletin_transaction_storage::Transactions::<T>::iter().fold(
-			0u64,
-			|acc, (_, entries)| {
-				entries
-					.iter()
-					.filter(|t| t.meta.is_renew())
-					.fold(acc, |inner, t| inner.saturating_add(t.size as u64))
-			},
+		ensure!(
+			used <= T::MaxPermanentStorageSize::get(),
+			"PermanentStorageUsed exceeds MaxPermanentStorageSize",
 		);
 
-		let mut prepaid_sum: u64 = 0;
+		// A hash straddling the cutoff contributes on both sides, matching the two
+		// independent charges it took.
+		let refcount_from = RefcountFrom::<T>::get();
+		let legacy_block =
+			|block: BlockNumberFor<T>| refcount_from.is_some_and(|from| block < from);
+		let mut legacy_sum: u64 = 0;
+		// Size comes from any live entry for the hash — same content, same bytes, same size.
+		let mut live_refs: alloc::collections::BTreeMap<ContentHash, (u32, u64)> =
+			Default::default();
+		for (block, entries) in pallet_bulletin_transaction_storage::Transactions::<T>::iter() {
+			for t in entries.iter().filter(|t| t.meta.is_renew()) {
+				if legacy_block(block) {
+					legacy_sum = legacy_sum.saturating_add(t.size as u64);
+				} else {
+					let slot = live_refs.entry(t.content_hash).or_insert((0, t.size as u64));
+					slot.0 = slot.0.saturating_add(1);
+				}
+			}
+		}
+
+		// A prepaid registration holds a reference before its `Renew` entry exists, so it may
+		// be the only thing keeping the hash counted.
 		for (content_hash, registration) in Renewals::<T>::iter() {
 			if !registration.paid {
+				continue;
+			}
+			if let Some(slot) = live_refs.get_mut(&content_hash) {
+				slot.0 = slot.0.saturating_add(1);
 				continue;
 			}
 			let (block, index) =
@@ -734,10 +828,20 @@ impl<T: Config> Pallet<T> {
 			let info =
 				pallet_bulletin_transaction_storage::Pallet::<T>::transaction_info(block, index)
 					.ok_or("paid Renewals registration target has no TransactionInfo")?;
-			prepaid_sum = prepaid_sum.saturating_add(info.size as u64);
+			live_refs.insert(content_hash, (1, info.size as u64));
 		}
 
-		let expected = renewed_sum.saturating_add(prepaid_sum);
+		let mut refcounted_sum: u64 = 0;
+		for (content_hash, (expected_refs, size)) in live_refs.iter() {
+			ensure!(
+				RenewRefCount::<T>::get(content_hash).unwrap_or(0) == *expected_refs,
+				"RenewRefCount does not match live refcounted Renew entries + prepaid \
+				 registrations",
+			);
+			refcounted_sum = refcounted_sum.saturating_add(*size);
+		}
+
+		let expected = legacy_sum.saturating_add(refcounted_sum);
 
 		// `used` gates admission, so under-counting is what lets renewed bytes past the cap;
 		// over-counting only rejects early. Live state drifts both ways through history this
@@ -747,7 +851,7 @@ impl<T: Config> Pallet<T> {
 		#[cfg(test)]
 		ensure!(
 			used == expected,
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
+			"PermanentStorageUsed != Σ refcounted content sizes + Σ legacy renewed sizes",
 		);
 		#[cfg(all(feature = "try-runtime", not(test)))]
 		if used != expected {
@@ -755,33 +859,34 @@ impl<T: Config> Pallet<T> {
 				target: LOG_TARGET,
 				used,
 				expected,
-				"PermanentStorageUsed drifts from Σ renewed + Σ paid registration sizes",
+				"PermanentStorageUsed drifts from Σ refcounted content + Σ legacy renewed sizes",
 			);
 		}
-
-		ensure!(
-			used <= T::MaxPermanentStorageSize::get(),
-			"PermanentStorageUsed exceeds MaxPermanentStorageSize",
-		);
 
 		Ok(())
 	}
 }
 
-/// Obsolete-block sweep callback: decrements [`PermanentStorageUsed`] for aged-out
-/// `Renew` entries and queues `is_latest` entries with a [`Renewals`] registration
-/// into [`PendingRenewals`] for the same block's inherent.
+/// Obsolete-block sweep callback: releases the [`RenewRefCount`] references held by aged-out
+/// `Renew` entries and queues `is_latest` entries with a [`Renewals`] registration into
+/// [`PendingRenewals`] for the same block's inherent.
 impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pallet<T> {
-	fn handle_obsolete(_obsolete: BlockNumberFor<T>, items: &[(TransactionInfoFor<T>, bool)]) {
-		// Renewed bytes leaving the retention window free up permanent capacity.
-		// Stale shadows (`is_latest == false`) count too: their sizes were charged
-		// when their renew was consumed.
-		let renewed_sum: u64 = items
-			.iter()
-			.filter(|(tx_info, _)| tx_info.meta.is_renew())
-			.fold(0u64, |acc, (tx_info, _)| acc.saturating_add(tx_info.size as u64));
-		if renewed_sum > 0 {
-			Self::update_permanent_storage_used(|used| used.saturating_sub(renewed_sum));
+	fn handle_obsolete(obsolete: BlockNumberFor<T>, items: &[(TransactionInfoFor<T>, bool)]) {
+		// Renewed bytes free up capacity only once the *last* reference to that content goes.
+		// Stale shadows (`is_latest == false`) hold a reference each, so they are dropped
+		// here too — they just usually aren't the one that frees the bytes.
+		let legacy = RefcountFrom::<T>::get().is_some_and(|from| obsolete < from);
+		let mut freed: u64 = 0;
+		for (tx_info, _) in items.iter().filter(|(tx_info, _)| tx_info.meta.is_renew()) {
+			let size_u64: u64 = tx_info.size.into();
+			freed = freed.saturating_add(if legacy {
+				size_u64
+			} else {
+				Self::release_renew_ref(tx_info.content_hash, size_u64)
+			});
+		}
+		if freed > 0 {
+			Self::update_permanent_storage_used(|used| used.saturating_sub(freed));
 		}
 
 		// One read, one write — `try_push` cannot overflow under
