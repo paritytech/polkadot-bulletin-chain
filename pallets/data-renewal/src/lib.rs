@@ -26,8 +26,9 @@
 //!   `enable_auto_renew` / `disable_auto_renew` (recurring), `process_pending_renewals` (mandatory
 //!   drain inherent).
 //! - **Storage:** [`Renewals`] (per-content-hash registration), [`PendingRenewals`] (per-block
-//!   scratch queue, drained by the inherent), and [`PermanentStorageUsed`] (chain-wide renewed-byte
-//!   counter, capped by `MaxPermanentStorageSize`).
+//!   scratch queue, drained by the inherent), [`PermanentStorageUsed`] (chain-wide renewed-byte
+//!   counter, capped by `MaxPermanentStorageSize`), and [`RenewRefCount`] (live references per
+//!   content hash, so overlapping renewals of one blob count its bytes once).
 //!
 //! ## Cross-pallet contract
 //!
@@ -38,8 +39,8 @@
 //! - **Down → storage:** dispatchables use the storage pallet's public API; the per-account renew
 //!   quota is mutated atomically through `try_mutate_active_authorization`.
 //! - **Up ← storage:** [`OnObsoleteTransactions::handle_obsolete`] fires at the `RetentionPeriod`
-//!   boundary — it decrements [`PermanentStorageUsed`] for aged-out `Renew` entries and queues
-//!   registered entries into [`PendingRenewals`] for the same block's inherent.
+//!   boundary — it releases the references held by aged-out `Renew` entries and queues registered
+//!   entries into [`PendingRenewals`] for the same block's inherent.
 //! - **Per-cycle accounting** is charged by `Pallet::check_renew_authorization`.
 //!
 //! ## Prepayment model
@@ -839,6 +840,15 @@ impl<T: Config> Pallet<T> {
 				 registrations",
 			);
 			refcounted_sum = refcounted_sum.saturating_add(*size);
+		}
+
+		// The other direction: an orphan reference holds bytes nothing can ever free.
+		for (content_hash, stored) in RenewRefCount::<T>::iter() {
+			ensure!(
+				live_refs.get(&content_hash).map(|(refs, _)| *refs) == Some(stored),
+				"RenewRefCount holds a reference with no live Renew entry or prepaid \
+				 registration",
+			);
 		}
 
 		let expected = legacy_sum.saturating_add(refcounted_sum);

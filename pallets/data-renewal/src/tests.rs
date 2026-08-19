@@ -3385,3 +3385,17 @@ fn v1_to_v2_migration_stamps_the_upgrade_block() {
 		);
 	});
 }
+
+/// A `RenewRefCount` entry with nothing live behind it holds bytes the sweep can never free.
+/// Over-counting, so safe, but it is drift and try-state must say so.
+#[test]
+fn try_state_detects_orphan_renew_reference() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		crate::RenewRefCount::<Test>::insert([7u8; 32], 1);
+		assert_err!(
+			DataRenewal::do_try_state(System::block_number()),
+			"RenewRefCount holds a reference with no live Renew entry or prepaid registration",
+		);
+	});
+}
