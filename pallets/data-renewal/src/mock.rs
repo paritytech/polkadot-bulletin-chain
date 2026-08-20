@@ -154,7 +154,7 @@ pub fn new_test_ext() -> TestExternalities {
 
 /// Run to block `n`, calling `apply_block_inherents` (proof inherent) and the
 /// renewal-pallet drain inherent before each `on_finalize`. Mirrors the runtime's
-/// block-author behaviour so the per-block `ProofChecked` and `PendingAutoRenewals`
+/// block-author behaviour so the per-block `ProofChecked` and `PendingRenewals`
 /// invariants are satisfied.
 pub fn run_to_block(
 	n: u64,
@@ -165,7 +165,7 @@ pub fn run_to_block(
 		RunToBlockHooks::default().before_finalize(move |_| {
 			let proof = f();
 			TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof).unwrap();
-			if !crate::PendingAutoRenewals::<Test>::get().is_empty() {
+			if !crate::PendingRenewals::<Test>::get().is_empty() {
 				DataRenewal::process_pending_renewals(RuntimeOrigin::none()).unwrap();
 			}
 		}),
@@ -182,7 +182,7 @@ pub fn apply_block_inherents_full(
 	TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof)
 		.map(|_| ())
 		.map_err(|e| e.error)?;
-	if !crate::PendingAutoRenewals::<Test>::get().is_empty() {
+	if !crate::PendingRenewals::<Test>::get().is_empty() {
 		DataRenewal::process_pending_renewals(RuntimeOrigin::none())
 			.map(|_| ())
 			.map_err(|e| e.error)?;

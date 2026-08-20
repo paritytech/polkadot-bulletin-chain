@@ -121,12 +121,13 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// Number of `StorageValue`s actually relocated below; each costs a set + a clear.
 		let mut values_moved: u64 = 0;
 
-		// `PendingAutoRenewals` (StorageValue): transient per-block scratch. The pre-split
-		// `on_finalize` asserts it is drained every block, so it is always absent here —
-		// the move is belt-and-braces, kept so the relocation is complete by construction
-		// rather than by relying on an invariant in the pallet being split apart.
+		// `PendingAutoRenewals` (StorageValue, now [`crate::PendingRenewals`]): transient
+		// per-block scratch. The pre-split `on_finalize` asserts it is drained every block,
+		// so it is always absent here — the move is belt-and-braces, kept so the relocation
+		// is complete by construction rather than by relying on an invariant in the pallet
+		// being split apart.
 		let old_pending_key = old_prefix::<T>(b"PendingAutoRenewals");
-		let new_pending_key = crate::PendingAutoRenewals::<T>::hashed_key();
+		let new_pending_key = crate::PendingRenewals::<T>::hashed_key();
 		if let Some(raw) = sp_io::storage::get(&old_pending_key) {
 			sp_io::storage::set(&new_pending_key, &raw);
 			sp_io::storage::clear(&old_pending_key);
@@ -246,10 +247,9 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// Compared as raw bytes so a value present only at the wrong prefix is caught even
 		// though `ValueQuery` would read it back as an empty vec either way.
 		ensure!(
-			sp_io::storage::get(&crate::PendingAutoRenewals::<T>::hashed_key())
-				.map(|raw| raw.to_vec()) ==
+			sp_io::storage::get(&crate::PendingRenewals::<T>::hashed_key()).map(|raw| raw.to_vec()) ==
 				pre.pending,
-			"PendingAutoRenewals not relocated byte-exactly"
+			"PendingRenewals not relocated byte-exactly"
 		);
 		ensure!(
 			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),

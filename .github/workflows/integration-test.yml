@@ -116,8 +116,6 @@ jobs:
         uses: ./.github/actions/build-external-runtime
         with:
           name: ${{ matrix.runtime.name }}
-          repo: ${{ matrix.runtime.external_runtime.repo }}
-          ref: ${{ matrix.runtime.external_runtime.ref }}
 
       - name: Start services
         working-directory: examples
