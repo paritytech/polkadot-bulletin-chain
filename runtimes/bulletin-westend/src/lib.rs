@@ -150,6 +150,7 @@ pub mod migrations {
 		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
 		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
 		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+		pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.

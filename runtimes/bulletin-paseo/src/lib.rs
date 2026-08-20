@@ -142,6 +142,7 @@ pub mod migrations {
 	pub type Unreleased = (
 		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
 		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
+		pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
