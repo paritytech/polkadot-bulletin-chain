@@ -4,6 +4,7 @@
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
     "integration_tests": true,
+    "data_renewal": true,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
@@ -20,6 +21,7 @@
     "package": "bulletin-paseo-runtime",
     "path": "runtimes/bulletin-paseo",
     "integration_tests": true,
+    "data_renewal": true,
     "try_runtime": {
       "spec_name_check": "--disable-spec-name-check",
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
@@ -37,6 +39,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "integration_tests": true,
+    "data_renewal": false,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
@@ -53,6 +56,7 @@
     "name": "bulletin-paseo-external",
     "package": "bulletin-paseo-runtime",
     "integration_tests": false,
+    "data_renewal": false,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
