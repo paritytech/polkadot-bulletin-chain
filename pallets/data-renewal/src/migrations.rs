@@ -316,7 +316,7 @@ pub mod v2 {
 
 		#[cfg(feature = "try-runtime")]
 		fn post_upgrade(
-			_state: Vec<u8>,
+			_state: alloc::vec::Vec<u8>,
 		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 			polkadot_sdk_frame::prelude::ensure!(
 				RefcountFrom::<T>::get().is_some(),
