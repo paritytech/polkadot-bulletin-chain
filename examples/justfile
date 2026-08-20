@@ -134,7 +134,7 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
 # Build a runtime that lives in an external (Fellows) repo and print the WASM path.
-# Different feature sets use separate checkouts so their build caches don't collide.
+# Different feature sets get separate checkouts and cached blobs.
 build-external-runtime name features="":
     #!/usr/bin/env bash
     set -e
@@ -152,30 +152,60 @@ build-external-runtime name features="":
     else
         VARIANT_SUFFIX=""
     fi
-    # Outside `target/`, which the CI Rust cache owns: its restores can leave a
-    # broken checkout behind.
-    CHECKOUT_DIR="$ROOT_DIR/.external-runtimes/{{ name }}${VARIANT_SUFFIX}"
-    WASM_PATH="$CHECKOUT_DIR/target/release/wbuild/$PACKAGE/${PACKAGE//-/_}.compact.compressed.wasm"
+    # A ref that is already a sha needs no resolution (ls-remote only sees refs).
+    if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
+        SHA="$REF"
+    else
+        SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+        if [ -z "$SHA" ]; then
+            >&2 echo "❌ Cannot resolve $REF in $REPO"
+            exit 1
+        fi
+    fi
+
+    # Only the blob is worth keeping between runs: the checkout and its `target/` run to
+    # several GB, enough to evict every other cache in the repo. Keyed by sha so a pin
+    # bump cannot serve a stale blob.
+    WASM_DIR="$ROOT_DIR/.external-runtimes/wasm/{{ name }}${VARIANT_SUFFIX}/$SHA"
+    WASM_PATH="$WASM_DIR/${PACKAGE//-/_}.compact.compressed.wasm"
+    SRC_DIR="$ROOT_DIR/.external-runtimes/src/{{ name }}${VARIANT_SUFFIX}"
 
     >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $REF ($SUBPATH) [features=${FEATURES:-default}]"
 
+    if [ -f "$WASM_PATH" ]; then
+        >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
+        echo "$WASM_PATH"
+        exit 0
+    fi
+
     sync_checkout() {
-        if [ ! -d "$CHECKOUT_DIR/.git" ]; then
-            >&2 echo "📥 Cloning $REPO into $CHECKOUT_DIR..."
-            git clone --filter=blob:none "$REPO" "$CHECKOUT_DIR" >&2
+        if [ ! -d "$SRC_DIR/.git" ]; then
+            >&2 echo "📥 Cloning $REPO into $SRC_DIR..."
+            git clone --filter=blob:none "$REPO" "$SRC_DIR" >&2
         else
-            git -C "$CHECKOUT_DIR" remote set-url origin "$REPO"
+            git -C "$SRC_DIR" remote set-url origin "$REPO"
         fi
 
-        >&2 echo "🔀 Fetching ref: $REF..."
-        git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REF" >&2
-        # --force: HEAD can already be at $REF with worktree files missing, where a
+        >&2 echo "🔀 Fetching ref: $SHA..."
+        git -C "$SRC_DIR" fetch --depth 1 origin "$SHA" >&2
+        # --force: HEAD can already be at $SHA with worktree files missing, where a
         # plain checkout is a no-op.
-        git -C "$CHECKOUT_DIR" checkout -q --force FETCH_HEAD
+        git -C "$SRC_DIR" checkout -q --force FETCH_HEAD
     }
 
-    mkdir -p "$(dirname "$CHECKOUT_DIR")"
+    mkdir -p "$(dirname "$SRC_DIR")"
     sync_checkout
+
+    # For a checkout `--force` cannot repair.
+    if [ ! -d "$SRC_DIR/$SUBPATH" ]; then
+        >&2 echo "🧹 $SUBPATH missing after checkout, re-cloning $SRC_DIR..."
+        rm -rf "$SRC_DIR"
+        sync_checkout
+    fi
+    if [ ! -d "$SRC_DIR/$SUBPATH" ]; then
+        >&2 echo "❌ $SUBPATH not found in $REPO @ $SHA"
+        exit 1
+    fi
 
     # --locked: honor the external repo's Cargo.lock; fresh resolution can
     # drift to dep versions the pinned rev never built against.
@@ -184,29 +214,16 @@ build-external-runtime name features="":
         BUILD_ARGS+=(--features "$FEATURES")
     fi
 
-    if [ ! -f "$WASM_PATH" ]; then
-        # For a checkout `--force` cannot repair. Inside the rebuild branch so the
-        # `rm -rf` can never discard a cached WASM.
-        if [ ! -d "$CHECKOUT_DIR/$SUBPATH" ]; then
-            >&2 echo "🧹 $SUBPATH missing after checkout, re-cloning $CHECKOUT_DIR..."
-            rm -rf "$CHECKOUT_DIR"
-            sync_checkout
-        fi
-        if [ ! -d "$CHECKOUT_DIR/$SUBPATH" ]; then
-            >&2 echo "❌ $SUBPATH not found in $REPO @ $REF"
-            exit 1
-        fi
+    >&2 echo "🔨 Building $PACKAGE [features=${FEATURES:-default}]..."
+    (cd "$SRC_DIR/$SUBPATH" && cargo build "${BUILD_ARGS[@]}" >&2)
 
-        >&2 echo "🔨 Building $PACKAGE [features=${FEATURES:-default}]..."
-        (cd "$CHECKOUT_DIR/$SUBPATH" && cargo build "${BUILD_ARGS[@]}" >&2)
-    else
-        >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
-    fi
-
-    if [ ! -f "$WASM_PATH" ]; then
-        >&2 echo "❌ WASM not produced at: $WASM_PATH"
+    BUILT="$SRC_DIR/target/release/wbuild/$PACKAGE/${PACKAGE//-/_}.compact.compressed.wasm"
+    if [ ! -f "$BUILT" ]; then
+        >&2 echo "❌ WASM not produced at: $BUILT"
         exit 1
     fi
+    mkdir -p "$WASM_DIR"
+    cp "$BUILT" "$WASM_PATH"
 
     echo "$WASM_PATH"
 

@@ -8,7 +8,7 @@
 # scripts/get_polkadot_binaries.sh
 /.polkadot-binaries/
 
-# Out-of-tree runtime checkouts built by `just build-external-runtime`
+# External runtime checkouts and their WASM, from `just build-external-runtime`
 /.external-runtimes/
 
 # OS

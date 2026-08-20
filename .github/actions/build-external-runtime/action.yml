@@ -57,7 +57,7 @@ runs:
           exit 1
         fi
         echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-        # Mirror the checkout-dir suffix logic of `build-external-runtime` in
+        # Mirror the variant-suffix logic of `build-external-runtime` in
         # examples/justfile so the cache path matches the recipe's output dir.
         if [ -n "$FEATURES" ]; then
           SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
@@ -66,13 +66,11 @@ runs:
         fi
         echo "variant-suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
 
-    - name: Cache external runtime build
+    - name: Cache external runtime WASM
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
-        path: .external-runtimes/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}
-        # `-v2`: an archive from the old `target/external-runtimes` layout restores to
-        # that path and still counts as a hit, leaving this path empty and unsaved.
-        key: external-runtime-v2-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
+        path: .external-runtimes/wasm/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}/${{ steps.resolve.outputs.sha }}
+        key: external-runtime-wasm-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
 
     - name: Build external runtime
       id: build
