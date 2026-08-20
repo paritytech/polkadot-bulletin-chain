@@ -143,13 +143,6 @@ pub mod migrations {
 		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
 		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
 		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
-		// Westend Bulletin is still on `TransactionStorage` storage version 1 (Paseo is on 5),
-		// so the whole chain from v0→v1 up has to stay wired here.
-		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
-		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
 	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
@@ -165,8 +158,7 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
+	pub type MbmMigrations = ();
 }
 
 /// Executive: handles dispatch to the various modules.
