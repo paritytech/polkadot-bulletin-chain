@@ -172,7 +172,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// relocated. A leftover value means the drain invariant did not hold on chain and the
 		// migration has to move it after all — fail the dry-run, not the block.
 		ensure!(
-			sp_io::storage::get(&old_prefix::<T>(b"PendingRenewals")).is_none(),
+			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
 			"legacy PendingRenewals is non-empty; it must be relocated",
 		);
 
