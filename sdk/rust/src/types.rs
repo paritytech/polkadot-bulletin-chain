@@ -556,7 +556,7 @@ mod tests {
 			"INVALID_CHUNK_SIZE",
 			"UNSUPPORTED_OPERATION",
 		];
-
+assert_eq!(all_errors().len(), expected.len(), "expected[] out of sync with all_errors()");
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
 			assert_eq!(error.code(), *expected_code, "Mismatch for {error:?}");
 		}
