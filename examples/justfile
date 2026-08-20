@@ -133,25 +133,15 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     echo "   Log: {{ test_dir }}/zombienet.log"
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
-# Build a runtime that lives in an external (Fellows) repo and print the WASM path.
-# Different feature sets get separate checkouts and cached blobs.
-build-external-runtime name features="":
+# Print `<sha> <wasm-dir> <src-dir> <cache-key>`, dirs repo-relative.
+# The CI cache action reads this so its key and path cannot drift from the recipe below.
+external-runtime-paths name features="":
     #!/usr/bin/env bash
     set -e
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    MATRIX="$ROOT_DIR/scripts/runtimes-matrix.json"
-
+    MATRIX="{{ justfile_directory() }}/../scripts/runtimes-matrix.json"
     REPO=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.repo' "$MATRIX")
     REF=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.ref' "$MATRIX")
-    SUBPATH=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.path' "$MATRIX")
-    PACKAGE=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .package' "$MATRIX")
 
-    FEATURES="{{ features }}"
-    if [ -n "$FEATURES" ]; then
-        VARIANT_SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
-    else
-        VARIANT_SUFFIX=""
-    fi
     # A ref that is already a sha needs no resolution (ls-remote only sees refs).
     if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
         SHA="$REF"
@@ -163,14 +153,39 @@ build-external-runtime name features="":
         fi
     fi
 
-    # Only the blob is worth keeping between runs: the checkout and its `target/` run to
-    # several GB, enough to evict every other cache in the repo. Keyed by sha so a pin
-    # bump cannot serve a stale blob.
-    WASM_DIR="$ROOT_DIR/.external-runtimes/wasm/{{ name }}${VARIANT_SUFFIX}/$SHA"
-    WASM_PATH="$WASM_DIR/${PACKAGE//-/_}.compact.compressed.wasm"
-    SRC_DIR="$ROOT_DIR/.external-runtimes/src/{{ name }}${VARIANT_SUFFIX}"
+    FEATURES="{{ features }}"
+    if [ -n "$FEATURES" ]; then
+        VARIANT_SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
+    else
+        VARIANT_SUFFIX=""
+    fi
 
-    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $REF ($SUBPATH) [features=${FEATURES:-default}]"
+    echo "$SHA" \
+        ".external-runtimes/wasm/{{ name }}${VARIANT_SUFFIX}/$SHA" \
+        ".external-runtimes/src/{{ name }}${VARIANT_SUFFIX}" \
+        "external-runtime-wasm-{{ name }}${VARIANT_SUFFIX}-$SHA"
+
+# Build a runtime that lives in an external (Fellows) repo and print the WASM path.
+# Different feature sets get separate checkouts and cached blobs.
+build-external-runtime name features="":
+    #!/usr/bin/env bash
+    set -e
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    MATRIX="$ROOT_DIR/scripts/runtimes-matrix.json"
+
+    REPO=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.repo' "$MATRIX")
+    SUBPATH=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.path' "$MATRIX")
+    PACKAGE=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .package' "$MATRIX")
+    FEATURES="{{ features }}"
+
+    # Only the blob is kept between runs: the checkout and its `target/` run to several
+    # GB, enough to evict every other cache in the repo.
+    read -r SHA WASM_REL SRC_REL _ < <(just external-runtime-paths "{{ name }}" "$FEATURES")
+    WASM_DIR="$ROOT_DIR/$WASM_REL"
+    WASM_PATH="$WASM_DIR/${PACKAGE//-/_}.compact.compressed.wasm"
+    SRC_DIR="$ROOT_DIR/$SRC_REL"
+
+    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $SHA ($SUBPATH) [features=${FEATURES:-default}]"
 
     if [ -f "$WASM_PATH" ]; then
         >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
