@@ -15,12 +15,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! One-shot split migration: moves `AutoRenewals` and `PermanentStorageUsed` from the legacy
-//! `TransactionStorage::*` storage prefix to `DataRenewal::*`.
-//!
-//! The legacy `PendingAutoRenewals` queue is not relocated: it is per-block scratch that the
-//! pre-split `on_finalize` asserted was drained every block, so no value can survive into the
-//! upgrade block. `pre_upgrade` asserts the key is absent.
+//! One-shot split migration: moves `AutoRenewals`, `PendingAutoRenewals`, and
+//! `PermanentStorageUsed` from the legacy `TransactionStorage::*` storage prefix to
+//! `DataRenewal::*`.
 //!
 //! `TransactionStorage::Authorizations` is deliberately *not* touched:
 //! `AuthorizationExtent::extra` occupies the slot the pre-split `bytes_permanent` field had,
@@ -62,8 +59,9 @@ fn old_prefix<T: Config>(item: &[u8]) -> [u8; 32] {
 	storage_prefix(<txs::Pallet<T> as PalletInfoAccess>::name().as_bytes(), item)
 }
 
-/// One-shot migration relocating `AutoRenewals` and the `PermanentStorageUsed` counter from
-/// the `TransactionStorage` pallet prefix to the `DataRenewal` pallet prefix.
+/// One-shot migration relocating `AutoRenewals`, `PendingAutoRenewals`, and the
+/// `PermanentStorageUsed` counter from the `TransactionStorage` pallet prefix to the
+/// `DataRenewal` pallet prefix.
 ///
 /// Idempotent by construction — every step is conditional on the *old* key still existing,
 /// which is false on any later run. Deliberately not gated on a storage version: this pallet
@@ -73,7 +71,7 @@ fn old_prefix<T: Config>(item: &[u8]) -> [u8; 32] {
 /// is always already satisfied and would skip the relocation entirely.
 ///
 /// Runs single-block: `AutoRenewals` is bounded by `MAX_SINGLE_BLOCK_ENTRIES`, enforced by
-/// `pre_upgrade`, and the counter is a single `StorageValue`.
+/// `pre_upgrade`, and the other two items are single `StorageValue`s.
 pub struct RelocateFromTransactionStorage<T: Config>(PhantomData<T>);
 
 impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
@@ -123,6 +121,19 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// Number of `StorageValue`s actually relocated below; each costs a set + a clear.
 		let mut values_moved: u64 = 0;
 
+		// `PendingAutoRenewals` (StorageValue, now [`crate::PendingRenewals`]): transient
+		// per-block scratch. The pre-split `on_finalize` asserts it is drained every block,
+		// so it is always absent here — the move is belt-and-braces, kept so the relocation
+		// is complete by construction rather than by relying on an invariant in the pallet
+		// being split apart.
+		let old_pending_key = old_prefix::<T>(b"PendingAutoRenewals");
+		let new_pending_key = crate::PendingRenewals::<T>::hashed_key();
+		if let Some(raw) = sp_io::storage::get(&old_pending_key) {
+			sp_io::storage::set(&new_pending_key, &raw);
+			sp_io::storage::clear(&old_pending_key);
+			values_moved = values_moved.saturating_add(1);
+		}
+
 		// `PermanentStorageUsed` (StorageValue<u64>): move verbatim if present.
 		let old_used_key = old_prefix::<T>(b"PermanentStorageUsed");
 		let new_used_key = crate::PermanentStorageUsed::<T>::hashed_key();
@@ -150,8 +161,8 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		);
 
 		// Reads: a `next_key` + `get` per visited `AutoRenewals` key, the terminal `next_key`,
-		// and the `PermanentStorageUsed` `get`.
-		let reads = visited.saturating_mul(2).saturating_add(2);
+		// and one `get` per relocated `StorageValue`.
+		let reads = visited.saturating_mul(2).saturating_add(3);
 		// Writes: a set + a clear per moved `AutoRenewals` entry and per relocated
 		// `StorageValue`.
 		let writes = moved.saturating_add(values_moved).saturating_mul(2);
@@ -167,14 +178,10 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		let already_relocated = count_keys(&crate::Renewals::<T>::final_prefix());
 		let permanent_used = sp_io::storage::get(&old_prefix::<T>(b"PermanentStorageUsed"))
 			.and_then(|raw| u64::decode(&mut &raw[..]).ok());
-
-		// Tripwire for the assumption that lets the transient queue be dropped rather than
-		// relocated. A leftover value means the drain invariant did not hold on chain and the
-		// migration has to move it after all — fail the dry-run, not the block.
-		ensure!(
-			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
-			"legacy PendingAutoRenewals is non-empty; it must be relocated",
-		);
+		// Raw bytes, not the decoded vec: the move must be byte-exact, and the value type
+		// is only nameable through this pallet's `Config`.
+		let pending =
+			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).map(|raw| raw.to_vec());
 
 		// Fail the dry-run rather than the block: the migration cannot be stepped, so an
 		// oversized collection has to be caught before the runtime ships.
@@ -183,7 +190,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			"AutoRenewals exceeds the single-block entry budget",
 		);
 
-		Ok(PreUpgradeState { renewals, already_relocated, permanent_used }.encode())
+		Ok(PreUpgradeState { renewals, already_relocated, permanent_used, pending }.encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -236,6 +243,19 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			"PermanentStorageUsed remains under the old prefix after relocation"
 		);
 
+		// `PendingAutoRenewals`: byte-exact at the key the pallet reads, old key gone.
+		// Compared as raw bytes so a value present only at the wrong prefix is caught even
+		// though `ValueQuery` would read it back as an empty vec either way.
+		ensure!(
+			sp_io::storage::get(&crate::PendingRenewals::<T>::hashed_key()).map(|raw| raw.to_vec()) ==
+				pre.pending,
+			"PendingRenewals not relocated byte-exactly"
+		);
+		ensure!(
+			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
+			"PendingAutoRenewals remains under the old prefix after relocation"
+		);
+
 		Ok(())
 	}
 }
@@ -250,6 +270,8 @@ struct PreUpgradeState {
 	/// missing.
 	already_relocated: u64,
 	permanent_used: Option<u64>,
+	/// Raw `PendingAutoRenewals` bytes, so the move can be checked byte-exactly.
+	pending: Option<alloc::vec::Vec<u8>>,
 }
 
 /// Number of keys under `prefix`.
