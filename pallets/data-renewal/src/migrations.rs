@@ -18,7 +18,7 @@
 //! One-shot split migration: moves `AutoRenewals` and `PermanentStorageUsed` from the legacy
 //! `TransactionStorage::*` storage prefix to `DataRenewal::*`.
 //!
-//! The legacy `PendingRenewals` queue is not relocated: it is per-block scratch that the
+//! The legacy `PendingAutoRenewals` queue is not relocated: it is per-block scratch that the
 //! pre-split `on_finalize` asserted was drained every block, so no value can survive into the
 //! upgrade block. `pre_upgrade` asserts the key is absent.
 //!
@@ -173,7 +173,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// migration has to move it after all — fail the dry-run, not the block.
 		ensure!(
 			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
-			"legacy PendingRenewals is non-empty; it must be relocated",
+			"legacy PendingAutoRenewals is non-empty; it must be relocated",
 		);
 
 		// Fail the dry-run rather than the block: the migration cannot be stepped, so an

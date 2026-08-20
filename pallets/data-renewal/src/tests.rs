@@ -196,14 +196,14 @@ fn relocation_migration_moves_permanent_storage_used() {
 	});
 }
 
-/// `pre_upgrade` rejects a leftover legacy `PendingRenewals` value: the migration drops
+/// `pre_upgrade` rejects a leftover legacy `PendingAutoRenewals` value: the migration drops
 /// the transient queue instead of relocating it, so a surviving value must fail the dry-run.
 #[cfg(feature = "try-runtime")]
 #[test]
 fn relocation_migration_pre_upgrade_rejects_leftover_pending_queue() {
 	new_test_ext().execute_with(|| {
 		// Any bytes at the old key trip the check; the value is never decoded.
-		sp_io::storage::set(&storage_prefix(b"TransactionStorage", b"PendingRenewals"), &[1u8]);
+		sp_io::storage::set(&storage_prefix(b"TransactionStorage", b"PendingAutoRenewals"), &[1u8]);
 
 		assert!(crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade().is_err());
 	});
