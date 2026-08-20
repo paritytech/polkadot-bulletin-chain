@@ -555,6 +555,7 @@ mod tests {
 			"TRANSACTION_FAILED",
 			"INVALID_CHUNK_SIZE",
 			"UNSUPPORTED_OPERATION",
+			"UNSUPPORTED_OPERATION",
 		];
 		assert_eq!(all_errors().len(), expected.len(), "expected[] out of sync with all_errors()");
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
