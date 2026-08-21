@@ -116,6 +116,21 @@ enum Commands {
 		#[arg(long, default_value = "1")]
 		instances: usize,
 	},
+	/// Continuous saturating feeder for dataset builds: reuse accounts with
+	/// sequential nonces and keep the tx pool full. Runs until killed.
+	Fill {
+		/// Payload size per store, bytes
+		#[arg(long, default_value = "524288")]
+		payload_bytes: usize,
+
+		/// Reusable accounts in the pool
+		#[arg(long, default_value = "64")]
+		accounts: u32,
+
+		/// Concurrent sign+submit workers
+		#[arg(long, default_value = "8")]
+		workers: u32,
+	},
 	/// Run Bitswap read benchmarks
 	Bitswap {
 		/// Which test: b2, bulk-read
@@ -367,6 +382,21 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			.await
 			{
 				tracing::error!("Throughput command failed: {e}");
+				command_error = Some(e);
+			},
+		Commands::Fill { payload_bytes, accounts, workers } =>
+			if let Err(e) = bulletin_stress_test::scenarios::fill::run_fill(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				ws_url_refs[0],
+				payload_bytes,
+				accounts,
+				workers,
+			)
+			.await
+			{
+				tracing::error!("Fill command failed: {e}");
 				command_error = Some(e);
 			},
 		Commands::Bitswap {
