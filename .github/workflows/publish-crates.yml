@@ -330,14 +330,15 @@ jobs:
       - name: Dry run - verify packaging
         if: ${{ inputs.dry_run }}
         run: |
-          cargo package --locked -p bulletin-pallets-common --allow-dirty
-          cargo package --locked -p bulletin-transaction-storage-primitives --allow-dirty
-          # --no-verify skips the isolated verification build. Without it, packaging fails
-          # because the verification build resolves bulletin-* deps from crates.io at the
-          # new (not-yet-published) version. The real publish path handles this via
-          # sequential publish + index wait.
-          cargo package --locked --no-verify -p pallet-bulletin-transaction-storage-runtime-api --allow-dirty
-          cargo package --locked --no-verify -p pallet-bulletin-transaction-storage --allow-dirty
-          cargo package --locked --no-verify -p pallet-bulletin-data-renewal --allow-dirty
-          cargo package --locked --no-verify -p pallet-bulletin-hop-promotion --allow-dirty
+          # All crates in one invocation: cargo then resolves the bulletin-* deps against
+          # the locally packaged copies instead of crates.io, where the new versions do not
+          # exist yet. Packaging them one at a time cannot work — rewriting a path dep to a
+          # registry dep happens while preparing the archive, so --no-verify does not help.
+          cargo package --locked --allow-dirty \
+            -p bulletin-pallets-common \
+            -p bulletin-transaction-storage-primitives \
+            -p pallet-bulletin-transaction-storage-runtime-api \
+            -p pallet-bulletin-transaction-storage \
+            -p pallet-bulletin-data-renewal \
+            -p pallet-bulletin-hop-promotion
           echo "Dry run complete - all crates packaged successfully"
