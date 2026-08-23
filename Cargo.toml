@@ -84,13 +84,13 @@ pallet-timestamp = { version = "48.0.0", default-features = false }
 pallet-transaction-payment = { version = "49.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "49.0.0", default-features = false }
 
-pallet-xcm = { version = "29.0.0", default-features = false }
-xcm = { version = "24.0.0", package = "staging-xcm", default-features = false }
-xcm-builder = { version = "29.0.0", package = "staging-xcm-builder", default-features = false }
-xcm-executor = { version = "28.0.0", package = "staging-xcm-executor", default-features = false }
+pallet-xcm = { version = "29.1.0", default-features = false }
+xcm = { version = "24.1.0", package = "staging-xcm", default-features = false }
+xcm-builder = { version = "29.0.1", package = "staging-xcm-builder", default-features = false }
+xcm-executor = { version = "28.0.1", package = "staging-xcm-executor", default-features = false }
 
 # Parachains common primitives (needed by runtimes)
-parachains-common = { version = "32.0.0", default-features = false }
+parachains-common = { version = "32.1.0", default-features = false }
 
 # XCM emulator framework for integration tests
 asset-hub-westend-runtime = { version = "0.49.0", default-features = true }
