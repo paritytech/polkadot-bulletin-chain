@@ -95,6 +95,28 @@ impl PayloadSizeMix {
 		Ok(Self { sizes, weights, total })
 	}
 
+	/// Parse a `"bytes:weight,bytes:weight"` spec, e.g. `"8192:60,524288:35"`.
+	pub fn from_spec(spec: &str) -> anyhow::Result<Self> {
+		let pairs = spec
+			.split(',')
+			.map(|entry| {
+				let (size, weight) = entry.split_once(':').ok_or_else(|| {
+					anyhow::anyhow!("payload mix entry {entry:?}: expected bytes:weight")
+				})?;
+				Ok((
+					size.trim()
+						.parse::<usize>()
+						.map_err(|e| anyhow::anyhow!("payload mix size {size:?}: {e}"))?,
+					weight
+						.trim()
+						.parse::<u32>()
+						.map_err(|e| anyhow::anyhow!("payload mix weight {weight:?}: {e}"))?,
+				))
+			})
+			.collect::<anyhow::Result<Vec<_>>>()?;
+		Self::from_weighted_sizes(&pairs)
+	}
+
 	#[must_use]
 	pub fn max_payload_bytes(&self) -> usize {
 		*self.sizes.iter().max().unwrap_or(&0)
