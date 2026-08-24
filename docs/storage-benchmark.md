@@ -54,8 +54,23 @@ aggregate dilutes the loaded hours. Record when each peer catches up
    (`bulletin-stress-test bitswap bulk-read --rate 0`) so read pressure does not disappear
    with the peers.
 
+## Bare box metrics
+
+The box has no ops stack, and the node's raw `/metrics` endpoint cannot answer quantile
+queries, so run a local Prometheus with `scripts/storage-bench/prometheus-box.yml` (author on
+9615, peers 9616+, node_exporter on 9100) and point `collect-metrics.sh` at it:
+
+    PROM=http://127.0.0.1:9090 SEL='job="author"' MOUNT=/mnt/<arm> \
+      scripts/storage-bench/collect-metrics.sh <arm>
+
+`SEL` must single out the author or the peers' import histograms (their DBs sit on the fast
+disk) blend into the percentiles. `MOUNT` switches the disk-free row from kubelet to
+node_exporter. `bulletin_permanent_storage_used_ratio` has no exporter outside the ops stack
+and reads NA on the box.
+
 ## Scripts
 
 `scripts/storage-bench/`: `fio-block-critical.fio` (pre-screen), `throttle.sh` (emulate a tier
 via cgroup v2 io.max), `collect-metrics.sh` (Prometheus snapshot, window-sliceable via
-`AT`/`WINDOW`), `wait-peers.sh` (peer catch-up watcher, emits the window boundaries).
+`AT`/`WINDOW`, bare-box capable via `SEL`/`MOUNT`), `wait-peers.sh` (peer catch-up watcher,
+emits the window boundaries), `prometheus-box.yml` (local Prometheus for the box).
