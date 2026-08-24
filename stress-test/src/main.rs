@@ -145,6 +145,16 @@ enum Commands {
 		/// CIDs per wantlist request (bulk-read only, 1=single, max 16, default: 1)
 		#[arg(long, default_value = "1")]
 		batch_size: usize,
+
+		/// Aggregate fetch rate in CIDs/s across all workers (bulk-read only,
+		/// 0 = unlimited, i.e. saturation; default: 0)
+		#[arg(long, default_value = "0")]
+		rate: f64,
+
+		/// Stop after this many seconds (bulk-read only, 0 = run until
+		/// read_size is downloaded; default: 0)
+		#[arg(long, default_value = "0")]
+		duration_secs: u64,
 	},
 	/// Renew stress test — upload data then spam renew calls
 	Renew {
@@ -377,6 +387,8 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			min_size,
 			max_size,
 			batch_size,
+			rate,
+			duration_secs,
 		} => {
 			if let Err(e) = run_bitswap(
 				&client,
@@ -390,6 +402,8 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				min_size,
 				max_size,
 				batch_size,
+				rate,
+				duration_secs,
 				control_url,
 				&mut all_results,
 				&flush,
@@ -480,6 +494,8 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 					0,
 					16 * 1024 * 1024,
 					1,
+					0.0,
+					0,
 					control_url,
 					&mut all_results,
 					&flush,
@@ -619,6 +635,8 @@ async fn run_bitswap(
 	min_size: u32,
 	max_size: u32,
 	batch_size: usize,
+	rate: f64,
+	duration_secs: u64,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
@@ -657,6 +675,8 @@ async fn run_bitswap(
 				min_size,
 				max_size,
 				batch_size.clamp(1, 16),
+				rate,
+				duration_secs,
 				control_url,
 			)
 			.await?;

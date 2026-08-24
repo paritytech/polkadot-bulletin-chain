@@ -234,7 +234,9 @@ async fn discover_cids(
 const VARIANT: &str = "bitswap-bulk-read";
 
 /// Run bulk Bitswap read: discover CIDs from chain, then download with
-/// specified concurrency.
+/// specified concurrency. `rate` > 0 caps the aggregate fetch rate (CIDs/s
+/// across all workers); 0 downloads at full speed. `duration_secs` > 0 stops
+/// the run on a clock instead of only on `target_bytes`.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_bulk_read(
 	client: &OnlineClient<BulletinConfig>,
@@ -244,6 +246,8 @@ pub async fn run_bulk_read(
 	min_size: u32,
 	max_size: u32,
 	batch_size: usize,
+	rate: f64,
+	duration_secs: u64,
 	_ws_url: &str,
 ) -> Result<ScenarioResult> {
 	let items = discover_cids(client, target_bytes, min_size, max_size).await?;
@@ -252,13 +256,15 @@ pub async fn run_bulk_read(
 
 	tracing::info!(
 		"Bulk read: {} items on chain ({} MB), target download: {} MB, \
-		 concurrency={}, batch_size={}, peers={}",
+		 concurrency={}, batch_size={}, peers={}, rate={}, duration_secs={}",
 		available_items,
 		available_bytes / (1024 * 1024),
 		target_bytes / (1024 * 1024),
 		concurrency,
 		batch_size,
 		multiaddrs.len(),
+		rate,
+		duration_secs,
 	);
 
 	// Create workers distributed across peers.
@@ -287,7 +293,9 @@ pub async fn run_bulk_read(
 	let bytes_downloaded = Arc::new(AtomicU64::new(0));
 	let reads_ok = Arc::new(AtomicU64::new(0));
 	let reads_failed = Arc::new(AtomicU64::new(0));
+	let wrapped = Arc::new(AtomicBool::new(false));
 	let target = target_bytes;
+	let duration = (duration_secs > 0).then(|| Duration::from_secs(duration_secs));
 
 	let wall_start = Instant::now();
 
@@ -331,6 +339,7 @@ pub async fn run_bulk_read(
 		let bytes_downloaded = Arc::clone(&bytes_downloaded);
 		let reads_ok = Arc::clone(&reads_ok);
 		let reads_failed = Arc::clone(&reads_failed);
+		let wrapped = Arc::clone(&wrapped);
 		let log_tx = log_tx.clone();
 
 		handles.push(tokio::spawn(async move {
@@ -341,19 +350,25 @@ pub async fn run_bulk_read(
 				if abort.load(Ordering::Relaxed) {
 					break;
 				}
+				if let Some(duration) = duration {
+					if wall_start.elapsed() >= duration {
+						break;
+					}
+				}
 				// Stop once global target is reached.
 				if bytes_downloaded.load(Ordering::Relaxed) >= target {
 					break;
 				}
 
-				// Check how much is left to download.
-				let downloaded_so_far = bytes_downloaded.load(Ordering::Relaxed);
-				if downloaded_so_far >= target {
-					break;
-				}
-
 				// Grab a batch of items round-robin.
 				let start_raw = next_idx.fetch_add(batch_size as u64, Ordering::Relaxed) as usize;
+				if start_raw + batch_size > work.len() && !wrapped.swap(true, Ordering::Relaxed) {
+					tracing::warn!(
+						"CID list exhausted ({} items), wrapping around: repeat reads \
+						 may be served from cache, not disk",
+						work.len(),
+					);
+				}
 				let batch_items: Vec<_> = (0..batch_size)
 					.map(|i| {
 						let idx = (start_raw + i) % work.len();
@@ -361,6 +376,17 @@ pub async fn run_bulk_read(
 					})
 					.collect();
 				let cids: Vec<cid::Cid> = batch_items.iter().map(|(_, item)| item.cid).collect();
+
+				// Aggregate pacing: batch n may start only after n/rate seconds,
+				// so all workers together hold `rate` CIDs/s regardless of
+				// concurrency or fetch latency.
+				if rate > 0.0 {
+					let due = Duration::from_secs_f64(start_raw as f64 / rate);
+					let elapsed = wall_start.elapsed();
+					if due > elapsed {
+						tokio::time::sleep(due - elapsed).await;
+					}
+				}
 
 				let start = Instant::now();
 				match client.fetch_blocks(peer_id, &cids, Duration::from_secs(30)).await {
