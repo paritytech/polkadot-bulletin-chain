@@ -39,7 +39,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "integration_tests": true,
-    "data_renewal": false,
+    "data_renewal": true,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
