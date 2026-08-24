@@ -1,0 +1,23 @@
+# Minimal Prometheus config for the bare benchmark box, so collect-metrics.sh
+# works without the ops stack:
+#   prometheus --config.file=scripts/storage-bench/prometheus-box.yml \
+#     --storage.tsdb.path=./prom-data
+#
+# Ports: author started with --prometheus-port 9615, peers with 9616+;
+# node_exporter (only needed for the disk-free row, MOUNT=/mnt/<arm>) on its
+# default 9100. The job label is the selector collect-metrics.sh filters on:
+# SEL='job="author"' keeps the peers' series (DBs on the fast disk) out of the
+# author's percentiles.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: author
+    static_configs:
+      - targets: ["127.0.0.1:9615"]
+  - job_name: peers
+    static_configs:
+      - targets: ["127.0.0.1:9616", "127.0.0.1:9617", "127.0.0.1:9618"]
+  - job_name: node
+    static_configs:
+      - targets: ["127.0.0.1:9100"]
