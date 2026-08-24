@@ -37,6 +37,7 @@ pub struct AccountAuthorization<BlockNumber> {
 
 sp_api::decl_runtime_apis! {
 	/// Runtime API for the Bulletin Chain transaction-storage pallet.
+	#[api_version(1)]
 	pub trait BulletinTransactionStorageApi<AccountId, BlockNumber>
 	where
 		AccountId: Codec,
