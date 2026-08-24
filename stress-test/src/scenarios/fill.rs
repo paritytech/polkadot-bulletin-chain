@@ -3,13 +3,15 @@
 
 //! Saturating feeder: a fixed pool of reused accounts with sequential nonces
 //! keeps the tx pool full so every sealed block goes out full. Runs until
-//! killed. Built for dataset generation (manual-seal dev node), where the
-//! one-shot-account pipeline leaves blocks mostly empty between batches.
+//! killed or until the chain reaches `until_height`, so a build script can lay
+//! down height-keyed bands of different payload profiles. Built for dataset
+//! generation (manual-seal dev node), where the one-shot-account pipeline
+//! leaves blocks mostly empty between batches.
 
 use anyhow::Result;
 use std::{
 	sync::{
-		atomic::{AtomicU64, Ordering},
+		atomic::{AtomicBool, AtomicU64, Ordering},
 		Arc,
 	},
 	time::{Duration, Instant},
@@ -24,6 +26,7 @@ use crate::{
 	accounts::{keypair_at_derivation_prefix, NonceTracker},
 	authorize::authorize_accounts,
 	client::{fetch_txpool_pending_total, BulletinConfig, BulletinExtrinsicParamsBuilder},
+	pipeline::StorePayloadMode,
 	store::{generate_payload, store_submit_pre_signed},
 };
 
@@ -55,13 +58,17 @@ const POOL_HIGH_WATER: usize = 600;
 /// How often each worker re-checks the pool depth, in submissions.
 const POOL_CHECK_EVERY: u64 = 8;
 
-/// Run the saturating feeder until the process is killed.
+/// Run the saturating feeder until the process is killed, or until the chain
+/// reaches `until_height` (0 = never). Per-store payload sizes come from
+/// `payload_mode` (fixed, or sampled from a weighted mix).
+#[allow(clippy::too_many_arguments)]
 pub async fn run_fill(
 	client: &OnlineClient<BulletinConfig>,
 	authorizer: &Keypair,
 	authorizer_nonces: &NonceTracker,
 	ws_url: &str,
-	payload_bytes: usize,
+	payload_mode: StorePayloadMode,
+	until_height: u64,
 	num_accounts: u32,
 	workers: u32,
 ) -> Result<()> {
@@ -90,6 +97,8 @@ pub async fn run_fill(
 	}
 
 	let submitted = Arc::new(AtomicU64::new(0));
+	let submitted_bytes = Arc::new(AtomicU64::new(0));
+	let stop = Arc::new(AtomicBool::new(false));
 	let start = Instant::now();
 
 	let mut tasks = Vec::new();
@@ -102,6 +111,9 @@ pub async fn run_fill(
 		let nonces = store_nonces.clone();
 		let ws_url = ws_url.to_string();
 		let submitted = submitted.clone();
+		let submitted_bytes = submitted_bytes.clone();
+		let stop = stop.clone();
+		let payload_mode = payload_mode.clone();
 
 		tasks.push(tokio::spawn(async move {
 			let rpc = jsonrpsee::ws_client::WsClientBuilder::default()
@@ -110,11 +122,15 @@ pub async fn run_fill(
 				.await?;
 			let mut i = 0usize;
 			let mut since_check = 0u64;
-			loop {
+			while !stop.load(Ordering::Relaxed) {
 				let kp = my_keypairs[i % my_keypairs.len()].clone();
 				let id = my_ids[i % my_ids.len()].clone();
 				i += 1;
 
+				let payload_bytes = match &payload_mode {
+					StorePayloadMode::Fixed(n) => *n,
+					StorePayloadMode::Mixed(mix) => mix.sample(&mut rand::thread_rng()),
+				};
 				let nonce = nonces.next_nonce(&id);
 				let c = client.clone();
 				let encoded = tokio::task::spawn_blocking(move || {
@@ -131,40 +147,66 @@ pub async fn run_fill(
 					continue;
 				}
 				submitted.fetch_add(1, Ordering::Relaxed);
+				submitted_bytes.fetch_add(payload_bytes as u64, Ordering::Relaxed);
 
 				since_check += 1;
 				if since_check >= POOL_CHECK_EVERY {
 					since_check = 0;
 					// Err means the depth is unknown: back off rather than flood.
-					while fetch_txpool_pending_total(&ws_url).await.unwrap_or(usize::MAX) >
-						POOL_HIGH_WATER
+					// The stop check matters here: after the target height the
+					// node may stop sealing and the pool never drains.
+					while !stop.load(Ordering::Relaxed) &&
+						fetch_txpool_pending_total(&ws_url).await.unwrap_or(usize::MAX) >
+							POOL_HIGH_WATER
 					{
 						tokio::time::sleep(Duration::from_millis(200)).await;
 					}
 				}
 			}
-			#[allow(unreachable_code)]
 			Ok::<_, anyhow::Error>(())
 		}));
 	}
 
-	// Progress line once a minute; the runner script tracks height and DB size.
-	// Nonce re-sync from chain heals ladders broken by silent pool drops
-	// (a dropped tx strands every higher nonce of that account as future).
+	// Height check every tick (band boundaries are height-keyed, so the
+	// overshoot is one tick of sealing); progress line and nonce re-sync once
+	// a minute. The re-sync heals ladders broken by silent pool drops (a
+	// dropped tx strands every higher nonce of that account as future).
+	let mut ticks = 0u64;
 	loop {
-		tokio::time::sleep(Duration::from_secs(60)).await;
-		for id in &account_ids {
-			if let Err(e) = store_nonces.refresh(client, id).await {
-				tracing::warn!("fill: nonce refresh failed for {id}: {e}");
+		tokio::time::sleep(Duration::from_secs(5)).await;
+		ticks += 1;
+
+		if until_height > 0 {
+			match client.blocks().at_latest().await {
+				Ok(block) => {
+					let height: u64 = block.number().into();
+					if height >= until_height {
+						tracing::info!("fill: reached height {height} >= {until_height}, stopping");
+						stop.store(true, Ordering::Relaxed);
+						for task in tasks {
+							let _ = task.await;
+						}
+						return Ok(());
+					}
+				},
+				Err(e) => tracing::warn!("fill: height check failed: {e}"),
 			}
 		}
-		let n = submitted.load(Ordering::Relaxed);
-		let mib = n as f64 * payload_bytes as f64 / 1024.0 / 1024.0;
-		let secs = start.elapsed().as_secs_f64();
-		tracing::info!(
-			"fill: {n} stores submitted, ~{mib:.0} MiB payload, avg {:.1} MiB/s",
-			mib / secs
-		);
+
+		if ticks.is_multiple_of(12) {
+			for id in &account_ids {
+				if let Err(e) = store_nonces.refresh(client, id).await {
+					tracing::warn!("fill: nonce refresh failed for {id}: {e}");
+				}
+			}
+			let n = submitted.load(Ordering::Relaxed);
+			let mib = submitted_bytes.load(Ordering::Relaxed) as f64 / 1024.0 / 1024.0;
+			let secs = start.elapsed().as_secs_f64();
+			tracing::info!(
+				"fill: {n} stores submitted, ~{mib:.0} MiB payload, avg {:.1} MiB/s",
+				mib / secs
+			);
+		}
 		if tasks.iter().all(|t| t.is_finished()) {
 			anyhow::bail!("fill: all workers exited");
 		}

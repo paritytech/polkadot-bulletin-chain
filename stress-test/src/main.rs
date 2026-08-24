@@ -17,7 +17,7 @@ use bulletin_stress_test::{
 	chain_info::{ChainLimits, EnvironmentInfo},
 	client,
 	metrics::{self, metrics, RunOutcome},
-	report, scenarios,
+	pipeline, report, scenarios,
 };
 
 #[derive(Parser)]
@@ -117,11 +117,22 @@ enum Commands {
 		instances: usize,
 	},
 	/// Continuous saturating feeder for dataset builds: reuse accounts with
-	/// sequential nonces and keep the tx pool full. Runs until killed.
+	/// sequential nonces and keep the tx pool full. Runs until killed, or
+	/// until the chain reaches --until-height.
 	Fill {
 		/// Payload size per store, bytes
 		#[arg(long, default_value = "524288")]
 		payload_bytes: usize,
+
+		/// Weighted payload mix "bytes:weight,..." (e.g.
+		/// "8192:60,524288:35,1900000:5"); overrides --payload-bytes
+		#[arg(long)]
+		payload_mix: Option<String>,
+
+		/// Stop once the chain reaches this height (0 = run until killed).
+		/// Lets a build script lay down height-keyed profile bands.
+		#[arg(long, default_value = "0")]
+		until_height: u64,
 
 		/// Reusable accounts in the pool
 		#[arg(long, default_value = "64")]
@@ -384,13 +395,19 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				tracing::error!("Throughput command failed: {e}");
 				command_error = Some(e);
 			},
-		Commands::Fill { payload_bytes, accounts, workers } =>
+		Commands::Fill { payload_bytes, ref payload_mix, until_height, accounts, workers } => {
+			let payload_mode = match payload_mix {
+				Some(spec) =>
+					pipeline::StorePayloadMode::Mixed(pipeline::PayloadSizeMix::from_spec(spec)?),
+				None => pipeline::StorePayloadMode::Fixed(payload_bytes),
+			};
 			if let Err(e) = bulletin_stress_test::scenarios::fill::run_fill(
 				&client,
 				&authorizer_signer,
 				&nonce_tracker,
 				ws_url_refs[0],
-				payload_bytes,
+				payload_mode,
+				until_height,
 				accounts,
 				workers,
 			)
@@ -398,7 +415,8 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			{
 				tracing::error!("Fill command failed: {e}");
 				command_error = Some(e);
-			},
+			}
+		},
 		Commands::Bitswap {
 			ref test,
 			payload_size,
