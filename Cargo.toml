@@ -18,10 +18,14 @@ cumulus-pallet-xcmp-queue = { version = "0.29.0", default-features = false }
 cumulus-primitives-aura = { version = "0.23.0", default-features = false }
 cumulus-primitives-core = { version = "0.25.0", default-features = false }
 cumulus-primitives-utility = { version = "0.29.0", default-features = false }
+fdlimit = { version = "0.3" }
 futures = { version = "0.3.21" }
 hex = { version = "0.4" }
 impl-trait-for-tuples = "0.2.3"
 jsonrpsee = { version = "0.24.3" }
+kvdb = { version = "0.13" }
+kvdb-memorydb = { version = "0.13" }
+kvdb-rocksdb = { version = "0.21" }
 litep2p = { version = "0.13" }
 parachain-info = { version = "0.27.0", package = "staging-parachain-info", default-features = false }
 polkadot-parachain-primitives = { version = "22.0.0", default-features = false }
@@ -44,6 +48,7 @@ pallet-bulletin-data-renewal = { version = "0.1.0", path = "pallets/data-renewal
 pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
 pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "pallets/transaction-storage/runtime-api", default-features = false }
+tx-index-tool = { version = "0.1.0", path = "utils/tx-index-tool" }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "48.0.0", default-features = false }
@@ -61,6 +66,7 @@ sp-block-builder = { version = "42.0.0", default-features = false }
 sp-consensus-babe = { version = "0.48.0", default-features = false }
 sp-consensus-beefy = { version = "30.0.0", default-features = false }
 sp-core = { version = "41.0.0", default-features = false }
+sp-crypto-hashing = { version = "0.1.0", default-features = false }
 sp-genesis-builder = { version = "0.23.0", default-features = false }
 sp-hop = { version = "0.2.0", default-features = false }
 sp-inherents = { version = "42.0.0", default-features = false }
@@ -73,6 +79,7 @@ sp-session = { version = "44.0.0", default-features = false }
 sp-storage = { version = "23.0.0", default-features = false }
 sp-transaction-pool = { version = "42.0.0", default-features = false }
 sp-transaction-storage-proof = { version = "42.0.1", default-features = false }
+sp-trie = { version = "44.0.0", default-features = false }
 sp-version = { version = "45.0.0", default-features = false }
 
 pallet-authorship = { version = "47.0.0", default-features = false }
@@ -134,6 +141,7 @@ members = [
 	"runtimes/bulletin-westend/integration-tests",
 	"sdk/rust",
 	"stress-test",
+	"utils/tx-index-tool",
 	"zombienet-sdk-tests",
 ]
 # Exclude rust/authorize-and-store example - it uses subxt directly with metadata codegen
