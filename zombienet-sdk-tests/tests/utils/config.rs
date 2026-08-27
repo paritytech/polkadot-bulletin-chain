@@ -30,6 +30,12 @@ pub const HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC: &str =
 	"substrate_hop_pool_removed_total{reason=\"expired_unpromoted\"}";
 pub const HOP_SUBMIT_NOT_AUTHORIZED_METRIC: &str =
 	"substrate_hop_rpc_errors_total{method=\"hop_submit\",reason=\"not_authorized\"}";
+// `claim`/`ack` map `NotRecipient` to `NotFound` so callers cannot probe whether a hash
+// exists, so `not_found` is the reason for both an unknown hash and a wrong signer.
+pub const HOP_CLAIM_NOT_FOUND_METRIC: &str =
+	"substrate_hop_rpc_errors_total{method=\"hop_claim\",reason=\"not_found\"}";
+pub const HOP_ACK_NOT_FOUND_METRIC: &str =
+	"substrate_hop_rpc_errors_total{method=\"hop_ack\",reason=\"not_found\"}";
 
 // Environment variables
 pub const RELAY_BINARY_PATH_ENV: &str = "POLKADOT_RELAY_BINARY_PATH";

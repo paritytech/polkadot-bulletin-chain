@@ -11,7 +11,7 @@
 //! * **B** — `hop_submit` -> promotion -> on-chain `Stored` -> `ProofChecked` + bitswap. A
 //!   pre-promotion bitswap probe asserts the blob is *not* yet served, guarding against a stale
 //!   col11 entry leaking through.
-//! * **C** — `hop_submit` before the account is authorized; the RPC is rejected.
+//! * **C** — `hop_submit` from an account with no authorization; the RPC is rejected.
 //!
 //! Metrics are per-node. Every read targets `collator-1`, the node that received the
 //! submits and whose maintenance task performs the promotions.
@@ -28,12 +28,14 @@ use crate::{
 		finalized_block_hash_at, generate_test_data, get_alice_nonce, hash_to_cid, hop_ack,
 		hop_api, hop_claim, hop_metric, hop_pool_status, hop_submit, initialize_network, now_ms,
 		override_alice_authorization, set_retention_period_finalized, verify_bitswap_fetch,
-		verify_parachain_binaries, wait_for_session_change_on_node, wait_hop_metric,
-		AuthorizationOverride, HopCounters, HOP_POOL_BYTES_METRIC, HOP_POOL_ENTRIES_METRIC,
-		HOP_POOL_MAX_BYTES_METRIC, HOP_PROMOTIONS_CONFIRMED_METRIC, HOP_PROMOTION_BACKLOG_METRIC,
-		HOP_REMOVED_ACKED_METRIC, HOP_REMOVED_EXPIRED_PROMOTED_METRIC,
-		HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC, HOP_SUBMIT_NOT_AUTHORIZED_METRIC,
-		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		verify_parachain_binaries, wait_for_finalized_quiescence, wait_for_session_change_on_node,
+		wait_hop_metric, AuthorizationOverride, HopCounters, FINALIZED_TRANSACTION_TIMEOUT_SECS,
+		HOP_ACK_NOT_FOUND_METRIC, HOP_CLAIM_NOT_FOUND_METRIC, HOP_POOL_BYTES_METRIC,
+		HOP_POOL_ENTRIES_METRIC, HOP_POOL_MAX_BYTES_METRIC, HOP_PROMOTIONS_CONFIRMED_METRIC,
+		HOP_PROMOTION_BACKLOG_METRIC, HOP_REMOVED_ACKED_METRIC,
+		HOP_REMOVED_EXPIRED_PROMOTED_METRIC, HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC,
+		HOP_SUBMIT_NOT_AUTHORIZED_METRIC, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -89,8 +91,8 @@ fn get_para_node_args() -> Vec<String> {
 	hop_node_args(HOP_RETENTION_SECS, HOP_PROMOTION_BUFFER_SECS)
 }
 
-/// Network plus everything both tests drive it through. Alice is *not* authorized yet —
-/// blob C depends on submitting before authorization.
+/// Network plus everything both tests drive it through. Alice is authorized at genesis;
+/// blob C uses a different account to get an unauthorized submit.
 struct HopEnv {
 	network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
 	collator1: zombienet_sdk::NetworkNode,
@@ -148,6 +150,11 @@ impl HopEnv {
 	/// Submit `data` naming Alice as the sole recipient.
 	async fn submit(&self, data: &[u8]) -> Result<u64> {
 		hop_submit(&self.rpc, &self.alice, data, &[self.alice_id], now_ms()).await
+	}
+
+	/// Submit `data` signed by, and addressed to, `signer`.
+	async fn submit_as(&self, signer: &Keypair, data: &[u8]) -> Result<u64> {
+		hop_submit(&self.rpc, signer, data, &[signer.public_key().0], now_ms()).await
 	}
 }
 
@@ -213,11 +220,14 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	let nonce = env.take_nonce();
 	set_retention_period_finalized(&env.client, RETENTION_PERIOD, nonce).await?;
 
-	// ── Blob C: submit before authorization ──
-	// `sc-hop` consults `can_account_promote` before touching the pool, so a rejected
-	// submit never becomes an entry — it shows up only in `_rpc_errors_total`.
+	// ── Blob C: submit from an unauthorized account ──
+	// Bob is in neither `accountAuthorizations` nor `allowedAuthorizers` at genesis
+	// (Alice is authorized, Eve is the authorizer), so he cannot promote. `sc-hop`
+	// consults `can_account_promote` before touching the pool, so the rejected submit
+	// never becomes an entry — it shows up only in `_rpc_errors_total`.
 	test_log!(TEST, "--- Blob C: unauthorized submit ---");
 	let (data_c, _) = blob("C");
+	let bob = dev::bob();
 
 	let max_size = hop_api::max_promotion_size(&env.client).await?;
 	assert!(
@@ -227,11 +237,12 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 		TEST_DATA_SIZE,
 	);
 	assert!(
-		!hop_api::can_account_promote(&env.client, &env.alice_id, TEST_DATA_SIZE as u32).await?,
-		"can_account_promote is true before `authorize_account`",
+		!hop_api::can_account_promote(&env.client, &bob.public_key().0, TEST_DATA_SIZE as u32)
+			.await?,
+		"can_account_promote is true for an unauthorized account",
 	);
 
-	let submit_c = env.submit(&data_c).await;
+	let submit_c = env.submit_as(&bob, &data_c).await;
 	assert!(submit_c.is_err(), "unauthorized hop_submit succeeded: {:?}", submit_c);
 	tracing::info!("unauthorized hop_submit rejected: {}", submit_c.unwrap_err());
 
@@ -243,14 +254,36 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 		"unauthorized submit was not counted",
 	)
 	.await?;
-	test_log!(TEST, "✓ Blob C rejected and counted in _rpc_errors_total");
 
+	// Claim/ack a hash that was never submitted, to reach the `hop_claim` / `hop_ack`
+	// method labels. Both map any recipient mismatch onto `NotFound`, so an unknown hash
+	// and a wrong signer are indistinguishable by design.
+	const ABSENT_HASH: [u8; 32] = [0xCD; 32];
+	let claim_absent = hop_claim(&env.rpc, &env.alice, &ABSENT_HASH).await;
+	assert!(claim_absent.is_err(), "hop_claim succeeded for an absent hash");
+	let ack_absent = hop_ack(&env.rpc, &env.alice, &ABSENT_HASH).await;
+	assert!(ack_absent.is_err(), "hop_ack succeeded for an absent hash");
+
+	for (metric, method) in
+		[(HOP_CLAIM_NOT_FOUND_METRIC, "hop_claim"), (HOP_ACK_NOT_FOUND_METRIC, "hop_ack")]
+	{
+		wait_hop_metric(
+			&collator1,
+			metric,
+			|errors| errors >= 1,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{method} on an absent hash was not counted"),
+		)
+		.await?;
+	}
+	test_log!(TEST, "✓ Blob C, claim and ack failures counted in _rpc_errors_total");
+
+	// Alice is authorized at genesis; this refreshes the entry to a known extent.
 	env.authorize_alice().await?;
 	assert!(
 		hop_api::can_account_promote(&env.client, &env.alice_id, TEST_DATA_SIZE as u32).await?,
-		"can_account_promote is false after `authorize_account`",
+		"can_account_promote is false for the authorized account",
 	);
-	test_log!(TEST, "✓ can_account_promote flips false -> true across authorization");
 
 	let baseline = HopCounters::read(&collator1).await?;
 	let max_bytes = hop_metric(&collator1, HOP_POOL_MAX_BYTES_METRIC).await?;
@@ -481,6 +514,21 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 	tracing::info!("hop_submit D OK; pool entry_count={}", entry_count);
 	assert!(entry_count >= 1, "pool reported {} entries right after submit", entry_count);
 
+	// The only place the pool gauges can be observed non-zero: promotion attempts do not
+	// start until `retention - buffer` seconds after submit, so the entry sits here. The
+	// promotion test's 10s retention is too short to read them before they drain.
+	assert!(
+		hop_metric(&collator1, HOP_POOL_ENTRIES_METRIC).await? >= 1,
+		"substrate_hop_pool_entries is 0 while an entry is pooled",
+	);
+	let pooled_bytes = hop_metric(&collator1, HOP_POOL_BYTES_METRIC).await?;
+	assert!(
+		pooled_bytes >= data_d.len() as u64,
+		"substrate_hop_pool_bytes is {} for a pooled {}-byte blob",
+		pooled_bytes,
+		data_d.len(),
+	);
+
 	// Expire the authorization out from under the pooled entry. `authorize_account` can
 	// neither shrink an entry nor set a custom expiration, hence the storage override.
 	// This is finalized well before the promotion window opens at
@@ -499,6 +547,9 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 		nonce,
 	)
 	.await?;
+	// The override is only best-block included, but runtime API calls read the latest
+	// *finalized* block, so the expiry is invisible until finality catches up.
+	wait_for_finalized_quiescence(&collator1, FINALIZED_TRANSACTION_TIMEOUT_SECS).await?;
 	assert!(
 		!hop_api::can_account_promote(&env.client, &env.alice_id, TEST_DATA_SIZE as u32).await?,
 		"can_account_promote is still true after expiring the authorization",
