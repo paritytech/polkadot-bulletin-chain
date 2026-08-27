@@ -39,7 +39,7 @@
     "name": "bulletin-polkadot",
     "package": "bulletin-polkadot-runtime",
     "integration_tests": true,
-    "data_renewal": false,
+    "data_renewal": true,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
@@ -47,8 +47,8 @@
       ]
     },
     "external_runtime": {
-      "repo": "https://github.com/bkontur/runtimes.git",
-      "ref": "e93abddfb111e6948c2fe155fbd772af90556f09",
+      "repo": "https://github.com/polkadot-fellows/runtimes.git",
+      "ref": "b3f18b26b80a2255dab06f78f70416358df64d61",
       "path": "./system-parachains/bulletin/bulletin-polkadot"
     }
   },
