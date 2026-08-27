@@ -52,11 +52,13 @@
 //!    - Submits new store extrinsic through RPC node (gossipped to collator for inclusion)
 //!    - Verifies both collator and RPC node serve the newly produced data via bitswap
 //!
-//! 9. `parachain_ldb_storage_verification_test` - Database-level verification using rocksdb_ldb
-//!    tool
+//! 9. `parachain_storage_verification_test` - Database-level verification, reading the node's
+//!    columns directly through `tx-index-tool`
 //!    - Verifies col11 state before/after store operations
+//!    - Verifies each stored value hashes to the key it is filed under
 //!    - Verifies reference counting works correctly (refcount=1 after first store, refcount=2 after
-//!      duplicate)
+//!      duplicate, single value row either way)
+//!    - Verifies the `BODY_INDEX` seam, so stored blocks stay executable
 //!    - Verifies data expiration after retention period (col11 becomes empty)
 //!
 //! ## Key Behavior Notes
@@ -109,20 +111,21 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_and_store_data, authorize_and_store_data_finalized, authorize_and_store_items,
-		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
-		get_para_id, get_parachain_binary_path, get_parachain_chain_id, initialize_network,
-		log_line_at_least_once, set_retention_period, set_retention_period_finalized,
-		verify_all_items_bitswap, verify_col11, verify_ldb_tool, verify_node_bitswap,
-		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
-		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
-		wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
+		assert_block_shape, assert_col11_empty, assert_items_stored, assert_seams_clean,
+		assert_single_entry, assert_storage_healthy, authorize_and_store_data,
+		authorize_and_store_data_finalized, authorize_and_store_items,
+		build_parachain_network_config_three_relay_validators, content_hash, content_hash_and_cid,
+		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_para_id,
+		get_parachain_binary_path, initialize_network, log_line_at_least_once, node_db_path,
+		set_retention_period, set_retention_period_finalized, verify_all_items_bitswap,
+		verify_node_bitswap, verify_parachain_binaries, verify_state_sync_completed,
+		verify_warp_sync_completed, wait_for_block_height, wait_for_finalized_height,
+		wait_for_fullnode, wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
 		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use futures::try_join;
 use subxt::{config::substrate::SubstrateConfig, OnlineClient};
 use zombienet_orchestrator::AddCollatorOptions;
@@ -133,6 +136,10 @@ const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
 /// Three items of different sizes for multi-item verification.
 const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SIZE * 2];
+
+/// State-directory suffix for the secondary rocksdb instance the on-disk assertions open. Two
+/// secondary instances must not share one, so there is a tag per node that gets read.
+const COLLATOR_DB_TAG: &str = "collator-1";
 
 /// Uses libp2p for embedded relay chain to avoid litep2p race conditions.
 fn get_para_node_args() -> Vec<String> {
@@ -293,6 +300,14 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	// Verify all items can be fetched from collator1 via bitswap
 	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
+	// … and that they are on disk under the hash the runtime committed to, at the size that was
+	// submitted. Bitswap serves from the same column, but only for hashes it is asked about — a
+	// direct read is what catches a duplicated row or a value filed under the wrong key.
+	let collator_db = node_db_path(&network, "collator-1")?;
+	let item_data: Vec<&[u8]> = stored_items.iter().map(|i| i.data.as_slice()).collect();
+	assert_items_stored(&collator_db, COLLATOR_DB_TAG, "collator after store", &item_data).await?;
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after store").await?;
+
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	tracing::info!("Waiting for block {} and finality", target_block);
@@ -349,6 +364,11 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
 		},
 	}
+
+	// The collator has been pruning throughout. Whatever survived must still be internally
+	// consistent — this asserts the *invariant* rather than a particular column size, because
+	// how far pruning has progressed by now is a matter of timing.
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after pruning").await?;
 
 	test_log!(TEST, "=== Parachain Fast Sync Test (with pruning) PASSED ===");
 	tracing::info!(
@@ -502,6 +522,12 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Verify all items can be fetched from collator1 via bitswap
 	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
+	// … and that col11 holds exactly those items, each verifying against its key.
+	let collator_db = node_db_path(&network, "collator-1")?;
+	let item_data: Vec<&[u8]> = stored_items.iter().map(|i| i.data.as_slice()).collect();
+	assert_items_stored(&collator_db, COLLATOR_DB_TAG, "collator after store", &item_data).await?;
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after store").await?;
+
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	tracing::info!("Waiting for block {} and finality", target_block);
@@ -551,6 +577,10 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	tracing::info!(
 		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
 	);
+
+	// The collator has been pruning throughout. Assert the invariant rather than a particular
+	// column size: how far pruning has progressed by now is a matter of timing.
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after pruning").await?;
 
 	test_log!(TEST, "=== Parachain Warp Sync Test (with block pruning) PASSED ===");
 	network.destroy().await?;
@@ -686,6 +716,12 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	// Verify all items can be fetched from collator1 via bitswap
 	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
+	// … and that col11 holds exactly those items, each verifying against its key.
+	let collator_db = node_db_path(&network, "collator-1")?;
+	let item_data: Vec<&[u8]> = stored_items.iter().map(|i| i.data.as_slice()).collect();
+	assert_items_stored(&collator_db, COLLATOR_DB_TAG, "collator after store", &item_data).await?;
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after store").await?;
+
 	// Wait for enough blocks and finality before adding sync node
 	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	tracing::info!("Waiting for block {} and finality", target_block);
@@ -741,6 +777,10 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 			anyhow::bail!("Expected to detect 'BlockResponse with 0 blocks' in logs, but did not find it within timeout");
 		},
 	}
+
+	// The collator has been pruning throughout. Assert the invariant rather than a particular
+	// column size: how far pruning has progressed by now is a matter of timing.
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "collator after pruning").await?;
 
 	test_log!(TEST, "=== Parachain Full Sync Test (with pruning) PASSED ===");
 	tracing::info!(
@@ -976,32 +1016,30 @@ async fn parachain_rpc_node_bitswap_test() -> Result<()> {
 }
 
 /// Long enough for both stores before expiration (~6 blocks each on parachain).
-const LDB_TEST_RETENTION_PERIOD: u32 = 20;
+const STORAGE_TEST_RETENTION_PERIOD: u32 = 20;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn parachain_ldb_storage_verification_test() -> Result<()> {
-	const TEST: &str = "para_ldb_storage";
+async fn parachain_storage_verification_test() -> Result<()> {
+	const TEST: &str = "para_storage_verification";
 	crate::utils::init_logging();
 
-	test_log!(TEST, "=== Parachain LDB Storage Verification Test ===");
+	test_log!(TEST, "=== Parachain Storage Verification Test ===");
 	tracing::info!(
-		"This test verifies transaction storage database behavior using rocksdb_ldb tool"
+		"This test verifies transaction storage database behavior by reading col11 and \
+		 BODY_INDEX directly"
 	);
 	tracing::info!(
 		"Using --blocks-pruning={} and retention-period={}",
-		LDB_TEST_RETENTION_PERIOD,
-		LDB_TEST_RETENTION_PERIOD
+		STORAGE_TEST_RETENTION_PERIOD,
+		STORAGE_TEST_RETENTION_PERIOD
 	);
 
-	// === Early validation of required external tools ===
-	tracing::info!("=== Verifying required external tools ===");
-	verify_ldb_tool()?;
 	verify_parachain_binaries()?;
 
 	let para_args = vec![
 		"--ipfs-server".into(),
 		"--database=rocksdb".into(),
-		format!("--blocks-pruning={}", LDB_TEST_RETENTION_PERIOD),
+		format!("--blocks-pruning={}", STORAGE_TEST_RETENTION_PERIOD),
 		"-ltransaction-storage=trace".into(),
 		"--".into(),
 		"--network-backend=libp2p".into(),
@@ -1032,34 +1070,26 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	let mut nonce = get_alice_nonce(collator1).await?;
 
 	// Set short retention period for fast testing
-	// NOTE: LDB test uses finalized transactions for database consistency
+	// NOTE: this test uses finalized transactions for database consistency
 	tracing::info!(
 		"Setting RetentionPeriod to {} blocks for fast expiration testing",
-		LDB_TEST_RETENTION_PERIOD
+		STORAGE_TEST_RETENTION_PERIOD
 	);
-	set_retention_period_finalized(&collator1_client, LDB_TEST_RETENTION_PERIOD, nonce).await?;
+	set_retention_period_finalized(&collator1_client, STORAGE_TEST_RETENTION_PERIOD, nonce).await?;
 	nonce += 1;
 
 	// Get database path for the collator
-	let base_dir = network
-		.base_dir()
-		.ok_or_else(|| anyhow!("Failed to get network base directory"))?
-		.to_string();
-	let parachain_chain_id = get_parachain_chain_id();
-	let collator_db_path = get_db_path(&base_dir, "collator-1", &parachain_chain_id);
-	tracing::info!("Collator-1 DB path: {:?}", collator_db_path);
+	let collator_db = node_db_path(&network, "collator-1")?;
+	tracing::info!("Collator-1 DB path: {:?}", collator_db);
 
 	// === Step 1: Verify col11 is empty before store ===
 	test_log!(TEST, "=== Step 1: Verify col11 is empty BEFORE store ===");
-	let dump = verify_col11(&collator_db_path, "col11 BEFORE store")?;
-	if !dump.is_empty() {
-		anyhow::bail!("Expected col11 to be empty before store, but found {} keys", dump.key_count);
-	}
-	tracing::info!("✓ col11 is empty as expected before store");
+	assert_col11_empty(&collator_db, COLLATOR_DB_TAG, "before store").await?;
 
 	// Generate test data and calculate expected content hash
 	let test_data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
 	let (expected_hash, expected_cid) = content_hash_and_cid(&test_data);
+	let expected_key = content_hash(&test_data);
 	tracing::info!("Generated {} bytes of test data", test_data.len());
 	tracing::info!("Expected content hash: {}", expected_hash);
 	tracing::info!("Expected CID: {}", expected_cid);
@@ -1071,33 +1101,29 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	nonce = next_nonce;
 	tracing::info!("First store completed at block {}", first_store_block);
 
-	let dump = verify_col11(&collator_db_path, "col11 AFTER first store")?;
-	if dump.key_count != 2 {
-		anyhow::bail!(
-			"Expected 2 keys in col11 after first store (data + refcount), found {}",
-			dump.key_count
-		);
-	}
+	// One value row and one counter row, the value hashing to the key the runtime committed to,
+	// at the size that was submitted.
+	assert_single_entry(
+		&collator_db,
+		COLLATOR_DB_TAG,
+		"after first store",
+		expected_key,
+		test_data.len(),
+		1,
+	)
+	.await?;
 
-	let data_entries = dump.data_entries();
-	let data_entry = data_entries
-		.first()
-		.ok_or_else(|| anyhow!("No data entries found in col11 after first store"))?;
-	let stored_hash = data_entry.content_hash();
-
-	// Verify the content hash matches our calculated hash
-	if !stored_hash.eq_ignore_ascii_case(&expected_hash) {
-		anyhow::bail!("Content hash mismatch! Expected: {}, Got: {}", expected_hash, stored_hash);
-	}
-	tracing::info!("✓ Content hash matches: {}", stored_hash);
-
-	let refcount = dump
-		.get_refcount(stored_hash)
-		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", stored_hash))?;
-	if refcount != 1 {
-		anyhow::bail!("Expected refcount=1 after first store, found refcount={}", refcount);
-	}
-	tracing::info!("✓ Reference count is 1 as expected after first store");
+	// The body must also reassemble: BODY_INDEX holds the extrinsic minus its indexed tail, so
+	// a mis-split there would leave a block no runtime can execute even though col11 verifies.
+	assert_seams_clean(&collator_db, COLLATOR_DB_TAG, "after first store")?;
+	assert_block_shape(
+		&collator_db,
+		COLLATOR_DB_TAG,
+		"after first store",
+		first_store_block as u32,
+		1,
+		&[],
+	)?;
 
 	// === Step 3: Second store (same data) - verify refcount = 2, still 2 keys ===
 	test_log!(TEST, "=== Step 3: Second store - expecting refcount = 2, still 2 keys ===");
@@ -1105,42 +1131,43 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
 	tracing::info!("Second store completed at block {}", second_store_block);
 
-	let dump = verify_col11(&collator_db_path, "col11 AFTER second store")?;
-	if dump.key_count != 2 {
-		anyhow::bail!(
-			"Expected 2 keys in col11 after second store (no duplicates), found {} - duplicated data may exist!",
-			dump.key_count
-		);
-	}
-	tracing::info!("✓ Still only 2 keys in col11 - no duplicate data rows");
+	// Still a single value row: storing the same data twice must share the row and bump the
+	// counter, not duplicate the bytes.
+	assert_single_entry(
+		&collator_db,
+		COLLATOR_DB_TAG,
+		"after second store",
+		expected_key,
+		test_data.len(),
+		2,
+	)
+	.await?;
 
-	let data_entries = dump.data_entries();
-	let data_entry = data_entries
-		.first()
-		.ok_or_else(|| anyhow!("No data entries found in col11 after second store"))?;
-	let content_hash = data_entry.content_hash();
-	let refcount = dump
-		.get_refcount(content_hash)
-		.ok_or_else(|| anyhow!("Could not find refcount for content hash {}", content_hash))?;
-	if refcount != 2 {
-		anyhow::bail!("Expected refcount=2 after second store, found refcount={}", refcount);
-	}
-	tracing::info!("✓ Reference count is 2 as expected after second store");
+	// Two blocks now reference the entry, each through its own `Indexed` extrinsic.
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "after second store").await?;
+	assert_block_shape(
+		&collator_db,
+		COLLATOR_DB_TAG,
+		"after second store",
+		second_store_block as u32,
+		1,
+		&[],
+	)?;
 
 	// === Step 4: Wait for retention period and verify col11 is empty ===
 	tracing::info!(
 		"=== Step 4: Wait for data expiration ({} blocks) ===",
-		LDB_TEST_RETENTION_PERIOD
+		STORAGE_TEST_RETENTION_PERIOD
 	);
 
 	// Calculate when both stores should have expired
-	let expiration_block = second_store_block + LDB_TEST_RETENTION_PERIOD as u64 + 2; // +2 for safety margin
+	let expiration_block = second_store_block + STORAGE_TEST_RETENTION_PERIOD as u64 + 2; // +2 for safety margin
 
 	tracing::info!(
 		"Waiting for block {} (second_store_block {} + retention {} + margin 2)",
 		expiration_block,
 		second_store_block,
-		LDB_TEST_RETENTION_PERIOD
+		STORAGE_TEST_RETENTION_PERIOD
 	);
 
 	// Must wait for FINALIZED height since block pruning (which triggers col11 cleanup)
@@ -1151,23 +1178,12 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		.context("Collator did not reach finalized expiration block height")?;
 
 	test_log!(TEST, "=== Verify col11 is empty AFTER retention period ===");
-	let dump = verify_col11(&collator_db_path, "col11 AFTER retention period")?;
-	if !dump.is_empty() {
-		tracing::error!(
-			"Expected col11 to be empty after retention period, but found {} keys:",
-			dump.key_count
-		);
-		for entry in &dump.entries {
-			tracing::error!("  Key: {}", entry.key);
-		}
-		anyhow::bail!(
-			"Data did not expire after retention period! Found {} keys in col11",
-			dump.key_count
-		);
-	}
-	tracing::info!("✓ col11 is empty as expected - data expired after retention period");
+	// Both references released, so the value is gone — counter row included. An entry left
+	// behind with a stale counter would show up as an orphan rather than as an empty column,
+	// which is why this asserts emptiness rather than just absence of the hash.
+	assert_col11_empty(&collator_db, COLLATOR_DB_TAG, "after retention period").await?;
 
-	test_log!(TEST, "=== Parachain LDB Storage Verification Test PASSED ===");
+	test_log!(TEST, "=== Parachain Storage Verification Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }

@@ -7,20 +7,21 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_proof_checked_at, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
+		assert_absent, assert_no_refcount_drift, assert_proof_checked_at, assert_referrers,
+		assert_storage_healthy, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
 		authorize_and_store_data, blake2_256, block_hash_at,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
 		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
 		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization, resolve_canonical_store_block,
-		set_retention_period, set_retention_period_finalized, submit_force_renew,
-		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
-		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
-		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		initialize_network, node_db_path, override_alice_authorization,
+		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
+		submit_force_renew, submit_renew_one_shot, submit_renew_pair, submit_store_signed,
+		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
+		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
+		wait_for_finalized_quiescence, wait_for_next_best_block, wait_for_session_change_on_node,
+		AuthorizationOverride, DbHash, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -102,6 +103,12 @@ struct SharedHarness {
 	/// Held to keep spawned processes alive; never dropped.
 	_network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
 	collator1: zombienet_sdk::NetworkNode,
+	/// The collator's database directory, for the on-disk assertions. Resolved at spawn time
+	/// because `_network` is never read once the harness is built.
+	db_path: std::path::PathBuf,
+	/// State-directory suffix for this database's secondary rocksdb instance. Per harness, so
+	/// the archive and pruning networks never share one.
+	db_tag: String,
 }
 
 static ARCHIVE_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
@@ -158,6 +165,7 @@ async fn spawn_shared_harness(
 		.get_node("collator-1")
 		.with_context(|| format!("[{}] failed to get collator-1", label))?
 		.clone();
+	let db_path = node_db_path(&network, "collator-1")?;
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	// Wait for finalization so tests can rely on `get_alice_nonce` reflecting the bump.
@@ -165,7 +173,12 @@ async fn spawn_shared_harness(
 	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
 	tracing::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
 
-	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
+	Ok(std::sync::Arc::new(SharedHarness {
+		_network: network,
+		collator1,
+		db_path,
+		db_tag: label.to_string(),
+	}))
 }
 
 /// Wait for the FINALIZED head to clear `block`'s `--blocks-pruning` boundary. Pruning
@@ -292,6 +305,17 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	nonce += 1;
 
 	let content_hash = blake2_256(&data);
+	let key = DbHash::from(content_hash);
+
+	// On-disk baseline. The archive harness never prunes, so every renewal below must leave
+	// one more reference than the last; taking the baseline from observation rather than
+	// assuming 1 keeps the arithmetic correct if a reorg replayed the store.
+	let baseline = assert_referrers(&harness.db_path, &harness.db_tag, "post-store", key, 1, None)
+		.await?
+		.refcount(&key)
+		.ok_or_else(|| anyhow::anyhow!("no col11 counter for the stored data"))?;
+	tracing::info!("Refcount after store is {baseline}");
+
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled for content_hash {}", hash_hex);
@@ -353,7 +377,36 @@ async fn parachain_auto_renew_test() -> Result<()> {
 			NUM_RENEWAL_CYCLES,
 			wait_until
 		);
+
+		// Each renewal indexes the data again from a new block, and nothing prunes on the
+		// archive harness, so both the referring-block count and the refcount must go up by
+		// exactly one per cycle. Bitswap only shows the data is *reachable*; this is what
+		// shows the reference was actually taken.
+		let expected = 1 + cycle as u32;
+		let snapshot = assert_referrers(
+			&harness.db_path,
+			&harness.db_tag,
+			&format!("cycle {cycle}"),
+			key,
+			expected,
+			Some(store_block as u32),
+		)
+		.await?;
+		let counter = snapshot.refcount(&key);
+		if counter != Some(baseline + cycle as u32) {
+			anyhow::bail!(
+				"cycle {cycle}: refcount is {counter:?}, expected {} ({baseline} at store, \
+				 +1 per renewal)",
+				baseline + cycle as u32,
+			);
+		}
+		tracing::info!("[cycle {cycle}/{NUM_RENEWAL_CYCLES}] ✓ refcount {counter:?} on disk");
 	}
+
+	// Nothing above renewed the same hash twice in one block, so this mainly guards the whole
+	// shared chain: every counter agrees with its BODY_INDEX references, every indexed body
+	// still reassembles, and no value was left behind unreferenced.
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after all cycles").await?;
 
 	// Shared-harness cleanup: stop renewing this item so it doesn't keep consuming Alice's
 	// authorization for the rest of the harness lifetime.
@@ -583,6 +636,32 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	}
 	let renew_block = std::cmp::max(renew_block_a, renew_block_b);
 
+	// Two renewals of one hash inside a single body is the shape that the pre-aggregation
+	// commit path collapsed into a single increment (polkadot-sdk#12106): the counter ends up
+	// short, and the first block to prune releases more references than it took, deleting data
+	// the other blocks still point at. `assert_no_refcount_drift` recomputes every counter from
+	// BODY_INDEX and compares, which is exactly that failure.
+	let key = DbHash::from(content_hash);
+	let duplicate_blocks =
+		assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
+	if renew_block_a == renew_block_b && duplicate_blocks == 0 {
+		anyhow::bail!(
+			"both renews landed in block {renew_block_a} but no block references a hash twice \
+			 — the intra-block duplicate this test exists to exercise was not produced"
+		);
+	}
+	// The store block plus however many blocks the two renews ended up in.
+	let expected_referrers = if renew_block_a == renew_block_b { 2 } else { 3 };
+	assert_referrers(
+		&harness.db_path,
+		&harness.db_tag,
+		"after the renew pair",
+		key,
+		expected_referrers,
+		None,
+	)
+	.await?;
+
 	// Proof for the original store lands at `store_block + RP` (one block before pruning
 	// could evict). At this point col11 still has the chunks and the proof can be built.
 	let proof_block = store_block + RETENTION_PERIOD as u64;
@@ -608,6 +687,12 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		"✓ Bitswap returns DONT_HAVE after both store and renew blocks were pruned (col11 \
 		 refcount reached zero)"
 	);
+
+	// DONT_HAVE only proves the value is unreachable. Check on disk that the value *and* its
+	// counter row are gone: an under-counted entry deleted while still referenced, or a counter
+	// left behind at zero, both look identical over bitswap.
+	assert_absent(&harness.db_path, &harness.db_tag, "after pruning", key).await?;
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after pruning").await?;
 
 	test_log!(TEST, "=== Parachain double-renew under pruning PASSED ===");
 	Ok(())
@@ -732,6 +817,19 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	);
 	tracing::info!("✓ One-shot renewal fired at block {} and unregistered", renewal_block);
 
+	// The renewal took a second reference: two blocks now point at the entry, the later one
+	// being the renewal block.
+	let key = DbHash::from(content_hash);
+	assert_referrers(
+		&harness.db_path,
+		&harness.db_tag,
+		"after the one-shot renewal",
+		key,
+		2,
+		Some(store_block as u32),
+	)
+	.await?;
+
 	// First retention period over, store block pruned; the renewal's col11 ref must keep
 	// the data served.
 	wait_past_pruning_boundary(collator1, store_block, "the store block").await?;
@@ -739,6 +837,19 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 		.await
 		.context("one-shot renewal did not preserve the data past the pruned store block")?;
 	tracing::info!("✓ Data still served after the store block was pruned");
+
+	// Pruning the store block released its reference and only the renewal's is left. This is
+	// the release side of the accounting: an over-release here would have dropped the entry
+	// (and the bitswap check above would have failed), an under-release leaves it at 2.
+	assert_referrers(
+		&harness.db_path,
+		&harness.db_tag,
+		"after the store block was pruned",
+		key,
+		1,
+		Some(store_block as u32),
+	)
+	.await?;
 
 	// Second retention period: the renewed entry's proof fires, but no renewal follows.
 	let second_proof_block = renewal_block + RETENTION_PERIOD as u64;
@@ -778,6 +889,11 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 		 must not have been scheduled",
 	)?;
 	tracing::info!("✓ Data evicted after the second retention period (no further renewal)");
+
+	// The last reference went, so both rows must be gone — closing the on-disk arc 1 → 2 → 1 → 0.
+	assert_absent(&harness.db_path, &harness.db_tag, "after the renewal block was pruned", key)
+		.await?;
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after full eviction").await?;
 
 	test_log!(TEST, "=== Parachain one-shot renew lifecycle PASSED ===");
 	Ok(())
