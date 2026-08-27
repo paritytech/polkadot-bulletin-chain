@@ -13,6 +13,24 @@ pub const IS_MAJOR_SYNCING_METRIC: &str = "substrate_sub_libp2p_is_major_syncing
 pub const FULLNODE_ROLE_VALUE: f64 = 1.0;
 pub const IDLE_VALUE: f64 = 0.0;
 
+// HOP (`sc-hop`) Prometheus metrics. The zombienet metrics parser indexes every series
+// both with and without the `chain` label, so labelled series are addressed by their
+// remaining labels alone — in the order `sc-hop` declares them.
+pub const HOP_POOL_ENTRIES_METRIC: &str = "substrate_hop_pool_entries";
+pub const HOP_POOL_BYTES_METRIC: &str = "substrate_hop_pool_bytes";
+pub const HOP_POOL_MAX_BYTES_METRIC: &str = "substrate_hop_pool_max_bytes";
+pub const HOP_POOL_INSERTED_BYTES_METRIC: &str = "substrate_hop_pool_inserted_bytes_total";
+pub const HOP_PROMOTIONS_CONFIRMED_METRIC: &str = "substrate_hop_promotions_confirmed_total";
+pub const HOP_PROMOTION_BACKLOG_METRIC: &str = "substrate_hop_promotion_backlog";
+pub const HOP_MAINTENANCE_TICKS_METRIC: &str = "substrate_hop_maintenance_ticks_total";
+pub const HOP_REMOVED_ACKED_METRIC: &str = "substrate_hop_pool_removed_total{reason=\"acked\"}";
+pub const HOP_REMOVED_EXPIRED_PROMOTED_METRIC: &str =
+	"substrate_hop_pool_removed_total{reason=\"expired_promoted\"}";
+pub const HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC: &str =
+	"substrate_hop_pool_removed_total{reason=\"expired_unpromoted\"}";
+pub const HOP_SUBMIT_NOT_AUTHORIZED_METRIC: &str =
+	"substrate_hop_rpc_errors_total{method=\"hop_submit\",reason=\"not_authorized\"}";
+
 // Environment variables
 pub const RELAY_BINARY_PATH_ENV: &str = "POLKADOT_RELAY_BINARY_PATH";
 pub const DEFAULT_RELAY_BINARY: &str = "polkadot";
