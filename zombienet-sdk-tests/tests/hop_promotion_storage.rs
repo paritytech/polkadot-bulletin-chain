@@ -56,8 +56,11 @@ const HOP_CHECK_INTERVAL_SECS: u64 = 5;
 /// outside the promotion window for `retention - buffer` seconds, which is the room
 /// [`parachain_hop_unpromoted_expiry_test`] needs to expire the authorization before the
 /// first promotion attempt.
+///
+/// The 30s gap is far more than the authorization override needs, and leaves the entry
+/// inside the window — and so counted in `_promotion_backlog` — for the remaining 60s.
 const UNPROMOTED_HOP_RETENTION_SECS: u64 = 90;
-const UNPROMOTED_HOP_PROMOTION_BUFFER_SECS: u64 = 20;
+const UNPROMOTED_HOP_PROMOTION_BUFFER_SECS: u64 = 60;
 
 /// `can_account_promote` never debits these, but `authorize_account` refuses to write a
 /// zero-extent entry.
@@ -556,6 +559,20 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 	);
 	test_log!(TEST, "✓ Blob D pooled, then authorization expired");
 
+	// `in_promotion_window` counts entries that are unpromoted, within `buffer` of expiry
+	// and still under `MAX_PROMOTION_ATTEMPTS`. D qualifies from `retention - buffer`
+	// seconds after submit until it expires, which is the only window in either test where
+	// the backlog is observable above zero.
+	wait_hop_metric(
+		&collator1,
+		HOP_PROMOTION_BACKLOG_METRIC,
+		|backlog| backlog >= 1,
+		UNPROMOTED_EXPIRY_TIMEOUT_SECS,
+		"promotion backlog never counted the pooled entry",
+	)
+	.await?;
+	test_log!(TEST, "✓ Blob D counted in _promotion_backlog");
+
 	// Every promotion attempt now fails in the pool, so the entry ages out unpromoted.
 	wait_hop_metric(
 		&collator1,
@@ -581,14 +598,19 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 		!hop_api::is_promoted_on_chain(&env.client, &hash_d).await?,
 		"is_promoted_on_chain is true for a blob that was never promoted",
 	);
-	wait_hop_metric(
-		&collator1,
-		HOP_POOL_ENTRIES_METRIC,
-		|entries| entries == 0,
-		HOP_METRIC_TIMEOUT_SECS,
-		"pool entries did not return to zero",
-	)
-	.await?;
+	for (metric, what) in [
+		(HOP_POOL_ENTRIES_METRIC, "pool entries"),
+		(HOP_PROMOTION_BACKLOG_METRIC, "promotion backlog"),
+	] {
+		wait_hop_metric(
+			&collator1,
+			metric,
+			|v| v == 0,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{what} did not return to zero"),
+		)
+		.await?;
+	}
 
 	test_log!(TEST, "=== HOP unpromoted expiry test PASSED ===");
 	env.network.destroy().await?;
