@@ -36,6 +36,19 @@ pub const HOP_CLAIM_NOT_FOUND_METRIC: &str =
 	"substrate_hop_rpc_errors_total{method=\"hop_claim\",reason=\"not_found\"}";
 pub const HOP_ACK_NOT_FOUND_METRIC: &str =
 	"substrate_hop_rpc_errors_total{method=\"hop_ack\",reason=\"not_found\"}";
+pub const HOP_REMOVED_CORRUPT_METRIC: &str = "substrate_hop_pool_removed_total{reason=\"corrupt\"}";
+pub const HOP_REMOVED_STARTUP_DROPPED_METRIC: &str =
+	"substrate_hop_pool_removed_total{reason=\"startup_dropped\"}";
+
+/// `substrate_hop_rpc_errors_total{method="hop_submit",reason="<reason>"}`.
+pub fn hop_submit_error_metric(reason: &str) -> String {
+	format!("substrate_hop_rpc_errors_total{{method=\"hop_submit\",reason=\"{reason}\"}}")
+}
+
+/// `substrate_hop_rpc_errors_total{method="hop_claim",reason="<reason>"}`.
+pub fn hop_claim_error_metric(reason: &str) -> String {
+	format!("substrate_hop_rpc_errors_total{{method=\"hop_claim\",reason=\"{reason}\"}}")
+}
 
 // Environment variables
 pub const RELAY_BINARY_PATH_ENV: &str = "POLKADOT_RELAY_BINARY_PATH";

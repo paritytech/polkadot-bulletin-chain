@@ -26,16 +26,17 @@ use crate::{
 		authorize_account_via_sudo_finalized, blake2_256,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
 		finalized_block_hash_at, generate_test_data, get_alice_nonce, hash_to_cid, hop_ack,
-		hop_api, hop_claim, hop_metric, hop_pool_status, hop_submit, initialize_network, now_ms,
+		hop_api, hop_claim, hop_claim_error_metric, hop_claim_raw, hop_metric, hop_pool_status,
+		hop_submit, hop_submit_error_metric, initialize_network, now_ms,
 		override_alice_authorization, set_retention_period_finalized, verify_bitswap_fetch,
 		verify_parachain_binaries, wait_for_finalized_quiescence, wait_for_session_change_on_node,
 		wait_hop_metric, AuthorizationOverride, HopCounters, FINALIZED_TRANSACTION_TIMEOUT_SECS,
 		HOP_ACK_NOT_FOUND_METRIC, HOP_CLAIM_NOT_FOUND_METRIC, HOP_POOL_BYTES_METRIC,
 		HOP_POOL_ENTRIES_METRIC, HOP_POOL_MAX_BYTES_METRIC, HOP_PROMOTIONS_CONFIRMED_METRIC,
-		HOP_PROMOTION_BACKLOG_METRIC, HOP_REMOVED_ACKED_METRIC,
+		HOP_PROMOTION_BACKLOG_METRIC, HOP_REMOVED_ACKED_METRIC, HOP_REMOVED_CORRUPT_METRIC,
 		HOP_REMOVED_EXPIRED_PROMOTED_METRIC, HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC,
-		HOP_SUBMIT_NOT_AUTHORIZED_METRIC, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		TEST_DATA_SIZE,
+		HOP_REMOVED_STARTUP_DROPPED_METRIC, HOP_SUBMIT_NOT_AUTHORIZED_METRIC,
+		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -74,6 +75,56 @@ const BITSWAP_TIMEOUT_SECS: u64 = 20;
 const HOP_METRIC_TIMEOUT_SECS: u64 = 120;
 /// Must outlast `UNPROMOTED_HOP_RETENTION_SECS` plus one cleanup tick.
 const UNPROMOTED_EXPIRY_TIMEOUT_SECS: u64 = 240;
+
+/// `parachain_hop_pool_integrity_test` never wants a promotion or an expiry: retention
+/// outlasts the test and the promotion window only opens `buffer` before that.
+const INTEGRITY_HOP_RETENTION_SECS: u64 = 900;
+const INTEGRITY_HOP_PROMOTION_BUFFER_SECS: u64 = 10;
+/// Comfortably above the submits the earlier phases make, so only the final burst trips.
+const INTEGRITY_SUBMIT_RATE_PER_MIN: u32 = 600;
+const INTEGRITY_SUBMIT_BURST: u32 = 20;
+/// MiB. `user < pool` is required: the pool check runs before the per-user charge, so an
+/// equal pair would make `PoolFull` mask `UserQuotaExceeded` permanently.
+const INTEGRITY_MAX_POOL_MIB: u64 = 2;
+const INTEGRITY_MAX_USER_MIB: u64 = 1;
+/// Large enough that a per-user cap is reached in a handful of submits.
+const CAP_BLOB_SIZE: usize = 256 * 1024;
+/// A sender that places this many blobs without rejection means the caps are misconfigured;
+/// `INTEGRITY_MAX_USER_MIB` needs 4.
+const CAP_MAX_SUBMITS: usize = 16;
+/// Attempts include waits for rate-limit tokens, so this is well above `CAP_MAX_SUBMITS`.
+const CAP_MAX_ATTEMPTS: usize = 64;
+
+/// Submit `CAP_BLOB_SIZE` blobs as `signer` until one is rejected for a capacity reason,
+/// returning the error text.
+///
+/// The preceding burst phase leaves the token bucket empty, so a rate-limited submit is
+/// transient here and is waited out rather than reported as the rejection.
+async fn fill_until_rejected(env: &HopEnv, signer: &Keypair, tag: &str) -> Result<String> {
+	let mut submitted = 0usize;
+	for attempt in 0..CAP_MAX_ATTEMPTS {
+		let pattern = format!("HOP_CAP_{tag}_{attempt}_{}_", now_ms()).into_bytes();
+		let data = generate_test_data(CAP_BLOB_SIZE, &pattern);
+		match env.submit_as(signer, &data).await {
+			Ok(_) => {
+				submitted += 1;
+				if submitted >= CAP_MAX_SUBMITS {
+					anyhow::bail!("{tag} placed {submitted} blobs without being rejected");
+				}
+			},
+			Err(e) if e.to_string().contains("Rate limited") =>
+				tokio::time::sleep(Duration::from_secs(1)).await,
+			Err(e) => return Ok(e.to_string()),
+		}
+	}
+	anyhow::bail!("{tag} made {CAP_MAX_ATTEMPTS} attempts without a capacity rejection")
+}
+
+/// `<data_dir>/blobs/<first-2-hex>/<hex>.blob`, sharded on the hash's first byte.
+fn hop_blob_path(data_dir: &std::path::Path, content_hash: &[u8; 32]) -> std::path::PathBuf {
+	let hex = hex::encode(content_hash);
+	data_dir.join("blobs").join(&hex[..2]).join(format!("{hex}.blob"))
+}
 
 fn hop_node_args(retention_secs: u64, promotion_buffer_secs: u64) -> Vec<String> {
 	vec![
@@ -139,10 +190,17 @@ impl HopEnv {
 	}
 
 	async fn authorize_alice(&mut self) -> Result<()> {
+		let alice_id = self.alice_id;
+		self.authorize(&alice_id).await
+	}
+
+	/// HOP never debits the storage extent, so any non-zero grant is enough for
+	/// `can_account_promote`.
+	async fn authorize(&mut self, account: &[u8; 32]) -> Result<()> {
 		let nonce = self.take_nonce();
 		authorize_account_via_sudo_finalized(
 			&self.client,
-			&self.alice_id,
+			account,
 			AUTH_TRANSACTIONS,
 			AUTH_BYTES,
 			nonce,
@@ -614,5 +672,214 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 
 	test_log!(TEST, "=== HOP unpromoted expiry test PASSED ===");
 	env.network.destroy().await?;
+	Ok(())
+}
+
+/// `_rpc_errors_total` reasons that only a malformed request reaches, plus the two
+/// `_pool_removed_total` reasons that need the pool's files touched underneath it.
+///
+/// Runs on its own network: `--hop-data-dir` is pinned so the test can locate a blob on
+/// disk, rate limiting is left enabled so the limiter can be tripped, and the promotion
+/// window never opens inside the test window so nothing is promoted or expired.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_hop_pool_integrity_test() -> Result<()> {
+	const TEST: &str = "para_hop_pool_integrity";
+	crate::utils::init_logging();
+
+	test_log!(TEST, "=== HOP pool integrity + RPC error reasons ===");
+
+	// Unique per run so a stale dir from an earlier run cannot be recovered at startup.
+	let data_dir = std::env::temp_dir().join(format!("bulletin-hop-{}", now_ms()));
+	let mut args = vec![
+		"--enable-hop".into(),
+		format!("--hop-data-dir={}", data_dir.display()),
+		format!("--hop-retention-secs={}", INTEGRITY_HOP_RETENTION_SECS),
+		format!("--hop-promotion-buffer-secs={}", INTEGRITY_HOP_PROMOTION_BUFFER_SECS),
+		format!("--hop-check-interval={}", HOP_CHECK_INTERVAL_SECS),
+		// Rate limiting stays on; the burst is far above what the phases below need, so
+		// only the final burst phase can trip it.
+		format!("--hop-submit-rate-per-min={}", INTEGRITY_SUBMIT_RATE_PER_MIN),
+		format!("--hop-submit-burst={}", INTEGRITY_SUBMIT_BURST),
+		format!("--hop-max-pool-size={}", INTEGRITY_MAX_POOL_MIB),
+		format!("--hop-max-user-size={}", INTEGRITY_MAX_USER_MIB),
+		// The submit-rate limiter is the one under test; keep the bandwidth limiter well
+		// clear of the megabytes the capacity phases push.
+		"--hop-bandwidth-per-min-mib=1024".into(),
+		"--hop-bandwidth-burst-mib=1024".into(),
+		format!("{},hop=trace", NODE_LOG_CONFIG),
+	];
+	args.extend(["--".into(), "--network-backend=libp2p".into()]);
+
+	let mut env = HopEnv::spawn(args).await?;
+	let collator1 = env.collator1.clone();
+	env.authorize_alice().await?;
+
+	// ── Malformed submits ──
+	let (data_e, hash_e) = blob("E");
+	for (label, result) in [
+		("empty_data", hop_submit(&env.rpc, &env.alice, &[], &[env.alice_id], now_ms()).await),
+		("no_recipients", hop_submit(&env.rpc, &env.alice, &data_e, &[], now_ms()).await),
+		(
+			"duplicate_recipient",
+			hop_submit(&env.rpc, &env.alice, &data_e, &[env.alice_id, env.alice_id], now_ms())
+				.await,
+		),
+	] {
+		assert!(result.is_err(), "{label} submit unexpectedly succeeded");
+		wait_hop_metric(
+			&collator1,
+			&hop_submit_error_metric(label),
+			|errors| errors >= 1,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{label} submit was not counted"),
+		)
+		.await?;
+	}
+
+	// A second submit of the same blob is a duplicate.
+	env.submit(&data_e).await?;
+	assert!(env.submit(&data_e).await.is_err(), "duplicate submit unexpectedly succeeded");
+	wait_hop_metric(
+		&collator1,
+		&hop_submit_error_metric("duplicate_entry"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"duplicate submit was not counted",
+	)
+	.await?;
+
+	// `decode_hash` rejects anything that is not 32 bytes, before any pool lookup.
+	assert!(
+		hop_claim_raw(&env.rpc, &[0u8; 31]).await.is_err(),
+		"hop_claim accepted a 31-byte hash",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_claim_error_metric("invalid_hash_length"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"short hash was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Malformed submit and claim reasons counted");
+
+	// ── already_claimed ──
+	// The gate is the recipient's `claimed` flag, which only `ack` sets — claiming twice
+	// in a row succeeds twice. Two recipients are required: with one, the ack removes the
+	// entry outright and the follow-up claim sees `NotFound` instead.
+	let (data_h, hash_h) = blob("H");
+	let bob_id = dev::bob().public_key().0;
+	hop_submit(&env.rpc, &env.alice, &data_h, &[env.alice_id, bob_id], now_ms()).await?;
+	assert_eq!(
+		hop_claim(&env.rpc, &env.alice, &hash_h).await?,
+		data_h,
+		"first claim did not return the blob",
+	);
+	hop_ack(&env.rpc, &env.alice, &hash_h).await?;
+	assert!(
+		hop_claim(&env.rpc, &env.alice, &hash_h).await.is_err(),
+		"claim after ack unexpectedly succeeded",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_claim_error_metric("already_claimed"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"claim after ack was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Claim after ack counted as already_claimed");
+
+	// ── corrupt: rewrite the blob so its content hash no longer matches ──
+	let (data_f, hash_f) = blob("F");
+	env.submit(&data_f).await?;
+	let blob_f = hop_blob_path(&data_dir, &hash_f);
+	std::fs::write(&blob_f, b"not the blob you are looking for")
+		.with_context(|| format!("overwrite {}", blob_f.display()))?;
+	// The integrity check purges the entry and reports `NotFound` to the caller.
+	assert!(hop_claim(&env.rpc, &env.alice, &hash_f).await.is_err(), "claim of a corrupt blob");
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_CORRUPT_METRIC,
+		|corrupt| corrupt >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"corrupt blob was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Corrupt blob purged and counted");
+
+	// ── rate_limited: exhaust the submit bucket ──
+	// Last of the pre-restart phases, so throttling cannot affect anything above.
+	for i in 0..(INTEGRITY_SUBMIT_BURST * 3) {
+		let (data, _) = blob(&format!("R{i}"));
+		let _ = env.submit(&data).await;
+	}
+	wait_hop_metric(
+		&collator1,
+		&hop_submit_error_metric("rate_limited"),
+		|limited| limited >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"submit burst did not trip the rate limiter",
+	)
+	.await?;
+	test_log!(TEST, "✓ Rate limiter tripped and counted");
+
+	// ── user_quota_exceeded, then pool_full ──
+	// Must follow the rate-limit phase: once the pool is full every later submit returns
+	// `PoolFull`, which would mask any other reason. Alice reaches her own cap while the
+	// pool still has room; further senders then push the pool itself over.
+	let alice_err = fill_until_rejected(&env, &env.alice, "alice").await?;
+	tracing::info!("alice's fill stopped: {}", alice_err);
+	wait_hop_metric(
+		&collator1,
+		&hop_submit_error_metric("user_quota_exceeded"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"per-user cap was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Per-user cap counted as user_quota_exceeded");
+
+	for (signer, tag) in [(dev::bob(), "bob"), (dev::charlie(), "charlie")] {
+		env.authorize(&signer.public_key().0).await?;
+		let err = fill_until_rejected(&env, &signer, tag).await?;
+		tracing::info!("{}'s fill stopped: {}", tag, err);
+	}
+	wait_hop_metric(
+		&collator1,
+		&hop_submit_error_metric("pool_full"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"pool cap was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Pool cap counted as pool_full");
+
+	// ── startup_dropped: leave a `.meta` with no `.blob`, then restart ──
+	// Recorded while recovering the pool from disk, so it must come last: the restart
+	// resets every counter asserted above.
+	let (data_g, hash_g) = blob("G");
+	env.submit(&data_g).await?;
+	std::fs::remove_file(hop_blob_path(&data_dir, &hash_g))
+		.context("remove blob to orphan its meta")?;
+
+	collator1.restart(None).await?;
+	assert_hop_metrics_registered(&collator1, HOP_METRIC_TIMEOUT_SECS).await?;
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_STARTUP_DROPPED_METRIC,
+		|dropped| dropped >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"orphan meta was not dropped at startup",
+	)
+	.await?;
+	test_log!(TEST, "✓ Orphan meta dropped at startup and counted");
+
+	// `hash_e` only exists to name blob E's entry; assert it survived its own submit.
+	tracing::info!("blob E hash: {}", hex::encode(hash_e));
+
+	test_log!(TEST, "=== HOP pool integrity test PASSED ===");
+	env.network.destroy().await?;
+	let _ = std::fs::remove_dir_all(&data_dir);
 	Ok(())
 }

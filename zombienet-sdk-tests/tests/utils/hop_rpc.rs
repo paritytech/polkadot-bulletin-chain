@@ -135,6 +135,16 @@ pub async fn hop_claim(
 	decode_hex("hop_claim", &hex)
 }
 
+/// `hop_claim` with an arbitrary-length `raw_hash`, to exercise the RPC's hash decode.
+/// The signature is irrelevant: `decode_hash` runs first.
+pub async fn hop_claim_raw(rpc: &RpcClient, raw_hash: &[u8]) -> Result<Vec<u8>> {
+	let hex: String = rpc
+		.request("hop_claim", rpc_params![hex0x(raw_hash), hex0x(&sr25519_scale(&[0u8; 64]))])
+		.await
+		.map_err(|e| anyhow!("hop_claim RPC: {e}"))?;
+	decode_hex("hop_claim", &hex)
+}
+
 /// Acknowledge receipt via `hop_ack`, signing as `recipient`. Marks the recipient
 /// claimed; the entry is removed once every recipient has acked.
 pub async fn hop_ack(rpc: &RpcClient, recipient: &Keypair, content_hash: &[u8; 32]) -> Result<()> {
