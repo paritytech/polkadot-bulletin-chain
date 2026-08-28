@@ -3,6 +3,9 @@
 Grafana dashboard models for the Bulletin networks. Edit here, then re-import.
 
 - `bulletin-paseo-dashboard.json` — Paseo Next V2
+- `bulletin-hop-dashboard.json`: HOP pool, promotion and RPC health (`substrate_hop_*`) for all
+  Bulletin networks; the `chain` variable lists whichever chains expose the metrics. Needs
+  collators built with polkadot-sdk#12662 and `--enable-hop`.
 
 Import: [Grafana](https://grafana.teleport.parity.io/dashboard/new?orgId=1&from=now-6h&to=now&timezone=browser)
 → New → New dashboard → Import dashboard → upload or paste JSON → Load → Overwrite.
