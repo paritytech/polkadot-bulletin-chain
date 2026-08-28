@@ -14,8 +14,8 @@ use std::{
 };
 pub use tx_index_tool::DbHash;
 use tx_index_tool::{
-	dry_run, inspect_block, list_entries, open_database, verify_seams, KeyValueDB, ListOptions,
-	OpenMode, StorageEntry,
+	dry_run, inspect_block, list_entries, open_database, trace_hash, verify_seams, KeyValueDB,
+	ListOptions, OpenMode, StorageEntry,
 };
 
 /// How long the polling assertions wait for the expected state to appear.
@@ -222,47 +222,39 @@ pub async fn assert_items_stored(
 	Ok(snapshot)
 }
 
-/// Assert how many times one block's body references `hash` — `Indexed` occurrences plus every
-/// `MultiRenew` inner count. Unlike a referring-block count this does not depend on how far
-/// pruning has progressed elsewhere, only on `block` itself still being retained.
-pub async fn assert_block_references(
+/// Assert that some retained block references `hash` `expected` times within a single body,
+/// and report which block that was.
+///
+/// Keyed on the hash rather than on a block number: a number captured when an extrinsic was
+/// included is not stable against a reorg, and which referring blocks are retained changes as
+/// pruning advances. The peak per-block occurrence count is stable while any referring block
+/// survives, which it must while the value is alive.
+pub async fn assert_occurrences_in_one_block(
 	db_path: &Path,
 	tag: &str,
 	label: &str,
-	block: u32,
 	hash: DbHash,
 	expected: u32,
 ) -> Result<()> {
-	let count = |db: &dyn KeyValueDB| -> Result<Option<u32>> {
-		let Some(inspection) = inspect_block(db, block)? else { return Ok(None) };
-		if let Some(err) = &inspection.decode_failure {
-			anyhow::bail!("{label}: block #{block} BODY_INDEX failed to decode: {err}");
-		}
-		Ok(Some(
-			inspection
-				.hashes
-				.iter()
-				.filter(|h| h.content_hash == hash)
-				.map(|h| h.indexed + h.multirenew_inner.iter().sum::<u32>())
-				.sum(),
-		))
+	let peak = |db: &dyn KeyValueDB| -> Result<(u32, u32)> {
+		let report = trace_hash(db, hash)?;
+		// Highest occurrence count, and the block it was found in.
+		Ok(report.rows.iter().map(|r| (r.delta(), r.block)).max().unwrap_or((0, 0)))
 	};
 
-	// The block may not have reached the secondary view yet, so poll rather than read once.
 	let deadline = std::time::Instant::now() + ASSERT_TIMEOUT;
 	loop {
-		let found = with_db(db_path, tag, count)?;
-		if found == Some(expected) {
-			tracing::info!("✓ {label}: block #{block} references {hash:?} {expected} time(s)");
+		let (found, block) = with_db(db_path, tag, peak)?;
+		if found == expected {
+			tracing::info!(
+				"✓ {label}: block #{block} references {hash:?} {expected} time(s) in one body",
+			);
 			return Ok(());
 		}
 		if std::time::Instant::now() >= deadline {
 			anyhow::bail!(
-				"{label}: block #{block} references {hash:?} {} time(s), expected {expected}",
-				match found {
-					Some(n) => n.to_string(),
-					None => "no (block absent)".to_string(),
-				},
+				"{label}: no retained block references {hash:?} {expected} time(s) in one body; \
+				 the highest is {found} at block #{block}",
 			);
 		}
 		tokio::time::sleep(POLL_INTERVAL).await;

@@ -7,21 +7,22 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_absent, assert_block_references, assert_no_refcount_drift, assert_proof_checked_at,
-		assert_referrers, assert_storage_healthy, authorize_account_via_sudo,
-		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
-		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
-		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
-		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, node_db_path, override_alice_authorization,
-		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
-		submit_force_renew, submit_renew_one_shot, submit_renew_pair, submit_store_signed,
-		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
-		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
-		wait_for_finalized_quiescence, wait_for_next_best_block, wait_for_session_change_on_node,
-		AuthorizationOverride, DbHash, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
-		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		assert_absent, assert_no_refcount_drift, assert_occurrences_in_one_block,
+		assert_proof_checked_at, assert_referrers, assert_storage_healthy,
+		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
+		blake2_256, block_hash_at, build_parachain_network_config_three_relay_validators,
+		canonical_store_block, content_hash_and_cid, count_event, current_best_block,
+		current_finalized_block, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		node_db_path, override_alice_authorization, resolve_canonical_store_block,
+		set_retention_period, set_retention_period_finalized, submit_force_renew,
+		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
+		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
+		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
+		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride, DbHash,
+		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
+		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -645,32 +646,18 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
 
 	// Both renews in one block reference the hash twice from that body — the intra-block
-	// duplicate the collapse mishandled. Asserted per block rather than as a referring-block
-	// count: the store block may already have been pruned by now, since the finalized
-	// authorization above can advance finality past the pruning window.
-	if renew_block_a == renew_block_b {
-		assert_block_references(
-			&harness.db_path,
-			&harness.db_tag,
-			"renew pair",
-			renew_block_a as u32,
-			key,
-			2,
-		)
-		.await?;
-	} else {
-		for block in [renew_block_a, renew_block_b] {
-			assert_block_references(
-				&harness.db_path,
-				&harness.db_tag,
-				"renew pair",
-				block as u32,
-				key,
-				1,
-			)
-			.await?;
-		}
-	}
+	// duplicate the collapse mishandled. Asserted by hash rather than by block number: the
+	// number reported at inclusion is not reorg-stable, and referring blocks come and go with
+	// pruning.
+	let expected_peak = if renew_block_a == renew_block_b { 2 } else { 1 };
+	assert_occurrences_in_one_block(
+		&harness.db_path,
+		&harness.db_tag,
+		"renew pair",
+		key,
+		expected_peak,
+	)
+	.await?;
 
 	// Proof for the original store lands at `store_block + RP` (one block before pruning
 	// could evict). At this point col11 still has the chunks and the proof can be built.
