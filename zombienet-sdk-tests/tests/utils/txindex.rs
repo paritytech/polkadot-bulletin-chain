@@ -222,6 +222,53 @@ pub async fn assert_items_stored(
 	Ok(snapshot)
 }
 
+/// Assert how many times one block's body references `hash` — `Indexed` occurrences plus every
+/// `MultiRenew` inner count. Unlike a referring-block count this does not depend on how far
+/// pruning has progressed elsewhere, only on `block` itself still being retained.
+pub async fn assert_block_references(
+	db_path: &Path,
+	tag: &str,
+	label: &str,
+	block: u32,
+	hash: DbHash,
+	expected: u32,
+) -> Result<()> {
+	let count = |db: &dyn KeyValueDB| -> Result<Option<u32>> {
+		let Some(inspection) = inspect_block(db, block)? else { return Ok(None) };
+		if let Some(err) = &inspection.decode_failure {
+			anyhow::bail!("{label}: block #{block} BODY_INDEX failed to decode: {err}");
+		}
+		Ok(Some(
+			inspection
+				.hashes
+				.iter()
+				.filter(|h| h.content_hash == hash)
+				.map(|h| h.indexed + h.multirenew_inner.iter().sum::<u32>())
+				.sum(),
+		))
+	};
+
+	// The block may not have reached the secondary view yet, so poll rather than read once.
+	let deadline = std::time::Instant::now() + ASSERT_TIMEOUT;
+	loop {
+		let found = with_db(db_path, tag, count)?;
+		if found == Some(expected) {
+			tracing::info!("✓ {label}: block #{block} references {hash:?} {expected} time(s)");
+			return Ok(());
+		}
+		if std::time::Instant::now() >= deadline {
+			anyhow::bail!(
+				"{label}: block #{block} references {hash:?} {} time(s), expected {expected}",
+				match found {
+					Some(n) => n.to_string(),
+					None => "no (block absent)".to_string(),
+				},
+			);
+		}
+		tokio::time::sleep(POLL_INTERVAL).await;
+	}
+}
+
 /// Assert an entry is gone: no value, no counter row.
 pub async fn assert_absent(db_path: &Path, tag: &str, label: &str, hash: DbHash) -> Result<()> {
 	await_col11(db_path, tag, &format!("{label}: {hash:?} absent"), |c| c.entry(&hash).is_none())
@@ -269,11 +316,7 @@ pub fn assert_column_sane(snapshot: &Col11, label: &str) -> Result<()> {
 
 /// No refcount is short of the references its blocks actually carry (the polkadot-sdk#12106
 /// collapse class), and nothing failed to decode.
-///
-/// Returns how many blocks reference some hash more than once in a single body — the only
-/// shape that can trigger the collapse. A caller that deliberately produced such a block can
-/// assert this is non-zero; where it is zero, the check passed vacuously.
-pub fn assert_no_refcount_drift(db_path: &Path, tag: &str, label: &str) -> Result<u64> {
+pub fn assert_no_refcount_drift(db_path: &Path, tag: &str, label: &str) -> Result<()> {
 	with_db(db_path, tag, |db| {
 		let report = dry_run(db)?;
 		if report.decode_failures != 0 {
@@ -301,7 +344,7 @@ pub fn assert_no_refcount_drift(db_path: &Path, tag: &str, label: &str) -> Resul
 			report.blocks_scanned,
 			report.blocks_with_duplicates,
 		);
-		Ok(report.blocks_with_duplicates)
+		Ok(())
 	})
 }
 

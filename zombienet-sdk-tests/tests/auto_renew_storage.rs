@@ -7,9 +7,9 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_absent, assert_no_refcount_drift, assert_proof_checked_at, assert_referrers,
-		assert_storage_healthy, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
-		authorize_and_store_data, blake2_256, block_hash_at,
+		assert_absent, assert_block_references, assert_no_refcount_drift, assert_proof_checked_at,
+		assert_referrers, assert_storage_healthy, authorize_account_via_sudo,
+		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
 		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
@@ -642,25 +642,35 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	// the other blocks still point at. `assert_no_refcount_drift` recomputes every counter from
 	// BODY_INDEX and compares, which is exactly that failure.
 	let key = DbHash::from(content_hash);
-	let duplicate_blocks =
-		assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
-	if renew_block_a == renew_block_b && duplicate_blocks == 0 {
-		anyhow::bail!(
-			"both renews landed in block {renew_block_a} but no block references a hash twice \
-			 — the intra-block duplicate this test exists to exercise was not produced"
-		);
+	assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
+
+	// Both renews in one block reference the hash twice from that body — the intra-block
+	// duplicate the collapse mishandled. Asserted per block rather than as a referring-block
+	// count: the store block may already have been pruned by now, since the finalized
+	// authorization above can advance finality past the pruning window.
+	if renew_block_a == renew_block_b {
+		assert_block_references(
+			&harness.db_path,
+			&harness.db_tag,
+			"renew pair",
+			renew_block_a as u32,
+			key,
+			2,
+		)
+		.await?;
+	} else {
+		for block in [renew_block_a, renew_block_b] {
+			assert_block_references(
+				&harness.db_path,
+				&harness.db_tag,
+				"renew pair",
+				block as u32,
+				key,
+				1,
+			)
+			.await?;
+		}
 	}
-	// The store block plus however many blocks the two renews ended up in.
-	let expected_referrers = if renew_block_a == renew_block_b { 2 } else { 3 };
-	assert_referrers(
-		&harness.db_path,
-		&harness.db_tag,
-		"after the renew pair",
-		key,
-		expected_referrers,
-		None,
-	)
-	.await?;
 
 	// Proof for the original store lands at `store_block + RP` (one block before pruning
 	// could evict). At this point col11 still has the chunks and the proof can be built.
