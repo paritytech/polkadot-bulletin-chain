@@ -4,7 +4,7 @@ Extending the retention of stored data with the Rust SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — call it via subxt (see [concepts](../concepts/renewal.md)).
+> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. `enable_auto_renew` / `disable_auto_renew` manage recurring renewal — see [Auto-Renewal](#auto-renewal).
 
 ## Two Clients
 
@@ -56,6 +56,25 @@ println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 ```
 
 `RenewReceipt` has `entry` (the `TransactionRef` that was renewed) and `block_hash`.
+
+## Auto-Renewal
+
+`enable_auto_renew` registers the content — by content hash, not a `TransactionRef` — for recurring renewal at each retention cycle. The first cycle is prepaid at registration; each later cycle charges the owner's authorization when it fires:
+
+```rust
+tx_client
+    .enable_auto_renew(content_hash, &signer, WaitFor::Finalized)
+    .await?;
+
+// Later, stop renewing:
+tx_client
+    .disable_auto_renew(content_hash, &signer, WaitFor::Finalized)
+    .await?;
+```
+
+`disable_auto_renew` is refused with `CannotDisablePrepaidAutoRenewal` while the registration is still prepaid — it only succeeds after the first cycle has consumed the prepayment. A signed caller must also own the registration (`NotAutoRenewalOwner`).
+
+Only one renewal registration can exist per content hash: enabling auto-renew on content that already has a scheduled `renew` (or vice versa) rejects with `RenewalAlreadyEnabled`.
 
 ## Storing and Tracking
 

@@ -56,6 +56,8 @@ impl TransactionClient {
 |--------|---------|-------------|
 | `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary); `entry` is `impl Into<TransactionRef<u32>>` — a `(block, index)` tuple or a `ContentHash` |
 | `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time (same `entry` conversions) |
+| `enable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Register recurring auto-renewal; first cycle prepaid, later cycles charge the owner's authorization |
+| `disable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Disable auto-renewal; refused while prepaid (`CannotDisablePrepaidAutoRenewal`) and for non-owners |
 
 ---
 
