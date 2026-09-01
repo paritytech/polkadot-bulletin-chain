@@ -73,7 +73,7 @@ The SDK book contains:
 - Automatic chunking (default 1 MiB, configurable)
 - DAG-PB manifest generation (IPFS-compatible)
 - Authorization management (`authorizeAccount`, `authorizePreimage`)
-- Data renewal (`renew`)
+- Data renewal (`renew`, `forceRenew`, `enableAutoRenew`, `disableAutoRenew`)
 - Progress tracking callbacks
 - Builder pattern API
 - Mock client for testing
