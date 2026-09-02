@@ -943,7 +943,7 @@
     },
     {
       "type": "row",
-      "title": "RPC",
+      "title": "HOP RPCs",
       "gridPos": {
         "h": 1,
         "w": 24,
