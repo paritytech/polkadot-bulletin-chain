@@ -69,21 +69,21 @@ With `enable_auto_renew` the chain tracks this for you and re-registers the data
 
 ## Raw Runtime Call
 
-`renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
+On current runtimes the renewal extrinsics live on the **`DataRenewal`** pallet (pre-split runtimes carried them on `TransactionStorage`). `renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
 
 ```typescript
-api.tx.TransactionStorage.renew({
+api.tx.DataRenewal.renew({
   entry: { type: "Position", value: { block, index } }
 });
 
 // force_renew takes the same `entry`; fixed-size hashes are passed as
 // 0x-prefixed hex (PAPI SizedHex):
-api.tx.TransactionStorage.force_renew({
+api.tx.DataRenewal.force_renew({
   entry: { type: "ContentHash", value: contentHashHex }
 });
 
 // enable_auto_renew / disable_auto_renew take a content hash, not an `entry`:
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+api.tx.DataRenewal.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
 ## When to Renew
@@ -100,9 +100,9 @@ Only the on-chain guarantee expires: the CID stays valid, and validators may sti
 
 ## SDK Support
 
-Both SDKs provide a `renew` helper:
-- **Rust SDK**: `prepare_renew()`, `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
-- **TypeScript SDK**: `client.renew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
+Both SDKs expose the full renewal surface:
+- **Rust SDK**: `TransactionClient::{renew, force_renew, enable_auto_renew, disable_auto_renew}`, plus the offline `prepare_renew()` and `RenewalTracker` helpers — See [Rust SDK: Renewal](../rust/renewal.md)
+- **TypeScript SDK**: `client.renew()`, `client.forceRenew()`, `client.enableAutoRenew()`, `client.disableAutoRenew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
 
 ## Next Steps
 
