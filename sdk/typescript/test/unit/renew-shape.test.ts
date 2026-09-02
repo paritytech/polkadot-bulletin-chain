@@ -63,15 +63,23 @@ const submitFn = async () => ({
 // the call.
 const staticApis = (levels: {
   dataRenewalRenew?: number
+  dataRenewalEnableAutoRenew?: number
   renew?: number
   forceRenew?: number
+  enableAutoRenew?: number
 }) => ({
   compat: {
     tx: {
-      DataRenewal: { renew: { level: levels.dataRenewalRenew ?? 0 } },
+      DataRenewal: {
+        renew: { level: levels.dataRenewalRenew ?? 0 },
+        enable_auto_renew: {
+          level: levels.dataRenewalEnableAutoRenew ?? 0,
+        },
+      },
       TransactionStorage: {
         renew: { level: levels.renew ?? 1 },
         force_renew: { level: levels.forceRenew ?? 0 },
+        enable_auto_renew: { level: levels.enableAutoRenew ?? 0 },
       },
     },
   },
@@ -420,6 +428,110 @@ describe("forceRenew", () => {
         message: expect.stringContaining("probe"),
       },
     )
+  })
+})
+
+describe("auto-renew", () => {
+  const hashHex = `0x${"01".repeat(32)}`
+
+  it("submits enable_auto_renew({content_hash}) on DataRenewal without getStaticApis", async () => {
+    let arg: unknown
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          enable_auto_renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+      },
+    )
+
+    await client.enableAutoRenew(hashInput).send()
+    expect(arg).toEqual({ content_hash: hashHex })
+  })
+
+  it("submits disable_auto_renew on DataRenewal when compat reports it present", async () => {
+    let arg: unknown
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          enable_auto_renew: () => mockTx,
+          disable_auto_renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+        getStaticApis: async () =>
+          staticApis({ dataRenewalRenew: 1, dataRenewalEnableAutoRenew: 1 }),
+      },
+    )
+
+    await client.disableAutoRenew(hashInput).send()
+    expect(arg).toEqual({ content_hash: hashHex })
+  })
+
+  it("submits enable_auto_renew on TransactionStorage on pre-split runtimes that carry it", async () => {
+    let arg: unknown
+    const client = createClient(
+      {
+        renew: () => mockTx,
+        force_renew: () => mockTx,
+        enable_auto_renew: (a: unknown) => {
+          arg = a
+          return mockTx
+        },
+      },
+      {
+        getStaticApis: async () =>
+          staticApis({ forceRenew: 1, enableAutoRenew: 1 }),
+      },
+    )
+
+    await client.enableAutoRenew(hashInput).send()
+    expect(arg).toEqual({ content_hash: hashHex })
+  })
+
+  it("rejects when compat reports enable_auto_renew Incompatible", async () => {
+    // Entries exist (real PAPI proxies always do); only compat levels reveal
+    // the live runtime lacks the auto-renew pair.
+    let called = false
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          enable_auto_renew: () => {
+            called = true
+            return mockTx
+          },
+        },
+        getStaticApis: async () => staticApis({ dataRenewalRenew: 1 }),
+      },
+    )
+
+    await expect(
+      client.enableAutoRenew(hashInput).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "enable_auto_renew is not supported by this runtime",
+    })
+    expect(called).toBe(false)
+  })
+
+  it("rejects on legacy runtimes with no auto-renew entries", async () => {
+    const client = createClient({ renew: () => mockTx })
+
+    await expect(
+      client.disableAutoRenew(hashInput).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "disable_auto_renew is not supported by this runtime",
+    })
   })
 })
 
