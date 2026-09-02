@@ -798,7 +798,7 @@
     },
     {
       "type": "row",
-      "title": "Promotion",
+      "title": "HOP promotion",
       "gridPos": {
         "h": 1,
         "w": 24,
