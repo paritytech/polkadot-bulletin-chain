@@ -2,7 +2,7 @@
 
 Grafana dashboard models for the Bulletin networks. Edit here, then re-import.
 
-- `bulletin-paseo-dashboard.json`: Paseo Next V2
+- `bulletin-paseo-dashboard.json` — Paseo Next V2: liveness, IPFS, bitswap, HOP (`substrate_hop_*`)
 - `bulletin-polkadot-dashboard.json`: Polkadot. The `kubo job` variable holds the
   Prometheus job of the mainnet IPFS gateway; none is deployed yet, so verify it first.
 
