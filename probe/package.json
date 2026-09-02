@@ -1,0 +1,30 @@
+{
+  "name": "bulletin-probe",
+  "version": "0.1.0",
+  "description": "Atomic synthetic probe for Bulletin Chain SLO. Emits Sentry spans matching bulletin-deploy schema, tagged deploy.probe.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "papi:generate": "papi add -w wss://paseo-bulletin-next-rpc.polkadot.io bulletin",
+    "start": "tsx src/probe.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "@polkadot-api/descriptors": "file:.papi/descriptors",
+    "@polkadot-labs/hdkd": "^0.0.28",
+    "@polkadot-labs/hdkd-helpers": "^0.0.30",
+    "@sentry/node": "^8.45.0",
+    "polkadot-api": "^2.1.2"
+  },
+  "devDependencies": {
+    "@polkadot-api/cli": "^0.21.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
