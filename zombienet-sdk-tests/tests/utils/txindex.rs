@@ -14,8 +14,8 @@ use std::{
 };
 pub use tx_index_tool::DbHash;
 use tx_index_tool::{
-	dry_run, inspect_block, list_entries, open_database, trace_hash, verify_seams, KeyValueDB,
-	ListOptions, OpenMode, StorageEntry,
+	dry_run, inspect_block, list_entries, open_database, verify_seams, KeyValueDB, ListOptions,
+	OpenMode, StorageEntry,
 };
 
 /// How long the polling assertions wait for the expected state to appear.
@@ -26,6 +26,10 @@ use tx_index_tool::{
 const ASSERT_TIMEOUT: Duration = Duration::from_secs(300);
 /// Gap between polls while waiting.
 const POLL_INTERVAL: Duration = Duration::from_secs(1);
+/// Bound for assertions that wait only on the secondary view catching up with the primary,
+/// rather than on chain progress. Kept short so an assertion about a block that pruning will
+/// eventually remove fails while the evidence is still readable.
+const CATCH_UP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The key a `store` files its data under, as a `DbHash` for the assertions below.
 pub fn content_hash(data: &[u8]) -> DbHash {
@@ -222,39 +226,51 @@ pub async fn assert_items_stored(
 	Ok(snapshot)
 }
 
-/// Assert that some retained block references `hash` `expected` times within a single body,
-/// and report which block that was.
+/// Assert how many times one block's body references `hash` — `Indexed` occurrences plus every
+/// `MultiRenew` inner count.
 ///
-/// Keyed on the hash rather than on a block number: a number captured when an extrinsic was
-/// included is not stable against a reorg, and which referring blocks are retained changes as
-/// pruning advances. The peak per-block occurrence count is stable while any referring block
-/// survives, which it must while the value is alive.
-pub async fn assert_occurrences_in_one_block(
+/// `block` must be a finality-anchored number: it is read directly, so a number that is not on
+/// the canonical chain reports the wrong body or none at all. Bounded by `CATCH_UP_TIMEOUT`
+/// rather than `ASSERT_TIMEOUT`, since the only wait is the secondary catching up — a block
+/// referencing live data stays retained for the whole pruning window, so a longer wait would
+/// outlive the state being checked.
+pub async fn assert_block_references(
 	db_path: &Path,
 	tag: &str,
 	label: &str,
+	block: u32,
 	hash: DbHash,
 	expected: u32,
 ) -> Result<()> {
-	let peak = |db: &dyn KeyValueDB| -> Result<(u32, u32)> {
-		let report = trace_hash(db, hash)?;
-		// Highest occurrence count, and the block it was found in.
-		Ok(report.rows.iter().map(|r| (r.delta(), r.block)).max().unwrap_or((0, 0)))
+	let count = |db: &dyn KeyValueDB| -> Result<Option<u32>> {
+		let Some(inspection) = inspect_block(db, block)? else { return Ok(None) };
+		if let Some(err) = &inspection.decode_failure {
+			anyhow::bail!("{label}: block #{block} BODY_INDEX failed to decode: {err}");
+		}
+		Ok(Some(
+			inspection
+				.hashes
+				.iter()
+				.filter(|h| h.content_hash == hash)
+				.map(|h| h.indexed + h.multirenew_inner.iter().sum::<u32>())
+				.sum(),
+		))
 	};
 
-	let deadline = std::time::Instant::now() + ASSERT_TIMEOUT;
+	let deadline = std::time::Instant::now() + CATCH_UP_TIMEOUT;
 	loop {
-		let (found, block) = with_db(db_path, tag, peak)?;
-		if found == expected {
-			tracing::info!(
-				"✓ {label}: block #{block} references {hash:?} {expected} time(s) in one body",
-			);
+		let found = with_db(db_path, tag, count)?;
+		if found == Some(expected) {
+			tracing::info!("✓ {label}: block #{block} references {hash:?} {expected} time(s)");
 			return Ok(());
 		}
 		if std::time::Instant::now() >= deadline {
 			anyhow::bail!(
-				"{label}: no retained block references {hash:?} {expected} time(s) in one body; \
-				 the highest is {found} at block #{block}",
+				"{label}: block #{block} references {hash:?} {}, expected {expected}",
+				match found {
+					Some(n) => format!("{n} time(s)"),
+					None => "nothing — the block is not in this database".to_string(),
+				},
 			);
 		}
 		tokio::time::sleep(POLL_INTERVAL).await;

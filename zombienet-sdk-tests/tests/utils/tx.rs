@@ -518,6 +518,59 @@ pub async fn resolve_canonical_store_block(
 	)
 }
 
+/// Blocks on the **finalized** chain carrying `DataRenewal::Renewed` events for
+/// `content_hash`, each with how many such events that block holds, ascending.
+///
+/// The renewal counterpart to [`resolve_canonical_store_block`], and needed for the same
+/// reason: [`submit_renew_pair`] reports best-chain numbers, so an orphaned inclusion block
+/// leaves them pointing at blocks that are not on the canonical chain. That helper cannot be
+/// reused because it matches `TransactionStorage::Stored`, which a renewal does not emit.
+///
+/// The per-block count is what distinguishes two renewals sharing one body from two renewals in
+/// separate blocks — the intra-block duplicate that `polkadot-sdk#12106` mishandled.
+///
+/// Callers must have waited for finality to cover the renewals. `search_from_inclusive` bounds
+/// how far back the walk descends; the store block is the natural floor, since nothing can be
+/// renewed before it was stored.
+pub async fn resolve_canonical_renew_blocks(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	search_from_inclusive: u64,
+) -> Result<Vec<(u64, u32)>> {
+	let mut found: Vec<(u64, u32)> = Vec::new();
+	// `at_latest` is the latest *finalized* block, which is what makes this walk reorg-proof.
+	let mut current = client.blocks().at_latest().await?;
+	loop {
+		let block_n = current.number() as u64;
+		if block_n < search_from_inclusive {
+			break;
+		}
+		// `Renewed { index: u32, content_hash: [u8; 32] }` — a 32-byte sliding-window match,
+		// as in `resolve_canonical_store_block`.
+		let count = current
+			.events()
+			.await?
+			.iter()
+			.filter_map(|e| e.ok())
+			.filter(|ev| {
+				ev.pallet_name() == "DataRenewal" &&
+					ev.variant_name() == "Renewed" &&
+					ev.field_bytes().windows(32).any(|w| w == content_hash)
+			})
+			.count() as u32;
+		if count > 0 {
+			found.push((block_n, count));
+		}
+		if block_n == 0 {
+			break;
+		}
+		let parent_hash = current.header().parent_hash;
+		current = client.blocks().at(parent_hash).await?;
+	}
+	found.reverse();
+	Ok(found)
+}
+
 /// Canonical store/renew block number, read from `TransactionByContentHash` at the
 /// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
@@ -598,21 +651,57 @@ pub async fn submit_renew_pair(
 	let bob_progress =
 		client.tx().sign_and_submit_then_watch(&renew_call, &bob, bob_params).await?;
 
-	let (hash_alice, _) = tokio::time::timeout(
+	let (hash_alice, events_alice) = tokio::time::timeout(
 		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
 		wait_for_in_best_block(alice_progress),
 	)
 	.await
 	.map_err(|_| anyhow!("alice renew timed out"))??;
-	let (hash_bob, _) = tokio::time::timeout(
+	let (hash_bob, events_bob) = tokio::time::timeout(
 		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
 		wait_for_in_best_block(bob_progress),
 	)
 	.await
 	.map_err(|_| anyhow!("bob renew timed out"))??;
 
+	// `canonical_store_block` rather than `block.number()`: the header can sit one ahead of the
+	// canonical `Transactions[N]` key, which is what the pallet schedules against. Both are
+	// best-chain reads, so the numbers are only as stable as the inclusion block — an orphaned
+	// one yields a number that is not on the canonical chain. Callers needing a stable value
+	// must re-anchor against finality.
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
+
+	// `wait_for_success` only proves the extrinsic did not error, not that it renewed anything;
+	// a renewal that produced no event would leave the caller reasoning about a block that
+	// holds no new reference.
+	for (who, events) in [("alice", &events_alice), ("bob", &events_bob)] {
+		let renewed = events.iter().filter_map(|e| e.ok()).any(|e| {
+			e.pallet_name() == "DataRenewal" &&
+				e.variant_name() == "Renewed" &&
+				e.field_bytes().windows(32).any(|w| w == content_hash.as_slice())
+		});
+		if !renewed {
+			anyhow::bail!(
+				"{who}'s force_renew(block={block}, index={index}) emitted no \
+				 DataRenewal.Renewed for 0x{}",
+				hex::encode(content_hash),
+			);
+		}
+	}
+
+	// A renewal re-anchors `TransactionByContentHash` to its own block, so a result equal to
+	// the entry's previous position means the read landed on state where the renewal is not
+	// present — an orphaned inclusion block.
+	if block_alice == u64::from(block) || block_bob == u64::from(block) {
+		tracing::warn!(
+			"force_renew resolved to the renewed entry's own block ({}): the inclusion block \
+			 was probably orphaned, so these numbers are unreliable (alice=#{}, bob=#{})",
+			block,
+			block_alice,
+			block_bob,
+		);
+	}
 	tracing::info!(
 		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,

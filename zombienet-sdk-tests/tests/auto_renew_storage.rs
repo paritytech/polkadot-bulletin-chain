@@ -7,17 +7,17 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_absent, assert_no_refcount_drift, assert_occurrences_in_one_block,
-		assert_proof_checked_at, assert_referrers, assert_storage_healthy,
-		authorize_account_via_sudo, authorize_account_via_sudo_finalized, authorize_and_store_data,
-		blake2_256, block_hash_at, build_parachain_network_config_three_relay_validators,
-		canonical_store_block, content_hash_and_cid, count_event, current_best_block,
-		current_finalized_block, disable_auto_renew, enable_auto_renew,
-		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
-		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
-		node_db_path, override_alice_authorization, resolve_canonical_store_block,
-		set_retention_period, set_retention_period_finalized, submit_force_renew,
-		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
+		assert_absent, assert_block_references, assert_no_refcount_drift, assert_proof_checked_at,
+		assert_referrers, assert_storage_healthy, authorize_account_via_sudo,
+		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
+		build_parachain_network_config_three_relay_validators, canonical_store_block,
+		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
+		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
+		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
+		initialize_network, node_db_path, override_alice_authorization,
+		resolve_canonical_renew_blocks, resolve_canonical_store_block, set_retention_period,
+		set_retention_period_finalized, submit_force_renew, submit_renew_one_shot,
+		submit_renew_pair, submit_store_signed, top_up_alice_authorization,
 		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
 		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride, DbHash,
@@ -26,7 +26,7 @@ use crate::{
 	},
 };
 use anyhow::{Context, Result};
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 use subxt::{
 	config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder},
 	dynamic::{tx, Value},
@@ -63,6 +63,10 @@ const BLOCKS_PRUNING_LESS_THAN_RETENTION: u32 = 5;
 /// Pruning larger than retention: the proof block still finds col11 alive, chain progresses.
 const BLOCKS_PRUNING_GREATER_THAN_RETENTION: u32 = 15;
 const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
+/// How long to wait for both `force_renew` calls to reach the finalized chain. Bounded well
+/// below the `--blocks-pruning` window so the renewal blocks are still retained when the
+/// on-disk assertion reads them.
+const RENEW_FINALITY_TIMEOUT_SECS: u64 = 120;
 /// With pruning=5 + RP=10, the proof block at `S+10` lands before finality has caught up
 /// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
 /// block out past the (finality + pruning) lag so col11 is reliably empty.
@@ -623,19 +627,42 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 			best_store_block
 		);
 	}
-	let (renew_block_a, renew_block_b) =
-		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
-	if renew_block_a != renew_block_b {
-		tracing::warn!(
-			"Renews landed in different blocks ({} and {}) instead of one — test still valid \
-			 but uses the later block for pruning math",
-			renew_block_a,
-			renew_block_b
-		);
-	} else {
-		tracing::info!("Both renews landed in the same block {}", renew_block_a);
+	submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
+
+	// `submit_renew_pair`'s numbers are best-chain reads that an orphaned inclusion block
+	// invalidates, so re-anchor against finality — the same reason the store block goes through
+	// `resolve_canonical_store_block` above. Polled rather than derived from a target height,
+	// because those numbers are the untrustworthy input.
+	let renew_blocks = {
+		let deadline = std::time::Instant::now() + Duration::from_secs(RENEW_FINALITY_TIMEOUT_SECS);
+		loop {
+			let found = resolve_canonical_renew_blocks(client, &content_hash, store_block).await?;
+			if found.iter().map(|(_, n)| n).sum::<u32>() == 2 {
+				break found;
+			}
+			if std::time::Instant::now() >= deadline {
+				anyhow::bail!(
+					"both renewals did not reach the finalized chain within {}s; found {:?}",
+					RENEW_FINALITY_TIMEOUT_SECS,
+					found,
+				);
+			}
+			tokio::time::sleep(Duration::from_secs(3)).await;
+		}
+	};
+	match renew_blocks.as_slice() {
+		[(block, 2)] => tracing::info!("Both renews landed in block {block}"),
+		blocks => tracing::warn!(
+			"Renews landed across {:?} instead of one block — test still valid, but the \
+			 intra-tx duplicate is not exercised",
+			blocks,
+		),
 	}
-	let renew_block = std::cmp::max(renew_block_a, renew_block_b);
+	let renew_block = renew_blocks
+		.iter()
+		.map(|(n, _)| *n)
+		.max()
+		.expect("the loop above breaks only on two renewals; qed");
 
 	// Two renewals of one hash inside a single body is the shape that the pre-aggregation
 	// commit path collapsed into a single increment (polkadot-sdk#12106): the counter ends up
@@ -645,19 +672,21 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let key = DbHash::from(content_hash);
 	assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
 
-	// Both renews in one block reference the hash twice from that body — the intra-block
-	// duplicate the collapse mishandled. Asserted by hash rather than by block number: the
-	// number reported at inclusion is not reorg-stable, and referring blocks come and go with
-	// pruning.
-	let expected_peak = if renew_block_a == renew_block_b { 2 } else { 1 };
-	assert_occurrences_in_one_block(
-		&harness.db_path,
-		&harness.db_tag,
-		"renew pair",
-		key,
-		expected_peak,
-	)
-	.await?;
+	// Two references to one hash from a single body is the shape the pre-aggregation commit
+	// path collapsed into one increment. Asserted per renewal block, which
+	// `assert_no_refcount_drift` cannot distinguish from any other duplicate on the shared
+	// harness.
+	for (block, count) in &renew_blocks {
+		assert_block_references(
+			&harness.db_path,
+			&harness.db_tag,
+			"renew pair",
+			*block as u32,
+			key,
+			*count,
+		)
+		.await?;
+	}
 
 	// Proof for the original store lands at `store_block + RP` (one block before pruning
 	// could evict). At this point col11 still has the chunks and the proof can be built.
