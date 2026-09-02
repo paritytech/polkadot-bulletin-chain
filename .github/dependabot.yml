@@ -4,8 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    ignore:
-      - dependency-name: "*"
+    # No version-update PRs (deps track the pinned polkadot-sdk), but let
+    # security updates through; ignore-all made those jobs fail with
+    # all_versions_ignored instead of opening lockfile bumps.
+    open-pull-requests-limit: 0
 
   - package-ecosystem: "npm"
     directory: "/console-ui"
