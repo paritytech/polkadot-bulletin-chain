@@ -15,6 +15,8 @@ export interface MonitoringLinks {
   grafana?: string;
   /** Grafana Bitswap server insights dashboard (IPFS/Bitswap serve load). */
   bitswap?: string;
+  /** Grafana Bulletin dashboard: chain liveness, IPFS, Bitswap, HOP pool/promotion/RPC. */
+  bulletin?: string;
   /** Sentry dashboard for product-side telemetry on this chain. */
   sentry?: string;
   /** Sentry drill-down: deploy.storage phase (per-deploy Bulletin write). */
@@ -121,6 +123,18 @@ function bitswapLink(chain: string): string {
   );
 }
 
+const GRAFANA_BULLETIN =
+  "https://grafana.teleport.parity.io/d/bulletin-paseo/bulletin-paseo";
+
+// Bulletin chain dashboard (uid `bulletin-paseo`), parameterised by `var-chain`,
+// so the one dashboard serves every Bulletin network.
+function bulletinLink(chain: string): string {
+  return (
+    `${GRAFANA_BULLETIN}?orgId=1&from=now-6h&to=now&timezone=utc` +
+    `&var-datasource=PC96415006F908B67&var-chain=${chain}`
+  );
+}
+
 export function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
 }
@@ -187,6 +201,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     ],
     monitoring: {
       grafana: grafanaLink("bulletin-westend"),
+      bulletin: bulletinLink("bulletin-westend"),
       bitswap: bitswapLink("bulletin-westend"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
@@ -212,6 +227,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     ],
     monitoring: {
       grafana: grafanaLink("products-devnet"),
+      bulletin: bulletinLink("products-devnet"),
       bitswap: bitswapLink("products-devnet"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
@@ -244,6 +260,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
         "next-bulletin-paseo",
         "paseo-bulletin-next-collator-node-0",
       ),
+      bulletin: bulletinLink("next-bulletin-paseo"),
       bitswap: bitswapLink("next-bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
@@ -280,6 +297,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     descriptor: bulletin_polkadot,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
+      bulletin: bulletinLink("bulletin-polkadot"),
       bitswap: bitswapLink("bulletin-polkadot"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
