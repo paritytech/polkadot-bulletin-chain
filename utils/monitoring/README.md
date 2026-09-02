@@ -2,7 +2,7 @@
 
 Grafana dashboard models for the Bulletin networks. Edit here, then re-import.
 
-- `bulletin-paseo-dashboard.json` — Paseo Next V2
+- `bulletin-paseo-dashboard.json` — Paseo Next V2: liveness, IPFS, bitswap, HOP (`substrate_hop_*`)
 
 Import: [Grafana](https://grafana.teleport.parity.io/dashboard/new?orgId=1&from=now-6h&to=now&timezone=browser)
 → New → New dashboard → Import dashboard → upload or paste JSON → Load → Overwrite.
