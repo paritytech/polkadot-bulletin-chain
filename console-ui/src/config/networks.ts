@@ -126,8 +126,8 @@ function bitswapLink(chain: string): string {
 const GRAFANA_BULLETIN =
   "https://grafana.teleport.parity.io/d/bulletin-paseo/bulletin-paseo";
 
-// Bulletin chain dashboard (uid `bulletin-paseo`), parameterised by `var-chain`,
-// so the one dashboard serves every Bulletin network.
+// Bulletin chain dashboard (uid `bulletin-paseo`), parameterised by `var-chain`.
+// Only wired where the metrics exist today (Paseo); add other chains once they do.
 function bulletinLink(chain: string): string {
   return (
     `${GRAFANA_BULLETIN}?orgId=1&from=now-6h&to=now&timezone=utc` +
@@ -201,7 +201,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     ],
     monitoring: {
       grafana: grafanaLink("bulletin-westend"),
-      bulletin: bulletinLink("bulletin-westend"),
       bitswap: bitswapLink("bulletin-westend"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
@@ -227,7 +226,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     ],
     monitoring: {
       grafana: grafanaLink("products-devnet"),
-      bulletin: bulletinLink("products-devnet"),
       bitswap: bitswapLink("products-devnet"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
@@ -297,7 +295,6 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
     descriptor: bulletin_polkadot,
     monitoring: {
       grafana: grafanaLink("bulletin-polkadot"),
-      bulletin: bulletinLink("bulletin-polkadot"),
       bitswap: bitswapLink("bulletin-polkadot"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
