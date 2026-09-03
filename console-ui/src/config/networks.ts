@@ -125,7 +125,7 @@ function bitswapLink(chain: string): string {
 
 // Bulletin dashboard (uid `bulletin-paseo`). Paseo only; it is the sole Bulletin dashboard.
 const GRAFANA_BULLETIN =
-  "https://grafana.teleport.parity.io/d/bulletin-paseo/bulletin-paseo" +
+  "https://grafana.teleport.parity.io/d/bulletin-paseo" +
   "?orgId=1&from=now-6h&to=now&timezone=utc" +
   "&var-datasource=PC96415006F908B67&var-chain=next-bulletin-paseo";
 
