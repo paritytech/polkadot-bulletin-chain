@@ -1,4 +1,4 @@
-import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LineChart, Network, ScrollText } from "lucide-react";
+import { Activity, BarChart3, BookOpen, ExternalLink, Globe, LayoutDashboard, LineChart, Network, ScrollText } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { useChainState } from "@/state/chain.state";
@@ -24,6 +24,14 @@ function group(monitoring: MonitoringLinks | undefined, endpoint: string | undef
       href: monitoring.grafana,
       icon: Activity,
       description: "Block production, finality, peer count.",
+    });
+  }
+  if (monitoring.bulletin) {
+    chainHealth.push({
+      label: "Grafana — Bulletin Dashboard",
+      href: monitoring.bulletin,
+      icon: LayoutDashboard,
+      description: "Chain liveness, IPFS gateway, Bitswap, and HOP pool/promotion/RPC.",
     });
   }
   if (monitoring.bitswap) {
