@@ -1,0 +1,45 @@
+[package]
+name = "tx-index-tool"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license = "Apache-2.0"
+description = "Inspect and repair the indexed transaction storage (col11) of a Bulletin Chain database."
+publish = false
+
+[[bin]]
+name = "tx-index-tool"
+path = "src/main.rs"
+
+[lib]
+name = "tx_index_tool"
+path = "src/lib.rs"
+
+[dependencies]
+# CLI
+clap = { workspace = true, features = ["derive"] }
+
+# Database — the same kvdb stack sc-client-db writes with
+kvdb = { workspace = true }
+kvdb-rocksdb = { workspace = true }
+
+# Decoding what the node wrote
+codec = { workspace = true, features = ["derive", "std"] }
+sp-core = { workspace = true, features = ["std"] }
+sp-crypto-hashing = { workspace = true, features = ["std"] }
+
+# `proof` recomputes what the transaction-storage inherent provider emits
+sp-transaction-storage-proof = { workspace = true, features = ["std"] }
+sp-trie = { workspace = true, features = ["std"] }
+
+# RocksDB keeps many SST files open; a secondary instance keeps all of them open
+fdlimit = { workspace = true }
+
+# `trace --rpc-url` cross-checks the database against chain state. Metadata-driven, so events
+# and calls come back named rather than as raw bytes. Same version the zombienet tests use.
+subxt = { version = "0.43", default-features = false, features = ["jsonrpsee", "native"] }
+# Only to drive subxt; `chain.rs` builds a current-thread runtime so the CLI stays sync.
+tokio = { version = "1", features = ["rt", "time"] }
+
+[dev-dependencies]
+kvdb-memorydb = { workspace = true }

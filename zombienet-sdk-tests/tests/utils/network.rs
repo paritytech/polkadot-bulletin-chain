@@ -51,6 +51,13 @@ pub fn get_parachain_chain_id() -> String {
 	env_or_default(PARACHAIN_CHAIN_ID_ENV, DEFAULT_PARACHAIN_CHAIN_ID)
 }
 
+/// Where a spawned node keeps its parachain database, for the on-disk assertions in
+/// [`super::txindex`].
+pub fn node_db_path(network: &Network<LocalFileSystem>, node_name: &str) -> Result<PathBuf> {
+	let base_dir = network.base_dir().ok_or_else(|| anyhow!("network has no base directory"))?;
+	Ok(super::txindex::get_db_path(base_dir, node_name, &get_parachain_chain_id()))
+}
+
 fn resolve_binary_path(path_str: &str) -> String {
 	let path = PathBuf::from(path_str);
 	if path.is_absolute() {
@@ -64,10 +71,6 @@ fn resolve_binary_path(path_str: &str) -> String {
 	}
 }
 
-fn require_env_var(env_var: &str) -> Result<String> {
-	std::env::var(env_var).map_err(|_| anyhow!("{} env var is not set", env_var))
-}
-
 fn verify_binary(path: &str) -> Result<()> {
 	let output = std::process::Command::new(path)
 		.arg("--version")
@@ -77,15 +80,6 @@ fn verify_binary(path: &str) -> Result<()> {
 		anyhow::bail!("'{}' exited with status: {}", path, output.status);
 	}
 	Ok(())
-}
-
-pub fn verify_ldb_tool() -> Result<String> {
-	let ldb_path = require_env_var(LDB_PATH_ENV)?;
-	std::process::Command::new(&ldb_path)
-		.arg("--help")
-		.output()
-		.context(format!("Failed to execute '{}' (set via {})", ldb_path, LDB_PATH_ENV))?;
-	Ok(ldb_path)
 }
 
 pub fn verify_parachain_binaries() -> Result<()> {
