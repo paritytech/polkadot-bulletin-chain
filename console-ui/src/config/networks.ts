@@ -123,12 +123,6 @@ function bitswapLink(chain: string): string {
   );
 }
 
-// Bulletin dashboard (uid `bulletin-paseo`). Paseo only; it is the sole Bulletin dashboard.
-const GRAFANA_BULLETIN =
-  "https://grafana.teleport.parity.io/d/bulletin-paseo" +
-  "?orgId=1&from=now-6h&to=now&timezone=utc" +
-  "&var-datasource=PC96415006F908B67&var-chain=next-bulletin-paseo";
-
 export function polkadotJsAppsLink(endpoint: string): string {
   return `https://polkadot.js.org/apps/?rpc=${encodeURIComponent(endpoint)}`;
 }
@@ -252,7 +246,8 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
         "next-bulletin-paseo",
         "paseo-bulletin-next-collator-node-0",
       ),
-      bulletin: GRAFANA_BULLETIN,
+      bulletin:
+        "https://grafana.teleport.parity.io/d/bulletin-paseo?orgId=1&from=now-6h&to=now&timezone=utc&var-datasource=PC96415006F908B67&var-chain=next-bulletin-paseo",
       bitswap: bitswapLink("next-bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,
