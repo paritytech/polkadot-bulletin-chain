@@ -571,16 +571,16 @@ pub async fn resolve_canonical_renew_blocks(
 	Ok(found)
 }
 
-/// Canonical store/renew block number, read from `TransactionByContentHash` at the
+/// Canonical store/renew `(block, index)`, read from `TransactionByContentHash` at the
 /// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
 /// schedule auto-renewal; reading at the inclusion-block state returns the authoritative
 /// number.
-pub async fn canonical_store_block(
+pub async fn canonical_store_position(
 	client: &OnlineClient<SubstrateConfig>,
 	at_block_hash: subxt::utils::H256,
 	content_hash: &[u8; 32],
-) -> Result<u64> {
+) -> Result<(u64, u32)> {
 	let address = subxt::dynamic::storage(
 		"TransactionStorage",
 		"TransactionByContentHash",
@@ -596,20 +596,32 @@ pub async fn canonical_store_block(
 	})?;
 	use subxt::ext::scale_value::{Primitive, ValueDef};
 	let decoded = value.to_value()?;
-	let block_number = match decoded.value {
-		ValueDef::Composite(ref c) => c
-			.values()
-			.next()
-			.and_then(|v| match &v.value {
-				ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
-				_ => None,
-			})
-			.ok_or_else(|| {
-				anyhow!("TransactionByContentHash value composite empty or non-numeric")
-			})?,
-		_ => anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded),
+	let ValueDef::Composite(ref c) = decoded.value else {
+		anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded)
 	};
-	Ok(block_number as u64)
+	// `(BlockNumber, u32)`.
+	let mut fields = c.values().map(|v| match &v.value {
+		ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
+		_ => None,
+	});
+	let block_number = fields
+		.next()
+		.flatten()
+		.ok_or_else(|| anyhow!("TransactionByContentHash block is empty or non-numeric"))?;
+	let index = fields
+		.next()
+		.flatten()
+		.ok_or_else(|| anyhow!("TransactionByContentHash index is empty or non-numeric"))?;
+	Ok((block_number as u64, index as u32))
+}
+
+/// Just the block half of [`canonical_store_position`].
+pub async fn canonical_store_block(
+	client: &OnlineClient<SubstrateConfig>,
+	at_block_hash: subxt::utils::H256,
+	content_hash: &[u8; 32],
+) -> Result<u64> {
+	Ok(canonical_store_position(client, at_block_hash, content_hash).await?.0)
 }
 
 /// Two `force_renew` calls signed by Alice and Bob respectively — synchronous immediate
@@ -625,6 +637,15 @@ pub async fn submit_renew_pair(
 ) -> Result<(u64, u64)> {
 	let alice = dev::alice();
 	let bob = dev::bob();
+	// `Position`, not `ContentHash`: the first renewal re-anchors `TransactionByContentHash` to
+	// the block being built, whose `Transactions[N]` is not sealed until `on_finalize`, so a
+	// second `ContentHash` renewal in the same block resolves to an entry that cannot be read
+	// yet and fails with `RenewedNotFound`. A position pins the entry for both calls.
+	//
+	// `index` must be resolved by the caller (see `canonical_store_position`) — which entry sits
+	// at a given index depends on what else that block stored, and a renewal fired from the
+	// mandatory inherent takes a lower index than any regular extrinsic. Guessing renews
+	// whatever happens to be there, silently, since that dispatch succeeds too.
 	let entry = Value::named_variant(
 		"Position",
 		[
@@ -672,43 +693,37 @@ pub async fn submit_renew_pair(
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
 
-	// `wait_for_success` only proves the extrinsic did not error, not that it renewed anything;
-	// a renewal that produced no event would leave the caller reasoning about a block that
-	// holds no new reference.
+	// `wait_for_success` only proves the extrinsic did not error, not that it renewed the entry
+	// asked for — renewing the wrong entry also succeeds. Assert the event names this hash, and
+	// list what was emitted when it does not.
 	for (who, events) in [("alice", &events_alice), ("bob", &events_bob)] {
-		let renewed = events.iter().filter_map(|e| e.ok()).any(|e| {
-			e.pallet_name() == "DataRenewal" &&
-				e.variant_name() == "Renewed" &&
-				e.field_bytes().windows(32).any(|w| w == content_hash.as_slice())
-		});
-		if !renewed {
+		let emitted: Vec<String> = events
+			.iter()
+			.filter_map(|e| e.ok())
+			.map(|e| {
+				let mentions_hash =
+					e.field_bytes().windows(32).any(|w| w == content_hash.as_slice());
+				format!(
+					"{}.{}{}",
+					e.pallet_name(),
+					e.variant_name(),
+					if mentions_hash { "(target hash)" } else { "" },
+				)
+			})
+			.collect();
+		let renewed = emitted.iter().any(|e| e == "DataRenewal.Renewed(target hash)");
+		if renewed {
+			tracing::info!("{who}'s force_renew emitted DataRenewal.Renewed for the target hash");
+		} else {
 			anyhow::bail!(
-				"{who}'s force_renew(block={block}, index={index}) emitted no \
-				 DataRenewal.Renewed for 0x{}",
+				"{who}'s force_renew emitted no DataRenewal.Renewed for 0x{} — events: {:?}",
 				hex::encode(content_hash),
+				emitted,
 			);
 		}
 	}
 
-	// A renewal re-anchors `TransactionByContentHash` to its own block, so a result equal to
-	// the entry's previous position means the read landed on state where the renewal is not
-	// present — an orphaned inclusion block.
-	if block_alice == u64::from(block) || block_bob == u64::from(block) {
-		tracing::warn!(
-			"force_renew resolved to the renewed entry's own block ({}): the inclusion block \
-			 was probably orphaned, so these numbers are unreliable (alice=#{}, bob=#{})",
-			block,
-			block_alice,
-			block_bob,
-		);
-	}
-	tracing::info!(
-		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
-		block,
-		index,
-		block_alice,
-		block_bob,
-	);
+	tracing::info!("force_renew canonical inclusions: alice={}, bob={}", block_alice, block_bob);
 	Ok((block_alice, block_bob))
 }
 

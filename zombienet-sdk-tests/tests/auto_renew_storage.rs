@@ -11,18 +11,18 @@ use crate::{
 		assert_referrers, assert_storage_healthy, authorize_account_via_sudo,
 		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
-		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
-		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, node_db_path, override_alice_authorization,
-		resolve_canonical_renew_blocks, resolve_canonical_store_block, set_retention_period,
-		set_retention_period_finalized, submit_force_renew, submit_renew_one_shot,
-		submit_renew_pair, submit_store_signed, top_up_alice_authorization,
-		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
-		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride, DbHash,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		canonical_store_position, content_hash_and_cid, count_event, current_best_block,
+		current_finalized_block, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		node_db_path, override_alice_authorization, resolve_canonical_renew_blocks,
+		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
+		submit_force_renew, submit_renew_one_shot, submit_renew_pair, submit_store_signed,
+		top_up_alice_authorization, verify_all_items_bitswap_concurrent, verify_node_bitswap,
+		verify_parachain_binaries, wait_for_block_height, wait_for_finalized_height,
+		wait_for_finalized_quiescence, wait_for_next_best_block, wait_for_session_change_on_node,
+		AuthorizationOverride, DbHash, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -627,12 +627,26 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 			best_store_block
 		);
 	}
-	submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
+	// Resolve the entry's index rather than assuming 0: a renewal fired from the mandatory
+	// inherent — one a sibling test on this shared harness left running — takes the first
+	// `Transactions[N]` slot ahead of this test's own store.
+	let store_hash = finalized_block_hash_at(client, store_block).await?;
+	let (position_block, position_index) =
+		canonical_store_position(client, store_hash, &content_hash).await?;
+	tracing::info!("Renewing the entry at ({position_block}, {position_index})");
+	submit_renew_pair(
+		client,
+		position_block as u32,
+		position_index,
+		&content_hash,
+		nonce,
+		bob_nonce,
+	)
+	.await?;
 
-	// `submit_renew_pair`'s numbers are best-chain reads that an orphaned inclusion block
-	// invalidates, so re-anchor against finality — the same reason the store block goes through
-	// `resolve_canonical_store_block` above. Polled rather than derived from a target height,
-	// because those numbers are the untrustworthy input.
+	// Re-anchor the renewal blocks against finality: `submit_renew_pair` reads them at the
+	// best-chain inclusion hash, which a reorg can orphan. Polled rather than derived from a
+	// target height, since those numbers are the untrustworthy input.
 	let renew_blocks = {
 		let deadline = std::time::Instant::now() + Duration::from_secs(RENEW_FINALITY_TIMEOUT_SECS);
 		loop {
@@ -672,10 +686,9 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let key = DbHash::from(content_hash);
 	assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
 
-	// Two references to one hash from a single body is the shape the pre-aggregation commit
-	// path collapsed into one increment. Asserted per renewal block, which
-	// `assert_no_refcount_drift` cannot distinguish from any other duplicate on the shared
-	// harness.
+	// Two references to one hash from a single body is the shape the collapse mishandled.
+	// Asserted per renewal block: `assert_no_refcount_drift` cannot tell this duplicate from
+	// any other on the shared harness.
 	for (block, count) in &renew_blocks {
 		assert_block_references(
 			&harness.db_path,
@@ -1192,6 +1205,13 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		"✓ data1 still alive — auto-renewal at R2 added a fresh ref before R was pruned"
 	);
 
+	// Shared-harness cleanup, as in `parachain_auto_renew_vs_no_renew_eviction_test`: a
+	// recurring renewal left running keeps taking the first `Transactions[N]` slot, ahead of
+	// any later test's own store.
+	let nonce = get_alice_nonce(collator1).await?;
+	disable_auto_renew(client, &content_hash_data1, nonce).await?;
+	tracing::info!("✓ Disabled auto-renew for data1 — chain idle for the next test");
+
 	test_log!(TEST, "=== Parachain auto-renewal + same-block store PASSED ===");
 	Ok(())
 }
@@ -1329,6 +1349,13 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		"data_not_renewed should be evicted — its only ref was at the now-pruned store block",
 	)?;
 	tracing::info!("✓ data_not_renewed evicted (no auto-renewal kept it alive)");
+
+	// Shared-harness cleanup: a recurring renewal left running keeps consuming Alice's
+	// authorization and, because it fires from the mandatory inherent, keeps taking the first
+	// `Transactions[N]` slot ahead of any later test's own store.
+	let nonce = get_alice_nonce(collator1).await?;
+	disable_auto_renew(client, &content_hash_renewed, nonce).await?;
+	tracing::info!("✓ Disabled auto-renew for data_renewed — chain idle for the next test");
 
 	test_log!(TEST, "=== Auto-renew vs no-renew eviction PASSED ===");
 	Ok(())
