@@ -25,7 +25,7 @@
 //! - **Dispatchables:** `force_renew` (synchronous), `renew` (one-shot scheduler),
 //!   `enable_auto_renew` / `disable_auto_renew` (recurring), `process_pending_renewals` (mandatory
 //!   drain inherent).
-//! - **Storage:** [`Renewals`] (per-content-hash registration), [`PendingAutoRenewals`] (per-block
+//! - **Storage:** [`Renewals`] (per-content-hash registration), [`PendingRenewals`] (per-block
 //!   scratch queue, drained by the inherent), and [`PermanentStorageUsed`] (chain-wide renewed-byte
 //!   counter, capped by `MaxPermanentStorageSize`).
 //!
@@ -39,7 +39,7 @@
 //!   quota is mutated atomically through `try_mutate_active_authorization`.
 //! - **Up ← storage:** [`OnObsoleteTransactions::handle_obsolete`] fires at the `RetentionPeriod`
 //!   boundary — it decrements [`PermanentStorageUsed`] for aged-out `Renew` entries and queues
-//!   registered entries into [`PendingAutoRenewals`] for the same block's inherent.
+//!   registered entries into [`PendingRenewals`] for the same block's inherent.
 //! - **Per-cycle accounting** is charged by `Pallet::check_renew_authorization`.
 //!
 //! ## Prepayment model
@@ -48,7 +48,7 @@
 //! transaction-extension's `pre_dispatch` charges one tx slot + `size` bytes
 //! up front. The first cycle then fires free (`paid = true` on the inserted
 //! [`RenewalData`]), and every subsequent recurring cycle charges per-cycle in
-//! `Pallet::do_process_auto_renewals`.
+//! `Pallet::do_process_pending_renewals`.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -96,8 +96,8 @@ pub const CHAIN_PERMANENT_CAP_REACHED: InvalidTransaction = InvalidTransaction::
 pub const AUTO_RENEWAL_NOT_ENABLED: InvalidTransaction = InvalidTransaction::Custom(9);
 /// `disable_auto_renew`: caller is not the account that registered the auto-renewal.
 pub const NOT_AUTO_RENEWAL_OWNER: InvalidTransaction = InvalidTransaction::Custom(10);
-/// `enable_auto_renew`: an auto-renewal is already registered for this content hash.
-pub const AUTO_RENEWAL_ALREADY_ENABLED: InvalidTransaction = InvalidTransaction::Custom(11);
+/// `renew` / `enable_auto_renew`: a renewal is already registered for this content hash.
+pub const RENEWAL_ALREADY_ENABLED: InvalidTransaction = InvalidTransaction::Custom(11);
 /// `disable_auto_renew`: the registration has been prepaid for its next cycle and
 /// cannot be disabled by the owner until the cycle fires and consumes the prepayment.
 /// Root can still disable for governance cleanup.
@@ -144,8 +144,8 @@ pub mod pallet {
 		RenewedNotFound,
 		/// Block already contains the maximum number of transactions.
 		TooManyTransactions,
-		/// Auto-renewal is already enabled for this content hash.
-		AutoRenewalAlreadyEnabled,
+		/// A renewal is already registered for this content hash.
+		RenewalAlreadyEnabled,
 		/// Auto-renewal is not enabled for this content hash.
 		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
@@ -170,13 +170,12 @@ pub mod pallet {
 	pub type Renewals<T: Config> =
 		StorageMap<_, Blake2_128Concat, ContentHash, RenewalData<T::AccountId>, OptionQuery>;
 
-	/// Transactions that must be auto-renewed in the current block.
+	/// Transactions to renew in the current block.
 	///
-	/// Populated by [`OnObsoleteTransactions::handle_obsolete`] when a block's data is
-	/// about to expire. Cleared by the [`Pallet::process_pending_renewals`] mandatory
-	/// inherent executed in the same block.
+	/// Filled by [`OnObsoleteTransactions::handle_obsolete`] at the retention boundary,
+	/// drained by the [`Pallet::process_pending_renewals`] inherent in the same block.
 	#[pallet::storage]
-	pub type PendingAutoRenewals<T: Config> = StorageValue<
+	pub type PendingRenewals<T: Config> = StorageValue<
 		_,
 		BoundedVec<
 			(ContentHash, TransactionInfoFor<T>, RenewalData<T::AccountId>),
@@ -206,10 +205,11 @@ pub mod pallet {
 		/// Auto-renewal disabled for `content_hash`. `who` is the registration's owner
 		/// (not the caller when Root issued the disable).
 		AutoRenewalDisabled { content_hash: ContentHash, who: T::AccountId },
-		/// Data was automatically renewed at `index` with `content_hash` for `account`.
-		DataAutoRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
-		/// Auto-renewal failed for `content_hash` (insufficient authorization for `account`).
-		AutoRenewalFailed { content_hash: ContentHash, account: T::AccountId },
+		/// A registered renewal fired, re-storing the data at `index`.
+		DataRenewed { index: u32, content_hash: ContentHash, account: T::AccountId },
+		/// A registered renewal failed on `account`'s authorization; the registration is
+		/// dropped and the data expires.
+		RenewalFailed { content_hash: ContentHash, account: T::AccountId },
 		/// `PermanentStorageUsed` changed (a `renew` bumped it, or the obsolete sweep
 		/// decremented it). Off-chain capacity-planning consumers can drive their dashboards
 		/// from these.
@@ -223,21 +223,21 @@ pub mod pallet {
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
 		fn on_finalize(_: BlockNumberFor<T>) {
-			// All pending auto-renewals must have been processed by the
+			// All pending renewals must have been processed by the
 			// `process_pending_renewals` inherent.
 			#[cfg(feature = "try-runtime")]
-			if !PendingAutoRenewals::<T>::get().is_empty() {
+			if !PendingRenewals::<T>::get().is_empty() {
 				tracing::warn!(
 					target: LOG_TARGET,
-					"Pending auto-renewals were not processed (expected during try-runtime)"
+					"Pending renewals were not processed (expected during try-runtime)"
 				);
-				PendingAutoRenewals::<T>::kill();
+				PendingRenewals::<T>::kill();
 			}
 
 			#[cfg(not(feature = "try-runtime"))]
 			assert!(
-				PendingAutoRenewals::<T>::get().is_empty(),
-				"All pending auto-renewals must be processed by process_pending_renewals"
+				PendingRenewals::<T>::get().is_empty(),
+				"All pending renewals must be processed by process_pending_renewals"
 			);
 		}
 
@@ -281,10 +281,7 @@ pub mod pallet {
 					.map_err(|_| Error::<T>::RenewedNotFound)?;
 			let content_hash = info.content_hash;
 
-			ensure!(
-				!Renewals::<T>::contains_key(content_hash),
-				Error::<T>::AutoRenewalAlreadyEnabled
-			);
+			ensure!(!Renewals::<T>::contains_key(content_hash), Error::<T>::RenewalAlreadyEnabled);
 
 			Renewals::<T>::insert(
 				content_hash,
@@ -322,9 +319,9 @@ pub mod pallet {
 
 		/// Register recurring auto-renewal for `content_hash`. First cycle is
 		/// prepaid at registration (`paid = true`); subsequent cycles charge
-		/// the owner's authorization in `do_process_auto_renewals` and
+		/// the owner's authorization in `do_process_pending_renewals` and
 		/// drop the registration on quota exhaustion with
-		/// [`Event::AutoRenewalFailed`].
+		/// [`Event::RenewalFailed`].
 		#[pallet::call_index(2)]
 		#[pallet::weight(<T as Config>::WeightInfo::enable_auto_renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
@@ -338,10 +335,7 @@ pub mod pallet {
 				return Err(DispatchError::BadOrigin);
 			};
 
-			ensure!(
-				!Renewals::<T>::contains_key(content_hash),
-				Error::<T>::AutoRenewalAlreadyEnabled
-			);
+			ensure!(!Renewals::<T>::contains_key(content_hash), Error::<T>::RenewalAlreadyEnabled);
 
 			// Defensive content-hash existence check. The hard-cap accounting
 			// (`bytes_permanent`, `PermanentStorageUsed`, one tx slot) is performed by
@@ -396,7 +390,7 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// Mandatory inherent: drain [`PendingAutoRenewals`] for the current
+		/// Mandatory inherent: drain [`PendingRenewals`] for the current
 		/// block. Refunds to the actually-drained count via `PostDispatchInfo`.
 		#[pallet::call_index(4)]
 		#[pallet::weight((
@@ -407,7 +401,7 @@ pub mod pallet {
 		))]
 		pub fn process_pending_renewals(origin: OriginFor<T>) -> DispatchResultWithPostInfo {
 			ensure_none(origin)?;
-			let n_actual = Self::do_process_auto_renewals();
+			let n_actual = Self::do_process_pending_renewals();
 			Ok(Some(<T as Config>::WeightInfo::process_pending_renewals(n_actual)).into())
 		}
 	}
@@ -419,7 +413,7 @@ pub mod pallet {
 		const INHERENT_IDENTIFIER: InherentIdentifier = *b"datarenw";
 
 		fn create_inherent(_data: &InherentData) -> Option<Self::Call> {
-			if PendingAutoRenewals::<T>::get().is_empty() {
+			if PendingRenewals::<T>::get().is_empty() {
 				return None;
 			}
 			Some(Call::process_pending_renewals {})
@@ -485,18 +479,18 @@ impl<T: Config> Pallet<T> {
 		.ok_or(Error::<T>::TooManyTransactions)
 	}
 
-	/// Drain [`PendingAutoRenewals`], returning the count drained. One
+	/// Drain [`PendingRenewals`], returning the count drained. One
 	/// `BlockTransactions` read/write for all entries. Per-cycle charges
 	/// (recurring cycles past the prepaid one) go through `check_authorization`;
 	/// the prepaid bump is refunded when a paid cycle is rejected by the
 	/// per-block slot cap.
 	///
 	/// On any failure (auth, caps, slot cap) the registration is removed and
-	/// `AutoRenewalFailed` emitted — the data is gone, since the obsolete
+	/// `RenewalFailed` emitted — the data is gone, since the obsolete
 	/// `Transactions` entry was already taken by storage pallet's
 	/// `on_initialize`.
-	pub(crate) fn do_process_auto_renewals() -> u32 {
-		let pending = PendingAutoRenewals::<T>::take();
+	pub(crate) fn do_process_pending_renewals() -> u32 {
+		let pending = PendingRenewals::<T>::take();
 		let n_actual = pending.len() as u32;
 		if n_actual == 0 {
 			return 0;
@@ -509,7 +503,7 @@ impl<T: Config> Pallet<T> {
 			None => {
 				for (content_hash, _, renewal_data) in pending.into_iter() {
 					Renewals::<T>::remove(content_hash);
-					Self::deposit_event(Event::AutoRenewalFailed {
+					Self::deposit_event(Event::RenewalFailed {
 						content_hash,
 						account: renewal_data.account,
 					});
@@ -546,7 +540,7 @@ impl<T: Config> Pallet<T> {
 							}
 						});
 					}
-					Self::deposit_event(Event::DataAutoRenewed {
+					Self::deposit_event(Event::DataRenewed {
 						index: new_index,
 						content_hash,
 						account: renewal_data.account,
@@ -562,7 +556,7 @@ impl<T: Config> Pallet<T> {
 						Self::update_permanent_storage_used(|used| used.saturating_sub(size_u64));
 					}
 					Renewals::<T>::remove(content_hash);
-					Self::deposit_event(Event::AutoRenewalFailed {
+					Self::deposit_event(Event::RenewalFailed {
 						content_hash,
 						account: renewal_data.account,
 					});
@@ -753,7 +747,7 @@ impl<T: Config> Pallet<T> {
 		#[cfg(test)]
 		ensure!(
 			used == expected,
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
 		);
 		#[cfg(all(feature = "try-runtime", not(test)))]
 		if used != expected {
@@ -761,7 +755,7 @@ impl<T: Config> Pallet<T> {
 				target: LOG_TARGET,
 				used,
 				expected,
-				"PermanentStorageUsed drifts from Σ renewed + Σ paid auto-renewal sizes",
+				"PermanentStorageUsed drifts from Σ renewed + Σ paid registration sizes",
 			);
 		}
 
@@ -776,7 +770,7 @@ impl<T: Config> Pallet<T> {
 
 /// Obsolete-block sweep callback: decrements [`PermanentStorageUsed`] for aged-out
 /// `Renew` entries and queues `is_latest` entries with a [`Renewals`] registration
-/// into [`PendingAutoRenewals`] for the same block's inherent.
+/// into [`PendingRenewals`] for the same block's inherent.
 impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pallet<T> {
 	fn handle_obsolete(_obsolete: BlockNumberFor<T>, items: &[(TransactionInfoFor<T>, bool)]) {
 		// Renewed bytes leaving the retention window free up permanent capacity.
@@ -793,7 +787,7 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pall
 		// One read, one write — `try_push` cannot overflow under
 		// `items.len() <= MaxBlockTransactions` plus the `on_finalize`
 		// empty-pending invariant.
-		let mut pending = PendingAutoRenewals::<T>::get();
+		let mut pending = PendingRenewals::<T>::get();
 		for (tx_info, is_latest) in items.iter() {
 			if !is_latest {
 				continue;
@@ -804,7 +798,7 @@ impl<T: Config> OnObsoleteTransactions<BlockNumberFor<T>, T::EntryMeta> for Pall
 			}
 		}
 		if !pending.is_empty() {
-			PendingAutoRenewals::<T>::put(&pending);
+			PendingRenewals::<T>::put(&pending);
 		}
 	}
 }

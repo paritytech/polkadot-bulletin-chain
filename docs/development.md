@@ -26,13 +26,13 @@ Five env vars in `.github/env` pin the version of each group:
 | `ZOMBIENET_VERSION` | `zombienet` (release-tag only) |
 
 Each value is either:
-- **a release tag** (e.g. `polkadot-stable2603`) — script downloads the prebuilt asset for your platform (Linux x86_64 or macOS arm64) and verifies its `.sha256` companion file, OR
+- **a release tag** (e.g. `polkadot-stable2606`) — script downloads the prebuilt asset for your platform (Linux x86_64 or macOS arm64) and verifies its `.sha256` companion file, OR
 - **a 40-char commit hash** — script clones `polkadot-sdk` / `try-runtime-cli` once into `./.polkadot-binaries/_src/`, checks out the commit, and builds with `SKIP_WASM_BUILD=1`.
 
 Override at the shell to pin a different version for one session:
 
 ```bash
-POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
+POLKADOT_NODE_VERSION=polkadot-stable2606 just binaries-polkadot
 POLKADOT_NODE_VERSION=d6a4f5977b39bf5e5152e2f2bb6719ea92b992ea just binaries-polkadot
 ```
 

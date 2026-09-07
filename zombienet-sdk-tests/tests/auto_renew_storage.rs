@@ -51,7 +51,7 @@ const BITSWAP_EVICTION_TIMEOUT_SECS: u64 = 300;
 
 const NUM_RENEWAL_CYCLES: u64 = 2;
 const TOPUP_TX_COUNT: u32 = 5;
-/// `+1` is safety: without it, a single byte short flips auto-renewal into `AutoRenewalFailed`.
+/// `+1` is safety: without it, a single byte short flips auto-renewal into `RenewalFailed`.
 const TOPUP_BYTES_MULTIPLIER: u64 = NUM_RENEWAL_CYCLES + 1;
 
 /// Pruning smaller than retention: the store block ages out of the pruning window before
@@ -711,16 +711,16 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	let renewal_hash = finalized_block_hash_at(client, renewal_block).await?;
 	let renewal_events = client.blocks().at(renewal_hash).await?.events().await?;
 	assert_eq!(
-		count_renewal_event_for(&renewal_events, "DataAutoRenewed", &content_hash),
+		count_renewal_event_for(&renewal_events, "DataRenewed", &content_hash),
 		1,
-		"expected 1 DataAutoRenewed for {} at renewal block {}",
+		"expected 1 DataRenewed for {} at renewal block {}",
 		hash_hex,
 		renewal_block
 	);
 	assert_eq!(
-		count_renewal_event_for(&renewal_events, "AutoRenewalFailed", &content_hash),
+		count_renewal_event_for(&renewal_events, "RenewalFailed", &content_hash),
 		0,
-		"expected 0 AutoRenewalFailed for {} at renewal block {}",
+		"expected 0 RenewalFailed for {} at renewal block {}",
 		hash_hex,
 		renewal_block
 	);
@@ -749,16 +749,16 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	let second_expiry_hash = finalized_block_hash_at(client, second_expiry_block).await?;
 	let expiry_events = client.blocks().at(second_expiry_hash).await?.events().await?;
 	assert_eq!(
-		count_renewal_event_for(&expiry_events, "DataAutoRenewed", &content_hash),
+		count_renewal_event_for(&expiry_events, "DataRenewed", &content_hash),
 		0,
 		"expected no renewal for {} at block {}: the one-shot already fired",
 		hash_hex,
 		second_expiry_block
 	);
 	assert_eq!(
-		count_renewal_event_for(&expiry_events, "AutoRenewalFailed", &content_hash),
+		count_renewal_event_for(&expiry_events, "RenewalFailed", &content_hash),
 		0,
-		"expected no AutoRenewalFailed for {} at block {}: nothing should be registered",
+		"expected no RenewalFailed for {} at block {}: nothing should be registered",
 		hash_hex,
 		second_expiry_block
 	);
@@ -884,16 +884,16 @@ async fn parachain_force_renew_lifecycle_test() -> Result<()> {
 	let sweep_hash = finalized_block_hash_at(client, sweep_block).await?;
 	let sweep_events = client.blocks().at(sweep_hash).await?.events().await?;
 	assert_eq!(
-		count_renewal_event_for(&sweep_events, "DataAutoRenewed", &content_hash),
+		count_renewal_event_for(&sweep_events, "DataRenewed", &content_hash),
 		0,
 		"expected no renewal for {} at sweep block {}: force_renew is synchronous only",
 		hash_hex,
 		sweep_block
 	);
 	assert_eq!(
-		count_renewal_event_for(&sweep_events, "AutoRenewalFailed", &content_hash),
+		count_renewal_event_for(&sweep_events, "RenewalFailed", &content_hash),
 		0,
-		"expected no AutoRenewalFailed for {} at sweep block {}: nothing should be registered",
+		"expected no RenewalFailed for {} at sweep block {}: nothing should be registered",
 		hash_hex,
 		sweep_block
 	);
@@ -1582,7 +1582,7 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	);
 
 	tracing::info!("--- Block weight stats ---");
-	tracing::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
+	tracing::info!("Format: block N | extrinsics={{n}} DataRenewed={{n}} RenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
 
 	let mut total_renewed: u32 = 0;
 	let mut weight_violations: Vec<String> = Vec::new();
@@ -1597,12 +1597,12 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -1677,9 +1677,9 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	tracing::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
 	if total_renewed < expected_total {
 		anyhow::bail!(
-			"Expected at least {} DataAutoRenewed events across the renewal window {}..={} \
+			"Expected at least {} DataRenewed events across the renewal window {}..={} \
 			 ({} items × {} cycles), saw {}. Some items did not renew (possibly insufficient \
-			 authorization, PendingAutoRenewals overflow, or do_renew returning Err).",
+			 authorization, PendingRenewals overflow, or do_renew returning Err).",
 			expected_total,
 			first_renewal_block,
 			last_renewal_block,
@@ -1715,25 +1715,29 @@ async fn parachain_auto_renew_many_items_test() -> Result<()> {
 	for n in exhaustion_block..=exhaustion_block + 1 {
 		let hash = finalized_block_hash_at(client, n).await?;
 		let events = client.blocks().at(hash).await?.events().await?;
-		total_failed += count_event(&events, "AutoRenewalFailed");
-		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
+		total_failed += count_event(&events, "RenewalFailed");
+		total_renewed_post_window += count_event(&events, "DataRenewed");
 	}
 	assert_eq!(
-		total_failed, MANY_ITEMS_COUNT,
-		"expected exactly {} AutoRenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
-		MANY_ITEMS_COUNT, exhaustion_block, exhaustion_block + 1, total_failed
+		total_failed,
+		MANY_ITEMS_COUNT,
+		"expected exactly {} RenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
+		MANY_ITEMS_COUNT,
+		exhaustion_block,
+		exhaustion_block + 1,
+		total_failed
 	);
 	assert_eq!(
 		total_renewed_post_window,
 		0,
-		"expected 0 DataAutoRenewed events post-exhaustion at blocks {}..={}; saw {} \
+		"expected 0 DataRenewed events post-exhaustion at blocks {}..={}; saw {} \
 		 (Alice's authorization should have been fully consumed by the observation window)",
 		exhaustion_block,
 		exhaustion_block + 1,
 		total_renewed_post_window
 	);
 	tracing::info!(
-		"✓ All {} items hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
+		"✓ All {} items hit RenewalFailed at blocks {}..={}; AutoRenewals storage drained",
 		MANY_ITEMS_COUNT,
 		exhaustion_block,
 		exhaustion_block + 1,
@@ -2111,7 +2115,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	);
 
 	tracing::info!("--- Block weight stats ---");
-	tracing::info!("Format: block N | extrinsics={{n}} DataAutoRenewed={{n}} AutoRenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
+	tracing::info!("Format: block N | extrinsics={{n}} DataRenewed={{n}} RenewalFailed={{n}} | normal=(ref_time,proof_size) op=(...) mand=(...)");
 
 	let mut total_renewed: u32 = 0;
 	let mut weight_violations: Vec<String> = Vec::new();
@@ -2125,12 +2129,12 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 		let auto_renewed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataRenewed")
 			.count() as u32;
 		let auto_renewal_failed: u32 = events
 			.iter()
 			.filter_map(|e| e.ok())
-			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
+			.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalFailed")
 			.count() as u32;
 		let weight_value = client
 			.storage()
@@ -2196,7 +2200,7 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	tracing::info!("Total renewals across window: {} / {}", total_renewed, expected_total);
 	if total_renewed < expected_total {
 		anyhow::bail!(
-			"Expected at least {} DataAutoRenewed events, saw {}",
+			"Expected at least {} DataRenewed events, saw {}",
 			expected_total,
 			total_renewed
 		);
@@ -2225,25 +2229,29 @@ async fn parachain_auto_renew_many_items_worst_case_test() -> Result<()> {
 	for n in exhaustion_block..=exhaustion_block + 1 {
 		let hash = finalized_block_hash_at(&client, n).await?;
 		let events = client.blocks().at(hash).await?.events().await?;
-		total_failed += count_event(&events, "AutoRenewalFailed");
-		total_renewed_post_window += count_event(&events, "DataAutoRenewed");
+		total_failed += count_event(&events, "RenewalFailed");
+		total_renewed_post_window += count_event(&events, "DataRenewed");
 	}
 	assert_eq!(
-		total_failed, WORST_CASE_WORKERS,
-		"expected exactly {} AutoRenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
-		WORST_CASE_WORKERS, exhaustion_block, exhaustion_block + 1, total_failed
+		total_failed,
+		WORST_CASE_WORKERS,
+		"expected exactly {} RenewalFailed events at blocks {}..={} (cycle N+1 exhaustion); saw {}",
+		WORST_CASE_WORKERS,
+		exhaustion_block,
+		exhaustion_block + 1,
+		total_failed
 	);
 	assert_eq!(
 		total_renewed_post_window,
 		0,
-		"expected 0 DataAutoRenewed post-exhaustion at blocks {}..={}; saw {} (every worker's \
+		"expected 0 DataRenewed post-exhaustion at blocks {}..={}; saw {} (every worker's \
 		 authorization should have been fully consumed by the observation window)",
 		exhaustion_block,
 		exhaustion_block + 1,
 		total_renewed_post_window
 	);
 	tracing::info!(
-		"✓ All {} workers hit AutoRenewalFailed at blocks {}..={}; AutoRenewals storage drained",
+		"✓ All {} workers hit RenewalFailed at blocks {}..={}; AutoRenewals storage drained",
 		WORST_CASE_WORKERS,
 		exhaustion_block,
 		exhaustion_block + 1,
@@ -2788,25 +2796,25 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let auto_renewed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataAutoRenewed")
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "DataRenewed")
 		.count() as u32;
 	let auto_renewal_failed = events
 		.iter()
 		.filter_map(|e| e.ok())
-		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "AutoRenewalFailed")
+		.filter(|e| e.pallet_name() == "DataRenewal" && e.variant_name() == "RenewalFailed")
 		.count() as u32;
 	assert_eq!(
 		auto_renewed, ON_INIT_CLEANUP_ITEMS_PER_SET,
-		"expected {} DataAutoRenewed events at expiry block {}, saw {}",
+		"expected {} DataRenewed events at expiry block {}, saw {}",
 		ON_INIT_CLEANUP_ITEMS_PER_SET, expiry_block, auto_renewed
 	);
 	assert_eq!(
 		auto_renewal_failed, 0,
-		"expected 0 AutoRenewalFailed events at expiry block {}, saw {}",
+		"expected 0 RenewalFailed events at expiry block {}, saw {}",
 		expiry_block, auto_renewal_failed
 	);
 	tracing::info!(
-		"✓ {} DataAutoRenewed events at expiry block {} (and zero AutoRenewalFailed)",
+		"✓ {} DataRenewed events at expiry block {} (and zero RenewalFailed)",
 		auto_renewed,
 		expiry_block
 	);
@@ -3581,7 +3589,7 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 }
 
 /// Cycles 1 and 2 fit Alice's `bytes_allowance`; cycle 3 trips `PERMANENT_ALLOWANCE_EXCEEDED`
-/// and the pallet emits `AutoRenewalFailed`, removing the entry from `AutoRenewals`.
+/// and the pallet emits `RenewalFailed`, removing the entry from `AutoRenewals`.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_quota_exhaustion";
@@ -3669,16 +3677,16 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 
 		let renewal_hash = finalized_block_hash_at(client, renewal_block).await?;
 		let events = client.blocks().at(renewal_hash).await?.events().await?;
-		let renewed = count_event(&events, "DataAutoRenewed");
-		let failed = count_event(&events, "AutoRenewalFailed");
+		let renewed = count_event(&events, "DataRenewed");
+		let failed = count_event(&events, "RenewalFailed");
 		assert_eq!(
 			renewed, 1,
-			"[cycle {}] expected exactly 1 DataAutoRenewed event at block {}, saw {}",
+			"[cycle {}] expected exactly 1 DataRenewed event at block {}, saw {}",
 			cycle, renewal_block, renewed
 		);
 		assert_eq!(
 			failed, 0,
-			"[cycle {}] expected 0 AutoRenewalFailed events at block {}, saw {}",
+			"[cycle {}] expected 0 RenewalFailed events at block {}, saw {}",
 			cycle, renewal_block, failed
 		);
 		verify_node_bitswap(
@@ -3689,7 +3697,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		)
 		.await
 		.with_context(|| format!("cycle {} did not preserve the data", cycle))?;
-		tracing::info!("[cycle {}] ✓ DataAutoRenewed at block {}", cycle, renewal_block);
+		tracing::info!("[cycle {}] ✓ DataRenewed at block {}", cycle, renewal_block);
 	}
 
 	// Cycle 3: bytes_permanent (= 2L) + L > bytes_allowance (= 2L).
@@ -3703,20 +3711,20 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 
 	let r3_hash = finalized_block_hash_at(client, r3).await?;
 	let events = client.blocks().at(r3_hash).await?.events().await?;
-	let failed = count_event(&events, "AutoRenewalFailed");
-	let renewed = count_event(&events, "DataAutoRenewed");
+	let failed = count_event(&events, "RenewalFailed");
+	let renewed = count_event(&events, "DataRenewed");
 	tracing::info!("[cycle 3] block {}: renewed={}, failed={}", r3, renewed, failed);
 	assert_eq!(
 		failed, 1,
-		"[cycle 3] expected exactly 1 AutoRenewalFailed event at block {}, saw {} (renewed={})",
+		"[cycle 3] expected exactly 1 RenewalFailed event at block {}, saw {} (renewed={})",
 		r3, failed, renewed
 	);
 	assert_eq!(
 		renewed, 0,
-		"[cycle 3] expected 0 DataAutoRenewed events at block {}, saw {}",
+		"[cycle 3] expected 0 DataRenewed events at block {}, saw {}",
 		r3, renewed
 	);
-	tracing::info!("[cycle 3] ✓ AutoRenewalFailed at block {}", r3);
+	tracing::info!("[cycle 3] ✓ RenewalFailed at block {}", r3);
 
 	// Query at the renewal block's hash, not `at_latest` (which reads finalized state and
 	// lags ~10s behind best on cumulus).
@@ -3728,7 +3736,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	let auto_renewals_after = client.storage().at(r3_hash).fetch(&auto_renewals_addr).await?;
 	assert!(
 		auto_renewals_after.is_none(),
-		"AutoRenewals[{}] should be None at block {} after AutoRenewalFailed",
+		"AutoRenewals[{}] should be None at block {} after RenewalFailed",
 		hash_hex,
 		r3
 	);
@@ -3762,12 +3770,12 @@ async fn dump_renewal_window(
 			},
 		};
 		let events = client.blocks().at(hash).await?.events().await?;
-		let renewed = count_event(&events, "DataAutoRenewed");
-		let failed = count_event(&events, "AutoRenewalFailed");
+		let renewed = count_event(&events, "DataRenewed");
+		let failed = count_event(&events, "RenewalFailed");
 		let enabled = count_event(&events, "RenewalEnabled");
 		let stored = count_event(&events, "Stored");
 		tracing::info!(
-			"[{}]   block {} ({}): Stored={} RenewalEnabled={} DataAutoRenewed={} AutoRenewalFailed={}",
+			"[{}]   block {} ({}): Stored={} RenewalEnabled={} DataRenewed={} RenewalFailed={}",
 			label,
 			n,
 			hex::encode(&hash.0[..4]),
@@ -3781,7 +3789,7 @@ async fn dump_renewal_window(
 }
 
 /// Authorization expires between auto-renew cycles: cycle 1 succeeds, cycle 2 trips the
-/// expired branch and emits `AutoRenewalFailed`, then re-authorizing exercises the
+/// expired branch and emits `RenewalFailed`, then re-authorizing exercises the
 /// expired-but-present reset path (counters zeroed) for a fresh item.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<()> {
@@ -3871,18 +3879,18 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let r1_hash = finalized_block_hash_at(client, r1).await?;
 	let r1_events = client.blocks().at(r1_hash).await?.events().await?;
 	assert_eq!(
-		count_event(&r1_events, "DataAutoRenewed"),
+		count_event(&r1_events, "DataRenewed"),
 		1,
-		"[cycle 1] expected 1 DataAutoRenewed at block {}",
+		"[cycle 1] expected 1 DataRenewed at block {}",
 		r1
 	);
 	assert_eq!(
-		count_event(&r1_events, "AutoRenewalFailed"),
+		count_event(&r1_events, "RenewalFailed"),
 		0,
-		"[cycle 1] expected 0 AutoRenewalFailed at block {}",
+		"[cycle 1] expected 0 RenewalFailed at block {}",
 		r1
 	);
-	tracing::info!("[cycle 1] ✓ DataAutoRenewed at block {}", r1);
+	tracing::info!("[cycle 1] ✓ DataRenewed at block {}", r1);
 
 	wait_for_finalized_height(collator1, r2 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	// Proof for the cycle-1 renewal at r1 fires at `r2 - 1 = r1 + RP`.
@@ -3890,16 +3898,16 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let r2_hash = finalized_block_hash_at(client, r2).await?;
 	let r2_events = client.blocks().at(r2_hash).await?.events().await?;
 	assert_eq!(
-		count_event(&r2_events, "AutoRenewalFailed"),
+		count_event(&r2_events, "RenewalFailed"),
 		1,
-		"[cycle 2] expected 1 AutoRenewalFailed at block {} (auth expired at {})",
+		"[cycle 2] expected 1 RenewalFailed at block {} (auth expired at {})",
 		r2,
 		override_expiration
 	);
 	assert_eq!(
-		count_event(&r2_events, "DataAutoRenewed"),
+		count_event(&r2_events, "DataRenewed"),
 		0,
-		"[cycle 2] expected 0 DataAutoRenewed at block {}",
+		"[cycle 2] expected 0 DataRenewed at block {}",
 		r2
 	);
 
@@ -3911,11 +3919,11 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let auto_renewals_after = client.storage().at(r2_hash).fetch(&auto_renewals_addr).await?;
 	assert!(
 		auto_renewals_after.is_none(),
-		"AutoRenewals[{}] should be None at block {} after AutoRenewalFailed",
+		"AutoRenewals[{}] should be None at block {} after RenewalFailed",
 		hash_hex,
 		r2
 	);
-	tracing::info!("[cycle 2] ✓ AutoRenewalFailed at block {}; AutoRenewals[hash] removed", r2);
+	tracing::info!("[cycle 2] ✓ RenewalFailed at block {}; AutoRenewals[hash] removed", r2);
 
 	// Expired-but-present: the pallet zeroes counters and installs a fresh expiration.
 	let alice_pk = subxt_signer::sr25519::dev::alice().public_key().0;
@@ -3973,15 +3981,15 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	let r1_after_hash = finalized_block_hash_at(client, r1_after).await?;
 	let r1_after_events = client.blocks().at(r1_after_hash).await?.events().await?;
 	assert_eq!(
-		count_event(&r1_after_events, "DataAutoRenewed"),
+		count_event(&r1_after_events, "DataRenewed"),
 		1,
-		"post-reauth cycle 1: expected 1 DataAutoRenewed at block {} (counters should be reset)",
+		"post-reauth cycle 1: expected 1 DataRenewed at block {} (counters should be reset)",
 		r1_after
 	);
 	assert_eq!(
-		count_event(&r1_after_events, "AutoRenewalFailed"),
+		count_event(&r1_after_events, "RenewalFailed"),
 		0,
-		"post-reauth cycle 1: expected 0 AutoRenewalFailed at block {}",
+		"post-reauth cycle 1: expected 0 RenewalFailed at block {}",
 		r1_after
 	);
 	verify_node_bitswap(collator1, &data2, BITSWAP_TIMEOUT_SECS, "post-reauth cycle 1").await?;
