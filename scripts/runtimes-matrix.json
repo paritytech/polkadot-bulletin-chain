@@ -65,7 +65,7 @@
     },
     "external_runtime": {
       "repo": "https://github.com/paseo-network/runtimes.git",
-      "ref": "840e903ed65737c0a6e97ff9776a31b3d34e1a4d",
+      "ref": "edb16707e3305277b94876b17c201a2f3a50c401",
       "path": "./system-parachains/bulletin-paseo"
     }
   }
