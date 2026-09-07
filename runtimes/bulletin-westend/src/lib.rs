@@ -131,27 +131,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (
-		pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
-		pallet_session::migrations::v1::MigrateV0ToV1<
-			Runtime,
-			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
-		>,
-		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
-		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
-		// Westend Bulletin is still on `TransactionStorage` storage version 1 (Paseo is on 5),
-		// so the whole chain from v0→v1 up has to stay wired here.
-		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
-		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
-		pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,
-	);
+	pub type Unreleased = (pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -166,8 +146,7 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations =
-		(pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,);
+	pub type MbmMigrations = ();
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -192,7 +171,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_025,
+	spec_version: 1_000_026,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -1135,6 +1114,11 @@ impl_runtime_apis! {
 						fun: Fungible(ExistentialDeposit::get()),
 					}
 				}
+
+				/// `Utility::batch`, so weighing a `Transact` recurses over every nested call.
+				fn batch_call(calls: Vec<RuntimeCall>) -> Option<RuntimeCall> {
+					Some(RuntimeCall::Utility(pallet_utility::Call::<Runtime>::batch { calls }))
+				}
 			}
 
 			parameter_types! {
@@ -1244,10 +1228,10 @@ impl_runtime_apis! {
 				}
 
 				fn alias_origin() -> Result<(Location, Location), BenchmarkError> {
-					Ok((
-						Location::new(1, [Parachain(1000)]),
-						Location::new(1, [Parachain(1000), AccountId32 { id: [111u8; 32], network: None }]),
-					))
+					// Worst case: `AuthorizedAliasers`, the last and priciest `Aliasers` entry.
+					Ok(parachains_common::benchmarking::set_up_worst_case_authorized_alias::<
+						Runtime,
+					>())
 				}
 			}
 

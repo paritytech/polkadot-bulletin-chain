@@ -139,11 +139,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (
-		cumulus_pallet_xcmp_queue::migration::v7::MigrateV6ToV7<Runtime>,
-		pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,
-		pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,
-	);
+	pub type Unreleased = (pallet_bulletin_data_renewal::migrations::v2::MigrateV1ToV2<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -183,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_025,
+	spec_version: 1_000_026,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -1127,6 +1123,11 @@ impl_runtime_apis! {
 						fun: Fungible(ExistentialDeposit::get()),
 					}
 				}
+
+				/// `Utility::batch`, so weighing a `Transact` recurses over every nested call.
+				fn batch_call(calls: Vec<RuntimeCall>) -> Option<RuntimeCall> {
+					Some(RuntimeCall::Utility(pallet_utility::Call::<Runtime>::batch { calls }))
+				}
 			}
 
 			parameter_types! {
@@ -1236,10 +1237,10 @@ impl_runtime_apis! {
 				}
 
 				fn alias_origin() -> Result<(Location, Location), BenchmarkError> {
-					Ok((
-						Location::new(1, [Parachain(1000)]),
-						Location::new(1, [Parachain(1000), AccountId32 { id: [111u8; 32], network: None }]),
-					))
+					// Worst case: `AuthorizedAliasers`, the last and priciest `Aliasers` entry.
+					Ok(parachains_common::benchmarking::set_up_worst_case_authorized_alias::<
+						Runtime,
+					>())
 				}
 			}
 

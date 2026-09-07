@@ -161,10 +161,10 @@ jobs:
 
       # Chopsticks cannot synthesize custom pallet inherents
       # (AcalaNetwork/chopsticks#1037), so the drain inherent is injected by hand.
-      # Skipped for external runtimes: those are already-deployed runtimes that
-      # predate `pallet-bulletin-data-renewal`.
+      # Gated on `data_renewal`: flip the matrix flag when a runtime wires
+      # `pallet-bulletin-data-renewal`.
       - name: Test chopsticks auto-renew inherent
-        if: ${{ matrix.runtime.external_runtime == null }}
+        if: ${{ matrix.runtime.data_renewal }}
         working-directory: examples
         run: just run-test-auto-renew-chopsticks "ws://127.0.0.1:10000" "none" "true"
 
