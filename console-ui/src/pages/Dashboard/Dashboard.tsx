@@ -197,7 +197,8 @@ function WelcomeCard() {
 
 interface UsageStats {
   ephemeral: { count: number; bytes: bigint };
-  permanent: { count: number; used: bigint; cap: bigint };
+  /** null on runtimes that ship without renewal. */
+  permanent: { count: number; used: bigint; cap: bigint } | null;
   userAuths: { count: number; bytes: bigint };
   preimageAuths: { count: number; bytes: bigint };
 }
@@ -249,20 +250,16 @@ function UsageCard() {
       // DataRenewal. api.query/api.constants are proxies that are truthy for
       // any pallet name, so presence can't be tested; probe the new pallet
       // with a call and fall back to the old one when the runtime rejects it.
+      // Neither answering means the runtime ships without renewal at all — not
+      // a TransactionStorage failure, so it must not set `palletError`.
       Promise.resolve()
         .then(() => (api.query as any).DataRenewal.PermanentStorageUsed.getValue())
         .catch(() => (api.query as any).TransactionStorage.PermanentStorageUsed.getValue())
-        .catch((err: unknown) => {
-          recordPalletError(err);
-          return null;
-        }),
+        .catch(() => null),
       Promise.resolve()
         .then(() => (api.constants as any).DataRenewal.MaxPermanentStorageSize())
         .catch(() => (api.constants as any).TransactionStorage.MaxPermanentStorageSize())
-        .catch((err: unknown) => {
-          recordPalletError(err);
-          return null;
-        }),
+        .catch(() => null),
     ])
       .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
@@ -304,11 +301,10 @@ function UsageCard() {
 
         setStats({
           ephemeral,
-          permanent: {
-            count: permanentCount.count,
-            used: permUsed ?? 0n,
-            cap: permCap ?? 0n,
-          },
+          permanent:
+            permUsed === null && permCap === null
+              ? null
+              : { count: permanentCount.count, used: permUsed ?? 0n, cap: permCap ?? 0n },
           userAuths,
           preimageAuths,
         });
@@ -357,18 +353,22 @@ function UsageCard() {
                 <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
               </div>
             </div>
-            <hr />
-            <div>
-              <p className="text-sm font-medium mb-2">Permanent</p>
-              <div className="grid grid-cols-2 gap-4">
-                <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
-                <TotalsStat
-                  label="Bytes"
-                  value={formatBytes(stats.permanent.used)}
-                  hint={`of ${formatBytes(stats.permanent.cap)}`}
-                />
-              </div>
-            </div>
+            {stats.permanent && (
+              <>
+                <hr />
+                <div>
+                  <p className="text-sm font-medium mb-2">Permanent</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
+                    <TotalsStat
+                      label="Bytes"
+                      value={formatBytes(stats.permanent.used)}
+                      hint={`of ${formatBytes(stats.permanent.cap)}`}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <hr />
             <div>
               <p className="text-sm font-medium mb-2">Authorizations</p>
