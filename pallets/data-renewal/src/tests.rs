@@ -3369,8 +3369,7 @@ fn refcount_from_unset_treats_all_entries_as_refcounted() {
 	});
 }
 
-/// The v1→v2 migration stamps the upgrade block and nothing else — no scan of live
-/// `Transactions`.
+/// The v1→v2 migration stamps the upgrade block without scanning live `Transactions`.
 #[test]
 fn v1_to_v2_migration_stamps_the_upgrade_block() {
 	new_test_ext().execute_with(|| {
@@ -3381,7 +3380,7 @@ fn v1_to_v2_migration_stamps_the_upgrade_block() {
 		assert_eq!(crate::RefcountFrom::<Test>::get(), Some(42));
 		assert!(
 			crate::RenewRefCount::<Test>::iter().next().is_none(),
-			"the migration must not build references"
+			"the migration must not build references from Transactions"
 		);
 	});
 }
@@ -3397,5 +3396,107 @@ fn try_state_detects_orphan_renew_reference() {
 			DataRenewal::do_try_state(System::block_number()),
 			"RenewRefCount holds a reference with no live Renew entry or prepaid registration",
 		);
+	});
+}
+
+/// The migration seeds a reference for a prepaid registration v1 charged without one, and
+/// leaves the counter alone.
+#[test]
+fn v1_to_v2_migration_seeds_prepaid_registrations() {
+	new_test_ext().execute_with(|| {
+		use polkadot_sdk_frame::deps::frame_support::traits::UncheckedOnRuntimeUpgrade;
+		run_to_block(1, || None);
+		let who = 1;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(3, || None);
+
+		// A prepaid registration as v1 left it: charged, but holding no reference.
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
+		assert!(crate::Renewals::<Test>::get(content_hash).unwrap().paid);
+		crate::RenewRefCount::<Test>::remove(content_hash);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+
+		run_to_block(4, || None);
+		crate::migrations::v2::VersionUncheckedMigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(crate::RefcountFrom::<Test>::get(), Some(4));
+
+		assert_eq!(crate::RenewRefCount::<Test>::get(content_hash), Some(1));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+	});
+}
+
+/// An unpaid registration was never charged, so seeding it would strand the bytes the
+/// reference goes on to credit.
+#[test]
+fn v1_to_v2_migration_skips_unpaid_registrations() {
+	new_test_ext().execute_with(|| {
+		use polkadot_sdk_frame::deps::frame_support::traits::UncheckedOnRuntimeUpgrade;
+		run_to_block(1, || None);
+		let content_hash = [9u8; 32];
+		crate::Renewals::<Test>::insert(
+			content_hash,
+			RenewalData { account: 1, recurring: true, paid: false },
+		);
+
+		crate::migrations::v2::VersionUncheckedMigrateV1ToV2::<Test>::on_runtime_upgrade();
+
+		assert_eq!(crate::RenewRefCount::<Test>::get(content_hash), None);
+	});
+}
+
+/// A v1 prepaid registration's bytes are credited once the entry it produces ages out.
+/// Unseeded, `release_renew_ref` finds nothing and `PermanentStorageUsed` keeps them for
+/// good — the leak behind the `bulletin-paseo / next-v2` try-state failure.
+#[test]
+fn v1_prepaid_registration_bytes_are_credited_after_migration() {
+	new_test_ext().execute_with(|| {
+		use polkadot_sdk_frame::deps::frame_support::traits::UncheckedOnRuntimeUpgrade;
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![42u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 8000));
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(2, || None);
+
+		// A prepaid one-shot registration as v1 left it: charged, holding no reference.
+		assert_ok!(renew_via_extension(who, TransactionRef::ContentHash(content_hash)));
+		crate::RenewRefCount::<Test>::remove(content_hash);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+
+		// Upgrade before the prepaid cycle fires.
+		crate::migrations::v2::VersionUncheckedMigrateV1ToV2::<Test>::on_runtime_upgrade();
+		assert_eq!(crate::RenewRefCount::<Test>::get(content_hash), Some(1));
+
+		// Block 11 proves the block-1 data and fires the prepaid cycle; the renewed entry
+		// lands at block 12, so its own proof is due at 12 + 10.
+		let proof_provider = || {
+			let parent_hash = System::parent_hash();
+			match System::block_number() {
+				11 | 22 => build_proof(parent_hash.as_ref(), vec![vec![42u8; 2000]]).unwrap(),
+				_ => None,
+			}
+		};
+		run_to_block(21, proof_provider);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000, "still live at block 21");
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+
+		run_to_block(23, proof_provider);
+		assert_eq!(
+			crate::PermanentStorageUsed::<Test>::get(),
+			0,
+			"the aged-out entry must credit the bytes v1 charged"
+		);
+		assert_eq!(crate::RenewRefCount::<Test>::get(content_hash), None);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
 	});
 }
