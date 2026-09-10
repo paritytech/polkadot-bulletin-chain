@@ -195,6 +195,15 @@ enum Commands {
 		/// Duration in seconds (for mixed scenario)
 		#[arg(long, default_value = "30")]
 		duration: u64,
+
+		/// Writer tasks for the mixed scenario; readers get the rest of `--concurrency`.
+		///
+		/// Writers pick the node, so all nodes are exercised only with at least one writer
+		/// per node. Defaults to half of `--concurrency`, which leaves claims tracking
+		/// submits and the pool near empty; skew toward writers to make the pool grow while
+		/// still acking.
+		#[arg(long)]
+		writers: Option<usize>,
 	},
 	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
@@ -410,39 +419,47 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				command_error = Some(e);
 			}
 		},
-		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
-			match authorize_hop_submitters(
-				&client,
-				&authorizer_signer,
-				&nonce_tracker,
-				cli.hop_submitters,
-			)
-			.await
-			{
-				Err(e) => {
-					tracing::error!("Failed to authorize HOP submitter: {e}");
+		Commands::Hop {
+			ref scenario,
+			items,
+			payload_size,
+			concurrency,
+			recipients,
+			duration,
+			writers,
+		} => match authorize_hop_submitters(
+			&client,
+			&authorizer_signer,
+			&nonce_tracker,
+			cli.hop_submitters,
+		)
+		.await
+		{
+			Err(e) => {
+				tracing::error!("Failed to authorize HOP submitter: {e}");
+				command_error = Some(e);
+			},
+			Ok(submitters) =>
+				if let Err(e) = scenarios::hop::run_hop_sweep(
+					&ws_url_refs,
+					scenario,
+					items,
+					payload_size,
+					concurrency,
+					recipients,
+					duration,
+					writers,
+					&submitters,
+					&mut all_results,
+					&flush,
+					cancel,
+				)
+				.await
+				{
+					tracing::error!("HOP command failed: {e}");
 					command_error = Some(e);
 				},
-				Ok(submitters) =>
-					if let Err(e) = scenarios::hop::run_hop_sweep(
-						&ws_url_refs,
-						scenario,
-						items,
-						payload_size,
-						concurrency,
-						recipients,
-						duration,
-						&submitters,
-						&mut all_results,
-						&flush,
-						cancel,
-					)
-					.await
-					{
-						tracing::error!("HOP command failed: {e}");
-						command_error = Some(e);
-					},
-			},
+		},
 		Commands::Renew { store_count, chunk_size, target_blocks } => {
 			if let Err(e) = scenarios::renew::run_renew_stress(
 				&client,
@@ -529,6 +546,7 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 							4,
 							10,
 							30,
+							None,
 							&submitters,
 							&mut all_results,
 							&flush,
