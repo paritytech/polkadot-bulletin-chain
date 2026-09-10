@@ -131,6 +131,7 @@ impl<T: Config> Pallet<T> {
 				}
 				Pallet::<T>::check_renew_authorization(
 					&AuthorizationScope::Account(who.clone()),
+					info.content_hash,
 					info.size,
 					consume,
 				)?;
@@ -172,6 +173,7 @@ impl<T: Config> Pallet<T> {
 
 				Pallet::<T>::check_renew_authorization(
 					&AuthorizationScope::Account(who.clone()),
+					info.content_hash,
 					info.size,
 					consume,
 				)?;
