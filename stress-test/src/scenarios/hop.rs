@@ -539,6 +539,9 @@ pub async fn run_pool_fill(
 		let mut sub_idx = 0usize;
 		let mut node_pool_full = false;
 		let mut i = 0u64;
+		// Per node: a node must not inherit the previous node's failures.
+		let mut node_errors = 0u64;
+		let mut throttled = 0u64;
 
 		while sub_idx < submitters.len() {
 			if cancel.load(Ordering::Relaxed) || i >= POOL_FILL_MAX_ENTRIES_PER_NODE {
@@ -587,6 +590,14 @@ pub async fn run_pool_fill(
 						any_pool_full = true;
 						break;
 					}
+					// RateLimited (1020): the node is asking us to slow down, which is the
+					// steady state once the submit burst is spent - the limit is 60/min. Wait
+					// and retry the same index rather than spending the error budget.
+					if err_str.contains("1020") || err_str.contains("Rate limited") {
+						throttled += 1;
+						tokio::time::sleep(Duration::from_secs(1)).await;
+						continue;
+					}
 					// UserQuotaExceeded (1013): rotate to the next account and keep filling.
 					if err_str.contains("1013") || err_str.contains("quota") {
 						tracing::info!(
@@ -599,11 +610,12 @@ pub async fn run_pool_fill(
 						continue;
 					}
 					errors += 1;
-					if errors <= 5 {
+					node_errors += 1;
+					if node_errors <= 5 {
 						tracing::warn!("[{url}] pool-fill submit error [{i}]: {e}");
 					}
-					if errors > 10 {
-						tracing::error!("Too many errors, stopping");
+					if node_errors > 10 {
+						tracing::error!("[{url}] too many errors, moving to the next node");
 						break;
 					}
 				},
@@ -616,6 +628,10 @@ pub async fn run_pool_fill(
 				 more submitters are needed to fill this pool",
 				submitters.len()
 			);
+		}
+
+		if throttled > 0 {
+			tracing::info!("[{url}] rate-limited {throttled} time(s) while filling");
 		}
 
 		if let Ok(status) = hop::hop_pool_status(&ws).await {
