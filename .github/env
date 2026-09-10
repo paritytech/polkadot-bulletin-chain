@@ -1,4 +1,4 @@
-CI_IMAGE=docker.io/paritytech/ci-unified:bullseye-1.93.0-2026-01-27-v202605151311
+CI_IMAGE=docker.io/paritytech/ci-unified:bullseye-1.93.0-2026-01-27-v202609081126
 RUST_STABLE_VERSION=1.88.0
 NODE_VERSION=22
 KUBO_VERSION=v0.40.1
