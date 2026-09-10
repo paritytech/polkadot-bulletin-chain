@@ -90,10 +90,10 @@ async fn main() -> Result<()> {
 	let cid_data = operation
 		.calculate_cid()
 		.map_err(|e| anyhow!("CID calculation error: {:?}", e))?;
-	let cid_bytes = cid_to_bytes(&cid_data)
-		.map_err(|e| anyhow!("CID serialization error: {:?}", e))?;
+	let cid_bytes =
+		cid_to_bytes(&cid_data).map_err(|e| anyhow!("CID serialization error: {:?}", e))?;
 	info!("Pre-calculated CID: {}", hex::encode(&cid_bytes));
-	info!("Content hash: {}", hex::encode(&cid_data.content_hash));
+	info!("Content hash: {}", hex::encode(cid_data.content_hash));
 
 	// Store using SDK's TransactionClient with progress callback
 	let store_receipt = client
@@ -140,7 +140,12 @@ async fn main() -> Result<()> {
 	});
 
 	let (batch_operation, manifest_data) = sdk_client
-		.prepare_store_chunked(&large_data, Some(chunker_config), dag_options, Some(progress_callback))
+		.prepare_store_chunked(
+			&large_data,
+			Some(chunker_config),
+			dag_options,
+			Some(progress_callback),
+		)
 		.map_err(|e| anyhow!("Chunking failed: {:?}", e))?;
 
 	info!("Prepared {} chunks", batch_operation.operations.len());
@@ -149,10 +154,9 @@ async fn main() -> Result<()> {
 	for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
 		info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
 
-		let chunk_receipt = client
-			.store(chunk_op.data.clone(), &keypair, WaitFor::InBlock)
-			.await
-			.map_err(|e| anyhow!("Chunk {} store failed: {:?}", i + 1, e))?;
+		let chunk_receipt =
+			store_with_retry(&client, chunk_op.data.clone(), &keypair, &format!("Chunk {}", i + 1))
+				.await?;
 
 		info!("  Chunk {} stored in block: {}", i + 1, chunk_receipt.block_hash);
 	}
@@ -161,10 +165,7 @@ async fn main() -> Result<()> {
 	if let Some(manifest) = manifest_data {
 		info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
 
-		let manifest_receipt = client
-			.store(manifest, &keypair, WaitFor::InBlock)
-			.await
-			.map_err(|e| anyhow!("Manifest store failed: {:?}", e))?;
+		let manifest_receipt = store_with_retry(&client, manifest, &keypair, "Manifest").await?;
 
 		info!("✅ DAG-PB manifest stored!");
 		info!("  Manifest block hash: {}", manifest_receipt.block_hash);
@@ -174,6 +175,44 @@ async fn main() -> Result<()> {
 	info!("\n✅ All examples completed successfully!");
 
 	Ok(())
+}
+
+/// Store with a bounded retry on reorg-induced nonce races.
+///
+/// The test relay reorgs the parachain at epoch boundaries. A reorg can
+/// retract the block that included the previous submission after the next
+/// nonce was already read from it; the node then reports the follow-up as
+/// usurped or invalid and gives no signal for the retracted transaction.
+/// Each `store` call re-reads the nonce from the best block and re-signs,
+/// so pausing and resubmitting recovers.
+async fn store_with_retry(
+	client: &TransactionClient,
+	data: Vec<u8>,
+	keypair: &Keypair,
+	label: &str,
+) -> Result<StoreReceipt> {
+	const MAX_ATTEMPTS: u32 = 3;
+	// About one block: lets the fork choice and tx pool settle before the
+	// nonce is read again.
+	const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(6);
+
+	let mut attempt = 1;
+	loop {
+		match client.store(data.clone(), keypair, WaitFor::InBlock).await {
+			Ok(receipt) => return Ok(receipt),
+			Err(e) if attempt < MAX_ATTEMPTS && is_nonce_race(&e) => {
+				info!("{label}: nonce race (attempt {attempt}/{MAX_ATTEMPTS}), retrying: {:?}", e);
+				tokio::time::sleep(RETRY_DELAY).await;
+				attempt += 1;
+			},
+			Err(e) => return Err(anyhow!("{label} store failed: {e:?}")),
+		}
+	}
+}
+
+fn is_nonce_race(error: &Error) -> bool {
+	let msg = format!("{error:?}").to_lowercase();
+	msg.contains("usurped") || msg.contains("invalid")
 }
 
 fn keypair_from_seed(seed: &str) -> Result<Keypair> {
