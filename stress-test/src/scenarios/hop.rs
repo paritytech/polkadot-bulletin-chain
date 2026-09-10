@@ -684,21 +684,40 @@ pub async fn run_mixed(
 	ws_urls: &[&str],
 	payload_size: usize,
 	concurrency: usize,
+	writers: Option<usize>,
 	duration_secs: u64,
-	submitter: &Keypair,
+	submitters: &[Keypair],
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
+	// Writers choose the node (`ws_urls[w_idx % len]`); readers follow each entry's
+	// recorded URL. So every node is exercised only if there is at least one writer per
+	// node. An even split leaves claims tracking submits and the pool near empty, which
+	// measures lifecycle throughput; skewing toward writers makes the pool grow while
+	// still acking.
+	let writer_count = writers.unwrap_or_else(|| std::cmp::max(1, concurrency / 2)).max(1);
+	let reader_count = std::cmp::max(1, concurrency.saturating_sub(writer_count));
+
 	tracing::info!(
-		"S5: Mixed — {} byte payloads, concurrency {}, {}s duration",
+		"S5: Mixed — {} byte payloads, {} writer(s) / {} reader(s) over {} node(s) with {} \
+		 submitter(s), {}s duration",
 		payload_size,
-		concurrency,
+		writer_count,
+		reader_count,
+		ws_urls.len(),
+		submitters.len(),
 		duration_secs,
 	);
 
-	let writer_count = std::cmp::max(1, concurrency / 2);
-	let reader_count = std::cmp::max(1, concurrency - writer_count);
+	if writer_count < ws_urls.len() {
+		tracing::warn!(
+			"{} writer(s) for {} node(s): nodes {}.. will receive no submissions",
+			writer_count,
+			ws_urls.len(),
+			writer_count
+		);
+	}
 
 	let deadline = Instant::now() + Duration::from_secs(duration_secs);
 
@@ -723,13 +742,16 @@ pub async fn run_mixed(
 	let mut writer_handles = Vec::new();
 	for w_idx in 0..writer_count {
 		let url = ws_urls[w_idx % ws_urls.len()].to_string();
+		// A writer owns a node, and the byte quota is per (node, submitter) — one account
+		// only covers --hop-max-user-size on that node. Carry every account and rotate on
+		// UserQuotaExceeded so a single writer can fill a pool larger than one quota.
+		let writer_submitters: Vec<Keypair> = submitters.to_vec();
 		let pending = pending.clone();
 		let count = submit_count.clone();
 		let errors = submit_errors.clone();
 		let bytes = submit_bytes.clone();
 		let lats = submit_lats.clone();
 		let cancel = cancel.clone();
-		let submitter = submitter.clone();
 
 		writer_handles.push(tokio::spawn(async move {
 			let ws = match client::connect_ws(&url).await {
@@ -741,12 +763,22 @@ pub async fn run_mixed(
 			};
 
 			let mut idx = MIXED_INDEX_BASE + (w_idx as u64) * 1_000_000;
+			let mut sub_idx = 0usize;
 			while Instant::now() < deadline && !cancel.load(Ordering::Relaxed) {
+				if sub_idx >= writer_submitters.len() {
+					tracing::warn!(
+						"Writer {w_idx} on {url}: all {} submitter(s) exhausted their quota; \
+						 acks are not releasing bytes fast enough, or more are needed",
+						writer_submitters.len()
+					);
+					break;
+				}
+
 				let data = hop::generate_payload(payload_size, idx);
 				let recipients = vec![RecipientKeypair::generate()];
 				idx += 1;
 
-				match hop::hop_submit(&ws, &data, &recipients, &submitter).await {
+				match hop::hop_submit(&ws, &data, &recipients, &writer_submitters[sub_idx]).await {
 					Ok((hash, _result, latency)) => {
 						count.fetch_add(1, Ordering::Relaxed);
 						bytes.fetch_add(payload_size as u64, Ordering::Relaxed);
@@ -758,7 +790,19 @@ pub async fn run_mixed(
 							collator_url: url.clone(),
 						});
 					},
-					Err(_) => {
+					Err(e) => {
+						let err_str = e.to_string();
+						// Rate limited: backpressure, not failure — the node caps submits
+						// per minute, so wait and retry with the same account.
+						if err_str.contains("1020") || err_str.contains("Rate limited") {
+							tokio::time::sleep(Duration::from_secs(1)).await;
+							continue;
+						}
+						// Quota spent on this node for this account: move to the next.
+						if err_str.contains("1013") || err_str.contains("quota") {
+							sub_idx += 1;
+							continue;
+						}
 						errors.fetch_add(1, Ordering::Relaxed);
 					},
 				}
@@ -1032,6 +1076,7 @@ pub async fn run_hop_sweep(
 	concurrency: usize,
 	num_recipients: usize,
 	duration_secs: u64,
+	writers: Option<usize>,
 	submitters: &[Keypair],
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
@@ -1093,8 +1138,9 @@ pub async fn run_hop_sweep(
 				ws_urls,
 				size,
 				concurrency,
+				writers,
 				duration_secs,
-				submitter,
+				submitters,
 				results,
 				on_result,
 				cancel,
@@ -1158,8 +1204,9 @@ pub async fn run_hop_sweep(
 					ws_urls,
 					size,
 					concurrency,
+					writers,
 					duration_secs,
-					submitter,
+					submitters,
 					results,
 					on_result,
 					cancel,
