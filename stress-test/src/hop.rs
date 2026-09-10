@@ -17,6 +17,14 @@ const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
 /// Domain-separator prefix the runtime uses when verifying `hop_claim` signatures.
 const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
 
+/// Domain-separator prefix the runtime uses when verifying `hop_ack` signatures.
+/// Distinct from the claim context: a claim signature is not a valid ack signature.
+const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
+
+/// `HopError::NotFound`. Acking an entry that is already gone - fully acked by every
+/// recipient, or expired - is a benign terminal state rather than a failure.
+const HOP_ERR_NOT_FOUND: i32 = 1004;
+
 /// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
 fn op_signing_payload(context: &[u8], hash: &[u8]) -> [u8; 32] {
 	let mut buf = Vec::with_capacity(context.len() + hash.len());
@@ -179,6 +187,38 @@ pub async fn hop_claim(
 	let data = hex::decode(data_hex.strip_prefix("0x").unwrap_or(&data_hex))
 		.context("decoding claimed data")?;
 	Ok((data, latency))
+}
+
+/// Acknowledge claimed data. Returns latency.
+///
+/// Claiming only reads: the node holds the entry until *every* recipient has acked, so a
+/// claim without an ack leaves the payload occupying both the pool and the submitter's
+/// per-user byte budget until it expires. Callers that claim should ack.
+pub async fn hop_ack(
+	ws: &WsClient,
+	hash: &[u8],
+	recipient: &RecipientKeypair,
+) -> Result<std::time::Duration> {
+	let hash_hex = format!("0x{}", hex::encode(hash));
+	let payload = op_signing_payload(HOP_ACK_CONTEXT, hash);
+	let signature = recipient.sign_multi_signature(&payload);
+	let sig_hex = format!("0x{}", hex::encode(&signature));
+
+	let start = Instant::now();
+	let outcome = ws.request::<(), _>("hop_ack", rpc_params![hash_hex, sig_hex]).await;
+	let latency = start.elapsed();
+
+	match outcome {
+		Ok(()) => Ok(latency),
+		Err(err) => {
+			let err = anyhow::Error::new(err);
+			if error_code(&err) == Some(HOP_ERR_NOT_FOUND) {
+				Ok(latency)
+			} else {
+				Err(err).context("hop_ack")
+			}
+		},
+	}
 }
 
 /// Get pool status.
