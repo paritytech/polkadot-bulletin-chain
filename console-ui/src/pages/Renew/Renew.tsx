@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/Select";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { CidInput } from "@/components/CidInput";
+import { CidInfoCard } from "@/components/CidInfoCard";
 import { useApi, useBlockNumber, useChainState, useCreateBulletinClient, useNetwork } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
@@ -1023,6 +1024,8 @@ export function Renew() {
 
         {/* Sidebar */}
         <div className="space-y-6">
+          <CidInfoCard cid={parsedCid} />
+
           <AuthorizationCard />
 
           {!selectedAccount && (
