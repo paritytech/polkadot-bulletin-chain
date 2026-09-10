@@ -114,7 +114,7 @@ All counters reset to zero when an expired authorization is re-granted, starting
 
 ### Chain-wide Renewal Cap
 
-A global `MaxPermanentStorageSize` limits total renewed bytes across all authorizations. A `renew` is rejected when `PermanentStorageUsed + size > MaxPermanentStorageSize`. When usage crosses 80% of the cap, a `PermanentStorageNearCap` event is emitted as a signal for off-chain governance to raise the cap or coordinate another bulletin chain.
+A global `MaxPermanentStorageSize` limits total renewed bytes across all authorizations. A `renew` is rejected when `PermanentStorageUsed + size > MaxPermanentStorageSize`. When usage crosses 80% of the cap, a `PermanentStorageNearCap` event is emitted as a signal for off-chain governance to raise the cap or coordinate another bulletin chain. Both it and `PermanentStorageUsedUpdated` are emitted from `on_finalize` — at most once per block, and only when the counter's block-end value differs from its block-start value.
 
 ## SDK
 
