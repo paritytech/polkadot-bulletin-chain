@@ -921,7 +921,8 @@ fn try_state_detects_zero_authorization_allowance() {
 		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
 		// AuthorizationExtent SCALE layout: transactions(u32), transactions_allowance(u32),
 		// bytes(u64), bytes_allowance(u64), extra(`()`, zero bytes)
-		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100
+		// all zero counters, bytes_allowance=0, expiration=100
+		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64);
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -1280,7 +1281,7 @@ fn genesis_populates_allowed_authorizers() {
 }
 
 /// Verify that `ProvideInherent::create_inherent` actually emits the composite inherent call
-/// when `PendingAutoRenewals` is non-empty, even with no storage proof in `InherentData`.
+/// when `PendingRenewals` is non-empty, even with no storage proof in `InherentData`.
 ///
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no

@@ -28,7 +28,7 @@ pub trait WeightInfo {
 	/// Per-call weight charged inside the renewal extension's signed validation
 	/// (auth lookup + `bytes_permanent` + `PermanentStorageUsed` checks).
 	fn validate_renew() -> Weight;
-	/// Drain `n` pending auto-renewals (linear in `n`).
+	/// Drain `n` pending renewals (linear in `n`).
 	fn process_pending_renewals(n: u32) -> Weight;
 }
 

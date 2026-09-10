@@ -1,10 +1,12 @@
 # Renewal
 
-This guide shows how to renew stored data using the TypeScript SDK to extend the retention period.
+Extending the retention of stored data with the TypeScript SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(ref)` takes either a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the on-chain `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires once when the data reaches its retention boundary; for immediate renewal use `client.forceRenew(ref)`. On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there. Recurring `enable_auto_renew` is not exposed by the SDK; call it via a raw PAPI transaction against the live runtime if you need it (see [Raw Runtime Renewal](#raw-runtime-renewal)).
+> **Note**: `client.renew(ref)` takes a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires at the retention boundary; `client.forceRenew(ref)` renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — use a [raw PAPI transaction](#raw-runtime-renewal).
+>
+> On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there.
 
 ## Using the SDK Client
 
@@ -49,7 +51,7 @@ console.log(`Data expires at block ${expiresAtBlock} (${blocksRemaining} blocks 
 
 ## Building a Renewal Tracker
 
-For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `AutoRenewalAlreadyEnabled`, so drop entries once scheduled:
+For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `RenewalAlreadyEnabled`, so drop entries once scheduled:
 
 ```typescript
 interface StoredItem {
@@ -86,7 +88,7 @@ for (const item of await tracker.getItemsNeedingRenewal(api)) {
 
 ## Raw Runtime Renewal
 
-Bypassing the SDK client, a raw PAPI transaction targets the **current** runtime, where `renew`/`force_renew` take an `entry: TransactionRef` and `enable_auto_renew` takes a `content_hash`:
+Against the **current** runtime, bypassing the SDK client: `renew` / `force_renew` take an `entry: TransactionRef`, `enable_auto_renew` a `content_hash`:
 
 ```typescript
 // One-shot scheduled renewal
@@ -119,7 +121,7 @@ api.tx.TransactionStorage.store_with_cid_config({
 
 ## Authorization for Renewal
 
-Renewal is accounted differently from storing. A store only consumes the soft boost budget (going over just lowers priority), but a renewal charges the data's byte size against `bytes_permanent` — the account's renew quota — plus one transaction unit, and also counts against the chain-wide permanent-storage **hard cap**. Unlike stores, renewals **are rejected** when either limit is exceeded (see [Authorization](./authorization.md)).
+Renewal is accounted differently from storing. Going over budget on a store only lowers its priority; a renewal charges the data size against `bytes_permanent` (the account's renew quota) plus one transaction unit, and against the chain-wide permanent-storage **hard cap**. Exceeding either limit **rejects** the renewal (see [Authorization](./authorization.md)).
 
 ## Error Handling
 
@@ -129,7 +131,7 @@ try {
 } catch (error) {
   if (error.message.includes("RenewedNotFound")) {
     console.log("Data not found - may have been pruned");
-  } else if (error.message.includes("AutoRenewalAlreadyEnabled")) {
+  } else if (error.message.includes("RenewalAlreadyEnabled")) {
     console.log("A renewal is already scheduled for this data");
   } else if (error.message.includes("AuthorizationNotFound")) {
     console.log("Insufficient authorization - request more via Faucet");
