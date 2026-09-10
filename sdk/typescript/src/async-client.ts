@@ -120,10 +120,21 @@ type RenewalPallet = {
     args: { block: number; index: number } | { entry: TransactionRef },
   ): PapiTransaction
   force_renew?(args: { entry: TransactionRef }): PapiTransaction
+  enable_auto_renew?(args: { content_hash: string }): PapiTransaction
+  disable_auto_renew?(args: { content_hash: string }): PapiTransaction
 }
 
-/** Where the runtime's renewal extrinsics live and which call shape they take. */
-type RenewalResolution = { pallet: RenewalPallet; shape: RenewShape }
+/**
+ * Where the runtime's renewal extrinsics live and which call shape they take.
+ *
+ * `autoRenew` is tracked separately: the auto-renew calls landed after
+ * `force_renew`, so a runtime can carry the latter without the former.
+ */
+type RenewalResolution = {
+  pallet: RenewalPallet
+  shape: RenewShape
+  autoRenew: boolean
+}
 
 /** The slice of PAPI's `getStaticApis()` result the renewal resolution reads. */
 type StaticApisCompat = {
@@ -161,6 +172,8 @@ export interface BulletinTypedApi {
         args: { block: number; index: number } | { entry: TransactionRef },
       ): PapiTransaction
       force_renew?(args: { entry: TransactionRef }): PapiTransaction
+      enable_auto_renew?(args: { content_hash: string }): PapiTransaction
+      disable_auto_renew?(args: { content_hash: string }): PapiTransaction
       remove_expired_account_authorization(args: {
         who: string
       }): PapiTransaction
@@ -389,6 +402,8 @@ export interface BulletinClientInterface {
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
   renew(ref: TransactionRefInput): CallBuilder
   forceRenew(ref: TransactionRefInput): CallBuilder
+  enableAutoRenew(contentHash: Uint8Array): CallBuilder
+  disableAutoRenew(contentHash: Uint8Array): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -1322,11 +1337,16 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       const transactionStorage = this.api.tx.TransactionStorage
       if (!this.api.getStaticApis) {
         if (dataRenewal?.renew) {
-          return { pallet: dataRenewal, shape: "transactionRef" }
+          return {
+            pallet: dataRenewal,
+            shape: "transactionRef",
+            autoRenew: !!dataRenewal.enable_auto_renew,
+          }
         }
         return {
           pallet: transactionStorage,
           shape: transactionStorage.force_renew ? "transactionRef" : "legacy",
+          autoRenew: !!transactionStorage.enable_auto_renew,
         }
       }
       let compat: StaticApisCompat["compat"]["tx"]
@@ -1342,16 +1362,27 @@ export class AsyncBulletinClient implements BulletinClientInterface {
       }
       // `DataRenewal` has only ever taken `TransactionRef` arguments.
       if (dataRenewal && (compat.DataRenewal?.renew?.level ?? 0) > 0) {
-        return { pallet: dataRenewal, shape: "transactionRef" }
+        return {
+          pallet: dataRenewal,
+          shape: "transactionRef",
+          autoRenew: (compat.DataRenewal?.enable_auto_renew?.level ?? 0) > 0,
+        }
       }
       const storageCompat = compat.TransactionStorage
+      // Auto-renew must come from the same pallet the shape resolved to.
+      const autoRenew = (storageCompat?.enable_auto_renew?.level ?? 0) > 0
       if ((storageCompat?.force_renew?.level ?? 0) > 0) {
-        return { pallet: transactionStorage, shape: "transactionRef" }
+        return {
+          pallet: transactionStorage,
+          shape: "transactionRef",
+          autoRenew,
+        }
       }
       return {
         pallet: transactionStorage,
         shape:
           (storageCompat?.renew?.level ?? 0) > 0 ? "legacy" : "unsupported",
+        autoRenew,
       }
     })()
     const resolved = this.renewalPromise
@@ -1424,6 +1455,59 @@ export class AsyncBulletinClient implements BulletinClientInterface {
         options,
       )
     })
+  }
+
+  /**
+   * Register recurring auto-renewal for stored content.
+   *
+   * The first cycle is prepaid at registration; later cycles charge the
+   * owner's authorization and stop once it is exhausted. Fails if any renewal
+   * is already registered for `contentHash`.
+   */
+  enableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const tx = await this.autoRenewTx("enable_auto_renew", contentHash)
+      return this.submitTx(
+        tx,
+        "Failed to enable auto-renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * Cancel a renewal registration.
+   *
+   * The chain rejects this while the registration's next cycle is still
+   * prepaid, so it only succeeds once the prepaid cycle has fired.
+   */
+  disableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const tx = await this.autoRenewTx("disable_auto_renew", contentHash)
+      return this.submitTx(
+        tx,
+        "Failed to disable auto-renew",
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /** Build an auto-renew call, or throw if this runtime has none. */
+  private async autoRenewTx(
+    call: "enable_auto_renew" | "disable_auto_renew",
+    contentHash: Uint8Array,
+  ): Promise<PapiTransaction> {
+    const { pallet, shape, autoRenew } = await this.resolveRenewal()
+    const entry = pallet[call]
+    if (shape !== "transactionRef" || !autoRenew || !entry) {
+      throw new BulletinError(
+        `${call} is not supported by this runtime`,
+        ErrorCode.UNSUPPORTED_OPERATION,
+      )
+    }
+    return entry({ content_hash: Binary.toHex(contentHash) })
   }
 
   /**
