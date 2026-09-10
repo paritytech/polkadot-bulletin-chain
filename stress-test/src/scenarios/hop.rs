@@ -36,6 +36,9 @@ const SUBMIT_PAYLOAD_SIZES: &[(usize, &str)] = &[
 const FULL_CYCLE_INDEX_BASE: u64 = 100_000_000;
 const GROUP_INDEX_BASE: u64 = 200_000_000;
 const POOL_FILL_INDEX_BASE: u64 = 300_000_000;
+
+/// Safety cap on entries submitted to a single node by `pool-fill`.
+const POOL_FILL_MAX_ENTRIES_PER_NODE: u64 = 100_000;
 const MIXED_INDEX_BASE: u64 = 400_000_000;
 
 // ---------------------------------------------------------------------------
@@ -279,6 +282,15 @@ pub async fn run_full_cycle(
 					}
 					claim_lats.push(latency);
 					claim_bytes += data.len() as u64;
+					// Claiming only reads; the node releases the entry once every
+					// recipient has acked. Without this the pool and the submitter's
+					// per-user byte budget stay occupied until expiry.
+					if let Err(e) = hop::hop_ack(&ws, &entry.hash, kp).await {
+						claim_errors += 1;
+						if claim_errors <= 5 {
+							tracing::warn!("ack error: {e}");
+						}
+					}
 				},
 				Err(e) => {
 					claim_errors += 1;
@@ -406,6 +418,14 @@ pub async fn run_group(
 						if data.len() != expected_len {
 							tracing::error!("Data length mismatch in group claim");
 						}
+						// The entry is released only once *all* recipients ack, which
+						// for this scenario means every spawned task acking its own.
+						if let Err(e) = hop::hop_ack(&ws, &hash, &kp).await {
+							errors.fetch_add(1, Ordering::Relaxed);
+							if errors.load(Ordering::Relaxed) <= 5 {
+								tracing::warn!("group ack error: {e}");
+							}
+						}
 					},
 					Err(e) => {
 						errors.fetch_add(1, Ordering::Relaxed);
@@ -469,83 +489,142 @@ pub async fn run_group(
 pub async fn run_pool_fill(
 	ws_urls: &[&str],
 	payload_size: usize,
-	submitter: &Keypair,
+	submitters: &[Keypair],
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
 	tracing::info!(
-		"S4: Pool fill — {} byte payloads until PoolFull or UserQuotaExceeded",
-		payload_size
+		"S4: Pool fill — {} byte payloads on {} node(s) with {} submitter(s), until PoolFull",
+		payload_size,
+		ws_urls.len(),
+		submitters.len()
 	);
-
-	let ws = client::connect_ws(ws_urls[0]).await?;
-
-	if let Ok(status) = hop::hop_pool_status(&ws).await {
-		tracing::info!(
-			"Initial pool: {} entries, {} / {} bytes",
-			status.entry_count,
-			status.total_bytes,
-			status.max_bytes
-		);
-	}
 
 	let start = Instant::now();
 	let mut submitted = 0u64;
 	let mut errors = 0u64;
 	let mut total_bytes = 0u64;
 	let mut lats = Vec::new();
-	let mut pool_full = false;
+	let mut any_pool_full = false;
 
-	for i in 0u64.. {
-		if cancel.load(Ordering::Relaxed) || i >= 100_000 {
-			if i >= 100_000 {
-				tracing::info!("Hit 100k entries safety cap");
-			}
+	// The node caps pool bytes per `(node, submitter)`, and pools are node-local, so each
+	// node is filled independently and each submitter contributes its own quota to it.
+	// UserQuotaExceeded therefore means "this account is done here", not "the pool is
+	// full" — only PoolFull ends a node.
+	for (node_idx, url) in ws_urls.iter().enumerate() {
+		if cancel.load(Ordering::Relaxed) {
 			break;
 		}
 
-		let data = hop::generate_payload(payload_size, POOL_FILL_INDEX_BASE + i);
-		let recipients = vec![RecipientKeypair::generate()];
-
-		match hop::hop_submit(&ws, &data, &recipients, submitter).await {
-			Ok((_hash, result, latency)) => {
-				submitted += 1;
-				total_bytes += payload_size as u64;
-				lats.push(latency);
-
-				if submitted.is_multiple_of(100) {
-					tracing::info!(
-						"  {} submitted, pool: {} entries, {} / {} bytes",
-						submitted,
-						result.pool_status.entry_count,
-						result.pool_status.total_bytes,
-						result.pool_status.max_bytes
-					);
-				}
-			},
+		let ws = match client::connect_ws(url).await {
+			Ok(ws) => ws,
 			Err(e) => {
-				let err_str = e.to_string();
-				// Check for PoolFull (1002) or UserQuotaExceeded (1013)
-				if err_str.contains("1002") || err_str.contains("Pool full") {
-					tracing::info!("PoolFull hit after {submitted} entries");
-					pool_full = true;
-					break;
-				}
-				if err_str.contains("1013") || err_str.contains("quota") {
-					tracing::info!("UserQuotaExceeded hit after {submitted} entries");
-					pool_full = true;
-					break;
-				}
+				tracing::warn!("pool-fill: cannot connect to {url}: {e}");
 				errors += 1;
-				if errors <= 5 {
-					tracing::warn!("pool-fill submit error [{i}]: {e}");
-				}
-				if errors > 10 {
-					tracing::error!("Too many errors, stopping");
-					break;
-				}
+				continue;
 			},
+		};
+
+		if let Ok(status) = hop::hop_pool_status(&ws).await {
+			tracing::info!(
+				"[{url}] initial pool: {} entries, {} / {} bytes",
+				status.entry_count,
+				status.total_bytes,
+				status.max_bytes
+			);
+		}
+
+		let mut node_submitted = 0u64;
+		let mut sub_idx = 0usize;
+		let mut node_pool_full = false;
+		let mut i = 0u64;
+
+		while sub_idx < submitters.len() {
+			if cancel.load(Ordering::Relaxed) || i >= POOL_FILL_MAX_ENTRIES_PER_NODE {
+				if i >= POOL_FILL_MAX_ENTRIES_PER_NODE {
+					tracing::info!("[{url}] hit the {POOL_FILL_MAX_ENTRIES_PER_NODE} entry cap");
+				}
+				break;
+			}
+
+			// Disjoint index space per node so payloads stay unique per pool.
+			let index = POOL_FILL_INDEX_BASE + (node_idx as u64) * 1_000_000 + i;
+			let data = hop::generate_payload(payload_size, index);
+			let recipients = vec![RecipientKeypair::generate()];
+
+			match hop::hop_submit(&ws, &data, &recipients, &submitters[sub_idx]).await {
+				Ok((_hash, result, latency)) => {
+					submitted += 1;
+					node_submitted += 1;
+					i += 1;
+					total_bytes += payload_size as u64;
+					lats.push(latency);
+
+					if node_submitted.is_multiple_of(100) {
+						tracing::info!(
+							"  [{url}] {} submitted (submitter {}/{}), pool: {} entries, {} / {} bytes",
+							node_submitted,
+							sub_idx + 1,
+							submitters.len(),
+							result.pool_status.entry_count,
+							result.pool_status.total_bytes,
+							result.pool_status.max_bytes
+						);
+					}
+				},
+				Err(e) => {
+					let err_str = e.to_string();
+					// PoolFull (1002): the node is full, nothing more to do here.
+					if err_str.contains("1002") || err_str.contains("Pool full") {
+						tracing::info!(
+							"[{url}] PoolFull after {node_submitted} entries \
+							 ({}/{} submitters used)",
+							sub_idx + 1,
+							submitters.len()
+						);
+						node_pool_full = true;
+						any_pool_full = true;
+						break;
+					}
+					// UserQuotaExceeded (1013): rotate to the next account and keep filling.
+					if err_str.contains("1013") || err_str.contains("quota") {
+						tracing::info!(
+							"[{url}] submitter {}/{} exhausted its quota after \
+							 {node_submitted} entries; rotating",
+							sub_idx + 1,
+							submitters.len()
+						);
+						sub_idx += 1;
+						continue;
+					}
+					errors += 1;
+					if errors <= 5 {
+						tracing::warn!("[{url}] pool-fill submit error [{i}]: {e}");
+					}
+					if errors > 10 {
+						tracing::error!("Too many errors, stopping");
+						break;
+					}
+				},
+			}
+		}
+
+		if !node_pool_full && sub_idx >= submitters.len() {
+			tracing::warn!(
+				"[{url}] all {} submitters exhausted without reaching PoolFull — \
+				 more submitters are needed to fill this pool",
+				submitters.len()
+			);
+		}
+
+		if let Ok(status) = hop::hop_pool_status(&ws).await {
+			tracing::info!(
+				"[{url}] final pool: {} entries, {} / {} bytes",
+				status.entry_count,
+				status.total_bytes,
+				status.max_bytes
+			);
 		}
 	}
 
@@ -560,7 +639,7 @@ pub async fn run_pool_fill(
 		name: format!(
 			"HOP pool-fill {}{}",
 			format_payload_label(payload_size),
-			if pool_full { " (full)" } else { "" }
+			if any_pool_full { " (full)" } else { "" }
 		),
 		variant: variant.into(),
 		duration,
@@ -576,21 +655,11 @@ pub async fn run_pool_fill(
 
 	result.print_text();
 
-	if let Ok(status) = hop::hop_pool_status(&ws).await {
-		tracing::info!(
-			"Final pool: {} entries, {} / {} bytes",
-			status.entry_count,
-			status.total_bytes,
-			status.max_bytes
-		);
-	}
-
 	results.push(result);
 	on_result(results);
 	Ok(())
 }
 
-// ---------------------------------------------------------------------------
 // S5: Mixed read/write
 // ---------------------------------------------------------------------------
 
@@ -710,6 +779,11 @@ pub async fn run_mixed(
 								count.fetch_add(1, Ordering::Relaxed);
 								bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
 								lats.lock().await.push(latency);
+								// Entries carry a single recipient here, so this ack
+								// releases the entry and frees pool and per-user budget.
+								if hop::hop_ack(&ws, &entry.hash, kp).await.is_err() {
+									errors.fetch_add(1, Ordering::Relaxed);
+								}
 							},
 							Err(_) => {
 								errors.fetch_add(1, Ordering::Relaxed);
@@ -942,11 +1016,15 @@ pub async fn run_hop_sweep(
 	concurrency: usize,
 	num_recipients: usize,
 	duration_secs: u64,
-	submitter: &Keypair,
+	submitters: &[Keypair],
 	results: &mut Vec<ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
+	// Only pool-fill spreads across submitters; every other scenario's writers already
+	// target distinct nodes, and the node's per-user cap is per `(node, submitter)`, so
+	// each writer already has its own quota with a single account.
+	let submitter = submitters.first().expect("at least one HOP submitter is derived");
 	match scenario {
 		"submit-only" | "submit" => {
 			let sizes: Vec<(usize, &str)> = match payload_size {
@@ -991,7 +1069,7 @@ pub async fn run_hop_sweep(
 		},
 		"pool-fill" => {
 			let size = payload_size.unwrap_or(10 * 1024);
-			run_pool_fill(ws_urls, size, submitter, results, on_result, cancel).await?;
+			run_pool_fill(ws_urls, size, submitters, results, on_result, cancel).await?;
 		},
 		"mixed" => {
 			let size = payload_size.unwrap_or(10 * 1024);
