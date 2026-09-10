@@ -411,8 +411,14 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			}
 		},
 		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
-			match authorize_hop_submitters(&client, &authorizer_signer, &nonce_tracker, cli.hop_submitters)
-					.await {
+			match authorize_hop_submitters(
+				&client,
+				&authorizer_signer,
+				&nonce_tracker,
+				cli.hop_submitters,
+			)
+			.await
+			{
 				Err(e) => {
 					tracing::error!("Failed to authorize HOP submitter: {e}");
 					command_error = Some(e);
@@ -502,8 +508,14 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				}
 			}
 			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
-				match authorize_hop_submitters(&client, &authorizer_signer, &nonce_tracker, cli.hop_submitters)
-					.await {
+				match authorize_hop_submitters(
+					&client,
+					&authorizer_signer,
+					&nonce_tracker,
+					cli.hop_submitters,
+				)
+				.await
+				{
 					Err(e) => {
 						tracing::error!("Failed to authorize HOP submitter: {e}");
 						command_error = Some(e);
@@ -698,27 +710,19 @@ async fn authorize_hop_submitters(
 	// authorizes the same account it always has.
 	let submitters = (0..count)
 		.map(|i| {
-			let uri = if i == 0 {
-				"//HopSubmitter".to_string()
-			} else {
-				format!("//HopSubmitter/{i}")
-			};
+			let uri =
+				if i == 0 { "//HopSubmitter".to_string() } else { format!("//HopSubmitter/{i}") };
 			let uri: subxt_signer::SecretUri =
 				uri.parse().expect("derived submitter seed is valid");
 			Keypair::from_uri(&uri)
 				.map_err(|e| anyhow::anyhow!("Failed to create HOP submitter keypair: {e}"))
 		})
 		.collect::<Result<Vec<_>>>()?;
-	let submitter_ids: Vec<_> =
-		submitters.iter().map(|k| k.public_key().to_account_id()).collect();
+	let submitter_ids: Vec<_> = submitters.iter().map(|k| k.public_key().to_account_id()).collect();
 	tracing::info!(
 		"Authorizing {} HOP submitter(s) via TransactionStorage::authorize_account: {}",
 		submitter_ids.len(),
-		submitter_ids
-			.iter()
-			.map(|id| id.to_string())
-			.collect::<Vec<_>>()
-			.join(", ")
+		submitter_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ")
 	);
 	authorize::authorize_account_batch(
 		client,
