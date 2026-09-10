@@ -204,6 +204,15 @@ enum Commands {
 		/// still acking.
 		#[arg(long)]
 		writers: Option<usize>,
+
+		/// Fraction of claimed entries the mixed scenario acks, 0.0..=1.0.
+		///
+		/// An ack releases the entry, so at 1.0 the pools stay near empty no matter how
+		/// many writers run - outflow matches inflow exactly. Lower it to leave the
+		/// balance resident until `--hop-retention-secs` expires it, which grows the
+		/// pools while still exercising claim and ack.
+		#[arg(long, default_value = "1.0")]
+		ack_ratio: f64,
 	},
 	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
@@ -427,6 +436,7 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			recipients,
 			duration,
 			writers,
+			ack_ratio,
 		} => match authorize_hop_submitters(
 			&client,
 			&authorizer_signer,
@@ -449,6 +459,7 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 					recipients,
 					duration,
 					writers,
+					ack_ratio,
 					&submitters,
 					&mut all_results,
 					&flush,
@@ -547,6 +558,7 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 							10,
 							30,
 							None,
+							1.0,
 							&submitters,
 							&mut all_results,
 							&flush,
