@@ -21,9 +21,25 @@ const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
 /// Distinct from the claim context: a claim signature is not a valid ack signature.
 const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
 
+// Numeric codes from `sc-hop`'s `HopError -> ErrorObjectOwned` mapping. Classify on
+// these rather than on `Display` text: the codes are the RPC contract, and matching
+// substrings of the message conflates errors whose wording happens to overlap.
+
+/// `HopError::PoolFull` — the node's pool is at `--hop-max-pool-size`. Node-wide, so it
+/// clears only as entries are acked or expire; rotating accounts does not help.
+pub const HOP_ERR_POOL_FULL: i32 = 1002;
+
 /// `HopError::NotFound`. Acking an entry that is already gone - fully acked by every
 /// recipient, or expired - is a benign terminal state rather than a failure.
 const HOP_ERR_NOT_FOUND: i32 = 1004;
+
+/// `HopError::UserQuotaExceeded` — `--hop-max-user-size` is spent for this
+/// `(node, account)` pair. Another account still has its own budget on the same node.
+pub const HOP_ERR_USER_QUOTA: i32 = 1011;
+
+/// `HopError::RateLimited` — the per-account token bucket is empty. Transient, and
+/// per account, so another account can submit immediately.
+pub const HOP_ERR_RATE_LIMITED: i32 = 1020;
 
 /// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
 fn op_signing_payload(context: &[u8], hash: &[u8]) -> [u8; 32] {
@@ -237,6 +253,21 @@ pub fn error_code(err: &anyhow::Error) -> Option<i32> {
 		Some(jsonrpsee::core::ClientError::Call(obj)) => Some(obj.code()),
 		_ => None,
 	}
+}
+
+/// Whether the WS transport itself failed, as opposed to the node rejecting the call.
+///
+/// `WsClient` does not reconnect, so a caller that keeps one connection for the length of
+/// a run must redial when this returns true; retrying on the same client only repeats the
+/// same failure.
+pub fn is_transport_error(err: &anyhow::Error) -> bool {
+	use jsonrpsee::core::ClientError;
+	matches!(
+		err.downcast_ref::<ClientError>(),
+		Some(
+			ClientError::RestartNeeded(_) | ClientError::Transport(_) | ClientError::RequestTimeout
+		)
+	)
 }
 
 // ---------------------------------------------------------------------------
