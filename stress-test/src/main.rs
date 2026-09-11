@@ -41,6 +41,16 @@ struct Cli {
 	#[arg(long, default_value = "//Alice", global = true)]
 	authorizer_seed: String,
 
+	/// Number of distinct HOP submitter accounts to derive and authorize.
+	///
+	/// The node caps pool bytes per `(node, submitter)` pair via `--hop-max-user-size`, so
+	/// filling a pool larger than that cap needs several submitters: at a 256 MiB cap and a
+	/// 10 GiB pool, 40. Only `pool-fill` spreads across them; the other scenarios use the
+	/// first, since each of their writers already targets a different node and so already
+	/// has its own quota.
+	#[arg(long, default_value = "1", global = true)]
+	hop_submitters: usize,
+
 	/// Number of unique items per size (for bitswap read tests)
 	#[arg(long, default_value = "512", global = true)]
 	iterations: u32,
@@ -185,6 +195,24 @@ enum Commands {
 		/// Duration in seconds (for mixed scenario)
 		#[arg(long, default_value = "30")]
 		duration: u64,
+
+		/// Writer tasks for the mixed scenario; readers get the rest of `--concurrency`.
+		///
+		/// Writers pick the node, so all nodes are exercised only with at least one writer
+		/// per node. Defaults to half of `--concurrency`, which leaves claims tracking
+		/// submits and the pool near empty; skew toward writers to make the pool grow while
+		/// still acking.
+		#[arg(long)]
+		writers: Option<usize>,
+
+		/// Fraction of claimed entries the mixed scenario acks, 0.0..=1.0.
+		///
+		/// An ack releases the entry, so at 1.0 the pools stay near empty no matter how
+		/// many writers run - outflow matches inflow exactly. Lower it to leave the
+		/// balance resident until `--hop-retention-secs` expires it, which grows the
+		/// pools while still exercising claim and ack.
+		#[arg(long, default_value = "1.0")]
+		ack_ratio: f64,
 	},
 	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
@@ -400,32 +428,49 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				command_error = Some(e);
 			}
 		},
-		Commands::Hop { ref scenario, items, payload_size, concurrency, recipients, duration } =>
-			match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
-				Err(e) => {
-					tracing::error!("Failed to authorize HOP submitter: {e}");
+		Commands::Hop {
+			ref scenario,
+			items,
+			payload_size,
+			concurrency,
+			recipients,
+			duration,
+			writers,
+			ack_ratio,
+		} => match authorize_hop_submitters(
+			&client,
+			&authorizer_signer,
+			&nonce_tracker,
+			cli.hop_submitters,
+		)
+		.await
+		{
+			Err(e) => {
+				tracing::error!("Failed to authorize HOP submitter: {e}");
+				command_error = Some(e);
+			},
+			Ok(submitters) =>
+				if let Err(e) = scenarios::hop::run_hop_sweep(
+					&ws_url_refs,
+					scenario,
+					items,
+					payload_size,
+					concurrency,
+					recipients,
+					duration,
+					writers,
+					ack_ratio,
+					&submitters,
+					&mut all_results,
+					&flush,
+					cancel,
+				)
+				.await
+				{
+					tracing::error!("HOP command failed: {e}");
 					command_error = Some(e);
 				},
-				Ok(submitter) =>
-					if let Err(e) = scenarios::hop::run_hop_sweep(
-						&ws_url_refs,
-						scenario,
-						items,
-						payload_size,
-						concurrency,
-						recipients,
-						duration,
-						&submitter,
-						&mut all_results,
-						&flush,
-						cancel,
-					)
-					.await
-					{
-						tracing::error!("HOP command failed: {e}");
-						command_error = Some(e);
-					},
-			},
+		},
 		Commands::Renew { store_count, chunk_size, target_blocks } => {
 			if let Err(e) = scenarios::renew::run_renew_stress(
 				&client,
@@ -491,12 +536,19 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				}
 			}
 			if command_error.is_none() && !cancel.load(Ordering::Relaxed) {
-				match authorize_hop_submitter(&client, &authorizer_signer, &nonce_tracker).await {
+				match authorize_hop_submitters(
+					&client,
+					&authorizer_signer,
+					&nonce_tracker,
+					cli.hop_submitters,
+				)
+				.await
+				{
 					Err(e) => {
 						tracing::error!("Failed to authorize HOP submitter: {e}");
 						command_error = Some(e);
 					},
-					Ok(submitter) =>
+					Ok(submitters) =>
 						if let Err(e) = scenarios::hop::run_hop_sweep(
 							&ws_url_refs,
 							"all",
@@ -505,7 +557,9 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 							4,
 							10,
 							30,
-							&submitter,
+							None,
+							1.0,
+							&submitters,
 							&mut all_results,
 							&flush,
 							cancel,
@@ -675,29 +729,41 @@ async fn run_bitswap(
 /// HOP's `can_account_promote` reads from
 /// `pallet-bulletin-transaction-storage::AccountAuthorization`. The numeric extents (`u32::MAX`
 /// txs, ~1 GiB) only bound the storage pallet; HOP just needs an unexpired entry to exist.
-async fn authorize_hop_submitter(
+async fn authorize_hop_submitters(
 	client: &subxt::OnlineClient<client::BulletinConfig>,
 	authorizer: &subxt_signer::sr25519::Keypair,
 	nonce_tracker: &accounts::NonceTracker,
-) -> Result<Keypair> {
-	let submitter_uri: subxt_signer::SecretUri =
-		"//HopSubmitter".parse().expect("static submitter seed is valid");
-	let submitter = Keypair::from_uri(&submitter_uri)
-		.map_err(|e| anyhow::anyhow!("Failed to create HOP submitter keypair: {e}"))?;
-	let submitter_id = submitter.public_key().to_account_id();
+	count: usize,
+) -> Result<Vec<Keypair>> {
+	let count = count.max(1);
+	// Index 0 keeps the original `//HopSubmitter` derivation so a single-submitter run
+	// authorizes the same account it always has.
+	let submitters = (0..count)
+		.map(|i| {
+			let uri =
+				if i == 0 { "//HopSubmitter".to_string() } else { format!("//HopSubmitter/{i}") };
+			let uri: subxt_signer::SecretUri =
+				uri.parse().expect("derived submitter seed is valid");
+			Keypair::from_uri(&uri)
+				.map_err(|e| anyhow::anyhow!("Failed to create HOP submitter keypair: {e}"))
+		})
+		.collect::<Result<Vec<_>>>()?;
+	let submitter_ids: Vec<_> = submitters.iter().map(|k| k.public_key().to_account_id()).collect();
 	tracing::info!(
-		"Authorizing HOP submitter {submitter_id} via TransactionStorage::authorize_account"
+		"Authorizing {} HOP submitter(s) via TransactionStorage::authorize_account: {}",
+		submitter_ids.len(),
+		submitter_ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ")
 	);
 	authorize::authorize_account_batch(
 		client,
 		authorizer,
 		nonce_tracker,
-		&[submitter_id],
+		&submitter_ids,
 		u32::MAX,
 		1024 * 1024 * 1024,
 	)
 	.await?;
-	Ok(submitter)
+	Ok(submitters)
 }
 
 /// Resolve P2P multiaddrs from CLI args or RPC auto-discovery.
