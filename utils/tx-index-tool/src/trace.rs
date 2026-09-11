@@ -28,8 +28,11 @@ use std::{
 /// What the ledger says about one block.
 #[derive(Debug, Clone)]
 pub struct TraceRow {
-	/// Block number.
+	/// Block number. Two rows can share it: a canonical block and a fork at the same height
+	/// both keep their `BODY_INDEX` entry, and both hold a reference until discarded.
 	pub block: u32,
+	/// Hash of the block this row is about, distinguishing same-height forks.
+	pub block_hash: Option<DbHash>,
 	/// Reference shape from this database's `BODY_INDEX`. `None` when the block holds no
 	/// reference here — either it never did, or its release has already happened.
 	pub occurrences: Option<Occurrences>,
@@ -111,7 +114,7 @@ pub struct TraceReport {
 impl TraceReport {
 	/// The verdict, derived from the value, the counter and the ledger.
 	pub fn verdict(&self) -> Verdict {
-		let referring = self.rows.iter().filter(|r| r.occurrences.is_some()).count();
+		let referring = self.referring_rows().count();
 		if self.value_size.is_none() {
 			return if referring == 0 {
 				Verdict::Absent
@@ -137,9 +140,29 @@ impl TraceReport {
 		self.rows.iter().filter(|r| r.spurious()).map(|r| r.block).collect()
 	}
 
-	/// Every block that holds a reference here, ascending — the input to a chain cross-check.
+	/// The rows that hold a reference, in block order. Rows are emitted ascending by
+	/// `(block, block_hash)` and `merge_chain` re-sorts stably, so equal heights are adjacent —
+	/// which is what lets the two accessors below scan rather than search.
+	fn referring_rows(&self) -> impl Iterator<Item = &TraceRow> {
+		self.rows.iter().filter(|r| r.occurrences.is_some())
+	}
+
+	/// Every block height that holds a reference here, ascending and deduplicated — the input
+	/// to a chain cross-check, which is only meaningful per height.
 	pub fn referring_blocks(&self) -> Vec<u32> {
-		self.rows.iter().filter(|r| r.occurrences.is_some()).map(|r| r.block).collect()
+		let mut blocks: Vec<u32> = self.referring_rows().map(|r| r.block).collect();
+		blocks.dedup();
+		blocks
+	}
+
+	/// Heights carrying more than one reference-holding block, i.e. where a fork is retained
+	/// alongside the canonical block.
+	pub fn forked_heights(&self) -> Vec<u32> {
+		let heights: Vec<u32> = self.referring_rows().map(|r| r.block).collect();
+		let mut forked: Vec<u32> =
+			heights.windows(2).filter(|w| w[0] == w[1]).map(|w| w[0]).collect();
+		forked.dedup();
+		forked
 	}
 }
 
@@ -155,13 +178,16 @@ pub fn trace_hash(db: &dyn KeyValueDB, content_hash: DbHash) -> std::io::Result<
 	let algo = value.as_ref().and_then(|v| HashAlgo::identify(content_hash, v));
 	let counter = read_counter(db, &content_hash)?;
 
-	let mut per_block: BTreeMap<u32, (Occurrences, Option<u64>)> = BTreeMap::new();
+	// Keyed by the whole lookup key, not by block number: at one height there may be both a
+	// canonical block and a fork, each with its own `BODY_INDEX` entry and its own reference.
+	// Collapsing them undercounts the ledger and makes a correct counter look like an excess.
+	let mut per_block: BTreeMap<(u32, DbHash), (Occurrences, Option<u64>)> = BTreeMap::new();
 	let mut blocks_scanned = 0u64;
 
 	for entry in db.iter(columns::BODY_INDEX) {
 		let (k, v) = entry?;
 		blocks_scanned += 1;
-		let Some((number, _)) = split_lookup_key(&k) else { continue };
+		let Some((number, block_hash)) = split_lookup_key(&k) else { continue };
 		let Ok(index) = Vec::<BareDbExtrinsic>::decode(&mut &v[..]) else { continue };
 
 		let mut occ = Occurrences::default();
@@ -182,14 +208,15 @@ pub fn trace_hash(db: &dyn KeyValueDB, content_hash: DbHash) -> std::io::Result<
 			}
 		}
 		if occ.total() > 0 {
-			per_block.insert(number, (occ, block_timestamp_ms(&fulls)));
+			per_block.insert((number, block_hash), (occ, block_timestamp_ms(&fulls)));
 		}
 	}
 
 	let rows: Vec<TraceRow> = per_block
 		.into_iter()
-		.map(|(block, (occ, time_ms))| TraceRow {
+		.map(|((block, block_hash), (occ, time_ms))| TraceRow {
 			block,
+			block_hash: Some(block_hash),
 			occurrences: Some(occ),
 			time_ms,
 			chain_took_reference: None,
@@ -217,18 +244,24 @@ pub fn trace_hash(db: &dyn KeyValueDB, content_hash: DbHash) -> std::io::Result<
 pub fn merge_chain(report: &mut TraceReport, facts: ChainFacts) {
 	let mut extra: Vec<TraceRow> = Vec::new();
 	for (number, bf) in &facts.per_block {
-		match report.rows.iter_mut().find(|r| r.block == *number) {
-			Some(row) => {
-				row.chain_took_reference = Some(bf.took_a_reference());
-				row.chain_summary = Some(bf.summary());
-				row.chunk_root = bf.chunk_root;
-			},
-			None =>
+		// Every row at that height, not just the first: a retained fork and the canonical block
+		// share a number, and chain facts describe the height, so both rows want them.
+		let mut matched = false;
+		for row in report.rows.iter_mut().filter(|r| r.block == *number) {
+			matched = true;
+			row.chain_took_reference = Some(bf.took_a_reference());
+			row.chain_summary = Some(bf.summary());
+			row.chunk_root = bf.chunk_root;
+		}
+		match matched {
+			true => {},
+			false =>
 			// Only worth a row if the chain actually recorded something there; cadence probes
 			// that found nothing are noise.
 				if bf.took_a_reference() || !bf.events.is_empty() {
 					extra.push(TraceRow {
 						block: *number,
+						block_hash: None,
 						occurrences: None,
 						time_ms: None,
 						chain_took_reference: Some(bf.took_a_reference()),
@@ -306,10 +339,14 @@ impl fmt::Display for TraceReport {
 			return Ok(());
 		}
 
+		// Heights where a fork is retained alongside the canonical block; both the table and
+		// the summary below single them out.
+		let forked = self.forked_heights();
+
 		writeln!(f)?;
 		writeln!(
 			f,
-			"  {:<10} {:>4} {:>6}  {:<16} {:<22} chain",
+			"  {:<20} {:>4} {:>6}  {:<16} {:<22} chain",
 			"block", "Δ", "cum", "body shape", "authored",
 		)?;
 		let mut cum = 0u32;
@@ -333,20 +370,34 @@ impl fmt::Display for TraceReport {
 			if row.spurious() {
 				chain_s.push_str("   ← chain has no record of this");
 			}
+			// Two rows share a height when a fork is retained, so name the block there —
+			// otherwise the table shows the same number twice with nothing to tell them apart.
+			let block_label = match row.block_hash.filter(|_| forked.contains(&row.block)) {
+				Some(hash) => format!("#{} {}", row.block, hex(&hash.as_ref()[..4])),
+				None => format!("#{}", row.block),
+			};
 			writeln!(
 				f,
-				"  #{:<9} {:>4} {:>6}  {:<16} {:<22} {}",
-				row.block, delta, cum_s, shape, when, chain_s,
+				"  {:<20} {:>4} {:>6}  {:<16} {:<22} {}",
+				block_label, delta, cum_s, shape, when, chain_s,
 			)?;
 		}
 
 		writeln!(f)?;
 		writeln!(
 			f,
-			"Alive references:      {}   (sum over {} referring block(s))",
+			"Alive references:      {}   (sum over {} retained reference-holding block(s))",
 			self.alive_total,
-			self.referring_blocks().len(),
+			self.referring_rows().count(),
 		)?;
+		if !forked.is_empty() {
+			writeln!(
+				f,
+				"  forked heights:      {}  — a fork is retained alongside the canonical block, \
+				 and each holds its own reference",
+				crate::common::joined_blocks(&forked, 20),
+			)?;
+		}
 
 		let verdict = self.verdict();
 		writeln!(f)?;

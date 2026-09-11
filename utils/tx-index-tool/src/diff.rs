@@ -57,16 +57,17 @@ impl EntryDiff {
 /// Per-block comparison of `BODY_INDEX`, gathered only when asked for.
 #[derive(Debug, Default)]
 pub struct BlockDiff {
-	/// Blocks with an indexed body in the first database.
+	/// Indexed bodies in the first database. A height with a retained fork contributes more
+	/// than one, since each block keeps its own entry.
 	pub bodies_a: usize,
-	/// Blocks with an indexed body in the second.
+	/// Indexed bodies in the second.
 	pub bodies_b: usize,
-	/// Blocks whose body only the first database has — the shape that leaves a collator unable
-	/// to build a storage proof.
+	/// Heights whose body only the first database has — the shape that leaves a collator
+	/// unable to build a storage proof.
 	pub only_in_a: Vec<u32>,
-	/// Blocks whose body only the second database has.
+	/// Heights whose body only the second database has.
 	pub only_in_b: Vec<u32>,
-	/// Blocks both have, but referencing different hashes.
+	/// Heights where both have a body for the same block, referencing different hashes.
 	pub refs_differ: Vec<u32>,
 }
 
@@ -170,11 +171,16 @@ fn column_facts(db: &dyn KeyValueDB) -> std::io::Result<(HashMap<DbHash, EntryFa
 }
 
 /// Which blocks have an indexed body, and which hashes each references.
-fn body_index_map(db: &dyn KeyValueDB) -> std::io::Result<HashMap<u32, Vec<DbHash>>> {
-	let mut bodies: HashMap<u32, Vec<DbHash>> = HashMap::new();
+///
+/// Keyed by `(number, block_hash)`, not by number alone: a retained fork and the canonical
+/// block share a height and each keeps its own `BODY_INDEX` entry. Collapsing them makes two
+/// healthy nodes that reorged differently look like they disagree, and hides a body one node
+/// is genuinely missing.
+fn body_index_map(db: &dyn KeyValueDB) -> std::io::Result<HashMap<(u32, DbHash), Vec<DbHash>>> {
+	let mut bodies: HashMap<(u32, DbHash), Vec<DbHash>> = HashMap::new();
 	for entry in db.iter(columns::BODY_INDEX) {
 		let (k, v) = entry?;
-		let Some((number, _)) = split_lookup_key(&k) else { continue };
+		let Some((number, block_hash)) = split_lookup_key(&k) else { continue };
 		let Ok(index) = Vec::<BareDbExtrinsic>::decode(&mut &v[..]) else { continue };
 		let mut hashes = Vec::new();
 		for ex in index {
@@ -185,7 +191,7 @@ fn body_index_map(db: &dyn KeyValueDB) -> std::io::Result<HashMap<u32, Vec<DbHas
 			}
 		}
 		hashes.sort_unstable();
-		bodies.insert(number, hashes);
+		bodies.insert((number, block_hash), hashes);
 	}
 	Ok(bodies)
 }
@@ -241,21 +247,25 @@ pub fn diff_databases(
 		let bodies_b = body_index_map(b)?;
 		let mut diff =
 			BlockDiff { bodies_a: bodies_a.len(), bodies_b: bodies_b.len(), ..Default::default() };
-		for (number, refs_a) in &bodies_a {
-			match bodies_b.get(number) {
+		for (key, refs_a) in &bodies_a {
+			let number = &key.0;
+			match bodies_b.get(key) {
 				None => diff.only_in_a.push(*number),
 				Some(refs_b) if refs_b != refs_a => diff.refs_differ.push(*number),
 				Some(_) => {},
 			}
 		}
-		for number in bodies_b.keys() {
-			if !bodies_a.contains_key(number) {
+		for key in bodies_b.keys() {
+			let number = &key.0;
+			if !bodies_a.contains_key(key) {
 				diff.only_in_b.push(*number);
 			}
 		}
-		diff.only_in_a.sort_unstable();
-		diff.only_in_b.sort_unstable();
-		diff.refs_differ.sort_unstable();
+		// Heights, so a fork and its canonical sibling collapse to one entry here.
+		for list in [&mut diff.only_in_a, &mut diff.only_in_b, &mut diff.refs_differ] {
+			list.sort_unstable();
+			list.dedup();
+		}
 		Some(diff)
 	} else {
 		None

@@ -1147,3 +1147,67 @@ fn chain_fetch_reaches_a_live_node() {
 	}
 	assert!(probed.per_block.len() > 1, "probing should reach beyond the anchor block");
 }
+
+/// Two `BODY_INDEX` entries at the same height — a canonical block and a retained fork — each
+/// hold their own reference. Keying the ledger by block number alone collapses them, which
+/// undercounts `alive_total` and reports a correct counter as an excess.
+#[test]
+fn trace_counts_a_retained_fork_at_the_same_height() {
+	let db = create(NUM_COLUMNS);
+	let data = payload(128);
+	let hash = put_value(&db, HashAlgo::Blake2b256, &data);
+	seed_counter(&db, &hash, 2);
+
+	// Same number, different block hashes: the canonical block and a fork.
+	for block_hash in [h(0xC1), h(0xF0)] {
+		let key = lookup_key(18, &block_hash);
+		put_body(&db, &key, vec![BareDbExtrinsic::Indexed { hash, header: vec![0x45] }]);
+	}
+
+	let report = trace_hash(&db, hash).unwrap();
+	assert_eq!(report.rows.len(), 2, "both entries at height 18 are their own row");
+	assert_eq!(report.alive_total, 2, "each retained block holds a reference");
+	assert_eq!(report.referring_blocks(), vec![18], "one height, deduplicated");
+	assert_eq!(report.forked_heights(), vec![18]);
+	assert_eq!(report.verdict(), Verdict::Consistent { total: 2 });
+	assert!(report.to_string().contains("forked heights"));
+}
+
+/// Two nodes that reorged differently both retain a body at one height. Keying the body map
+/// by number alone let one entry overwrite the other — and `BODY_INDEX` iterates by
+/// `number ++ hash`, so *which* entry survives depends on the hashes each node happens to
+/// hold. Where a fork outsorted the canonical block on one side only, the two maps ended up
+/// holding different hash lists for the same height and the comparison reported
+/// `refs_differ`: the alarm that means "this collator cannot build a storage proof", raised
+/// for two databases that are both fine.
+#[test]
+fn diff_does_not_flag_two_nodes_that_retained_different_forks() {
+	let (a, b) = (create(NUM_COLUMNS), create(NUM_COLUMNS));
+	let shared = payload(64);
+	let only_on_the_fork = payload(96);
+	let shared_hash = put_value(&a, HashAlgo::Blake2b256, &shared);
+	let _ = put_value(&b, HashAlgo::Blake2b256, &shared);
+	let fork_hash = put_value(&a, HashAlgo::Blake2b256, &only_on_the_fork);
+
+	// The canonical block at height 9, in both databases, referencing the shared hash.
+	for db in [&a, &b] {
+		let key = lookup_key(9, &h(0xC0));
+		put_body(db, &key, vec![BareDbExtrinsic::Indexed { hash: shared_hash, header: vec![] }]);
+	}
+	// `a` also retains a fork at that height, whose block hash sorts *above* the canonical
+	// one — so under the old keying the fork's entry was the one that survived in `a`.
+	let fork_key = lookup_key(9, &h(0xF1));
+	put_body(&a, &fork_key, vec![BareDbExtrinsic::Indexed { hash: fork_hash, header: vec![] }]);
+
+	let report = diff_databases(&a, &b, &DiffOptions { blocks: true, limit: None }).unwrap();
+	let blocks = report.blocks.expect("--blocks was requested");
+	assert_eq!(
+		blocks.refs_differ,
+		Vec::<u32>::new(),
+		"both databases hold the same canonical body at height 9",
+	);
+	assert_eq!(blocks.only_in_a, vec![9], "the fork is a body only `a` retains");
+	assert_eq!(blocks.only_in_b, Vec::<u32>::new());
+	assert_eq!(blocks.bodies_a, 2, "canonical plus the fork");
+	assert_eq!(blocks.bodies_b, 1);
+}
