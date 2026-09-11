@@ -2016,6 +2016,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake2",
+ "bulletin-hop-rpc-client",
  "bytes",
  "cid",
  "futures",
@@ -2034,6 +2035,15 @@ dependencies = [
  "twox-hash 2.1.2",
  "zombienet-orchestrator",
  "zombienet-sdk",
+]
+
+[[package]]
+name = "bulletin-hop-rpc-client"
+version = "0.1.0"
+dependencies = [
+ "blake2",
+ "hex",
+ "pallet-bulletin-hop-promotion",
 ]
 
 [[package]]
@@ -2142,6 +2152,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake2",
+ "bulletin-hop-rpc-client",
  "bytes",
  "cid",
  "clap",

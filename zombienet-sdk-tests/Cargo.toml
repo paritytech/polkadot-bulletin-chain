@@ -24,6 +24,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tracing = { workspace = true, default-features = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 twox-hash = "2"
+bulletin-hop-rpc-client = { workspace = true }
 
 # Zombienet SDK
 zombienet-sdk = "0.3.13"
