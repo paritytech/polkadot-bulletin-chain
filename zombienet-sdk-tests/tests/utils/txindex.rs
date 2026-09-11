@@ -14,8 +14,8 @@ use std::{
 };
 pub use tx_index_tool::DbHash;
 use tx_index_tool::{
-	dry_run, inspect_block, list_entries, open_database, verify_seams, KeyValueDB, ListOptions,
-	OpenMode, StorageEntry,
+	dry_run, inspect_block, list_entries, open_database, trace_hash, verify_seams, KeyValueDB,
+	ListOptions, OpenMode, StorageEntry, Verdict,
 };
 
 /// How long the polling assertions wait for the expected state to appear.
@@ -76,6 +76,8 @@ pub struct Col11 {
 	pub unexpected_keys: u64,
 	/// Values that do not hash to the key they are filed under.
 	pub corrupted: u64,
+	/// Values no alive block references any more.
+	pub orphans: usize,
 	/// Every entry, with size, refcount, algorithm and the blocks referencing it.
 	pub entries: Vec<StorageEntry>,
 }
@@ -116,20 +118,73 @@ impl Col11 {
 	}
 }
 
+/// Walk col11 on an already-open handle. Split out so the checks below can share one
+/// secondary instance: opening a secondary costs more than the scans it enables.
+fn col11_snapshot(db: &dyn KeyValueDB) -> Result<Col11> {
+	// `limit: None` so assertions see every entry; test chains hold a handful.
+	let opts = ListOptions { limit: None, preview_len: 0, ..Default::default() };
+	let report = list_entries(db, &opts)?;
+	Ok(Col11 {
+		values: report.value_entries,
+		counters: report.counter_entries,
+		unexpected_keys: report.unexpected_key_rows,
+		corrupted: report.values_corrupted,
+		orphans: report.orphans,
+		entries: report.entries,
+	})
+}
+
+/// No refcount is short of the references its blocks carry (the polkadot-sdk#12106 collapse
+/// class), and nothing failed to decode.
+fn check_no_drift(db: &dyn KeyValueDB, label: &str) -> Result<()> {
+	let report = dry_run(db)?;
+	if report.decode_failures != 0 {
+		anyhow::bail!("{label}: {} BODY_INDEX entries failed to decode", report.decode_failures);
+	}
+	if !report.on_disk_drift.is_empty() {
+		anyhow::bail!(
+			"{label}: {} refcount(s) short by {} units in total",
+			report.on_disk_drift.len(),
+			report.total_units_to_backfill(),
+		);
+	}
+	if !report.on_disk_excess.is_empty() {
+		anyhow::bail!(
+			"{label}: {} refcount(s) exceed their reference count",
+			report.on_disk_excess.len(),
+		);
+	}
+	// `dry_run` only re-reads counters for hashes a block references more than once, so on
+	// bodies without intra-block duplicates this has nothing to bite on. Log the count so a
+	// vacuous pass is visible as such.
+	tracing::info!(
+		"✓ {label}: refcounts agree across {} BODY_INDEX entr(ies), {} with intra-block \
+		 duplicates",
+		report.blocks_scanned,
+		report.blocks_with_duplicates,
+	);
+	Ok(())
+}
+
+/// Every indexed entry's `BODY_INDEX.header ++ col11` pair round-trips, so the bodies remain
+/// executable (the polkadot-bulletin-chain#574 class).
+fn check_seams(db: &dyn KeyValueDB, label: &str) -> Result<()> {
+	let report = verify_seams(db)?;
+	if !report.is_clean() {
+		anyhow::bail!(
+			"{label}: {} mis-split and {} half-repaired entr(ies); blocks {:?} would not execute",
+			report.original_misaligned,
+			report.half_repaired,
+			report.unexecutable_blocks(),
+		);
+	}
+	tracing::info!("✓ {label}: {} indexed entr(ies) reassemble correctly", report.examined);
+	Ok(())
+}
+
 /// Read col11 once.
 pub fn read_col11(db_path: &Path, tag: &str) -> Result<Col11> {
-	with_db(db_path, tag, |db| {
-		// `limit: None` so assertions see every entry; test chains hold a handful.
-		let opts = ListOptions { limit: None, preview_len: 0, ..Default::default() };
-		let report = list_entries(db, &opts)?;
-		Ok(Col11 {
-			values: report.value_entries,
-			counters: report.counter_entries,
-			unexpected_keys: report.unexpected_key_rows,
-			corrupted: report.values_corrupted,
-			entries: report.entries,
-		})
-	})
+	with_db(db_path, tag, col11_snapshot)
 }
 
 /// Poll col11 until `pred` holds. Returns the matching snapshot, or an error naming what was
@@ -277,6 +332,105 @@ pub async fn assert_block_references(
 	}
 }
 
+/// Every on-disk invariant for `items`, in a single secondary open: each value present and
+/// hashing to the key it is filed under, each counter agreeing with the references its blocks
+/// carry, every indexed body reassembling, nothing orphaned.
+///
+/// One open matters when this runs per block — opening a secondary costs more than the scans
+/// it enables, so the four checks share one. Pass an empty `items` slice for the column-wide
+/// checks alone; see [`assert_storage_healthy`].
+///
+/// Returns each item's `(hash, refcount, referring_blocks)` in `items` order, so a caller can
+/// watch the accounting move across renewal cycles. Reads once rather than polling: the caller
+/// decides when the chain is at a point worth asserting.
+pub fn assert_items_healthy(
+	db_path: &Path,
+	tag: &str,
+	label: &str,
+	items: &[&[u8]],
+) -> Result<Vec<(DbHash, u32, u32)>> {
+	with_db(db_path, tag, |db| {
+		let snapshot = col11_snapshot(db)?;
+		assert_column_sane(&snapshot, label)?;
+		let found = check_items_present(&snapshot, items, label)?;
+		check_no_orphans(&snapshot, label)?;
+		check_no_drift(db, label)?;
+		check_seams(db, label)?;
+		Ok(found)
+	})
+}
+
+/// Each item is stored, at its submitted size, and hashes to the key it is filed under.
+fn check_items_present(
+	snapshot: &Col11,
+	items: &[&[u8]],
+	label: &str,
+) -> Result<Vec<(DbHash, u32, u32)>> {
+	items
+		.iter()
+		.map(|data| {
+			let hash = content_hash(data);
+			let entry =
+				snapshot.entry(&hash).ok_or_else(|| {
+					anyhow!("{label}: {hash:?} is not stored — an auto-renewed item must never leave col11")
+				})?;
+			if entry.size != data.len() {
+				anyhow::bail!(
+					"{label}: expected {} bytes for {hash:?}, found {}",
+					data.len(),
+					entry.size,
+				);
+			}
+			entry
+				.algo
+				.ok_or_else(|| anyhow!("{label}: value for {hash:?} does not hash to its key"))?;
+			Ok((hash, entry.counter.unwrap_or(0), entry.referring_blocks))
+		})
+		.collect()
+}
+
+/// Assert the entry has become a *dangling reference*: alive blocks still name it in their
+/// `BODY_INDEX`, but no value is stored under it.
+///
+/// This is what a renewal leaves behind when the previous reference was released before the
+/// renewal took its own: `store_or_reference` finds no local copy, falls through to
+/// `tx.reference(..)`, and that is a no-op against a counter pruning already removed — while
+/// the body index records the reference regardless. Nothing recovers from it, because a renew
+/// extrinsic carries only the hash. The chain keeps producing until the proof for one of those
+/// blocks comes due.
+///
+/// Returns the blocks left referencing nothing.
+pub async fn assert_dangling(
+	db_path: &Path,
+	tag: &str,
+	label: &str,
+	hash: DbHash,
+) -> Result<Vec<u32>> {
+	// Only the secondary catching up is being waited on — the caller has already awaited the
+	// renewal block — so this uses the short bound, not the pruning-sized one.
+	let deadline = std::time::Instant::now() + CATCH_UP_TIMEOUT;
+	loop {
+		let (verdict, blocks) = with_db(db_path, tag, |db| {
+			let report = trace_hash(db, hash)?;
+			Ok((report.verdict(), report.referring_blocks()))
+		})?;
+		if matches!(verdict, Verdict::Dangling { .. }) {
+			tracing::info!(
+				"✓ {label}: {hash:?} is a dangling reference — block(s) {blocks:?} reference a \
+				 value that is no longer stored",
+			);
+			return Ok(blocks);
+		}
+		if std::time::Instant::now() >= deadline {
+			anyhow::bail!(
+				"{label}: expected {hash:?} to become a dangling reference within \
+				 {CATCH_UP_TIMEOUT:?}; it is {verdict:?} with referring block(s) {blocks:?}",
+			);
+		}
+		tokio::time::sleep(POLL_INTERVAL).await;
+	}
+}
+
 /// Assert an entry is gone: no value, no counter row.
 pub async fn assert_absent(db_path: &Path, tag: &str, label: &str, hash: DbHash) -> Result<()> {
 	await_col11(db_path, tag, &format!("{label}: {hash:?} absent"), |c| c.entry(&hash).is_none())
@@ -322,73 +476,27 @@ pub fn assert_column_sane(snapshot: &Col11, label: &str) -> Result<()> {
 	Ok(())
 }
 
-/// No refcount is short of the references its blocks actually carry (the polkadot-sdk#12106
-/// collapse class), and nothing failed to decode.
+/// [`check_no_drift`] against its own secondary instance.
 pub fn assert_no_refcount_drift(db_path: &Path, tag: &str, label: &str) -> Result<()> {
-	with_db(db_path, tag, |db| {
-		let report = dry_run(db)?;
-		if report.decode_failures != 0 {
-			anyhow::bail!(
-				"{label}: {} BODY_INDEX entries failed to decode",
-				report.decode_failures
-			);
-		}
-		if !report.on_disk_drift.is_empty() {
-			anyhow::bail!(
-				"{label}: {} refcount(s) short by {} units in total",
-				report.on_disk_drift.len(),
-				report.total_units_to_backfill(),
-			);
-		}
-		if !report.on_disk_excess.is_empty() {
-			anyhow::bail!(
-				"{label}: {} refcount(s) exceed their reference count",
-				report.on_disk_excess.len(),
-			);
-		}
-		tracing::info!(
-			"✓ {label}: refcounts agree across {} BODY_INDEX entr(ies), {} with intra-block \
-			 duplicates",
-			report.blocks_scanned,
-			report.blocks_with_duplicates,
-		);
-		Ok(())
-	})
+	with_db(db_path, tag, |db| check_no_drift(db, label))
 }
 
-/// Every indexed entry's `BODY_INDEX.header ++ col11` pair round-trips, so the bodies remain
-/// executable (the polkadot-bulletin-chain#574 class).
+/// [`check_seams`] against its own secondary instance.
 pub fn assert_seams_clean(db_path: &Path, tag: &str, label: &str) -> Result<()> {
-	with_db(db_path, tag, |db| {
-		let report = verify_seams(db)?;
-		if !report.is_clean() {
-			anyhow::bail!(
-				"{label}: {} mis-split and {} half-repaired entr(ies); blocks {:?} would not execute",
-				report.original_misaligned,
-				report.half_repaired,
-				report.unexecutable_blocks(),
-			);
-		}
-		tracing::info!("✓ {label}: {} indexed entr(ies) reassemble correctly", report.examined);
-		Ok(())
-	})
+	with_db(db_path, tag, |db| check_seams(db, label))
 }
 
-/// No stored value is left behind with nothing referencing it.
-pub fn assert_no_orphans(db_path: &Path, tag: &str, label: &str) -> Result<()> {
-	with_db(db_path, tag, |db| {
-		let opts =
-			ListOptions { limit: None, preview_len: 0, orphans_only: true, ..Default::default() };
-		let report = list_entries(db, &opts)?;
-		if report.matched != 0 {
-			anyhow::bail!(
-				"{label}: {} col11 value(s) survive with no block referencing them",
-				report.matched,
-			);
-		}
-		tracing::info!("✓ {label}: no orphaned values");
-		Ok(())
-	})
+/// No stored value is left behind with nothing referencing it. [`Col11::orphans`] is already
+/// counted by the column walk, so this needs no scan of its own.
+fn check_no_orphans(snapshot: &Col11, label: &str) -> Result<()> {
+	if snapshot.orphans != 0 {
+		anyhow::bail!(
+			"{label}: {} col11 value(s) survive with no block referencing them",
+			snapshot.orphans,
+		);
+	}
+	tracing::info!("✓ {label}: no orphaned values");
+	Ok(())
 }
 
 /// Assert how a block's body references its indexed data: how many standalone `Indexed`
@@ -433,12 +541,11 @@ pub fn assert_block_shape(
 }
 
 /// The full on-disk health check: column sanity, refcount agreement, seam integrity, orphans.
+///
+/// [`assert_items_healthy`] with no items — one secondary open rather than the four this used
+/// to take, which matters at its ten call sites.
 pub async fn assert_storage_healthy(db_path: &Path, tag: &str, label: &str) -> Result<()> {
-	let snapshot = read_col11(db_path, tag)?;
-	assert_column_sane(&snapshot, label)?;
-	assert_no_refcount_drift(db_path, tag, label)?;
-	assert_seams_clean(db_path, tag, label)?;
-	assert_no_orphans(db_path, tag, label)
+	assert_items_healthy(db_path, tag, label, &[]).map(|_| ())
 }
 
 /// Assert an entry's referring blocks: how many alive blocks list it, and the highest-numbered
