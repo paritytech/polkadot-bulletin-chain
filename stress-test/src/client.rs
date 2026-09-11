@@ -100,12 +100,13 @@ pub async fn connect_ws(ws_url: &str) -> Result<jsonrpsee::ws_client::WsClient> 
 	Ok(client)
 }
 
-/// `connect_ws` with linear backoff, for long-running loops that own one connection.
+/// `connect_ws` with linear backoff. Use this in loops that keep one connection for the
+/// whole run.
 ///
-/// `WsClient` never reconnects: once the transport dies - the node restarts, the ingress
-/// drops the stream - every later request fails with `RestartNeeded` forever. A DNS blip
-/// at dial time is just as terminal. Either one silently takes a worker out for the whole
-/// run unless it redials, so long-lived workers must call this rather than `connect_ws`.
+/// `WsClient` does not reconnect. After the node restarts or the connection drops, every
+/// later request on that client fails with `RestartNeeded`. A DNS failure at connect time
+/// has the same effect: the worker never connects. Both cases stop the worker for the rest
+/// of the run unless it connects again.
 pub async fn connect_ws_retry(
 	ws_url: &str,
 	attempts: usize,

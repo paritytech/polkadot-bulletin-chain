@@ -21,24 +21,24 @@ const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
 /// Distinct from the claim context: a claim signature is not a valid ack signature.
 const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
 
-// Numeric codes from `sc-hop`'s `HopError -> ErrorObjectOwned` mapping. Classify on
-// these rather than on `Display` text: the codes are the RPC contract, and matching
-// substrings of the message conflates errors whose wording happens to overlap.
+// Numeric codes from the `HopError -> ErrorObjectOwned` mapping in `sc-hop`. Match on these
+// codes, not on the `Display` text. Two different errors can contain the same substring, so
+// substring matching classifies them incorrectly.
 
-/// `HopError::PoolFull` — the node's pool is at `--hop-max-pool-size`. Node-wide, so it
-/// clears only as entries are acked or expire; rotating accounts does not help.
+/// `HopError::PoolFull`. The node pool reached `--hop-max-pool-size`. The limit applies to
+/// the whole node, so no other account can submit until entries are acked or expire.
 pub const HOP_ERR_POOL_FULL: i32 = 1002;
 
-/// `HopError::NotFound`. Acking an entry that is already gone - fully acked by every
-/// recipient, or expired - is a benign terminal state rather than a failure.
+/// `HopError::NotFound`. The entry no longer exists, either because every recipient acked it
+/// or because it expired. Treat this as success when acking.
 const HOP_ERR_NOT_FOUND: i32 = 1004;
 
-/// `HopError::UserQuotaExceeded` — `--hop-max-user-size` is spent for this
-/// `(node, account)` pair. Another account still has its own budget on the same node.
+/// `HopError::UserQuotaExceeded`. This account used up `--hop-max-user-size` on this node.
+/// Other accounts still have their own quota on the same node.
 pub const HOP_ERR_USER_QUOTA: i32 = 1011;
 
-/// `HopError::RateLimited` — the per-account token bucket is empty. Transient, and
-/// per account, so another account can submit immediately.
+/// `HopError::RateLimited`. The rate limit for this account is exceeded. The limit is per
+/// account, so another account can submit immediately.
 pub const HOP_ERR_RATE_LIMITED: i32 = 1020;
 
 /// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
@@ -207,9 +207,10 @@ pub async fn hop_claim(
 
 /// Acknowledge claimed data. Returns latency.
 ///
-/// Claiming only reads: the node holds the entry until *every* recipient has acked, so a
-/// claim without an ack leaves the payload occupying both the pool and the submitter's
-/// per-user byte budget until it expires. Callers that claim should ack.
+/// A claim only reads the entry. The node keeps the entry until every recipient acks it. If
+/// the caller claims without acking, the payload stays in the pool and continues to count
+/// against the submitter's per-user byte quota until the entry expires. Callers that claim
+/// should also ack.
 pub async fn hop_ack(
 	ws: &WsClient,
 	hash: &[u8],
@@ -255,11 +256,12 @@ pub fn error_code(err: &anyhow::Error) -> Option<i32> {
 	}
 }
 
-/// Whether the WS transport itself failed, as opposed to the node rejecting the call.
+/// Returns true when the WebSocket connection failed, rather than the node rejecting the
+/// call.
 ///
-/// `WsClient` does not reconnect, so a caller that keeps one connection for the length of
-/// a run must redial when this returns true; retrying on the same client only repeats the
-/// same failure.
+/// `WsClient` does not reconnect. A caller that keeps one connection for the whole run must
+/// connect again when this returns true. Retrying on the same client produces the same
+/// failure.
 pub fn is_transport_error(err: &anyhow::Error) -> bool {
 	use jsonrpsee::core::ClientError;
 	matches!(

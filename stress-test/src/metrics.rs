@@ -17,32 +17,31 @@
 //!
 //! # Write-path model
 //!
-//! The write path is counted along two independent axes.
+//! The write path uses two separate counts.
 //!
-//! **Unique transactions.** `tx_offered_*` (the tool starts trying to place this extrinsic),
-//! `tx_accepted_*` (a pool took it), `tx_abandoned_*` (the worker stopped trying) and
-//! `tx_confirmed_*` (it appeared in a finalized block) are incremented **exactly once per
-//! extrinsic**, so each is a count of transactions, never of events.
+//! **Unique transactions.** `tx_offered_*` (the tool started submitting this extrinsic),
+//! `tx_accepted_*` (a transaction pool accepted it), `tx_abandoned_*` (the worker stopped
+//! retrying it) and `tx_confirmed_*` (it appeared in a finalized block) increment **once per
+//! extrinsic**. Each counts transactions, not events.
 //!
-//! **Attempts.** `submit_attempts_total` is incremented once per `author_submitExtrinsic` RPC
-//! call, with `outcome=accepted` or the failure class, so one transaction that needed five tries
-//! contributes five samples.
+//! **Attempts.** `submit_attempts_total` increments once per `author_submitExtrinsic` RPC call,
+//! with `outcome=accepted` or the failure class. One transaction that required five calls
+//! produces five samples.
 //!
-//! The two axes give these invariants:
+//! This gives the following invariants:
 //!
 //! ```text
-//! attempts >= offered                          // equality ⇒ no retries at all
+//! attempts >= offered                          // equal means no retries
 //! retries per transaction = attempts / offered - 1
 //! offered = accepted + abandoned + in-flight    // in-flight = still inside StoreWorker::submit
 //! ```
 //!
-//! Abandoned is not a synonym for lost data: `reason="already_imported"` means the node already
-//! had the transaction, and it is grouped under abandoned only because this worker stops tracking
-//! it from that point on.
+//! An abandoned transaction is not always lost data. `reason="already_imported"` means the node
+//! already contains the transaction. It counts as abandoned because the worker stops tracking it.
 //!
-//! Every write-path `_bytes_total` counts **uncompressed payload** bytes, so offered / accepted /
-//! abandoned / confirmed bytes are directly comparable and converge under zero loss. Wire size is
-//! kept separately as `tx_accepted_encoded_bytes_total` (SCALE-encoded extrinsic, i.e. payload
+//! Every write-path `_bytes_total` counts **uncompressed payload** bytes, so offered, accepted,
+//! abandoned and confirmed bytes are directly comparable and equal when nothing is lost. Wire
+//! size uses a separate metric, `tx_accepted_encoded_bytes_total` (SCALE-encoded extrinsic: payload
 //! plus signature and call overhead).
 //!
 //! [`serve`] binds a hyper exposition server for the global recorder's registry.
@@ -66,9 +65,9 @@ use crate::report::{LatencyStats, ScenarioResult};
 const BLOCK_TXS_BUCKETS: &[f64] =
 	&[1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 192.0, 256.0, 384.0, 512.0];
 
-/// Buckets for the per-block payload-size histogram, in bytes. Coarse below 4 MB, then tight
-/// around the 8–9 MB band where production blocks (versi `bc-3000`: 8.4–8.8 MB) sit, so "full" and
-/// "short" blocks land in different buckets.
+/// Buckets for the per-block payload-size histogram, in bytes. Wide below 4 MB, narrow
+/// between 8 MB and 9 MB. A full block is close to the 9 MiB normal-class length limit, so
+/// narrow buckets there separate full blocks from partly filled ones.
 const BLOCK_BYTES_BUCKETS: &[f64] = &[
 	65_536.0,
 	262_144.0,

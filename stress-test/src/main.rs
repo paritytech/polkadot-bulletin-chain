@@ -41,13 +41,13 @@ struct Cli {
 	#[arg(long, default_value = "//Alice", global = true)]
 	authorizer_seed: String,
 
-	/// Number of distinct HOP submitter accounts to derive and authorize.
+	/// Number of HOP submitter accounts to derive and authorize.
 	///
-	/// The node caps pool bytes per `(node, submitter)` pair via `--hop-max-user-size`, so
-	/// filling a pool larger than that cap needs several submitters: at a 256 MiB cap and a
-	/// 10 GiB pool, 40. Only `pool-fill` spreads across them; the other scenarios use the
-	/// first, since each of their writers already targets a different node and so already
-	/// has its own quota.
+	/// `--hop-max-user-size` limits pool bytes per `(node, submitter)` pair. Filling a pool
+	/// larger than that limit requires several accounts. A 256 MiB limit and a 10 GiB pool
+	/// require 40. Only `pool-fill` and `mixed` use more than one account. The other
+	/// scenarios use the first account, because each of their writers submits to a different
+	/// node and therefore has a separate quota.
 	#[arg(long, default_value = "1", global = true)]
 	hop_submitters: usize,
 
@@ -196,21 +196,19 @@ enum Commands {
 		#[arg(long, default_value = "30")]
 		duration: u64,
 
-		/// Writer tasks for the mixed scenario; readers get the rest of `--concurrency`.
+		/// Writer tasks for the mixed scenario. Readers use the rest of `--concurrency`.
 		///
-		/// Writers pick the node, so all nodes are exercised only with at least one writer
-		/// per node. Defaults to half of `--concurrency`, which leaves claims tracking
-		/// submits and the pool near empty; skew toward writers to make the pool grow while
-		/// still acking.
+		/// Each writer submits to one node, so the scenario covers all nodes only with at
+		/// least one writer per node. Defaults to half of `--concurrency`.
 		#[arg(long)]
 		writers: Option<usize>,
 
-		/// Fraction of claimed entries the mixed scenario acks, 0.0..=1.0.
+		/// Fraction of claimed entries the mixed scenario acks, 0.0 to 1.0.
 		///
-		/// An ack releases the entry, so at 1.0 the pools stay near empty no matter how
-		/// many writers run - outflow matches inflow exactly. Lower it to leave the
-		/// balance resident until `--hop-retention-secs` expires it, which grows the
-		/// pools while still exercising claim and ack.
+		/// An ack releases the entry. At 1.0 the submit rate and the release rate are equal,
+		/// so the pool stays at 0 entries regardless of the writer count. A lower value
+		/// leaves the remaining entries in the pool until `--hop-retention-secs` expires
+		/// them, which increases pool size while the scenario still runs claim and ack.
 		#[arg(long, default_value = "1.0")]
 		ack_ratio: f64,
 	},
@@ -736,8 +734,8 @@ async fn authorize_hop_submitters(
 	count: usize,
 ) -> Result<Vec<Keypair>> {
 	let count = count.max(1);
-	// Index 0 keeps the original `//HopSubmitter` derivation so a single-submitter run
-	// authorizes the same account it always has.
+	// Index 0 uses the `//HopSubmitter` derivation, so a run with one submitter authorizes
+	// the same account as before this flag existed.
 	let submitters = (0..count)
 		.map(|i| {
 			let uri =

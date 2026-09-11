@@ -41,26 +41,26 @@ const POOL_FILL_INDEX_BASE: u64 = 300_000_000;
 const POOL_FILL_MAX_ENTRIES_PER_NODE: u64 = 100_000;
 const MIXED_INDEX_BASE: u64 = 400_000_000;
 
-/// Redial attempts before a worker gives up on its node.
+/// Connect attempts before a worker stops using a node.
 const CONNECT_ATTEMPTS: usize = 5;
 
-/// Backoff bounds for a full pool. Space frees up only as entries are acked or reach
-/// `--hop-retention-secs`, so retrying tightly just burns bandwidth re-sending payloads
-/// the node will reject; back off, but stay well under the retention window so a worker
-/// resumes promptly once entries start expiring.
+/// Backoff range for a full pool. The pool frees space only when entries are acked or reach
+/// `--hop-retention-secs`. Retrying without a delay re-sends payloads that the node rejects,
+/// which wastes bandwidth. The maximum stays below the retention period so a worker resumes
+/// soon after entries start to expire.
 const POOL_FULL_BACKOFF_START: Duration = Duration::from_secs(1);
 const POOL_FULL_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
-/// How a submit failed, as far as the fill loops need to distinguish.
+/// Submit failure categories that the fill loops handle differently.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubmitFailure {
-	/// Node-wide pool limit: back off, no account can help.
+	/// The node pool is full. No account can submit until the pool frees space.
 	PoolFull,
-	/// This `(node, account)` pair is spent: retire the account for this node.
+	/// This account used up its byte quota on this node. Other accounts still have quota.
 	QuotaExceeded,
-	/// This account's token bucket is empty: another account can submit now.
+	/// The rate limit for this account is exceeded. Other accounts can submit now.
 	RateLimited,
-	/// The connection died: redial before submitting again.
+	/// The connection failed. Connect again before the next submit.
 	Transport,
 	Other,
 }
@@ -79,9 +79,9 @@ fn classify_submit_error(err: &anyhow::Error) -> SubmitFailure {
 	}
 }
 
-/// Round-robin to the next account that still has quota on this node, starting after
-/// `from`. `from` itself is considered last, so a lone live account keeps being used.
-/// `None` means every account is spent here.
+/// Returns the next account with quota remaining on this node, searching from `from + 1` and
+/// wrapping around. `from` is checked last, so the function returns `from` when it is the only
+/// account with quota left. Returns `None` when all accounts used up their quota.
 fn next_live_submitter(retired: &[bool], from: usize) -> Option<usize> {
 	(1..=retired.len())
 		.map(|off| (from + off) % retired.len())
@@ -329,9 +329,9 @@ pub async fn run_full_cycle(
 					}
 					claim_lats.push(latency);
 					claim_bytes += data.len() as u64;
-					// Claiming only reads; the node releases the entry once every
-					// recipient has acked. Without this the pool and the submitter's
-					// per-user byte budget stay occupied until expiry.
+					// A claim only reads the entry. The node removes it after every
+					// recipient acks. Without the ack, the entry stays in the pool and
+					// counts against the submitter's byte quota until it expires.
 					if let Err(e) = hop::hop_ack(&ws, &entry.hash, kp).await {
 						claim_errors += 1;
 						if claim_errors <= 5 {
@@ -465,8 +465,8 @@ pub async fn run_group(
 						if data.len() != expected_len {
 							tracing::error!("Data length mismatch in group claim");
 						}
-						// The entry is released only once *all* recipients ack, which
-						// for this scenario means every spawned task acking its own.
+						// The node removes the entry only after all recipients ack. In
+						// this scenario each spawned task acks for one recipient.
 						if let Err(e) = hop::hop_ack(&ws, &hash, &kp).await {
 							errors.fetch_add(1, Ordering::Relaxed);
 							if errors.load(Ordering::Relaxed) <= 5 {
@@ -555,10 +555,10 @@ pub async fn run_pool_fill(
 	let mut lats = Vec::new();
 	let mut any_pool_full = false;
 
-	// The node caps pool bytes per `(node, submitter)`, and pools are node-local, so each
-	// node is filled independently and each submitter contributes its own quota to it.
-	// UserQuotaExceeded therefore means "this account is done here", not "the pool is
-	// full" — only PoolFull ends a node.
+	// The byte quota applies per `(node, submitter)` pair and each node has its own pool, so
+	// this loop fills one node at a time and every submitter adds its own quota to that node.
+	// UserQuotaExceeded means one account used up its quota on this node, not that the pool
+	// is full. Only PoolFull ends the loop for a node.
 	for (node_idx, url) in ws_urls.iter().enumerate() {
 		if cancel.load(Ordering::Relaxed) {
 			break;
@@ -584,16 +584,16 @@ pub async fn run_pool_fill(
 
 		let mut node_submitted = 0u64;
 		let mut sub_idx = 0usize;
-		// Accounts whose `(node, account)` quota is spent here. Rate limiting rotates
-		// among the rest; only quota exhaustion retires an account for this node.
+		// Accounts that used up their quota on this node. A rate limit switches to another
+		// account. Only an exceeded quota marks an account as retired for this node.
 		let mut retired = vec![false; submitters.len()];
 		let mut node_pool_full = false;
 		let mut i = 0u64;
-		// Per node: a node must not inherit the previous node's failures.
+		// Reset per node, so failures on one node do not affect the next node.
 		let mut node_errors = 0u64;
 		let mut throttled = 0u64;
-		// Consecutive rate-limited rotations. Once it reaches the number of live
-		// accounts every bucket is empty, so there is nothing left to rotate to.
+		// Number of consecutive rate limits since the last successful submit. When it
+		// reaches the number of accounts with quota left, every account is rate limited.
 		let mut throttle_streak = 0usize;
 
 		loop {
@@ -631,7 +631,7 @@ pub async fn run_pool_fill(
 					}
 				},
 				Err(e) => match classify_submit_error(&e) {
-					// The node itself is full: nothing more to do here.
+					// The pool for this node is full. Move to the next node.
 					SubmitFailure::PoolFull => {
 						tracing::info!(
 							"[{url}] PoolFull after {node_submitted} entries \
@@ -643,9 +643,9 @@ pub async fn run_pool_fill(
 						any_pool_full = true;
 						break;
 					},
-					// Rate limits are per account, so rotate rather than sleep: the other
-					// accounts' buckets are untouched. Only sleep once every live account
-					// has been tried and throttled in turn.
+					// Rate limits apply per account, so switch to another account instead
+					// of sleeping. Sleep only after every account with quota left returned
+					// a rate limit.
 					SubmitFailure::RateLimited => {
 						throttled += 1;
 						throttle_streak += 1;
@@ -660,8 +660,8 @@ pub async fn run_pool_fill(
 						}
 						continue;
 					},
-					// This account's byte quota is spent on this node; retire it and
-					// carry on with the next one.
+					// This account used up its byte quota on this node. Mark it retired and
+					// continue with the next account.
 					SubmitFailure::QuotaExceeded => {
 						retired[sub_idx] = true;
 						tracing::info!(
@@ -777,18 +777,16 @@ pub async fn run_mixed(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	// Writers choose the node (`ws_urls[w_idx % len]`); readers follow each entry's
-	// recorded URL. So every node is exercised only if there is at least one writer per
-	// node. An even split leaves claims tracking submits and the pool near empty, which
-	// measures lifecycle throughput; skewing toward writers makes the pool grow while
-	// still acking.
+	// Each writer submits to one node, `ws_urls[w_idx % len]`. Each reader uses the URL
+	// recorded with the entry. The scenario covers every node only with at least one writer
+	// per node.
 	let writer_count = writers.unwrap_or_else(|| std::cmp::max(1, concurrency / 2)).max(1);
 	let reader_count = std::cmp::max(1, concurrency.saturating_sub(writer_count));
 
-	// Acking releases the entry, so at ratio 1.0 inflow and outflow cancel and the pool
-	// cannot grow however many writers there are - it sits near empty while both sides
-	// stay busy. A ratio below 1.0 leaves the balance in the pool to age out at
-	// `--hop-retention-secs`, which is what makes a fill test out of a lifecycle test.
+	// An ack removes the entry. At ratio 1.0 the submit rate and the removal rate are equal,
+	// so the pool stays at 0 entries for any writer count. A ratio below 1.0 leaves the
+	// remaining entries in the pool until `--hop-retention-secs` expires them, which is what
+	// increases pool size.
 	let ack_ratio = ack_ratio.clamp(0.0, 1.0);
 	let ack_permille = (ack_ratio * 1000.0).round() as u64;
 
@@ -837,9 +835,10 @@ pub async fn run_mixed(
 	let mut writer_handles = Vec::new();
 	for w_idx in 0..writer_count {
 		let url = ws_urls[w_idx % ws_urls.len()].to_string();
-		// A writer owns a node, and the byte quota is per (node, submitter) — one account
-		// only covers --hop-max-user-size on that node. Carry every account and rotate on
-		// UserQuotaExceeded so a single writer can fill a pool larger than one quota.
+		// Each writer submits to one node and the byte quota applies per (node, submitter)
+		// pair, so one account covers only --hop-max-user-size on that node. Give every
+		// writer all accounts and switch on UserQuotaExceeded, so one writer can fill a pool
+		// larger than a single quota.
 		let writer_submitters: Vec<Keypair> = submitters.to_vec();
 		let pending = pending.clone();
 		let count = submit_count.clone();
@@ -859,8 +858,8 @@ pub async fn run_mixed(
 
 			let mut idx = MIXED_INDEX_BASE + (w_idx as u64) * 1_000_000;
 			let mut sub_idx = 0usize;
-			// Retired = this account's byte quota is spent on this node. Rate limiting
-			// rotates among the live accounts instead of retiring any of them.
+			// A retired account used up its byte quota on this node. A rate limit switches
+			// to another account and does not retire any account.
 			let mut retired = vec![false; writer_submitters.len()];
 			let mut throttle_streak = 0usize;
 			let mut pool_full_backoff = POOL_FULL_BACKOFF_START;
@@ -886,9 +885,10 @@ pub async fn run_mixed(
 						});
 					},
 					Err(e) => match classify_submit_error(&e) {
-						// Node-wide limit, so no account can help and retrying tightly
-						// only re-sends payloads the node will reject. Wait for acks or
-						// expiry to free space, escalating up to the cap.
+						// The limit applies to the whole node, so switching accounts does
+						// not help, and an immediate retry re-sends a payload the node
+						// rejects. Wait for acks or expiry to free space, increasing the
+						// delay up to POOL_FULL_BACKOFF_MAX.
 						SubmitFailure::PoolFull => {
 							if !pool_full_logged {
 								tracing::warn!(
@@ -902,9 +902,9 @@ pub async fn run_mixed(
 							pool_full_backoff = (pool_full_backoff * 2).min(POOL_FULL_BACKOFF_MAX);
 							continue;
 						},
-						// Buckets are per account, so another account can submit right
-						// now. Only sleep once every live account has been throttled in
-						// turn, which means the node-side budget really is spent.
+						// Rate limits apply per account, so another account can submit now.
+						// Sleep only after every account with quota left returned a rate
+						// limit.
 						SubmitFailure::RateLimited => {
 							throttle_streak += 1;
 							match next_live_submitter(&retired, sub_idx) {
@@ -918,7 +918,8 @@ pub async fn run_mixed(
 							}
 							continue;
 						},
-						// Quota spent on this node for this account: retire it and move on.
+						// This account used up its quota on this node. Mark it retired and
+						// continue with the next account.
 						SubmitFailure::QuotaExceeded => {
 							retired[sub_idx] = true;
 							match next_live_submitter(&retired, sub_idx) {
@@ -935,8 +936,8 @@ pub async fn run_mixed(
 							}
 							continue;
 						},
-						// The node restarted or the stream dropped. Redial: this client
-						// will fail every subsequent request otherwise.
+						// The node restarted or the connection dropped. Connect again,
+						// because every later request on this client fails otherwise.
 						SubmitFailure::Transport => {
 							tracing::warn!("Writer {w_idx} on {url}: connection lost: {e}");
 							match client::connect_ws_retry(&url, CONNECT_ATTEMPTS).await {
@@ -971,8 +972,9 @@ pub async fn run_mixed(
 		let writers_done = writers_done.clone();
 
 		reader_handles.push(tokio::spawn(async move {
-			// Bresenham over permille, so acks are spread across the claim stream rather
-			// than acking the first N of every thousand.
+			// Accumulate the ack ratio in permille and ack when the total reaches 1000.
+			// This spreads the acks over the claim sequence instead of acking the first N
+			// claims of every 1000.
 			let mut ack_credit = 0u64;
 			loop {
 				if cancel.load(Ordering::Relaxed) {
@@ -1001,10 +1003,11 @@ pub async fn run_mixed(
 								count.fetch_add(1, Ordering::Relaxed);
 								bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
 								lats.lock().await.push(latency);
-								// Entries carry a single recipient here, so an ack
-								// releases the entry and frees pool and per-user budget.
-								// Skipping it is what lets the pool grow: the entry then
-								// occupies both until `--hop-retention-secs` expires it.
+								// Each entry has one recipient, so this ack removes the
+								// entry and frees the pool bytes and the per-user quota.
+								// Skipping the ack keeps the entry in the pool until
+								// `--hop-retention-secs` expires it, which increases pool
+								// size.
 								ack_credit += ack_permille;
 								if ack_credit >= 1000 {
 									ack_credit -= 1000;
@@ -1048,8 +1051,8 @@ pub async fn run_mixed(
 			}
 			let elapsed = start.elapsed().as_secs_f64();
 			let plen = p_ref.lock().await.len();
-			// submitted - acked is what stays resident in the pools, so the two counts
-			// together say whether the run is filling them or just cycling entries.
+			// submitted minus acked is the number of entries left in the pools. Both
+			// counts show whether the run increases pool size.
 			tracing::info!(
 				"[{:.0}s] submitted: {}, claimed: {}, acked: {}, pending: {}, errors: {}/{}",
 				elapsed,
@@ -1257,9 +1260,9 @@ pub async fn run_hop_sweep(
 	on_result: &dyn Fn(&mut Vec<ScenarioResult>),
 	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	// Only pool-fill spreads across submitters; every other scenario's writers already
-	// target distinct nodes, and the node's per-user cap is per `(node, submitter)`, so
-	// each writer already has its own quota with a single account.
+	// Only pool-fill and mixed use more than one submitter. In the other scenarios each
+	// writer submits to a different node, and the per-user limit applies per
+	// `(node, submitter)` pair, so one account gives each writer a separate quota.
 	let submitter = submitters.first().expect("at least one HOP submitter is derived");
 	match scenario {
 		"submit-only" | "submit" => {
@@ -1418,8 +1421,8 @@ mod tests {
 		let retired = vec![false; 3];
 		assert_eq!(next_live_submitter(&retired, 0), Some(1));
 		assert_eq!(next_live_submitter(&retired, 1), Some(2));
-		// Wraps rather than running off the end, so throttled accounts are revisited
-		// once their buckets have refilled.
+		// The search wraps around, so rate-limited accounts are used again after their
+		// rate limit resets.
 		assert_eq!(next_live_submitter(&retired, 2), Some(0));
 	}
 
@@ -1432,8 +1435,8 @@ mod tests {
 
 	#[test]
 	fn rotation_keeps_a_lone_live_submitter() {
-		// `from` is considered last, so the only account with quota left is returned
-		// instead of reporting exhaustion.
+		// The function checks `from` last, so it returns the only account with quota left
+		// instead of None.
 		let retired = vec![true, false, true];
 		assert_eq!(next_live_submitter(&retired, 1), Some(1));
 	}
@@ -1470,8 +1473,8 @@ mod tests {
 
 	#[test]
 	fn ack_decisions_are_spread_not_front_loaded() {
-		// Bresenham puts one ack in each group of four at 0.25, rather than acking the
-		// first 250 of every 1000 and then stalling.
+		// At ratio 0.25 the accumulator acks one claim in every four, instead of acking
+		// the first 250 claims of every 1000 and then none.
 		let mut credit = 0u64;
 		let mut acked_at = Vec::new();
 		for i in 0..12u64 {
