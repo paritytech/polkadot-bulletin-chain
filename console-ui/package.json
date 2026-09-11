@@ -38,7 +38,7 @@
     "ipfs-unixfs": "^12.0.0",
     "lucide-react": "^1.33.0",
     "multiformats": "^14.0.4",
-    "polkadot-api": "^2.1.2",
+    "polkadot-api": "^3.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",
@@ -48,7 +48,7 @@
   },
   "devDependencies": {
     "@playwright/test": "~1.61.1",
-    "@polkadot-api/cli": "^0.21.10",
+    "@polkadot-api/cli": "^0.22.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

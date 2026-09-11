@@ -102,7 +102,7 @@ const authTx = api.tx.Sudo.sudo({
   })
 });
 
-await authTx.signAndSubmit(sudoSigner);
+await authTx.createAndSubmit(sudoSigner);
 console.log("Account authorized!");
 ```
 
@@ -126,7 +126,7 @@ const authTx = api.tx.Sudo.sudo({
   })
 });
 
-await authTx.signAndSubmit(sudoSigner);
+await authTx.createAndSubmit(sudoSigner);
 console.log("Preimage authorized!");
 ```
 

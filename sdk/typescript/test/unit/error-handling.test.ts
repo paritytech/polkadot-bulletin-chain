@@ -287,28 +287,23 @@ describe("Error Handling", () => {
   })
 
   describe("TransactionStatusEvent variants", () => {
-    it("should support signed event", () => {
+    it("should support created event", () => {
       const event: TransactionStatusEvent = {
-        type: TxStatus.Signed,
+        type: TxStatus.Created,
         txHash: "0xabc123",
       }
-      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.type).toBe(TxStatus.Created)
       expect(event.txHash).toBe("0xabc123")
     })
 
-    it("should support signed event with chunkIndex", () => {
+    it("should support created event with chunkIndex", () => {
       const event: TransactionStatusEvent = {
-        type: TxStatus.Signed,
+        type: TxStatus.Created,
         txHash: "0xdef456",
         chunkIndex: 2,
       }
-      expect(event.type).toBe(TxStatus.Signed)
+      expect(event.type).toBe(TxStatus.Created)
       expect(event.chunkIndex).toBe(2)
-    })
-
-    it("should support validated event", () => {
-      const event: TransactionStatusEvent = { type: TxStatus.Validated }
-      expect(event.type).toBe(TxStatus.Validated)
     })
 
     it("should support broadcasted event", () => {

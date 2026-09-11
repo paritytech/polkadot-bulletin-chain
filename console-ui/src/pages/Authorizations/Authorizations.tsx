@@ -31,7 +31,7 @@ import { formatBytes, formatNumber, formatAddress } from "@/utils/format";
 import { SS58String, Enum } from "polkadot-api";
 import { cryptoWaitReady } from "@polkadot/util-crypto";
 import { Keyring } from "@polkadot/keyring";
-import { getPolkadotSigner } from "polkadot-api/signer";
+import { getTxCreator } from "polkadot-api/tx-creator";
 
 function AccountAuthorizationsTab() {
   const api = useApi();
@@ -403,7 +403,7 @@ function FaucetAuthorizePreimagePanel() {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
       const faucet = keyring.addFromUri("//Eve");
-      const faucetSigner = getPolkadotSigner(
+      const faucetSigner = getTxCreator(
         faucet.publicKey,
         "Sr25519",
         (data: Uint8Array) => faucet.sign(data)
@@ -669,7 +669,7 @@ function FaucetAuthorizeAccountPanel() {
       await cryptoWaitReady();
       const keyring = new Keyring({ type: "sr25519" });
       const faucet = keyring.addFromUri("//Eve");
-      const faucetSigner = getPolkadotSigner(
+      const faucetSigner = getTxCreator(
         faucet.publicKey,
         "Sr25519",
         (data: Uint8Array) => faucet.sign(data)

@@ -221,7 +221,7 @@ export function Renew() {
   }, [api, blockInput, indexInput, retentionPeriod]);
 
   const handleRenew = useCallback(async () => {
-    if (!api || !selectedAccount?.polkadotSigner || !renewalTarget) return;
+    if (!api || !selectedAccount?.txCreator || !renewalTarget) return;
 
     setIsRenewing(true);
     setRenewalError(null);
@@ -230,7 +230,7 @@ export function Renew() {
 
     try {
       // Create SDK client with user's signer
-      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+      const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
 
       // Immediate renewal: force_renew on TransactionRef runtimes; legacy
       // runtimes reject it as unsupported, and there plain renew is already
@@ -383,7 +383,7 @@ export function Renew() {
   // batches (`pallets/transaction-storage/src/extension.rs:244`), so batching
   // isn't an option — sequential per-CID renewals are required.
   const handleBatchRenew = useCallback(async () => {
-    if (!api || !selectedAccount?.polkadotSigner) return;
+    if (!api || !selectedAccount?.txCreator) return;
 
     const targets = resolutions.filter(
       (r) => r.location !== null && checkedCids.has(r.cidString),
@@ -395,7 +395,7 @@ export function Renew() {
     setBatchResults([]);
     setBatchProgress(null);
 
-    const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+    const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
     const results: BatchRenewResult[] = [];
 
     for (let i = 0; i < targets.length; i++) {
@@ -455,7 +455,7 @@ export function Renew() {
 
   const canRenew =
     api &&
-    selectedAccount?.polkadotSigner &&
+    selectedAccount?.txCreator &&
     renewalTarget &&
     !isRenewing;
 
@@ -470,7 +470,7 @@ export function Renew() {
   // CID tab helpers
   const checkedCount = resolutions.filter((r) => r.location !== null && checkedCids.has(r.cidString)).length;
   const foundCount = resolutions.filter((r) => r.location !== null).length;
-  const canBatchRenew = api && selectedAccount?.polkadotSigner && checkedCount > 0 && !isBatchRenewing;
+  const canBatchRenew = api && selectedAccount?.txCreator && checkedCount > 0 && !isBatchRenewing;
 
   // Calculate expiration for a resolution
   const getExpirationInfo = (resolution: CidResolution) => {
