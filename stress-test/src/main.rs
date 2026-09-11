@@ -16,6 +16,7 @@ use bulletin_stress_test::{
 	accounts, authorize, bitswap,
 	chain_info::{ChainLimits, EnvironmentInfo},
 	client,
+	fetch::ReadSource,
 	metrics::{self, metrics, RunOutcome},
 	report, scenarios,
 };
@@ -36,6 +37,11 @@ struct Cli {
 	/// multi-peer, auto-discovered if omitted)
 	#[arg(long, global = true, value_delimiter = ',')]
 	p2p_multiaddr: Vec<String>,
+
+	/// IPFS HTTP gateway URL(s) to read from instead of Bitswap (comma-separated,
+	/// e.g. "https://paseo-ipfs.polkadot.io"; bulk-read, verify-all, verify-dag, dag-fanout)
+	#[arg(long, global = true, value_delimiter = ',', conflicts_with = "p2p_multiaddr")]
+	ipfs_gateway: Vec<String>,
 
 	/// Seed for authorizer account (must be in the runtime's Authorizer origin)
 	#[arg(long, default_value = "//Alice", global = true)]
@@ -118,7 +124,7 @@ enum Commands {
 	},
 	/// Run Bitswap read benchmarks
 	Bitswap {
-		/// Which test: b2, bulk-read
+		/// Which test: b2, bulk-read, verify-all, verify-dag
 		#[arg(default_value = "b2")]
 		test: String,
 
@@ -142,9 +148,25 @@ enum Commands {
 		#[arg(long, default_value = "16777216")]
 		max_size: u32,
 
-		/// CIDs per wantlist request (bulk-read only, 1=single, max 16, default: 1)
+		/// CIDs per request batch (bulk-read only, 1=single; max 16 over Bitswap,
+		/// unlimited with --ipfs-gateway, default: 1)
 		#[arg(long, default_value = "1")]
 		batch_size: usize,
+
+		/// Request fresh random CIDs instead of on-chain ones (bulk-read only).
+		/// Every request on every worker and batch slot uses a distinct random CID
+		/// that is never reused, so in-flight volume is read-concurrency times
+		/// batch-size. All requests miss the cache, which forces the gateway to do
+		/// provider lookups and Bitswap requests to backing nodes. Runs until Ctrl+C.
+		#[arg(long)]
+		random_cids: bool,
+
+		/// Read only dag-pb (UnixFS) roots as full DAGs via
+		/// `?format=car&dag-scope=all` (bulk-read with --ipfs-gateway only). The
+		/// gateway requests every descendant block, so a root with many children
+		/// produces a multi-CID wantlist to the backing node.
+		#[arg(long)]
+		dag_pb: bool,
 	},
 	/// Renew stress test — upload data then spam renew calls
 	Renew {
@@ -186,6 +208,18 @@ enum Commands {
 		#[arg(long, default_value = "30")]
 		duration: u64,
 	},
+	/// Upload N-leaf dag-pb constructs then download each root via the IPFS
+	/// gateway in CAR mode, which produces large wantlists to the backing node.
+	/// Requires --ipfs-gateway.
+	DagFanout {
+		/// Comma-separated leaf counts to test (e.g. "50,100,200")
+		#[arg(long, value_delimiter = ',', default_value = "50,100,200")]
+		leaves: Vec<usize>,
+
+		/// Size in bytes of each random leaf block
+		#[arg(long, default_value = "65536")]
+		leaf_size: usize,
+	},
 	/// Run all test suites (block-capacity + bitswap + hop)
 	Full,
 }
@@ -199,6 +233,13 @@ async fn main() -> Result<()> {
 				.unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
 		)
 		.init();
+
+	match fdlimit::raise_fd_limit() {
+		Ok(fdlimit::Outcome::LimitRaised { from, to }) =>
+			tracing::info!("Raised fd limit from {from} to {to}"),
+		Ok(fdlimit::Outcome::Unsupported) => {},
+		Err(error) => tracing::warn!("cannot raise fd limit: {error}"),
+	}
 
 	let cli = Cli::parse();
 
@@ -377,6 +418,8 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 			min_size,
 			max_size,
 			batch_size,
+			random_cids,
+			dag_pb,
 		} => {
 			if let Err(e) = run_bitswap(
 				&client,
@@ -390,13 +433,37 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 				min_size,
 				max_size,
 				batch_size,
+				bulk_read_mode(random_cids, dag_pb)?,
 				control_url,
 				&mut all_results,
 				&flush,
+				cancel,
 			)
 			.await
 			{
 				tracing::error!("Bitswap command failed: {e}");
+				command_error = Some(e);
+			}
+		},
+		Commands::DagFanout { ref leaves, leaf_size } => {
+			let outcome = match cli.ipfs_gateway.first() {
+				None => Err(anyhow::anyhow!("dag-fanout requires --ipfs-gateway")),
+				Some(gateway_url) =>
+					scenarios::dag_fanout::run_dag_fanout(
+						&client,
+						&authorizer_signer,
+						&nonce_tracker,
+						ws_urls,
+						gateway_url,
+						leaves,
+						leaf_size,
+						&mut all_results,
+						&flush,
+					)
+					.await,
+			};
+			if let Err(e) = outcome {
+				tracing::error!("DagFanout command failed: {e}");
 				command_error = Some(e);
 			}
 		},
@@ -480,9 +547,11 @@ async fn run_once(cli: &Cli, ws_urls: &[String], cancel: &Arc<AtomicBool>) -> Re
 					0,
 					16 * 1024 * 1024,
 					1,
+					scenarios::bitswap_bulk_read::BulkReadMode::OnChain,
 					control_url,
 					&mut all_results,
 					&flush,
+					cancel,
 				)
 				.await
 				{
@@ -606,6 +675,19 @@ async fn run_throughput(
 	Ok(())
 }
 
+fn bulk_read_mode(
+	random_cids: bool,
+	dag_pb: bool,
+) -> Result<scenarios::bitswap_bulk_read::BulkReadMode> {
+	use scenarios::bitswap_bulk_read::BulkReadMode;
+	match (random_cids, dag_pb) {
+		(false, false) => Ok(BulkReadMode::OnChain),
+		(false, true) => Ok(BulkReadMode::DagPbCar),
+		(true, false) => Ok(BulkReadMode::RandomCids),
+		(true, true) => anyhow::bail!("--dag-pb and --random-cids are mutually exclusive"),
+	}
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_bitswap(
 	client: &subxt::OnlineClient<client::BulletinConfig>,
@@ -619,20 +701,36 @@ async fn run_bitswap(
 	min_size: u32,
 	max_size: u32,
 	batch_size: usize,
+	bulk_read_mode: scenarios::bitswap_bulk_read::BulkReadMode,
 	control_url: &str,
 	results: &mut Vec<report::ScenarioResult>,
 	on_result: &dyn Fn(&mut Vec<report::ScenarioResult>),
+	cancel: &Arc<AtomicBool>,
 ) -> Result<()> {
-	let multiaddrs = match resolve_p2p_multiaddrs(cli, control_url).await {
-		Ok(r) => r,
-		Err(e) => {
-			tracing::warn!("Bitswap tests skipped: could not resolve P2P address: {e}");
-			return Ok(());
-		},
+	use scenarios::bitswap_bulk_read::BulkReadMode;
+
+	let multiaddrs = if cli.ipfs_gateway.is_empty() {
+		match resolve_p2p_multiaddrs(cli, control_url).await {
+			Ok(r) => r,
+			Err(e) => {
+				tracing::warn!("Bitswap tests skipped: could not resolve P2P address: {e}");
+				return Ok(());
+			},
+		}
+	} else {
+		Vec::new()
+	};
+	let source = if cli.ipfs_gateway.is_empty() {
+		ReadSource::Bitswap(&multiaddrs)
+	} else {
+		ReadSource::HttpGateway(&cli.ipfs_gateway)
 	};
 
 	match test {
 		"b2" => {
+			let ReadSource::Bitswap(multiaddrs) = &source else {
+				anyhow::bail!("b2 reads over Bitswap only; remove --ipfs-gateway");
+			};
 			let rs = scenarios::bitswap_read::run_b2_concurrent_read_sweep(
 				client,
 				authorizer_signer,
@@ -649,21 +747,50 @@ async fn run_bitswap(
 			}
 		},
 		"bulk-read" => {
+			if bulk_read_mode == BulkReadMode::DagPbCar && matches!(source, ReadSource::Bitswap(_))
+			{
+				anyhow::bail!("--dag-pb requires --ipfs-gateway (CAR fan-out is gateway-only)");
+			}
 			let r = scenarios::bitswap_bulk_read::run_bulk_read(
 				client,
-				&multiaddrs,
+				source,
 				read_size,
 				read_concurrency,
 				min_size,
 				max_size,
-				batch_size.clamp(1, 16),
-				control_url,
+				batch_size,
+				bulk_read_mode,
+				cancel.clone(),
 			)
 			.await?;
 			results.push(r);
 			on_result(results);
 		},
-		other => anyhow::bail!("Unknown bitswap test: {other} (expected: b2, bulk-read)"),
+		"verify-all" => {
+			let r = scenarios::verify_all::run_verify_all(
+				client,
+				source,
+				read_concurrency,
+				cancel.clone(),
+			)
+			.await?;
+			results.push(r);
+			on_result(results);
+		},
+		"verify-dag" => {
+			let r = scenarios::dag_verify::run_dag_verify(
+				client,
+				source,
+				read_concurrency,
+				cancel.clone(),
+			)
+			.await?;
+			results.push(r);
+			on_result(results);
+		},
+		other => anyhow::bail!(
+			"Unknown bitswap test: {other} (expected: b2, bulk-read, verify-all, verify-dag)"
+		),
 	}
 
 	Ok(())

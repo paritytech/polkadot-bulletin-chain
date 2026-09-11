@@ -984,6 +984,7 @@ pub async fn bulk_store_oneshot(
 // ---------------------------------------------------------------------------
 
 /// A pre-signed store extrinsic with metadata.
+#[derive(Clone)]
 pub struct PreSignedTx {
 	pub nonce: u64,
 	pub encoded: Vec<u8>,
