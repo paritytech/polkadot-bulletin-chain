@@ -173,7 +173,7 @@ const progress = (event) => {
         case 'chunk_failed':
             console.error(`[${event.index + 1}/${event.total}] ✗ Failed:`, event.error.message);
             break;
-        case 'signed':
+        case 'created':
         case 'broadcasted':
         case 'in_block':
             // Transaction status events carry chunkIndex to identify which chunk they belong to.

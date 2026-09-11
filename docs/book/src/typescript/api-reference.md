@@ -9,15 +9,17 @@ Complete reference for the `@parity/bulletin-sdk` TypeScript package.
 The primary client for interacting with Bulletin Chain. Wraps a PAPI connection and provides high-level storage, authorization, and renewal operations.
 
 ```typescript
+import type { SignerTxCreator } from 'polkadot-api/tx-creator';
+
 class AsyncBulletinClient implements BulletinClientInterface {
   api: BulletinTypedApi;
-  signer: PolkadotSigner;
+  signer: SignerTxCreator;
   submit: SubmitFn;
   config: Required<ClientConfig>;
 
   constructor(
     api: BulletinTypedApi,
-    signer: PolkadotSigner,
+    signer: SignerTxCreator,
     submit: SubmitFn,
     config?: Partial<ClientConfig>,
     onDestroy?: () => void | Promise<void>,
@@ -279,8 +281,7 @@ Transaction lifecycle states.
 
 | Value | Description |
 |-------|-------------|
-| `TxStatus.Signed` | Transaction signed |
-| `TxStatus.Validated` | Transaction validated by node |
+| `TxStatus.Created` | Transaction created |
 | `TxStatus.Broadcasted` | Broadcasted to network |
 | `TxStatus.InBlock` | Included in a block |
 | `TxStatus.Finalized` | Block finalized |
@@ -439,8 +440,7 @@ type ChunkProgressEvent =
 
 ```typescript
 type TransactionStatusEvent =
-  | { type: "signed"; txHash: string; chunkIndex?: number }
-  | { type: "validated"; chunkIndex?: number }
+  | { type: "created"; txHash: string; chunkIndex?: number }
   | { type: "broadcasted"; chunkIndex?: number }
   | { type: "in_block"; blockHash: string; blockNumber: number; txIndex?: number; chunkIndex?: number }
   | { type: "finalized"; blockHash: string; blockNumber: number; txIndex?: number; chunkIndex?: number }
