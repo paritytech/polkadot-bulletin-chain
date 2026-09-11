@@ -98,7 +98,8 @@ The SDK book contains comprehensive guides including:
 
 Both SDKs provide:
 
-- ✅ **Authorization operations** (authorizeAccount, authorizePreimage, renew)
+- ✅ **Authorization operations** (authorizeAccount, authorizePreimage)
+- ✅ **Data renewal** (renew, forceRenew, enableAutoRenew, disableAutoRenew)
 - ✅ **Store transaction submission**
 - ✅ **Automatic chunking** with configurable chunk size (default 1 MiB)
 - ✅ **DAG-PB manifests** (IPFS-compatible)

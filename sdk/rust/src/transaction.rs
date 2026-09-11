@@ -524,6 +524,48 @@ impl TransactionClient {
 		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
+	/// Register recurring auto-renewal for stored content.
+	///
+	/// The first cycle is prepaid at registration; each later cycle charges
+	/// the owner's authorization when it fires.
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
+	pub async fn enable_auto_renew(
+		&self,
+		content_hash: ContentHash,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<()> {
+		self.ensure_renewal_available()?;
+		let tx = bulletin::tx().data_renewal().enable_auto_renew(content_hash);
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::RenewalFailed(format!("Enable auto-renew failed: {e}"))
+		})
+		.await?;
+		Ok(())
+	}
+
+	/// Disable auto-renewal for stored content.
+	///
+	/// A signed caller must own the registration, and its prepaid cycle must
+	/// already have fired; Root bypasses both checks.
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
+	pub async fn disable_auto_renew(
+		&self,
+		content_hash: ContentHash,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<()> {
+		self.ensure_renewal_available()?;
+		let tx = bulletin::tx().data_renewal().disable_auto_renew(content_hash);
+		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
+			Error::RenewalFailed(format!("Disable auto-renew failed: {e}"))
+		})
+		.await?;
+		Ok(())
+	}
+
 	/// Refresh an account authorization (extends expiry).
 	///
 	/// Requires authorizer origin (typically sudo).
