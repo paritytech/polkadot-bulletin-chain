@@ -7,24 +7,28 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_proof_checked_at, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
-		authorize_and_store_data, blake2_256, block_hash_at,
+		assert_absent, assert_block_references, assert_dangling, assert_items_healthy,
+		assert_no_refcount_drift, assert_proof_checked_at, assert_referrers,
+		assert_storage_healthy, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
+		authorize_and_store_data, authorize_and_store_items, blake2_256, block_hash_at,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
-		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
-		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization, resolve_canonical_store_block,
-		set_retention_period, set_retention_period_finalized, submit_force_renew,
-		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
-		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
-		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
-		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride,
+		canonical_store_position, content_hash_and_cid, count_event, current_best_block,
+		current_finalized_block, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		node_db_path, override_alice_authorization, resolve_canonical_renew_blocks,
+		resolve_canonical_store_block, set_retention_period, set_retention_period_finalized,
+		submit_force_renew, submit_renew_one_shot, submit_renew_pair, submit_store_signed,
+		top_up_alice_authorization, verify_all_items_bitswap, verify_all_items_bitswap_concurrent,
+		verify_node_bitswap, verify_parachain_binaries, wait_for_block_height,
+		wait_for_finalized_height, wait_for_finalized_quiescence, wait_for_next_best_block,
+		wait_for_session_change_on_node, AuthorizationOverride, DbHash,
 		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
 		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, time::Duration};
 use subxt::{
 	config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder},
 	dynamic::{tx, Value},
@@ -61,6 +65,34 @@ const BLOCKS_PRUNING_LESS_THAN_RETENTION: u32 = 5;
 /// Pruning larger than retention: the proof block still finds col11 alive, chain progresses.
 const BLOCKS_PRUNING_GREATER_THAN_RETENTION: u32 = 15;
 const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
+/// How long to wait for both `force_renew` calls to reach the finalized chain. Bounded well
+/// below the `--blocks-pruning` window so the renewal blocks are still retained when the
+/// on-disk assertion reads them.
+const RENEW_FINALITY_TIMEOUT_SECS: u64 = 120;
+
+/// `--blocks-pruning` set equal to `RetentionPeriod`, shared by the two tests below — the
+/// configuration a node is most likely to be given, since `RP` is the number an operator sees.
+///
+/// Auto-renewal fires at `RP + 1` — `on_initialize` sweeps `Transactions[n - RP - 1]` and that
+/// sweep is what queues the renewal — so a node must retain the store block until block
+/// `S + RP + 1` has been imported and taken its own col11 reference. A window of exactly `RP`
+/// is one block short. Whether the shortfall bites depends on how far finality trails import,
+/// since pruning is driven off the finalized head while the reference is taken at import:
+/// `margin = blocks_pruning - (RP + 1) + finality_lag`, which at `pruning == RP` is
+/// `finality_lag - 1`.
+///
+/// Matching the two numbers is what isolates the reference handoff: below `RP` the *proof*
+/// requirement fails first — the store block is released at `finalized >= S + pruning` while
+/// its proof is not due until `S + RP` — so the chain halts for a reason that has nothing to do
+/// with renewals. One constant rather than two equal ones, because the equality is the premise
+/// and two names can be edited apart without either test failing.
+const PRUNING_EQUAL_TO_RETENTION: u32 = 20;
+/// Items stored and auto-renewed as a group.
+const RENEW_FLEET_SIZE: usize = 8;
+/// How long to hold the collator frozen. Block production stops, so `best` is pinned while the
+/// relay finalizes every para candidate it had already backed — which is what drives finality
+/// up to `best` and leaves pruning no lag to hide behind.
+const LOST_REF_PAUSE_SECS: u64 = 45;
 /// With pruning=5 + RP=10, the proof block at `S+10` lands before finality has caught up
 /// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
 /// block out past the (finality + pruning) lag so col11 is reliably empty.
@@ -102,6 +134,12 @@ struct SharedHarness {
 	/// Held to keep spawned processes alive; never dropped.
 	_network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
 	collator1: zombienet_sdk::NetworkNode,
+	/// The collator's database directory, for the on-disk assertions. Resolved at spawn time
+	/// because `_network` is never read once the harness is built.
+	db_path: std::path::PathBuf,
+	/// State-directory suffix for this database's secondary rocksdb instance. Per harness, so
+	/// the archive and pruning networks never share one.
+	db_tag: String,
 }
 
 static ARCHIVE_HARNESS: tokio::sync::OnceCell<std::sync::Arc<SharedHarness>> =
@@ -158,6 +196,7 @@ async fn spawn_shared_harness(
 		.get_node("collator-1")
 		.with_context(|| format!("[{}] failed to get collator-1", label))?
 		.clone();
+	let db_path = node_db_path(&network, "collator-1")?;
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	// Wait for finalization so tests can rely on `get_alice_nonce` reflecting the bump.
@@ -165,7 +204,12 @@ async fn spawn_shared_harness(
 	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
 	tracing::info!("[{}] harness ready (RetentionPeriod={})", label, RETENTION_PERIOD);
 
-	Ok(std::sync::Arc::new(SharedHarness { _network: network, collator1 }))
+	Ok(std::sync::Arc::new(SharedHarness {
+		_network: network,
+		collator1,
+		db_path,
+		db_tag: label.to_string(),
+	}))
 }
 
 /// Wait for the FINALIZED head to clear `block`'s `--blocks-pruning` boundary. Pruning
@@ -292,6 +336,17 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	nonce += 1;
 
 	let content_hash = blake2_256(&data);
+	let key = DbHash::from(content_hash);
+
+	// On-disk baseline. The archive harness never prunes, so every renewal below must leave
+	// one more reference than the last; taking the baseline from observation rather than
+	// assuming 1 keeps the arithmetic correct if a reorg replayed the store.
+	let baseline = assert_referrers(&harness.db_path, &harness.db_tag, "post-store", key, 1, None)
+		.await?
+		.refcount(&key)
+		.ok_or_else(|| anyhow::anyhow!("no col11 counter for the stored data"))?;
+	tracing::info!("Refcount after store is {baseline}");
+
 	enable_auto_renew(client, &content_hash, nonce).await?;
 	nonce += 1;
 	tracing::info!("Auto-renewal enabled for content_hash {}", hash_hex);
@@ -353,7 +408,36 @@ async fn parachain_auto_renew_test() -> Result<()> {
 			NUM_RENEWAL_CYCLES,
 			wait_until
 		);
+
+		// Each renewal indexes the data again from a new block, and nothing prunes on the
+		// archive harness, so both the referring-block count and the refcount must go up by
+		// exactly one per cycle. Bitswap only shows the data is *reachable*; this is what
+		// shows the reference was actually taken.
+		let expected = 1 + cycle as u32;
+		let snapshot = assert_referrers(
+			&harness.db_path,
+			&harness.db_tag,
+			&format!("cycle {cycle}"),
+			key,
+			expected,
+			Some(store_block as u32),
+		)
+		.await?;
+		let counter = snapshot.refcount(&key);
+		if counter != Some(baseline + cycle as u32) {
+			anyhow::bail!(
+				"cycle {cycle}: refcount is {counter:?}, expected {} ({baseline} at store, \
+				 +1 per renewal)",
+				baseline + cycle as u32,
+			);
+		}
+		tracing::info!("[cycle {cycle}/{NUM_RENEWAL_CYCLES}] ✓ refcount {counter:?} on disk");
 	}
+
+	// Nothing above renewed the same hash twice in one block, so this mainly guards the whole
+	// shared chain: every counter agrees with its BODY_INDEX references, every indexed body
+	// still reassembles, and no value was left behind unreferenced.
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after all cycles").await?;
 
 	// Shared-harness cleanup: stop renewing this item so it doesn't keep consuming Alice's
 	// authorization for the rest of the harness lifetime.
@@ -569,19 +653,79 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 			best_store_block
 		);
 	}
-	let (renew_block_a, renew_block_b) =
-		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
-	if renew_block_a != renew_block_b {
-		tracing::warn!(
-			"Renews landed in different blocks ({} and {}) instead of one — test still valid \
-			 but uses the later block for pruning math",
-			renew_block_a,
-			renew_block_b
-		);
-	} else {
-		tracing::info!("Both renews landed in the same block {}", renew_block_a);
+	// Resolve the entry's index rather than assuming 0: a renewal fired from the mandatory
+	// inherent — one a sibling test on this shared harness left running — takes the first
+	// `Transactions[N]` slot ahead of this test's own store.
+	let store_hash = finalized_block_hash_at(client, store_block).await?;
+	let (position_block, position_index) =
+		canonical_store_position(client, store_hash, &content_hash).await?;
+	tracing::info!("Renewing the entry at ({position_block}, {position_index})");
+	submit_renew_pair(
+		client,
+		position_block as u32,
+		position_index,
+		&content_hash,
+		nonce,
+		bob_nonce,
+	)
+	.await?;
+
+	// Re-anchor the renewal blocks against finality: `submit_renew_pair` reads them at the
+	// best-chain inclusion hash, which a reorg can orphan. Polled rather than derived from a
+	// target height, since those numbers are the untrustworthy input.
+	let renew_blocks = {
+		let deadline = std::time::Instant::now() + Duration::from_secs(RENEW_FINALITY_TIMEOUT_SECS);
+		loop {
+			let found = resolve_canonical_renew_blocks(client, &content_hash, store_block).await?;
+			if found.iter().map(|(_, n)| n).sum::<u32>() == 2 {
+				break found;
+			}
+			if std::time::Instant::now() >= deadline {
+				anyhow::bail!(
+					"both renewals did not reach the finalized chain within {}s; found {:?}",
+					RENEW_FINALITY_TIMEOUT_SECS,
+					found,
+				);
+			}
+			tokio::time::sleep(Duration::from_secs(3)).await;
+		}
+	};
+	match renew_blocks.as_slice() {
+		[(block, 2)] => tracing::info!("Both renews landed in block {block}"),
+		blocks => tracing::warn!(
+			"Renews landed across {:?} instead of one block — test still valid, but the \
+			 intra-tx duplicate is not exercised",
+			blocks,
+		),
 	}
-	let renew_block = std::cmp::max(renew_block_a, renew_block_b);
+	let renew_block = renew_blocks
+		.iter()
+		.map(|(n, _)| *n)
+		.max()
+		.expect("the loop above breaks only on two renewals; qed");
+
+	// Two renewals of one hash inside a single body is the shape that the pre-aggregation
+	// commit path collapsed into a single increment (polkadot-sdk#12106): the counter ends up
+	// short, and the first block to prune releases more references than it took, deleting data
+	// the other blocks still point at. `assert_no_refcount_drift` recomputes every counter from
+	// BODY_INDEX and compares, which is exactly that failure.
+	let key = DbHash::from(content_hash);
+	assert_no_refcount_drift(&harness.db_path, &harness.db_tag, "after the renew pair")?;
+
+	// Two references to one hash from a single body is the shape the collapse mishandled.
+	// Asserted per renewal block: `assert_no_refcount_drift` cannot tell this duplicate from
+	// any other on the shared harness.
+	for (block, count) in &renew_blocks {
+		assert_block_references(
+			&harness.db_path,
+			&harness.db_tag,
+			"renew pair",
+			*block as u32,
+			key,
+			*count,
+		)
+		.await?;
+	}
 
 	// Proof for the original store lands at `store_block + RP` (one block before pruning
 	// could evict). At this point col11 still has the chunks and the proof can be built.
@@ -609,7 +753,327 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		 refcount reached zero)"
 	);
 
+	// DONT_HAVE only proves the value is unreachable. Check on disk that the value *and* its
+	// counter row are gone: an under-counted entry deleted while still referenced, or a counter
+	// left behind at zero, both look identical over bitswap.
+	assert_absent(&harness.db_path, &harness.db_tag, "after pruning", key).await?;
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after pruning").await?;
+
 	test_log!(TEST, "=== Parachain double-renew under pruning PASSED ===");
+	Ok(())
+}
+
+/// `--blocks-pruning == RetentionPeriod` with a fleet of auto-renewed items, checked on disk at
+/// every finalized block.
+///
+/// Two things are asserted per block, both of which must hold continuously rather than
+/// eventually: every item's value is still in col11 and still hashes to its key, and every
+/// counter still equals the references its blocks carry. A renewal that records a reference it
+/// cannot honour — `store_or_reference` falling through to `tx.reference(..)` against a counter
+/// pruning already removed, which `sp_database::kvdb` treats as a no-op — shows up here as a
+/// vanished value, `RP` blocks before the missing proof would halt the chain.
+///
+/// Retrievability is checked over bitswap at each renewal boundary: col11 holding the bytes and
+/// a peer actually serving them are separate claims.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_auto_renew_pruning_equals_retention_test() -> Result<()> {
+	const TEST: &str = "para_pruning_equals_retention";
+	/// State-directory suffix for this node's secondary rocksdb instance.
+	const DB_TAG: &str = "prune-eq-retention";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== Auto-renew with --blocks-pruning == RetentionPeriod ({}) ===",
+		PRUNING_EQUAL_TO_RETENTION
+	);
+
+	verify_parachain_binaries()?;
+
+	// Its own network: the shared harnesses run a pruning window wider than their retention
+	// period, which is the safe configuration this test exists to contrast with.
+	let para_args = get_para_node_args_with_pruning(PRUNING_EQUAL_TO_RETENTION);
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.context("Failed to detect session change on relay chain")?;
+
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	let db_path = node_db_path(&network, "collator-1")?;
+	let client_owned: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let client = &client_owned;
+
+	let mut nonce = get_alice_nonce(collator1).await?;
+	tracing::info!("Setting RetentionPeriod to {}", PRUNING_EQUAL_TO_RETENTION);
+	set_retention_period_finalized(client, PRUNING_EQUAL_TO_RETENTION, nonce).await?;
+	nonce += 1;
+
+	// A fleet of distinct items, so the per-block check covers many entries rather than one.
+	let sizes: Vec<usize> = (0..RENEW_FLEET_SIZE).map(|i| TEST_DATA_SIZE + i * 128).collect();
+	let (stored_items, next_nonce) =
+		authorize_and_store_items(collator1, b"DATA_PRUNE_EQ_RETENTION_", &sizes, nonce).await?;
+	nonce = next_nonce;
+	let store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
+	let item_data: Vec<&[u8]> = stored_items.iter().map(|i| i.data.as_slice()).collect();
+	tracing::info!("Stored {} items by block {}", stored_items.len(), store_block);
+
+	// Each cycle re-charges every item's bytes against Alice's authorization, plus a slot per
+	// item per cycle. `+ 2` covers the registration cycle and one spare.
+	let total_bytes: u64 = sizes.iter().map(|n| *n as u64).sum();
+	top_up_alice_authorization(
+		client,
+		RENEW_FLEET_SIZE as u32 * (RENEWAL_CYCLES_TO_OBSERVE as u64 as u32 + 2),
+		total_bytes * (RENEWAL_CYCLES_TO_OBSERVE as u64 + 2),
+		nonce,
+	)
+	.await?;
+	nonce += 1;
+
+	for item in &stored_items {
+		enable_auto_renew(client, &blake2_256(&item.data), nonce).await?;
+		nonce += 1;
+	}
+	tracing::info!("Auto-renewal enabled for all {} items", stored_items.len());
+
+	// Everything is in place; from here the chain runs itself and every finalized block is an
+	// observation point.
+	let cadence = PRUNING_EQUAL_TO_RETENTION as u64 + 1;
+	let watch_until = store_block + RENEWAL_CYCLES_TO_OBSERVE as u64 * cadence + 2;
+	tracing::info!(
+		"Checking every finalized block from {} to {} (cadence {}, {} cycles)",
+		store_block + 1,
+		watch_until,
+		cadence,
+		RENEWAL_CYCLES_TO_OBSERVE as u64,
+	);
+
+	for block in (store_block + 1)..=watch_until {
+		wait_for_finalized_height(collator1, block, BLOCK_PRODUCTION_TIMEOUT_SECS)
+			.await
+			.with_context(|| format!("chain did not finalize block {block}"))?;
+
+		let label = format!("finalized #{block}");
+		let counts =
+			assert_items_healthy(&db_path, DB_TAG, &label, &item_data).with_context(|| {
+				format!(
+					"on-disk invariant broken at finalized block {block} — with \
+					 blocks-pruning={} and RetentionPeriod={}, a renewal at the {}-block cadence \
+					 can find its store block already pruned and record a reference against a \
+					 counter that no longer exists",
+					PRUNING_EQUAL_TO_RETENTION, PRUNING_EQUAL_TO_RETENTION, cadence,
+				)
+			})?;
+
+		// The expected count is not a free variable, but it is not the clean
+		// `(finality, best]` arithmetic either: a fork retained alongside the canonical block
+		// at the same height holds its own reference, so the total tracks retained
+		// reference-holding *blocks*, not renewal cycles.
+		//
+		// What is exact — atomically, within one read, and immune to both finality lag and
+		// forks — is that these items are only ever referenced by single `Indexed` extrinsics,
+		// one per referring block. So the counter must equal the number of referring blocks:
+		// below it means references were lost, above it means releases were missed.
+		for (hash, counter, referring) in &counts {
+			if counter != referring {
+				anyhow::bail!(
+					"{label}: {hash:?} has counter {counter} against {referring} referring \
+					 block(s); every reference to these items comes from one `Indexed` \
+					 extrinsic, so the two must match",
+				);
+			}
+		}
+
+		// Renewal boundaries are where the handoff happens, so log the accounting there and
+		// confirm a peer still serves the bytes.
+		if (block - store_block) % cadence == 1 {
+			let best = current_best_block(client).await?.number() as u64;
+			let refs: Vec<String> = counts.iter().map(|(_, c, b)| format!("{c}/{b}")).collect();
+			tracing::info!(
+				"[#{block}] renewal boundary — best #{best} (finality lag {}), \
+				 refcount/referring-blocks per item: {}",
+				best.saturating_sub(block),
+				refs.join(" "),
+			);
+			verify_all_items_bitswap(
+				collator1,
+				&stored_items,
+				BITSWAP_TIMEOUT_SECS,
+				&format!("Collator-1 (finalized #{block})"),
+			)
+			.await
+			.with_context(|| format!("items not retrievable at finalized block {block}"))?;
+		}
+	}
+
+	tracing::info!(
+		"✓ Every item stayed in col11, verified against its key, with counters matching \
+		 BODY_INDEX, across {} renewal cycles at blocks-pruning == RetentionPeriod",
+		RENEWAL_CYCLES_TO_OBSERVE as u64,
+	);
+
+	test_log!(TEST, "=== Auto-renew with --blocks-pruning == RetentionPeriod PASSED ===");
+	network.destroy().await?;
+	Ok(())
+}
+
+/// Reproduces the reference-handoff loss: a renewal cadence of `RP + 1` against a pruning
+/// window of `RP` or less means the store block can be released before the renewal exists.
+///
+/// Finality lag normally masks it — pruning is driven off the finalized head while the new
+/// reference is taken at import, so the margin is
+/// `blocks_pruning - (RP + 1) + finality_lag` and a lagging chain keeps winning the race. This
+/// test removes the lag rather than waiting for it to vanish: freezing the collator pins
+/// `best` while the relay finalizes the candidates it already backed, so on resume the node
+/// finalizes the whole backlog and prunes with `finalized == best`.
+///
+/// The value then disappears while blocks still reference it, and the next renewal cannot
+/// bring it back — `store_or_reference` has no local copy, `tx.reference(..)` is a no-op
+/// against a counter that pruning removed, and the body index records the reference anyway.
+/// That is the state a collator is in `RP` blocks before it fails to author.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_auto_renew_reference_lost_when_finality_catches_up_test() -> Result<()> {
+	const TEST: &str = "para_reference_lost";
+	const DB_TAG: &str = "reference-lost";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== Reference lost when finality catches up (pruning {}, retention {}) ===",
+		PRUNING_EQUAL_TO_RETENTION,
+		PRUNING_EQUAL_TO_RETENTION
+	);
+
+	verify_parachain_binaries()?;
+
+	let para_args = get_para_node_args_with_pruning(PRUNING_EQUAL_TO_RETENTION);
+	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.context("Failed to detect session change on relay chain")?;
+
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	let db_path = node_db_path(&network, "collator-1")?;
+	let client_owned: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let client = &client_owned;
+
+	let mut nonce = get_alice_nonce(collator1).await?;
+	set_retention_period_finalized(client, PRUNING_EQUAL_TO_RETENTION, nonce).await?;
+	nonce += 1;
+
+	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_REFERENCE_LOST_");
+	let content_hash = blake2_256(&data);
+	let key = DbHash::from(content_hash);
+	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	nonce = next_nonce;
+
+	top_up_alice_authorization(client, 5, 4 * data.len() as u64, nonce).await?;
+	nonce += 1;
+	enable_auto_renew(client, &content_hash, nonce).await?;
+
+	// Re-anchor against finality: the freeze point is computed from the store block, and a
+	// best-chain number a reorg moved would put it in the wrong place.
+	wait_for_finalized_height(collator1, best_store_block + 2, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await?;
+	let store_block =
+		resolve_canonical_store_block(client, &content_hash, best_store_block.saturating_sub(3))
+			.await?;
+	tracing::info!("Stored at canonical block {store_block}, auto-renewal enabled");
+
+	assert_items_healthy(&db_path, DB_TAG, "before the freeze", &[data.as_slice()])?;
+
+	// Freezing must happen at exactly `store + RP`. One block earlier and finality never
+	// reaches `store + RP`, so the store block is not prunable; one block later and the
+	// renewal has already taken its own reference. With `pruning == RP` there is no wider
+	// window — that is the price of isolating the handoff from the proof requirement.
+	let proof_block = store_block + PRUNING_EQUAL_TO_RETENTION as u64;
+	let renewal_block = proof_block + 1;
+	tracing::info!(
+		"Waiting for best #{proof_block} — its own proof covers the store block and passes; \
+		 the renewal is at #{renewal_block}"
+	);
+	wait_for_block_height(collator1, proof_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+
+	// Every RPC read happens before the freeze: a SIGSTOPped node answers nothing, so asking
+	// it for its own height after pausing just times out.
+	let best_before = current_best_block(client).await?.number() as u64;
+	let finalized_before = current_finalized_block(client).await?.number() as u64;
+	if best_before != proof_block {
+		anyhow::bail!(
+			"best is #{best_before}, past the one-block window at #{proof_block}: at \
+			 pruning == RP there is exactly one height where the store block is prunable and \
+			 the renewal has not yet run. Retryable — the window reopens every RP + 1 blocks."
+		);
+	}
+	tracing::info!(
+		"Freezing collator-1 for {}s at best #{best_before}, finalized #{finalized_before} \
+		 (lag {})",
+		LOST_REF_PAUSE_SECS,
+		best_before.saturating_sub(finalized_before),
+	);
+
+	collator1.pause().await.context("failed to pause collator-1")?;
+	tokio::time::sleep(Duration::from_secs(LOST_REF_PAUSE_SECS)).await;
+	collator1.resume().await.context("failed to resume collator-1")?;
+	tracing::info!("Resumed collator-1 — it now finalizes the backlog and prunes with no lag");
+
+	// The WebSocket does not survive the freeze, so take a fresh client rather than reusing a
+	// subscription that died while the process was stopped.
+	let client_owned = collator1.wait_client().await?;
+	let client: &OnlineClient<SubstrateConfig> = &client_owned;
+
+	// Finality has reached `store + RP`, so the store block is released. It held the only
+	// reference, so value and counter both go — while `Transactions[store_block]` is still in
+	// state, waiting to be swept and renewed one block later.
+	assert_absent(&db_path, DB_TAG, "after finality caught up", key).await.context(
+		"the store block's reference survived the catch-up — the freeze may have been too \
+		 short for the relay to finalize the backlog",
+	)?;
+	let best_after = current_best_block(client).await?.number() as u64;
+	let finalized_after = current_finalized_block(client).await?.number() as u64;
+	tracing::info!(
+		"After resume: best #{best_after}, finalized #{finalized_after} (lag {}) — value gone",
+		best_after.saturating_sub(finalized_after),
+	);
+
+	// The renewal runs on schedule and cannot restore anything: it carries only the hash, and
+	// referencing a counter that pruning removed is a no-op. The body index records it anyway.
+	tracing::info!("Waiting past the renewal at #{renewal_block}");
+	wait_for_block_height(collator1, renewal_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await
+		.context("chain stalled before the renewal could run")?;
+	let dangling = assert_dangling(&db_path, DB_TAG, "after the renewal", key).await?;
+	tracing::info!(
+		"✓ Renewal recorded a reference it cannot honour; block(s) {dangling:?} point at \
+		 nothing while the chain keeps producing"
+	);
+
+	// The dangling entry's own proof falls due `RP` blocks after the renewal. That is where a
+	// collator in this state stops being able to author — long after the data actually went.
+	let halt_block = renewal_block + PRUNING_EQUAL_TO_RETENTION as u64;
+	tracing::info!("Expecting the chain to stall below #{halt_block}, the dangling entry's proof");
+	match wait_for_block_height(collator1, halt_block, HALT_DETECTION_TIMEOUT_SECS).await {
+		Err(_) => tracing::info!(
+			"✓ Chain did not reach #{halt_block} within {}s — the proof for the renewal block \
+			 cannot be built, {} blocks after the value was lost",
+			HALT_DETECTION_TIMEOUT_SECS,
+			halt_block.saturating_sub(proof_block),
+		),
+		Ok(_) => anyhow::bail!(
+			"chain advanced to #{halt_block} with the value absent; a proof should not have \
+			 been constructible"
+		),
+	}
+
+	test_log!(TEST, "=== Reference lost when finality catches up PASSED ===");
+	network.destroy().await?;
 	Ok(())
 }
 
@@ -732,6 +1196,19 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	);
 	tracing::info!("✓ One-shot renewal fired at block {} and unregistered", renewal_block);
 
+	// The renewal took a second reference: two blocks now point at the entry, the later one
+	// being the renewal block.
+	let key = DbHash::from(content_hash);
+	assert_referrers(
+		&harness.db_path,
+		&harness.db_tag,
+		"after the one-shot renewal",
+		key,
+		2,
+		Some(store_block as u32),
+	)
+	.await?;
+
 	// First retention period over, store block pruned; the renewal's col11 ref must keep
 	// the data served.
 	wait_past_pruning_boundary(collator1, store_block, "the store block").await?;
@@ -739,6 +1216,19 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 		.await
 		.context("one-shot renewal did not preserve the data past the pruned store block")?;
 	tracing::info!("✓ Data still served after the store block was pruned");
+
+	// Pruning the store block released its reference and only the renewal's is left. This is
+	// the release side of the accounting: an over-release here would have dropped the entry
+	// (and the bitswap check above would have failed), an under-release leaves it at 2.
+	assert_referrers(
+		&harness.db_path,
+		&harness.db_tag,
+		"after the store block was pruned",
+		key,
+		1,
+		Some(store_block as u32),
+	)
+	.await?;
 
 	// Second retention period: the renewed entry's proof fires, but no renewal follows.
 	let second_proof_block = renewal_block + RETENTION_PERIOD as u64;
@@ -778,6 +1268,11 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 		 must not have been scheduled",
 	)?;
 	tracing::info!("✓ Data evicted after the second retention period (no further renewal)");
+
+	// The last reference went, so both rows must be gone — closing the on-disk arc 1 → 2 → 1 → 0.
+	assert_absent(&harness.db_path, &harness.db_tag, "after the renewal block was pruned", key)
+		.await?;
+	assert_storage_healthy(&harness.db_path, &harness.db_tag, "after full eviction").await?;
 
 	test_log!(TEST, "=== Parachain one-shot renew lifecycle PASSED ===");
 	Ok(())
@@ -1050,6 +1545,13 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 		"✓ data1 still alive — auto-renewal at R2 added a fresh ref before R was pruned"
 	);
 
+	// Shared-harness cleanup, as in `parachain_auto_renew_vs_no_renew_eviction_test`: a
+	// recurring renewal left running keeps taking the first `Transactions[N]` slot, ahead of
+	// any later test's own store.
+	let nonce = get_alice_nonce(collator1).await?;
+	disable_auto_renew(client, &content_hash_data1, nonce).await?;
+	tracing::info!("✓ Disabled auto-renew for data1 — chain idle for the next test");
+
 	test_log!(TEST, "=== Parachain auto-renewal + same-block store PASSED ===");
 	Ok(())
 }
@@ -1187,6 +1689,13 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 		"data_not_renewed should be evicted — its only ref was at the now-pruned store block",
 	)?;
 	tracing::info!("✓ data_not_renewed evicted (no auto-renewal kept it alive)");
+
+	// Shared-harness cleanup: a recurring renewal left running keeps consuming Alice's
+	// authorization and, because it fires from the mandatory inherent, keeps taking the first
+	// `Transactions[N]` slot ahead of any later test's own store.
+	let nonce = get_alice_nonce(collator1).await?;
+	disable_auto_renew(client, &content_hash_renewed, nonce).await?;
+	tracing::info!("✓ Disabled auto-renew for data_renewed — chain idle for the next test");
 
 	test_log!(TEST, "=== Auto-renew vs no-renew eviction PASSED ===");
 	Ok(())

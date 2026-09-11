@@ -42,6 +42,10 @@ bytes = "1"
 # Source compile-time limits (e.g. `DEFAULT_MAX_BLOCK_TRANSACTIONS`) from the pallet.
 pallet-bulletin-transaction-storage = { path = "../pallets/transaction-storage", default-features = false, features = ["std"] }
 
+# On-disk verification of the transaction-storage columns. Replaces shelling out to rocksdb's
+# `ldb` CLI, which is absent from the CI image.
+tx-index-tool = { workspace = true }
+
 [features]
 zombie-sync-tests = []
 zombie-auto-renew-tests = []
