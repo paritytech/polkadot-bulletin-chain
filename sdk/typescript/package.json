@@ -67,13 +67,13 @@
     "@polkadot-labs/hdkd": "^0.0.30",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^26.0.0",
-    "@vitest/coverage-v8": "^4.1.2",
+    "@vitest/coverage-v8": "^5.0.0",
     "happy-dom": "^20.8.9",
     "multiformats": "^14.0.0",
     "polkadot-api": "^2.1.2",
     "tsdown": "^0.22.8",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.2"
+    "vitest": "^5.0.0"
   },
   "publishConfig": {
     "access": "public"
