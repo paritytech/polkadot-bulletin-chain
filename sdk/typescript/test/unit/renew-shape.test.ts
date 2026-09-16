@@ -59,15 +59,21 @@ const submitFn = async () => ({
 // the call.
 const staticApis = (levels: {
   dataRenewalRenew?: number
+  dataRenewalAutoRenew?: number
   renew?: number
   forceRenew?: number
+  autoRenew?: number
 }) => ({
   compat: {
     tx: {
-      DataRenewal: { renew: { level: levels.dataRenewalRenew ?? 0 } },
+      DataRenewal: {
+        renew: { level: levels.dataRenewalRenew ?? 0 },
+        enable_auto_renew: { level: levels.dataRenewalAutoRenew ?? 0 },
+      },
       TransactionStorage: {
         renew: { level: levels.renew ?? 1 },
         force_renew: { level: levels.forceRenew ?? 0 },
+        enable_auto_renew: { level: levels.autoRenew ?? 0 },
       },
     },
   },
@@ -435,5 +441,104 @@ describe("toTransactionRef variant inference", () => {
       type: "ContentHash",
       value: `0x${"01".repeat(32)}`,
     })
+  })
+})
+
+// The auto-renew calls landed after force_renew, so a runtime can carry the
+// latter without the former; and on pre-split runtimes they sit on
+// TransactionStorage alongside it.
+describe("auto-renew resolution", () => {
+  const contentHash = new Uint8Array(32).fill(2)
+  const contentHashHex = `0x${"02".repeat(32)}`
+
+  it("uses DataRenewal when compat reports auto-renew present", async () => {
+    let arg: unknown
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          enable_auto_renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+        getStaticApis: async () =>
+          staticApis({ dataRenewalRenew: 1, dataRenewalAutoRenew: 1 }),
+      },
+    )
+
+    await client.enableAutoRenew(contentHash).send()
+    expect(arg).toEqual({ content_hash: contentHashHex })
+  })
+
+  it("uses TransactionStorage on pre-split runtimes that carry the call", async () => {
+    let arg: unknown
+    const client = createClient(
+      {
+        renew: () => mockTx,
+        force_renew: () => mockTx,
+        enable_auto_renew: (a: unknown) => {
+          arg = a
+          return mockTx
+        },
+      },
+      {
+        getStaticApis: async () => staticApis({ forceRenew: 1, autoRenew: 1 }),
+      },
+    )
+
+    await client.enableAutoRenew(contentHash).send()
+    expect(arg).toEqual({ content_hash: contentHashHex })
+  })
+
+  it("rejects when the runtime has force_renew but no auto-renew", async () => {
+    const client = createClient(
+      { renew: () => mockTx, force_renew: () => mockTx },
+      { getStaticApis: async () => staticApis({ forceRenew: 1 }) },
+    )
+
+    await expect(
+      client.enableAutoRenew(contentHash).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "enable_auto_renew is not supported by this runtime",
+    })
+  })
+
+  it("rejects on legacy runtimes", async () => {
+    const client = createClient(
+      { renew: () => mockTx },
+      { getStaticApis: async () => staticApis({ renew: 1 }) },
+    )
+
+    await expect(
+      client.disableAutoRenew(contentHash).send(),
+    ).rejects.toMatchObject({
+      code: ErrorCode.UNSUPPORTED_OPERATION,
+      message: "disable_auto_renew is not supported by this runtime",
+    })
+  })
+
+  it("resolves by entry presence when the api has no getStaticApis", async () => {
+    let arg: unknown
+    const client = createClient(
+      {},
+      {
+        dataRenewal: {
+          renew: () => mockTx,
+          // The pallet ships both auto-renew calls together, so presence of
+          // `enable_auto_renew` is the family signal.
+          enable_auto_renew: () => mockTx,
+          disable_auto_renew: (a: unknown) => {
+            arg = a
+            return mockTx
+          },
+        },
+      },
+    )
+
+    await client.disableAutoRenew(contentHash).send()
+    expect(arg).toEqual({ content_hash: contentHashHex })
   })
 })

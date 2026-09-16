@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import type { HexString } from "polkadot-api";
 import { RefreshCw, AlertCircle, Check, Clock, Copy, Database, Search, History, Info } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -19,29 +20,173 @@ import {
 } from "@/components/ui/Select";
 import { AuthorizationCard } from "@/components/AuthorizationCard";
 import { CidInput } from "@/components/CidInput";
+import { CidInfoCard } from "@/components/CidInfoCard";
 import { useApi, useBlockNumber, useChainState, useCreateBulletinClient, useNetwork } from "@/state/chain.state";
 import { useSelectedAccount } from "@/state/wallet.state";
 import { fetchTransactionInfo, TransactionInfo } from "@/state/storage.state";
 import { useStorageHistory } from "@/state/history.state";
-import { formatBytes, bytesToHex } from "@/utils/format";
+import { formatBytes, bytesToHex, formatBlockDuration } from "@/utils/format";
 import { cn } from "@/utils/cn";
-import { BulletinError, CID, ErrorCode, WaitFor } from "@parity/bulletin-sdk";
+import {
+  BulletinError,
+  CID,
+  ErrorCode,
+  WaitFor,
+  type BulletinClientInterface,
+  type ProgressCallback,
+} from "@parity/bulletin-sdk";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import {
+  fetchRenewalRegistration,
   isDagPb,
   resolveCid,
   type CidResolution,
   type OnChainTransaction,
+  type RenewalRegistration,
 } from "@/lib/cid-lookup";
 import { fetchRawBlock } from "@/lib/ipfs";
 
-// The SDK rejects forceRenew on pre-`TransactionRef` runtimes with
-// UNSUPPORTED_OPERATION; there the plain renew extrinsic is already an
-// immediate renewal.
-function isForceRenewUnsupported(err: unknown): boolean {
+// The SDK rejects calls the live runtime lacks with UNSUPPORTED_OPERATION:
+// forceRenew on pre-`TransactionRef` runtimes (where plain renew is already an
+// immediate renewal), and the auto-renew calls on runtimes predating them.
+function isUnsupportedOperation(err: unknown): boolean {
   return (
     err instanceof BulletinError &&
     err.code === ErrorCode.UNSUPPORTED_OPERATION
+  );
+}
+
+/** ~1 day at 6s blocks; matches the Download page's on-chain status badge. */
+const EXPIRING_SOON_BLOCKS = 14400;
+
+/** Which renewal call a button triggers. */
+type RenewAction = "scheduled" | "immediate" | "auto";
+
+interface RenewTarget {
+  block: number;
+  index: number;
+  contentHash: Uint8Array;
+}
+
+/**
+ * Submit one renewal action.
+ *
+ * `immediate` falls back to plain `renew` on pre-`force_renew` runtimes, where
+ * it is already immediate. The two registering actions get no fallback — a
+ * legacy `renew` would renew now, which is not what was asked for.
+ */
+function submitRenewAction(
+  client: BulletinClientInterface,
+  action: RenewAction,
+  target: RenewTarget,
+  waitFor: WaitFor,
+  onProgress: ProgressCallback,
+) {
+  const ref = { block: target.block, index: target.index };
+  if (action === "auto") {
+    return client
+      .enableAutoRenew(target.contentHash)
+      .withCallback(onProgress)
+      .withWaitFor(waitFor)
+      .send();
+  }
+  if (action === "scheduled") {
+    return client.renew(ref).withCallback(onProgress).withWaitFor(waitFor).send();
+  }
+  return client
+    .forceRenew(ref)
+    .withCallback(onProgress)
+    .withWaitFor(waitFor)
+    .send()
+    .catch((err) => {
+      if (!isUnsupportedOperation(err)) throw err;
+      return client.renew(ref).withCallback(onProgress).withWaitFor(waitFor).send();
+    });
+}
+
+/** Auto-renew is absent on older runtimes; say so instead of leaking the SDK message. */
+function renewErrorMessage(err: unknown, action: RenewAction): string {
+  if (action === "auto" && isUnsupportedOperation(err)) {
+    return "Auto-renew is not available on this network.";
+  }
+  return err instanceof Error ? err.message : "Renewal failed";
+}
+
+/** All three actions are feeless; the registering ones are prepaid at registration. */
+function RenewActionLegend() {
+  return (
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p>
+        <strong className="text-foreground">Renew</strong> — schedules one renewal that
+        fires when the current retention period ends. Retention does not change yet.
+      </p>
+      <p>
+        <strong className="text-foreground">Renew immediately</strong> — renews now; the
+        full retention period restarts from the current block.
+      </p>
+      <p>
+        <strong className="text-foreground">Enable auto-renew</strong> — renews every
+        retention period. The first cycle is prepaid; later cycles use your authorization
+        quota and stop when it runs out.
+      </p>
+    </div>
+  );
+}
+
+const BATCH_SUMMARY_VERBS: Record<RenewAction, string> = {
+  scheduled: "Scheduled a renewal for",
+  immediate: "Renewed",
+  auto: "Enabled auto-renew for",
+};
+
+const SUCCESS_TITLES: Record<RenewAction, string> = {
+  scheduled: "Renewal Scheduled",
+  immediate: "Renewal Successful",
+  auto: "Auto-Renew Enabled",
+};
+
+const SUCCESS_DESCRIPTIONS: Record<RenewAction, string> = {
+  scheduled:
+    "One renewal will fire when the current retention period ends. Retention has not changed yet.",
+  immediate: "Your data retention period has been extended",
+  auto: "This data will be renewed every retention period while your quota allows",
+};
+
+/**
+ * Badge for an existing `Renewals` entry, with a disable action for recurring
+ * ones. The chain refuses `disable_auto_renew` while the next cycle is still
+ * prepaid, so the button waits for that cycle to fire rather than failing.
+ */
+function RegistrationBadge({
+  registration,
+  onDisable,
+  busy,
+}: {
+  registration: RenewalRegistration;
+  onDisable?: () => void;
+  busy?: boolean;
+}) {
+  return (
+    <>
+      <Badge variant="secondary" className="text-xs">
+        {registration.recurring ? "Auto-renew" : "Renewal scheduled"}
+      </Badge>
+      {registration.recurring && onDisable && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDisable}
+          disabled={busy || registration.paid}
+          title={
+            registration.paid
+              ? "Cannot disable until the prepaid cycle fires"
+              : undefined
+          }
+        >
+          Disable
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -55,6 +200,7 @@ interface RenewalTarget {
 interface BatchRenewResult {
   cidString: string;
   success: boolean;
+  /** Set only for `immediate`; the registering actions do not move the expiry yet. */
   newExpiresAt?: number;
   error?: string;
 }
@@ -98,10 +244,14 @@ export function Renew() {
 
   // Renewal state (block+index tab)
   const [isRenewing, setIsRenewing] = useState(false);
+  /** Which action is in flight, so only its button shows the spinner. */
+  const [renewingAction, setRenewingAction] = useState<RenewAction>("scheduled");
   const [renewalError, setRenewalError] = useState<string | null>(null);
   const [renewalSuccess, setRenewalSuccess] = useState<{
+    action: RenewAction;
     blockNumber?: number;
-    newExpiresAt: number;
+    /** Set only for `immediate`; the registering actions do not move the expiry yet. */
+    newExpiresAt?: number;
   } | null>(null);
   const [txStatus, setTxStatus] = useState<string | null>(null);
   const handleProgress = useProgressHandler(setTxStatus);
@@ -122,6 +272,10 @@ export function Renew() {
   const [isBatchRenewing, setIsBatchRenewing] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchResults, setBatchResults] = useState<BatchRenewResult[]>([]);
+  const [batchAction, setBatchAction] = useState<RenewAction>("scheduled");
+  /** Content-hash hex of the registration currently being disabled. */
+  const [isDisabling, setIsDisabling] = useState<string | null>(null);
+  const [disableError, setDisableError] = useState<string | null>(null);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const [copiedCid, setCopiedCid] = useState<string | null>(null);
 
@@ -134,6 +288,30 @@ export function Renew() {
       // Clipboard API blocked — silently ignore.
     }
   }, []);
+
+  // Renewal registrations by content-hash hex. The pallet allows one per hash,
+  // so an existing entry blocks both `renew` and `enable_auto_renew`.
+  const [registrations, setRegistrations] = useState<
+    Map<string, RenewalRegistration | null>
+  >(new Map());
+
+  const refreshRegistrations = useCallback(
+    async (client: NonNullable<typeof api>, hashes: string[]) => {
+      if (hashes.length === 0) return;
+      const entries = await Promise.all(
+        hashes.map(
+          async (h) =>
+            [h, await fetchRenewalRegistration(client, h as HexString)] as const,
+        ),
+      );
+      setRegistrations((prev) => {
+        const next = new Map(prev);
+        for (const [h, reg] of entries) next.set(h, reg);
+        return next;
+      });
+    },
+    [],
+  );
 
   // Retention period from chain
   const [retentionPeriod, setRetentionPeriod] = useState<number | null>(null);
@@ -212,64 +390,100 @@ export function Renew() {
         info,
         expiresAtBlock,
       });
+      await refreshRegistrations(api, [bytesToHex(info.contentHash)]);
     } catch (err) {
       console.error("Lookup failed:", err);
       setLookupError(err instanceof Error ? err.message : "Failed to lookup transaction");
     } finally {
       setIsLookingUp(false);
     }
-  }, [api, blockInput, indexInput, retentionPeriod]);
+  }, [api, blockInput, indexInput, retentionPeriod, refreshRegistrations]);
 
-  const handleRenew = useCallback(async () => {
+  const handleRenew = useCallback(async (action: RenewAction) => {
     if (!api || !selectedAccount?.txCreator || !renewalTarget) return;
 
     setIsRenewing(true);
+    setRenewingAction(action);
     setRenewalError(null);
     setRenewalSuccess(null);
     setTxStatus(null);
+
+    const contentHashHex = bytesToHex(renewalTarget.info.contentHash);
 
     try {
       // Create SDK client with user's signer
       const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
 
-      // Immediate renewal: force_renew on TransactionRef runtimes; legacy
-      // runtimes reject it as unsupported, and there plain renew is already
-      // immediate. Both keep the "renewed at this block, expires at block +
-      // retention" math below correct.
-      const ref = { block: renewalTarget.blockNumber, index: renewalTarget.index };
-      const result = await bulletinClient
-        .forceRenew(ref)
-        .withCallback(handleProgress)
-        .withWaitFor(WaitFor.Finalized)
-        .send()
-        .catch((err) => {
-          if (!isForceRenewUnsupported(err)) throw err;
-          return bulletinClient
-            .renew(ref)
-            .withCallback(handleProgress)
-            .withWaitFor(WaitFor.Finalized)
-            .send();
-        });
+      const result = await submitRenewAction(
+        bulletinClient,
+        action,
+        {
+          block: renewalTarget.blockNumber,
+          index: renewalTarget.index,
+          contentHash: renewalTarget.info.contentHash,
+        },
+        WaitFor.Finalized,
+        handleProgress,
+      );
 
-      // Calculate new expiration (retentionPeriod guaranteed non-null at this point)
+      // Only an immediate renewal moves the expiry; the registering actions
+      // fire at the retention boundary, so there is no new expiry to report.
+      // retentionPeriod is guaranteed non-null here.
       const renewedAtBlock = result.blockNumber ?? (currentBlockNumber ?? 0);
-      const newExpiresAt = renewedAtBlock + retentionPeriod!;
-
       setRenewalSuccess({
+        action,
         blockNumber: result.blockNumber,
-        newExpiresAt,
+        newExpiresAt:
+          action === "immediate" ? renewedAtBlock + retentionPeriod! : undefined,
       });
 
-      // Clear the target after successful renewal
-      setRenewalTarget(null);
+      // Clear the target after an immediate renewal; keep it for the
+      // registering actions so the new registration badge is visible.
+      if (action === "immediate") {
+        setRenewalTarget(null);
+      }
+      await refreshRegistrations(api, [contentHashHex]);
     } catch (err) {
       console.error("Renewal failed:", err);
-      setRenewalError(err instanceof Error ? err.message : "Renewal failed");
+      setRenewalError(renewErrorMessage(err, action));
     } finally {
       setIsRenewing(false);
       setTxStatus(null);
     }
-  }, [api, selectedAccount, renewalTarget, currentBlockNumber, retentionPeriod]);
+  }, [
+    api,
+    selectedAccount,
+    renewalTarget,
+    currentBlockNumber,
+    retentionPeriod,
+    createBulletinClient,
+    handleProgress,
+    refreshRegistrations,
+  ]);
+
+  const handleDisableAutoRenew = useCallback(
+    async (contentHash: Uint8Array, hashHex: string) => {
+      if (!api || !selectedAccount?.txCreator) return;
+      setIsDisabling(hashHex);
+      setDisableError(null);
+      try {
+        const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
+        await bulletinClient
+          .disableAutoRenew(contentHash)
+          .withCallback(handleProgress)
+          .withWaitFor(WaitFor.Finalized)
+          .send();
+        await refreshRegistrations(api, [hashHex]);
+      } catch (err) {
+        console.error("Disable auto-renew failed:", err);
+        setDisableError(renewErrorMessage(err, "auto"));
+      } finally {
+        setIsDisabling(null);
+        setTxStatus(null);
+      }
+    },
+    [api, selectedAccount, createBulletinClient, handleProgress, refreshRegistrations],
+  );
 
   // CID input handler
   const handleCidChange = (value: string, isValid: boolean, cid?: CID) => {
@@ -343,6 +557,11 @@ export function Renew() {
           "None of the CIDs were found on chain. The data may have expired or was never stored on this network.",
         );
       }
+
+      await refreshRegistrations(
+        api,
+        resolved.filter((r) => r.location !== null).map((r) => r.contentHashHex),
+      );
     } catch (err) {
       console.error("CID resolution failed:", err);
       setResolveError(err instanceof Error ? err.message : "Failed to resolve CID");
@@ -350,7 +569,7 @@ export function Renew() {
       setIsResolving(false);
       setResolveProgress(null);
     }
-  }, [api, parsedCid, currentNetwork, networkHistory]);
+  }, [api, parsedCid, currentNetwork, networkHistory, refreshRegistrations]);
 
   // Toggle a single CID checkbox
   const handleToggleCid = (cidString: string) => {
@@ -382,7 +601,7 @@ export function Renew() {
   // ValidateStorageCalls extension rejects store/renew wrapped in Utility
   // batches (`pallets/transaction-storage/src/extension.rs:244`), so batching
   // isn't an option — sequential per-CID renewals are required.
-  const handleBatchRenew = useCallback(async () => {
+  const handleBatchRenew = useCallback(async (action: RenewAction) => {
     if (!api || !selectedAccount?.txCreator) return;
 
     const targets = resolutions.filter(
@@ -391,49 +610,53 @@ export function Renew() {
     if (targets.length === 0) return;
 
     setIsBatchRenewing(true);
+    setBatchAction(action);
     setBatchError(null);
     setBatchResults([]);
     setBatchProgress(null);
 
     const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
     const results: BatchRenewResult[] = [];
+    const verb = action === "auto" ? "Enabling auto-renew for" : "Renewing";
 
     for (let i = 0; i < targets.length; i++) {
       const t = targets[i]!;
       const cidStr = t.cidString;
       const shortCid =
         cidStr.length > 20 ? `${cidStr.slice(0, 10)}...${cidStr.slice(-6)}` : cidStr;
-      setBatchProgress(`Renewing ${i + 1} of ${targets.length}: ${shortCid}`);
+      setBatchProgress(`${verb} ${i + 1} of ${targets.length}: ${shortCid}`);
 
       try {
-        // Per-tx InBlock (not Finalized): an immediate renewal is safe to
-        // retry — a reorg-dropped one can simply be resubmitted. Saves ~6s
-        // per CID. force_renew falls back to plain renew on legacy runtimes,
-        // where renew is already immediate.
-        const ref = { block: t.location!.blockNumber, index: t.location!.index };
-        const result = await bulletinClient
-          .forceRenew(ref)
-          .withCallback(handleProgress)
-          .withWaitFor(WaitFor.InBlock)
-          .send()
-          .catch((err) => {
-            if (!isForceRenewUnsupported(err)) throw err;
-            return bulletinClient
-              .renew(ref)
-              .withCallback(handleProgress)
-              .withWaitFor(WaitFor.InBlock)
-              .send();
-          });
+        // Per-tx InBlock (not Finalized): these are safe to retry — a
+        // reorg-dropped one can simply be resubmitted. Saves ~6s per CID.
+        const result = await submitRenewAction(
+          bulletinClient,
+          action,
+          {
+            block: t.location!.blockNumber,
+            index: t.location!.index,
+            contentHash: t.cid.multihash.digest,
+          },
+          WaitFor.InBlock,
+          handleProgress,
+        );
 
+        // Only an immediate renewal moves the expiry.
         const renewedAtBlock = result.blockNumber ?? currentBlockNumber ?? 0;
-        const newExpiresAt = renewedAtBlock + (retentionPeriod ?? 0);
-        results.push({ cidString: cidStr, success: true, newExpiresAt });
+        results.push({
+          cidString: cidStr,
+          success: true,
+          newExpiresAt:
+            action === "immediate"
+              ? renewedAtBlock + (retentionPeriod ?? 0)
+              : undefined,
+        });
       } catch (err) {
         console.error(`Failed to renew ${cidStr}:`, err);
         results.push({
           cidString: cidStr,
           success: false,
-          error: err instanceof Error ? err.message : "Renewal failed",
+          error: renewErrorMessage(err, action),
         });
       }
     }
@@ -442,6 +665,10 @@ export function Renew() {
     setIsBatchRenewing(false);
     setBatchProgress(null);
     setTxStatus(null);
+    await refreshRegistrations(
+      api,
+      targets.map((t) => t.contentHashHex),
+    );
   }, [
     api,
     selectedAccount,
@@ -451,6 +678,7 @@ export function Renew() {
     retentionPeriod,
     createBulletinClient,
     handleProgress,
+    refreshRegistrations,
   ]);
 
   const canRenew =
@@ -459,13 +687,22 @@ export function Renew() {
     renewalTarget &&
     !isRenewing;
 
+  // A content hash carries at most one registration, so `renew` and
+  // `enable_auto_renew` both reject once one exists.
+  const targetRegistration = renewalTarget
+    ? registrations.get(bytesToHex(renewalTarget.info.contentHash)) ?? null
+    : null;
+
   // Calculate blocks until expiration
   const blocksUntilExpiration = renewalTarget && currentBlockNumber !== undefined
     ? renewalTarget.expiresAtBlock - currentBlockNumber
     : null;
 
   const isExpired = blocksUntilExpiration !== null && blocksUntilExpiration <= 0;
-  const isExpiringSoon = blocksUntilExpiration !== null && blocksUntilExpiration > 0 && blocksUntilExpiration < 1000;
+  const isExpiringSoon =
+    blocksUntilExpiration !== null &&
+    blocksUntilExpiration > 0 &&
+    blocksUntilExpiration < EXPIRING_SOON_BLOCKS;
 
   // CID tab helpers
   const checkedCount = resolutions.filter((r) => r.location !== null && checkedCids.has(r.cidString)).length;
@@ -479,8 +716,30 @@ export function Renew() {
     }
     const expiresAt = resolution.location.blockNumber + retentionPeriod;
     const remaining = expiresAt - currentBlockNumber;
-    return { expiresAt, remaining, expired: remaining <= 0, expiringSoon: remaining > 0 && remaining < 1000 };
+    return {
+      expiresAt,
+      remaining,
+      expired: remaining <= 0,
+      expiringSoon: remaining > 0 && remaining < EXPIRING_SOON_BLOCKS,
+    };
   };
+
+  // Selected CIDs that block a registering action, and the soonest retention
+  // deadline among the selection — the number that matters for a scheduled renew.
+  const selectedResolutions = resolutions.filter(
+    (r) => r.location !== null && checkedCids.has(r.cidString),
+  );
+  const selectedRegistered = selectedResolutions.filter((r) =>
+    registrations.get(r.contentHashHex),
+  ).length;
+  const selectedExpired = selectedResolutions.filter(
+    (r) => getExpirationInfo(r)?.expired,
+  ).length;
+  const selectedMinRemaining = selectedResolutions.length
+    ? Math.min(
+        ...selectedResolutions.map((r) => getExpirationInfo(r)?.remaining ?? 0),
+      )
+    : null;
 
   return (
     <div className="space-y-6">
@@ -672,6 +931,7 @@ export function Renew() {
                       <div className="space-y-2 max-h-[400px] overflow-y-auto">
                         {resolutions.map((r, i) => {
                           const expInfo = getExpirationInfo(r);
+                          const registration = registrations.get(r.contentHashHex);
                           const shortCid = r.cidString.length > 30
                             ? `${r.cidString.slice(0, 14)}...${r.cidString.slice(-8)}`
                             : r.cidString;
@@ -722,11 +982,27 @@ export function Renew() {
                                           {expInfo.expired ? (
                                             <Badge variant="destructive" className="text-xs">Expired</Badge>
                                           ) : expInfo.expiringSoon ? (
-                                            <Badge className="bg-yellow-500 text-xs">Expiring Soon</Badge>
+                                            <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-xs">
+                                              {formatBlockDuration(expInfo.remaining)} left
+                                            </Badge>
                                           ) : (
-                                            <Badge variant="secondary" className="text-xs">Active</Badge>
+                                            <Badge variant="secondary" className="bg-green-500/10 text-green-600 text-xs">
+                                              {formatBlockDuration(expInfo.remaining)} left
+                                            </Badge>
                                           )}
                                         </>
+                                      )}
+                                      {registration && (
+                                        <RegistrationBadge
+                                          registration={registration}
+                                          busy={isDisabling === r.contentHashHex}
+                                          onDisable={() =>
+                                            handleDisableAutoRenew(
+                                              r.cid.multihash.digest,
+                                              r.contentHashHex,
+                                            )
+                                          }
+                                        />
                                       )}
                                     </>
                                   ) : (
@@ -739,25 +1015,74 @@ export function Renew() {
                         })}
                       </div>
 
-                      {/* Batch Renew Button */}
-                      <Button
-                        onClick={handleBatchRenew}
-                        disabled={!canBatchRenew}
-                        className="w-full"
-                        size="lg"
-                      >
-                        {isBatchRenewing ? (
-                          <>
+                      {/* Renewal actions */}
+                      {selectedMinRemaining !== null && (
+                        <p className="text-sm">
+                          <span className="text-muted-foreground">Retention </span>
+                          <span className="font-medium">
+                            {selectedMinRemaining <= 0
+                              ? "expired"
+                              : `${formatBlockDuration(selectedMinRemaining)} left`}
+                          </span>
+                          {checkedCount > 1 && (
+                            <span className="text-muted-foreground">
+                              {" "}(earliest of {checkedCount} selected)
+                            </span>
+                          )}
+                        </p>
+                      )}
+
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <Button
+                          onClick={() => handleBatchRenew("scheduled")}
+                          disabled={!canBatchRenew || selectedRegistered > 0 || selectedExpired > 0}
+                        >
+                          {isBatchRenewing && batchAction === "scheduled" ? (
                             <Spinner size="sm" className="mr-2" />
-                            {txStatus || "Renewing..."}
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="h-5 w-5 mr-2" />
-                            Renew Selected ({checkedCount})
-                          </>
-                        )}
-                      </Button>
+                          ) : (
+                            <Clock className="h-4 w-4 mr-2" />
+                          )}
+                          Renew selected ({checkedCount})
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => handleBatchRenew("immediate")}
+                          disabled={!canBatchRenew}
+                        >
+                          {isBatchRenewing && batchAction === "immediate" ? (
+                            <Spinner size="sm" className="mr-2" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                          )}
+                          Renew immediately
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => handleBatchRenew("auto")}
+                          disabled={!canBatchRenew || selectedRegistered > 0}
+                        >
+                          {isBatchRenewing && batchAction === "auto" ? (
+                            <Spinner size="sm" className="mr-2" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                          )}
+                          Enable auto-renew
+                        </Button>
+                      </div>
+
+                      <RenewActionLegend />
+
+                      {selectedRegistered > 0 && (
+                        <p className="text-xs text-amber-600">
+                          {selectedRegistered} selected CID(s) already have a renewal
+                          registered.
+                        </p>
+                      )}
+                      {selectedExpired > 0 && (
+                        <p className="text-xs text-amber-600">
+                          Expired entries can only be renewed immediately.
+                        </p>
+                      )}
 
                       {!selectedAccount && (
                         <p className="text-sm text-muted-foreground text-center">
@@ -801,7 +1126,8 @@ export function Renew() {
                           )}
                           <div className="text-sm">
                             <p className="font-medium">
-                              Renewed {succeeded} of {batchResults.length} CID(s)
+                              {BATCH_SUMMARY_VERBS[batchAction]} {succeeded} of{" "}
+                              {batchResults.length} CID(s)
                               {failed > 0 && ` — ${failed} failed`}
                             </p>
                           </div>
@@ -853,6 +1179,16 @@ export function Renew() {
                       </div>
                     </div>
                   )}
+
+                  {disableError && (
+                    <div className="flex items-start gap-3 p-3 rounded-md bg-destructive/10 text-destructive">
+                      <AlertCircle className="h-5 w-5 mt-0.5 shrink-0" />
+                      <div className="text-sm">
+                        <p className="font-medium">Disable failed</p>
+                        <p className="mt-1">{disableError}</p>
+                      </div>
+                    </div>
+                  )}
                 </TabsContent>
               </Tabs>
             </CardContent>
@@ -895,13 +1231,31 @@ export function Renew() {
                     <Clock className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm font-medium">Expiration Status</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {isExpired ? (
                       <Badge variant="destructive">Expired</Badge>
                     ) : isExpiringSoon ? (
-                      <Badge className="bg-yellow-500">Expiring Soon</Badge>
+                      <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+                        {formatBlockDuration(blocksUntilExpiration!)} left
+                      </Badge>
                     ) : (
-                      <Badge variant="secondary">Active</Badge>
+                      <Badge variant="secondary" className="bg-green-500/10 text-green-600">
+                        {blocksUntilExpiration !== null
+                          ? `${formatBlockDuration(blocksUntilExpiration)} left`
+                          : "Active"}
+                      </Badge>
+                    )}
+                    {targetRegistration && (
+                      <RegistrationBadge
+                        registration={targetRegistration}
+                        busy={isDisabling !== null}
+                        onDisable={() =>
+                          handleDisableAutoRenew(
+                            renewalTarget.info.contentHash,
+                            bytesToHex(renewalTarget.info.contentHash),
+                          )
+                        }
+                      />
                     )}
                     {blocksUntilExpiration !== null && (
                       <span className="text-sm text-muted-foreground">
@@ -919,31 +1273,69 @@ export function Renew() {
                   </p>
                 </div>
 
-                <Button
-                  onClick={handleRenew}
-                  disabled={!canRenew}
-                  className="w-full"
-                  size="lg"
-                >
-                  {isRenewing ? (
-                    <>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <Button
+                    onClick={() => handleRenew("scheduled")}
+                    disabled={!canRenew || !!targetRegistration || isExpired}
+                  >
+                    {isRenewing && renewingAction === "scheduled" ? (
                       <Spinner size="sm" className="mr-2" />
-                      {txStatus || "Renewing..."}
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-5 w-5 mr-2" />
-                      Renew Storage
-                    </>
-                  )}
-                </Button>
+                    ) : (
+                      <Clock className="h-4 w-4 mr-2" />
+                    )}
+                    Renew
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleRenew("immediate")}
+                    disabled={!canRenew}
+                  >
+                    {isRenewing && renewingAction === "immediate" ? (
+                      <Spinner size="sm" className="mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Renew immediately
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => handleRenew("auto")}
+                    disabled={!canRenew || !!targetRegistration}
+                  >
+                    {isRenewing && renewingAction === "auto" ? (
+                      <Spinner size="sm" className="mr-2" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                    )}
+                    Enable auto-renew
+                  </Button>
+                </div>
 
-                {renewalError && (
+                {isRenewing && txStatus && (
+                  <p className="text-xs text-muted-foreground text-center">{txStatus}</p>
+                )}
+
+                <RenewActionLegend />
+
+                {targetRegistration && (
+                  <p className="text-xs text-amber-600">
+                    A renewal is already registered for this content hash.
+                  </p>
+                )}
+                {isExpired && (
+                  <p className="text-xs text-amber-600">
+                    Expired entries can only be renewed immediately.
+                  </p>
+                )}
+
+                {(renewalError || disableError) && (
                   <div className="flex items-start gap-3 p-3 rounded-md bg-destructive/10 text-destructive">
                     <AlertCircle className="h-5 w-5 mt-0.5" />
                     <div>
-                      <p className="font-medium">Renewal Failed</p>
-                      <p className="text-sm mt-1">{renewalError}</p>
+                      <p className="font-medium">
+                        {renewalError ? "Renewal Failed" : "Disable Failed"}
+                      </p>
+                      <p className="text-sm mt-1">{renewalError ?? disableError}</p>
                     </div>
                   </div>
                 )}
@@ -957,10 +1349,10 @@ export function Renew() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-success">
                   <Check className="h-5 w-5" />
-                  Renewal Successful
+                  {SUCCESS_TITLES[renewalSuccess.action]}
                 </CardTitle>
                 <CardDescription>
-                  Your data retention period has been extended
+                  {SUCCESS_DESCRIPTIONS[renewalSuccess.action]}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -968,21 +1360,23 @@ export function Renew() {
                   {renewalSuccess.blockNumber && (
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                        Renewed in Block
+                        Submitted in Block
                       </p>
                       <p className="font-mono">
                         #{renewalSuccess.blockNumber.toLocaleString()}
                       </p>
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                      New Expiration Block
-                    </p>
-                    <p className="font-mono">
-                      #{renewalSuccess.newExpiresAt.toLocaleString()}
-                    </p>
-                  </div>
+                  {renewalSuccess.newExpiresAt !== undefined && (
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        New Expiration Block
+                      </p>
+                      <p className="font-mono">
+                        #{renewalSuccess.newExpiresAt.toLocaleString()}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1011,6 +1405,12 @@ export function Renew() {
                 Renewal extends the retention period from the current block, giving your
                 data another full retention period before expiration.
               </p>
+              <p>
+                On networks whose runtime predates immediate renewal, a plain renewal
+                already takes effect at once — there <strong>Renew</strong> and{" "}
+                <strong>Renew immediately</strong> behave identically, and auto-renew is
+                unavailable.
+              </p>
               {retentionPeriod && (
                 <p>
                   <strong>Current retention period:</strong>{" "}
@@ -1023,6 +1423,8 @@ export function Renew() {
 
         {/* Sidebar */}
         <div className="space-y-6">
+          <CidInfoCard cid={parsedCid} />
+
           <AuthorizationCard />
 
           {!selectedAccount && (
