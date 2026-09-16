@@ -48,7 +48,7 @@
 
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
-import { getPolkadotSigner } from 'polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { HopClient, HopNotFoundError } from 'hop-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import {
@@ -88,7 +88,7 @@ const BITSWAP_POLL_INTERVAL_MS = 3_000;     // gap between retrieval attempts
 const BITSWAP_TIMEOUT_MS = 120_000;         // overall deadline for retrieval
 const BITSWAP_ATTEMPT_TIMEOUT_MS = 10_000;  // per-attempt fetch timeout
 
-// HOP requires raw byte signing — never use getPolkadotSigner, which wraps the
+// HOP requires raw byte signing — never use getTxCreator, which wraps the
 // payload in <Bytes>…</Bytes> and the node would reject the signature.
 function rawSigner(keyPair) {
 	return {
@@ -173,10 +173,10 @@ async function main() {
 	const miniSecret = entropyToMiniSecret(mnemonicToEntropy(DEV_PHRASE));
 	const derive = sr25519CreateDerive(miniSecret);
 
-	// The authorizer signs an on-chain extrinsic — getPolkadotSigner is fine here
+	// The authorizer signs an on-chain extrinsic — getTxCreator is fine here
 	// (only the HOP signBytes path must avoid <Bytes> wrapping).
 	const authorizerKeyPair = derive(AUTHORIZER_PATH);
-	const authorizerSigner = getPolkadotSigner(authorizerKeyPair.publicKey, 'Sr25519', authorizerKeyPair.sign);
+	const authorizerSigner = getTxCreator(authorizerKeyPair.publicKey, 'Sr25519', authorizerKeyPair.sign);
 
 	const senderKeyPair = derive(SENDER_PATH);
 	const senderAddress = ss58Address(senderKeyPair.publicKey);

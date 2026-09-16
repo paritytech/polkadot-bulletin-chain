@@ -32,6 +32,7 @@ import {
 import { addStorageEntry } from "@/state/history.state";
 import { formatBytes } from "@/utils/format";
 import { getContentHash, CidCodec, HashAlgorithm, WaitFor } from "@parity/bulletin-sdk";
+import type { TxEvent } from "polkadot-api";
 import { useProgressHandler } from "@/hooks/useProgressHandler";
 import { bytesToHex } from "@/utils/format";
 
@@ -122,7 +123,7 @@ export function Upload() {
   }, [api, inputMode, textData, fileData, hashAlgorithm, getData]);
 
   const hasAccountAuth =
-    selectedAccount?.polkadotSigner &&
+    selectedAccount?.txCreator &&
     authorization &&
     authorization.bytes >= BigInt(dataSize) &&
     authorization.transactions > 0n;
@@ -199,22 +200,15 @@ export function Upload() {
         const result = await new Promise<{ blockHash?: string; blockNumber?: number; index?: number }>((resolve, reject) => {
           let resolved = false;
 
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const handleEvent = (ev: any) => {
-            if (ev.type === "txBestBlocksState" && ev.found && !resolved) {
+          const handleEvent = (ev: TxEvent) => {
+            if (ev.type === "inBestBlock" && !resolved) {
               resolved = true;
               subscription.unsubscribe();
 
-              let index: number | undefined;
-              if (ev.events) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const storedEvent = ev.events.find((e: any) =>
-                  e.type === "TransactionStorage" && e.value?.type === "Stored"
-                );
-                if (storedEvent?.value?.value?.index !== undefined) {
-                  index = storedEvent.value.value.index;
-                }
-              }
+              const storedEvent = ev.events.find(
+                (e) => e.type === "TransactionStorage" && e.value.type === "Stored"
+              );
+              const index: number | undefined = storedEvent?.value.value?.index;
 
               resolve({
                 blockHash: ev.block.hash,
@@ -261,7 +255,7 @@ export function Upload() {
         setUploadResult(uploadResultData);
       } else {
         // Signed submission via SDK
-        const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
+        const bulletinClient = createBulletinClient!(selectedAccount!.txCreator);
 
         const result = await bulletinClient
           .store(data)

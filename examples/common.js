@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Keyring } from '@polkadot/keyring';
-import { getPolkadotSigner } from '@polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
 import { createCanvas } from "canvas";
 import fs from "fs";
@@ -17,7 +17,7 @@ export const CHUNK_SIZE = 1 * 1024 * 1024; // 1 MiB
  * Creates a PAPI-compatible signer from a Keyring account
  */
 export function createSigner(account) {
-  return getPolkadotSigner(
+  return getTxCreator(
     account.publicKey,
     'Sr25519',
     (input) => account.sign(input)

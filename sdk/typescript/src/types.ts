@@ -200,8 +200,7 @@ export type ChunkProgressEvent =
  * Transaction status event types
  */
 export enum TxStatus {
-  Signed = "signed",
-  Validated = "validated",
+  Created = "created",
   Broadcasted = "broadcasted",
   InBlock = "in_block",
   Finalized = "finalized",
@@ -211,11 +210,10 @@ export enum TxStatus {
 }
 
 /**
- * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
+ * Transaction status event types (mirrors PAPI's createSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: TxStatus.Signed; txHash: string; chunkIndex?: number }
-  | { type: TxStatus.Validated; chunkIndex?: number }
+  | { type: TxStatus.Created; txHash: string; chunkIndex?: number }
   | { type: TxStatus.Broadcasted; chunkIndex?: number }
   | {
       type: TxStatus.InBlock

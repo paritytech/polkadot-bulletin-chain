@@ -400,7 +400,7 @@ export function Renew() {
   }, [api, blockInput, indexInput, retentionPeriod, refreshRegistrations]);
 
   const handleRenew = useCallback(async (action: RenewAction) => {
-    if (!api || !selectedAccount?.polkadotSigner || !renewalTarget) return;
+    if (!api || !selectedAccount?.txCreator || !renewalTarget) return;
 
     setIsRenewing(true);
     setRenewingAction(action);
@@ -412,7 +412,7 @@ export function Renew() {
 
     try {
       // Create SDK client with user's signer
-      const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+      const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
 
       const result = await submitRenewAction(
         bulletinClient,
@@ -463,11 +463,11 @@ export function Renew() {
 
   const handleDisableAutoRenew = useCallback(
     async (contentHash: Uint8Array, hashHex: string) => {
-      if (!api || !selectedAccount?.polkadotSigner) return;
+      if (!api || !selectedAccount?.txCreator) return;
       setIsDisabling(hashHex);
       setDisableError(null);
       try {
-        const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+        const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
         await bulletinClient
           .disableAutoRenew(contentHash)
           .withCallback(handleProgress)
@@ -602,7 +602,7 @@ export function Renew() {
   // batches (`pallets/transaction-storage/src/extension.rs:244`), so batching
   // isn't an option — sequential per-CID renewals are required.
   const handleBatchRenew = useCallback(async (action: RenewAction) => {
-    if (!api || !selectedAccount?.polkadotSigner) return;
+    if (!api || !selectedAccount?.txCreator) return;
 
     const targets = resolutions.filter(
       (r) => r.location !== null && checkedCids.has(r.cidString),
@@ -615,7 +615,7 @@ export function Renew() {
     setBatchResults([]);
     setBatchProgress(null);
 
-    const bulletinClient = createBulletinClient!(selectedAccount.polkadotSigner);
+    const bulletinClient = createBulletinClient!(selectedAccount.txCreator);
     const results: BatchRenewResult[] = [];
     const verb = action === "auto" ? "Enabling auto-renew for" : "Renewing";
 
@@ -683,7 +683,7 @@ export function Renew() {
 
   const canRenew =
     api &&
-    selectedAccount?.polkadotSigner &&
+    selectedAccount?.txCreator &&
     renewalTarget &&
     !isRenewing;
 
@@ -707,7 +707,7 @@ export function Renew() {
   // CID tab helpers
   const checkedCount = resolutions.filter((r) => r.location !== null && checkedCids.has(r.cidString)).length;
   const foundCount = resolutions.filter((r) => r.location !== null).length;
-  const canBatchRenew = api && selectedAccount?.polkadotSigner && checkedCount > 0 && !isBatchRenewing;
+  const canBatchRenew = api && selectedAccount?.txCreator && checkedCount > 0 && !isBatchRenewing;
 
   // Calculate expiration for a resolution
   const getExpirationInfo = (resolution: CidResolution) => {
