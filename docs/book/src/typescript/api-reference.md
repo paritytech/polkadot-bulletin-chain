@@ -36,6 +36,8 @@ class AsyncBulletinClient implements BulletinClientInterface {
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
 | `renew(ref)` | `CallBuilder` | Schedule a one-shot renewal; `ref` is `{ block, index }` or a content hash (legacy immediate renew on pre-`TransactionRef` runtimes) |
 | `forceRenew(ref)` | `CallBuilder` | Renew immediately; rejects with `UNSUPPORTED_OPERATION` on runtimes without `force_renew` |
+| `enableAutoRenew(contentHash)` | `CallBuilder` | Register recurring auto-renewal; rejects with `UNSUPPORTED_OPERATION` on runtimes without the call |
+| `disableAutoRenew(contentHash)` | `CallBuilder` | Cancel a renewal registration; refused while its next cycle is prepaid |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Refresh an account authorization expiry |
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Refresh a preimage authorization expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
