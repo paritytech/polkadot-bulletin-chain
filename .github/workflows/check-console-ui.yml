@@ -48,3 +48,33 @@ jobs:
         env:
           GITHUB_PAGES: true
         run: npm run build
+
+  papi-drift:
+    name: Check PAPI metadata drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: console-ui
+        run: npm ci
+
+      - name: Refetch metadata from live chains
+        working-directory: console-ui
+        run: npx papi update --skip-codegen
+
+      # The Pages deploy generates descriptors from the committed snapshots, so a
+      # stale snapshot ships a UI that papi rejects against the live runtime.
+      - name: Fail on drift
+        working-directory: console-ui
+        run: |
+          if ! git diff --exit-code -- .papi/metadata .papi/polkadot-api.json; then
+            echo "::error::Committed PAPI metadata is behind the live chains. Run 'npx papi update' in console-ui and commit .papi/metadata and .papi/polkadot-api.json."
+            exit 1
+          fi
