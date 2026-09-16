@@ -1,0 +1,16 @@
+[package]
+name = "bulletin-hop-rpc-client"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+description = "Shared HOP JSON-RPC signing and SCALE encoding for Bulletin test tooling"
+publish = false
+
+[dependencies]
+blake2 = "0.10"
+hex.workspace = true
+pallet-bulletin-hop-promotion = { workspace = true, default-features = false, features = ["std"] }
+
+[dev-dependencies]
+pallet-bulletin-hop-promotion = { workspace = true, features = ["std"] }
