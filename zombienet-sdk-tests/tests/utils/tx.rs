@@ -518,16 +518,69 @@ pub async fn resolve_canonical_store_block(
 	)
 }
 
-/// Canonical store/renew block number, read from `TransactionByContentHash` at the
+/// Blocks on the **finalized** chain carrying `DataRenewal::Renewed` events for
+/// `content_hash`, each with how many such events that block holds, ascending.
+///
+/// The renewal counterpart to [`resolve_canonical_store_block`], and needed for the same
+/// reason: [`submit_renew_pair`] reports best-chain numbers, so an orphaned inclusion block
+/// leaves them pointing at blocks that are not on the canonical chain. That helper cannot be
+/// reused because it matches `TransactionStorage::Stored`, which a renewal does not emit.
+///
+/// The per-block count is what distinguishes two renewals sharing one body from two renewals in
+/// separate blocks — the intra-block duplicate that `polkadot-sdk#12106` mishandled.
+///
+/// Callers must have waited for finality to cover the renewals. `search_from_inclusive` bounds
+/// how far back the walk descends; the store block is the natural floor, since nothing can be
+/// renewed before it was stored.
+pub async fn resolve_canonical_renew_blocks(
+	client: &OnlineClient<SubstrateConfig>,
+	content_hash: &[u8; 32],
+	search_from_inclusive: u64,
+) -> Result<Vec<(u64, u32)>> {
+	let mut found: Vec<(u64, u32)> = Vec::new();
+	// `at_latest` is the latest *finalized* block, which is what makes this walk reorg-proof.
+	let mut current = client.blocks().at_latest().await?;
+	loop {
+		let block_n = current.number() as u64;
+		if block_n < search_from_inclusive {
+			break;
+		}
+		// `Renewed { index: u32, content_hash: [u8; 32] }` — a 32-byte sliding-window match,
+		// as in `resolve_canonical_store_block`.
+		let count = current
+			.events()
+			.await?
+			.iter()
+			.filter_map(|e| e.ok())
+			.filter(|ev| {
+				ev.pallet_name() == "DataRenewal" &&
+					ev.variant_name() == "Renewed" &&
+					ev.field_bytes().windows(32).any(|w| w == content_hash)
+			})
+			.count() as u32;
+		if count > 0 {
+			found.push((block_n, count));
+		}
+		if block_n == 0 {
+			break;
+		}
+		let parent_hash = current.header().parent_hash;
+		current = client.blocks().at(parent_hash).await?;
+	}
+	found.reverse();
+	Ok(found)
+}
+
+/// Canonical store/renew `(block, index)`, read from `TransactionByContentHash` at the
 /// inclusion-block hash. subxt's `tx_in_block.block_hash()` can name a block whose
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
 /// schedule auto-renewal; reading at the inclusion-block state returns the authoritative
 /// number.
-pub async fn canonical_store_block(
+pub async fn canonical_store_position(
 	client: &OnlineClient<SubstrateConfig>,
 	at_block_hash: subxt::utils::H256,
 	content_hash: &[u8; 32],
-) -> Result<u64> {
+) -> Result<(u64, u32)> {
 	let address = subxt::dynamic::storage(
 		"TransactionStorage",
 		"TransactionByContentHash",
@@ -543,20 +596,32 @@ pub async fn canonical_store_block(
 	})?;
 	use subxt::ext::scale_value::{Primitive, ValueDef};
 	let decoded = value.to_value()?;
-	let block_number = match decoded.value {
-		ValueDef::Composite(ref c) => c
-			.values()
-			.next()
-			.and_then(|v| match &v.value {
-				ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
-				_ => None,
-			})
-			.ok_or_else(|| {
-				anyhow!("TransactionByContentHash value composite empty or non-numeric")
-			})?,
-		_ => anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded),
+	let ValueDef::Composite(ref c) = decoded.value else {
+		anyhow::bail!("unexpected TransactionByContentHash value shape: {:?}", decoded)
 	};
-	Ok(block_number as u64)
+	// `(BlockNumber, u32)`.
+	let mut fields = c.values().map(|v| match &v.value {
+		ValueDef::Primitive(Primitive::U128(n)) => Some(*n),
+		_ => None,
+	});
+	let block_number = fields
+		.next()
+		.flatten()
+		.ok_or_else(|| anyhow!("TransactionByContentHash block is empty or non-numeric"))?;
+	let index = fields
+		.next()
+		.flatten()
+		.ok_or_else(|| anyhow!("TransactionByContentHash index is empty or non-numeric"))?;
+	Ok((block_number as u64, index as u32))
+}
+
+/// Just the block half of [`canonical_store_position`].
+pub async fn canonical_store_block(
+	client: &OnlineClient<SubstrateConfig>,
+	at_block_hash: subxt::utils::H256,
+	content_hash: &[u8; 32],
+) -> Result<u64> {
+	Ok(canonical_store_position(client, at_block_hash, content_hash).await?.0)
 }
 
 /// Two `force_renew` calls signed by Alice and Bob respectively — synchronous immediate
@@ -572,6 +637,15 @@ pub async fn submit_renew_pair(
 ) -> Result<(u64, u64)> {
 	let alice = dev::alice();
 	let bob = dev::bob();
+	// `Position`, not `ContentHash`: the first renewal re-anchors `TransactionByContentHash` to
+	// the block being built, whose `Transactions[N]` is not sealed until `on_finalize`, so a
+	// second `ContentHash` renewal in the same block resolves to an entry that cannot be read
+	// yet and fails with `RenewedNotFound`. A position pins the entry for both calls.
+	//
+	// `index` must be resolved by the caller (see `canonical_store_position`) — which entry sits
+	// at a given index depends on what else that block stored, and a renewal fired from the
+	// mandatory inherent takes a lower index than any regular extrinsic. Guessing renews
+	// whatever happens to be there, silently, since that dispatch succeeds too.
 	let entry = Value::named_variant(
 		"Position",
 		[
@@ -598,28 +672,58 @@ pub async fn submit_renew_pair(
 	let bob_progress =
 		client.tx().sign_and_submit_then_watch(&renew_call, &bob, bob_params).await?;
 
-	let (hash_alice, _) = tokio::time::timeout(
+	let (hash_alice, events_alice) = tokio::time::timeout(
 		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
 		wait_for_in_best_block(alice_progress),
 	)
 	.await
 	.map_err(|_| anyhow!("alice renew timed out"))??;
-	let (hash_bob, _) = tokio::time::timeout(
+	let (hash_bob, events_bob) = tokio::time::timeout(
 		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
 		wait_for_in_best_block(bob_progress),
 	)
 	.await
 	.map_err(|_| anyhow!("bob renew timed out"))??;
 
+	// `canonical_store_block` rather than `block.number()`: the header can sit one ahead of the
+	// canonical `Transactions[N]` key, which is what the pallet schedules against. Both are
+	// best-chain reads, so the numbers are only as stable as the inclusion block — an orphaned
+	// one yields a number that is not on the canonical chain. Callers needing a stable value
+	// must re-anchor against finality.
 	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
 	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
-	tracing::info!(
-		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
-		block,
-		index,
-		block_alice,
-		block_bob,
-	);
+
+	// `wait_for_success` only proves the extrinsic did not error, not that it renewed the entry
+	// asked for — renewing the wrong entry also succeeds. Assert the event names this hash, and
+	// list what was emitted when it does not.
+	for (who, events) in [("alice", &events_alice), ("bob", &events_bob)] {
+		let emitted: Vec<String> = events
+			.iter()
+			.filter_map(|e| e.ok())
+			.map(|e| {
+				let mentions_hash =
+					e.field_bytes().windows(32).any(|w| w == content_hash.as_slice());
+				format!(
+					"{}.{}{}",
+					e.pallet_name(),
+					e.variant_name(),
+					if mentions_hash { "(target hash)" } else { "" },
+				)
+			})
+			.collect();
+		let renewed = emitted.iter().any(|e| e == "DataRenewal.Renewed(target hash)");
+		if renewed {
+			tracing::info!("{who}'s force_renew emitted DataRenewal.Renewed for the target hash");
+		} else {
+			anyhow::bail!(
+				"{who}'s force_renew emitted no DataRenewal.Renewed for 0x{} — events: {:?}",
+				hex::encode(content_hash),
+				emitted,
+			);
+		}
+	}
+
+	tracing::info!("force_renew canonical inclusions: alice={}, bob={}", block_alice, block_bob);
 	Ok((block_alice, block_bob))
 }
 
