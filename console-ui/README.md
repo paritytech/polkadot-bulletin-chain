@@ -101,8 +101,6 @@ npm run papi:generate
 npm run papi:update
 ```
 
-CI fails when the committed `.papi/metadata` snapshots drift from the live chains. Run `npx papi update` and commit `.papi/metadata` and `.papi/polkadot-api.json`.
-
 ## Project Structure
 
 ```
