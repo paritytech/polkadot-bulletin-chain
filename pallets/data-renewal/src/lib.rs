@@ -195,6 +195,16 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type PermanentStorageUsed<T: Config> = StorageValue<_, u64, ValueQuery>;
 
+	/// [`PermanentStorageUsed`] as it stood before this block's first mutation. Written
+	/// lazily by [`Pallet::update_permanent_storage_used`], always `take`n by `on_finalize`,
+	/// so it never persists across blocks.
+	///
+	/// Lazy rather than seeded from `on_initialize`: `TransactionStorage` precedes
+	/// `DataRenewal` in `construct_runtime`, so its expiry sweep has already mutated the
+	/// counter by the time this pallet's hook runs.
+	#[pallet::storage]
+	pub type PermanentStorageUsedSnapshot<T: Config> = StorageValue<_, u64, OptionQuery>;
+
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
@@ -210,19 +220,50 @@ pub mod pallet {
 		/// A registered renewal failed on `account`'s authorization; the registration is
 		/// dropped and the data expires.
 		RenewalFailed { content_hash: ContentHash, account: T::AccountId },
-		/// `PermanentStorageUsed` changed (a `renew` bumped it, or the obsolete sweep
-		/// decremented it). Off-chain capacity-planning consumers can drive their dashboards
-		/// from these.
+		/// `PermanentStorageUsed` ended the block at a different value than it started it.
+		/// Off-chain capacity-planning consumers can drive their dashboards from these.
+		///
+		/// At most once per block, from `on_finalize`. A block whose mutations cancel out
+		/// emits nothing; per-renewal detail lives in [`Event::DataRenewed`] /
+		/// [`Event::RenewalFailed`].
 		PermanentStorageUsedUpdated { used: u64 },
 		/// `PermanentStorageUsed` just crossed the [`PERMANENT_STORAGE_NEAR_CAP_PERCENT`]
 		/// threshold of `MaxPermanentStorageSize` on the rising edge. Emitted once per
-		/// crossing — no re-emission while still above the threshold.
+		/// crossing — no re-emission while still above the threshold. The edge is measured
+		/// block-start to block-end, so intra-block dips do not re-arm it.
 		PermanentStorageNearCap { used: u64, cap: u64 },
 	}
 
 	#[pallet::hooks]
 	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Reserves `on_finalize`: the `PendingRenewals` invariant read plus the
+		/// `PermanentStorageUsedSnapshot` read/kill and the `PermanentStorageUsed` read
+		/// behind it. Does no state work of its own.
+		fn on_initialize(_: BlockNumberFor<T>) -> Weight {
+			<T as frame_system::Config>::DbWeight::get().reads_writes(3, 1)
+		}
+
 		fn on_finalize(_: BlockNumberFor<T>) {
+			if let Some(old) = PermanentStorageUsedSnapshot::<T>::take() {
+				let new = PermanentStorageUsed::<T>::get();
+				// Equal when a retention-boundary block frees aged-out renewed bytes and the
+				// drain inherent re-charges the same bytes: nothing to report.
+				if new != old {
+					Self::deposit_event(Event::PermanentStorageUsedUpdated { used: new });
+					let cap = T::MaxPermanentStorageSize::get();
+					// Divide-first to avoid u64 overflow on extreme caps (`cap * 80`
+					// saturates above ~230 EiB). Loses ≤`pct` bytes of precision;
+					// harmless for the rising-edge.
+					let threshold = (cap / 100).saturating_mul(PERMANENT_STORAGE_NEAR_CAP_PERCENT);
+					// Block start vs block end: per mutation, that same decrement would
+					// dip a near-cap chain below the threshold for the re-charge to cross
+					// again, re-firing every boundary block.
+					if old < threshold && new >= threshold {
+						Self::deposit_event(Event::PermanentStorageNearCap { used: new, cap });
+					}
+				}
+			}
+
 			// All pending renewals must have been processed by the
 			// `process_pending_renewals` inherent.
 			#[cfg(feature = "try-runtime")]
@@ -607,22 +648,22 @@ impl<T: Config> Pallet<T> {
 		Ok(())
 	}
 
-	/// Update [`PermanentStorageUsed`] via `f`, emitting
-	/// [`Event::PermanentStorageUsedUpdated`] and — on the rising edge across the
-	/// [`PERMANENT_STORAGE_NEAR_CAP_PERCENT`] threshold —
-	/// [`Event::PermanentStorageNearCap`], exactly once per crossing.
+	/// Update [`PermanentStorageUsed`] via `f`, snapshotting the block's pre-change value
+	/// for `on_finalize`, which owns [`Event::PermanentStorageUsedUpdated`] and
+	/// [`Event::PermanentStorageNearCap`].
+	///
+	/// Only the events are deferred, never the write: the chain-wide cap check in
+	/// [`Self::check_renew_authorization`] re-reads `PermanentStorageUsed` on every entry
+	/// of the drain loop, so a batched write would let a full block over-admit past
+	/// `MaxPermanentStorageSize`.
 	pub(crate) fn update_permanent_storage_used(f: impl FnOnce(u64) -> u64) {
 		let old = PermanentStorageUsed::<T>::get();
-		let new = f(old);
-		PermanentStorageUsed::<T>::put(new);
-		Self::deposit_event(Event::PermanentStorageUsedUpdated { used: new });
-		let cap = T::MaxPermanentStorageSize::get();
-		// Divide-first to avoid u64 overflow on extreme caps (`cap * 80` saturates
-		// above ~230 EiB). Loses ≤`pct` bytes of precision; harmless for the rising-edge.
-		let threshold = (cap / 100).saturating_mul(PERMANENT_STORAGE_NEAR_CAP_PERCENT);
-		if old < threshold && new >= threshold {
-			Self::deposit_event(Event::PermanentStorageNearCap { used: new, cap });
+		// First mutation of the block wins; a later one would overwrite the block-start
+		// value `on_finalize` compares against.
+		if !PermanentStorageUsedSnapshot::<T>::exists() {
+			PermanentStorageUsedSnapshot::<T>::put(old);
 		}
+		PermanentStorageUsed::<T>::put(f(old));
 	}
 
 	/// Signed-renew authorization with preimage-preference: try a
