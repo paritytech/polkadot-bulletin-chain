@@ -100,6 +100,41 @@ pub async fn connect_ws(ws_url: &str) -> Result<jsonrpsee::ws_client::WsClient> 
 	Ok(client)
 }
 
+/// `connect_ws` with linear backoff. Use this in loops that keep one connection for the
+/// whole run.
+///
+/// `WsClient` does not reconnect. After the node restarts or the connection drops, every
+/// later request on that client fails with `RestartNeeded`. A DNS failure at connect time
+/// has the same effect: the worker never connects. Both cases stop the worker for the rest
+/// of the run unless it connects again.
+pub async fn connect_ws_retry(
+	ws_url: &str,
+	attempts: usize,
+) -> Result<jsonrpsee::ws_client::WsClient> {
+	let attempts = attempts.max(1);
+	let mut last_err = None;
+	for attempt in 1..=attempts {
+		match connect_ws(ws_url).await {
+			Ok(client) => {
+				if attempt > 1 {
+					tracing::info!("connected to {ws_url} on attempt {attempt}/{attempts}");
+				}
+				return Ok(client);
+			},
+			Err(e) => {
+				if attempt < attempts {
+					tracing::warn!(
+						"connect to {ws_url} failed (attempt {attempt}/{attempts}): {e}; retrying"
+					);
+					tokio::time::sleep(std::time::Duration::from_secs(attempt.min(5) as u64)).await;
+				}
+				last_err = Some(e);
+			},
+		}
+	}
+	Err(last_err.expect("at least one attempt is made")).context(format!("connecting to {ws_url}"))
+}
+
 /// Compute blake2b-256 hash (same as the runtime's `content_hash` for `store` calls).
 pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
 	use blake2::digest::{consts::U32, Digest};
