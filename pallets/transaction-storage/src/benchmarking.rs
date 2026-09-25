@@ -144,6 +144,28 @@ fn bench_budget<T: Config>() -> AuthorizerBudgetFor<T> {
 	}
 }
 
+/// Origin for the most expensive `Authorizer` path: a registered [`AllowedAuthorizers`]
+/// entry, whose quota `authorize` debits. Falls back to `try_successful_origin` when the
+/// runtime's `Authorizer` does not accept registered accounts.
+fn worst_case_authorizer_origin<T: Config>() -> Result<T::RuntimeOrigin, BenchmarkError> {
+	let authorizer: T::AccountId = account("authorizer", 0, 0);
+	AllowedAuthorizers::<T>::insert(
+		&authorizer,
+		AuthorizerBudget {
+			quota: Some(Quota { transactions: u32::MAX, bytes: u64::MAX }),
+			valid_until: None,
+			feeless: false,
+		},
+	);
+	let origin: T::RuntimeOrigin = RawOrigin::Signed(authorizer.clone()).into();
+	if matches!(T::Authorizer::try_origin(origin.clone()), Ok(Some(_))) {
+		return Ok(origin);
+	}
+	AllowedAuthorizers::<T>::remove(&authorizer);
+	T::Authorizer::try_successful_origin()
+		.map_err(|_| BenchmarkError::Stop("unable to compute origin"))
+}
+
 #[benchmarks(where
 	T: Send + Sync,
 	RuntimeCallOf<T>: IsSubType<Call<T>> + From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
@@ -193,9 +215,8 @@ mod benchmarks {
 
 	#[benchmark]
 	fn authorize_account() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let who: T::AccountId = whitelisted_caller();
+		let origin = worst_case_authorizer_origin::<T>()?;
+		let who: T::AccountId = account("who", 0, 0);
 		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
 
@@ -210,7 +231,7 @@ mod benchmarks {
 	fn add_authorizer() -> Result<(), BenchmarkError> {
 		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let who: T::AccountId = whitelisted_caller();
+		let who: T::AccountId = account("who", 0, 0);
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, who.clone(), bench_budget::<T>());
@@ -223,7 +244,7 @@ mod benchmarks {
 	fn remove_authorizer() -> Result<(), BenchmarkError> {
 		let origin = T::AuthorizerRegistrarOrigin::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let who: T::AccountId = whitelisted_caller();
+		let who: T::AccountId = account("who", 0, 0);
 		let origin2 = origin.clone();
 		TransactionStorage::<T>::add_authorizer(
 			origin2 as T::RuntimeOrigin,
@@ -241,9 +262,8 @@ mod benchmarks {
 
 	#[benchmark]
 	fn refresh_account_authorization() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let who: T::AccountId = whitelisted_caller();
+		let origin = worst_case_authorizer_origin::<T>()?;
+		let who: T::AccountId = account("who", 0, 0);
 		let bytes: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
 		TransactionStorage::<T>::authorize_account(
@@ -263,8 +283,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn authorize_preimage() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let origin = worst_case_authorizer_origin::<T>()?;
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 
@@ -277,8 +296,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn refresh_preimage_authorization() -> Result<(), BenchmarkError> {
-		let origin = T::Authorizer::try_successful_origin()
-			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+		let origin = worst_case_authorizer_origin::<T>()?;
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
 		let origin2 = origin.clone();
@@ -300,7 +318,7 @@ mod benchmarks {
 	fn remove_expired_account_authorization() -> Result<(), BenchmarkError> {
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
-		let who: T::AccountId = whitelisted_caller();
+		let who: T::AccountId = account("who", 0, 0);
 		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -340,7 +358,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn remove_exhausted_authorizer() -> Result<(), BenchmarkError> {
-		let who: T::AccountId = whitelisted_caller();
+		let who: T::AccountId = account("who", 0, 0);
 		AllowedAuthorizers::<T>::insert(
 			&who,
 			AuthorizerBudget {
@@ -349,6 +367,7 @@ mod benchmarks {
 				feeless: false,
 			},
 		);
+		TransactionStorage::<T>::inc_authorizer_providers(&who);
 
 		#[extrinsic_call]
 		_(RawOrigin::None, who.clone());
