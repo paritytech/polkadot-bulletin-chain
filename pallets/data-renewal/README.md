@@ -24,7 +24,7 @@ Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` 
 
 `renew` and `enable_auto_renew` are feeless. The transaction extension charges one transaction slot plus `size` bytes at registration, which prepays the first cycle; recurring registrations are charged per cycle thereafter.
 
-Renewed bytes are capped twice — per account against the authorization's `bytes_allowance`, and chain-wide by `MaxPermanentStorageSize`. Crossing 80% of the chain-wide cap emits `PermanentStorageNearCap` once per crossing, as a signal for governance to raise the cap.
+Renewed bytes are capped twice — per account against the authorization's `bytes_allowance`, and chain-wide by `MaxPermanentStorageSize`. The two count differently: the per-account cap charges every renewal, while the chain-wide counter counts a content hash once however many overlapping renewals it has, so it tracks bytes on disk rather than references to them. Crossing 80% of the chain-wide cap emits `PermanentStorageNearCap` once per crossing, as a signal for governance to raise the cap.
 
 ## Dependencies
 

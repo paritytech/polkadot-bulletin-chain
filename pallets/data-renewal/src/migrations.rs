@@ -285,3 +285,131 @@ fn count_keys(prefix: &[u8]) -> u64 {
 	}
 	count
 }
+
+/// v1 → v2: start refcounting renewed bytes per content hash.
+///
+/// Stamps the upgrade block into [`crate::RefcountFrom`], which is all `handle_obsolete`
+/// needs to credit v1 entries and refcounted ones under their own rules. No scan of live
+/// `Transactions`: seeding [`crate::RenewRefCount`] from those would walk a full
+/// `RetentionPeriod` of blocks.
+///
+/// Accounting the two populations independently leaves a blob straddling the upgrade
+/// double-counted exactly as v1 left it, until its pre-upgrade entries age out. Nothing is
+/// mis-credited, and the drift is gone one `RetentionPeriod` later.
+///
+/// Prepaid registrations are the exception: they carry no creation block for the cutoff to
+/// classify them by, so they are seeded instead.
+pub mod v2 {
+	use super::*;
+	use crate::{pallet::Pallet, RefcountFrom, RenewRefCount, Renewals};
+	use polkadot_sdk_frame::deps::{
+		frame_support::{migrations::VersionedMigration, traits::UncheckedOnRuntimeUpgrade},
+		frame_system,
+	};
+
+	pub struct VersionUncheckedMigrateV1ToV2<T>(PhantomData<T>);
+
+	impl<T: Config> UncheckedOnRuntimeUpgrade for VersionUncheckedMigrateV1ToV2<T> {
+		fn on_runtime_upgrade() -> Weight {
+			let now = <frame_system::Pallet<T>>::block_number();
+			RefcountFrom::<T>::put(now);
+
+			// v1 charged prepaid registrations into `PermanentStorageUsed` without a
+			// reference, and nothing credits those bytes back unless one exists to release.
+			// The charge is already counted, so `PermanentStorageUsed` must not move here.
+			//
+			// Scanning `Renewals` is what the relocation migration already does single-block.
+			let mut seeded: u64 = 0;
+			let mut visited: u64 = 0;
+			for (content_hash, registration) in Renewals::<T>::iter() {
+				visited = visited.saturating_add(1);
+				if registration.paid {
+					// A v1 chain holds no references, so this cannot overwrite one.
+					RenewRefCount::<T>::insert(content_hash, 1);
+					seeded = seeded.saturating_add(1);
+				}
+			}
+
+			if visited > MAX_SINGLE_BLOCK_ENTRIES {
+				tracing::error!(
+					target: LOG_TARGET,
+					visited,
+					budget = MAX_SINGLE_BLOCK_ENTRIES,
+					"v1->v2: single-block entry budget exceeded; block may exceed its weight \
+					 or PoV limit",
+				);
+			}
+
+			tracing::info!(
+				target: LOG_TARGET,
+				?now,
+				seeded,
+				visited,
+				"v1->v2: refcounting renewed bytes from here",
+			);
+
+			T::DbWeight::get()
+				.reads_writes(visited.saturating_mul(2).saturating_add(1), seeded.saturating_add(1))
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade(
+		) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::prelude::ensure;
+
+			let mut total: u64 = 0;
+			let mut paid: u64 = 0;
+			for (_, registration) in Renewals::<T>::iter() {
+				total = total.saturating_add(1);
+				paid = paid.saturating_add(u64::from(registration.paid));
+			}
+			// The scan cannot be stepped, so an oversized map has to fail the dry-run.
+			ensure!(total <= MAX_SINGLE_BLOCK_ENTRIES, "Renewals exceeds the single-block budget");
+
+			Ok((paid, crate::PermanentStorageUsed::<T>::get()).encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: alloc::vec::Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::prelude::ensure;
+
+			let (paid, used) = <(u64, u64)>::decode(&mut &state[..])
+				.map_err(|_| "pre_upgrade state decode failed")?;
+
+			ensure!(
+				RefcountFrom::<T>::get().is_some(),
+				"RefcountFrom must be set after the v1->v2 migration"
+			);
+
+			for (content_hash, registration) in Renewals::<T>::iter() {
+				let refs = RenewRefCount::<T>::get(content_hash).unwrap_or(0);
+				ensure!(
+					refs == u32::from(registration.paid),
+					"prepaid registrations must hold exactly one reference after v1->v2"
+				);
+			}
+			ensure!(
+				RenewRefCount::<T>::iter().count() as u64 == paid,
+				"v1->v2 seeded references that no prepaid registration accounts for"
+			);
+			ensure!(
+				crate::PermanentStorageUsed::<T>::get() == used,
+				"v1->v2 must not move PermanentStorageUsed"
+			);
+
+			Ok(())
+		}
+	}
+
+	/// Chains created at v2 or later have no pre-refcount entries, so they skip this and
+	/// leave [`crate::RefcountFrom`] unset — "refcount everything".
+	pub type MigrateV1ToV2<T> = VersionedMigration<
+		1,
+		2,
+		VersionUncheckedMigrateV1ToV2<T>,
+		Pallet<T>,
+		<T as frame_system::Config>::DbWeight,
+	>;
+}
