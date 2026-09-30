@@ -15,7 +15,7 @@
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
     "@chainsafe/libp2p-yamux": "^8.0.1",
-    "@helia/bitswap": "^4.0.15",
+    "@helia/bitswap": "^4.0.19",
     "@helia/libp2p": "^2.0.0",
     "@ipld/dag-pb": "^4.1.3",
     "@libp2p/websockets": "^10.1.21",
@@ -34,16 +34,16 @@
     "@react-rxjs/core": "^0.10.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "helia": "^7.1.11",
+    "helia": "^7.1.15",
     "ipfs-unixfs": "^12.0.0",
-    "lucide-react": "^1.45.0",
+    "lucide-react": "^1.48.0",
     "multiformats": "^14.0.4",
     "polkadot-api": "^3.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router-dom": "^7.18.3",
+    "react-router-dom": "^7.18.4",
     "rxjs": "^7.8.1",
-    "smoldot": "^3.5.0",
+    "smoldot": "^3.6.0",
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
@@ -56,6 +56,6 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-lsp": "^0.0.7",
-    "vite": "^8.3.0"
+    "vite": "^8.3.1"
   }
 }
