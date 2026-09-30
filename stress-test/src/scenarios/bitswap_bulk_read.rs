@@ -15,11 +15,22 @@ use std::{
 use subxt::OnlineClient;
 
 use crate::{
-	bitswap::{self, BitswapClient},
+	cid_hash::{cid_v1, Hashing, CODEC_DAG_PB, CODEC_RAW},
 	client::BulletinConfig,
+	fetch::{connect_fetchers, FetchMode, ReadSource},
 	metrics::{metrics, LatencyKind},
 	report::{compute_latency_stats, ScenarioResult},
 };
+
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BulkReadMode {
+	OnChain,
+	DagPbCar,
+	RandomCids,
+}
 
 /// Decode a block's `BoundedVec<TransactionInfo>` storage value into discovered
 /// items. The layout mirrors the pallet's `TransactionInfo`
@@ -72,26 +83,15 @@ fn decode_one_transaction_info(
 	let block_chunks = u32::decode(input)?;
 	let _kind = u8::decode(input)?;
 
-	let mh_code: u64 = match hashing_variant {
-		0 => 0xb220, // Blake2b256
-		1 => 0x12,   // Sha2_256
-		2 => 0x1b,   // Keccak256
-		other => {
-			tracing::warn!("block #{block_number}: unknown hashing variant {other}, skipping item");
-			return Ok(None);
-		},
+	let Some(hashing) = Hashing::from_variant_index(hashing_variant) else {
+		tracing::warn!(
+			"block #{block_number}: unknown hashing variant {hashing_variant}, skipping item"
+		);
+		return Ok(None);
 	};
-	let mh = match cid::multihash::Multihash::<64>::wrap(mh_code, &content_hash) {
-		Ok(mh) => mh,
-		Err(e) => {
-			tracing::warn!("block #{block_number}: invalid multihash: {e}");
-			return Ok(None);
-		},
-	};
-	let cid = cid::Cid::new_v1(cid_codec, mh);
 
 	Ok(Some(DiscoveredItem {
-		cid,
+		cid: cid_v1(cid_codec, hashing, &content_hash),
 		size,
 		chunk_root,
 		content_hash,
@@ -104,17 +104,17 @@ fn decode_one_transaction_info(
 
 /// A discovered CID with its raw TransactionInfo fields for debugging.
 #[derive(Clone)]
-struct DiscoveredItem {
-	cid: cid::Cid,
-	size: u32,
+pub(crate) struct DiscoveredItem {
+	pub(crate) cid: cid::Cid,
+	pub(crate) size: u32,
 	// Raw fields for diagnostics:
 	chunk_root: [u8; 32],
 	content_hash: [u8; 32],
 	hashing_variant: u8,
-	cid_codec: u64,
+	pub(crate) cid_codec: u64,
 	block_chunks: u32,
 	/// Block number where this item was stored.
-	block_number: u64,
+	pub(crate) block_number: u64,
 }
 
 impl std::fmt::Display for DiscoveredItem {
@@ -126,12 +126,8 @@ impl std::fmt::Display for DiscoveredItem {
 			self.cid,
 			self.size,
 			self.block_number,
-			match self.hashing_variant {
-				0 => "Blake2b256",
-				1 => "Sha2_256",
-				2 => "Keccak256",
-				_ => "Unknown",
-			},
+			Hashing::from_variant_index(self.hashing_variant)
+				.map_or("Unknown", Hashing::runtime_variant_name),
 			self.cid_codec,
 			hex::encode(self.content_hash),
 			hex::encode(self.chunk_root),
@@ -140,13 +136,8 @@ impl std::fmt::Display for DiscoveredItem {
 	}
 }
 
-/// Discover CIDs from on-chain `TransactionStorage::Transactions`,
-/// filtering by size range. Stops once `target_bytes` of matching data found.
-async fn discover_cids(
+pub(crate) async fn discover_all_items(
 	client: &OnlineClient<BulletinConfig>,
-	target_bytes: u64,
-	min_size: u32,
-	max_size: u32,
 ) -> Result<Vec<DiscoveredItem>> {
 	let fin_ref = client.backend().latest_finalized_block_ref().await?;
 	let header = client
@@ -156,17 +147,10 @@ async fn discover_cids(
 		.ok_or_else(|| anyhow!("cannot fetch finalized header"))?;
 	let current_block: u64 = header.number.into();
 
-	tracing::info!(
-		"Discovering CIDs (size {}..{} bytes, target {} MB, block #{current_block})...",
-		min_size,
-		max_size,
-		target_bytes / (1024 * 1024),
-	);
+	tracing::info!("Scanning on-chain TransactionStorage at block #{current_block}...");
 
 	let storage = client.storage().at(fin_ref.hash());
 	let mut items = Vec::new();
-	let mut total_bytes: u64 = 0;
-	let mut skipped = 0u64;
 
 	let addr = subxt::dynamic::storage("TransactionStorage", "Transactions", ());
 	let mut entries = storage.iter(addr).await?;
@@ -190,100 +174,142 @@ async fn discover_cids(
 		};
 
 		let encoded = entry.value.encoded();
-		let parsed = decode_transaction_infos(encoded, block_number);
-
-		for item in parsed {
-			if item.size >= min_size && item.size <= max_size {
-				total_bytes += item.size as u64;
-				items.push(item);
-			} else {
-				skipped += 1;
-			}
-		}
+		items.extend(decode_transaction_infos(encoded, block_number));
 
 		blocks_scanned += 1;
 		if blocks_scanned.is_multiple_of(500) && !items.is_empty() {
-			tracing::info!(
-				"  ...scanned {blocks_scanned} blocks: {} matching CIDs ({} MB), {skipped} skipped",
-				items.len(),
-				total_bytes / (1024 * 1024),
-			);
-		}
-
-		if total_bytes >= target_bytes {
-			break;
+			tracing::info!("  ...scanned {blocks_scanned} blocks: {} CIDs", items.len());
 		}
 	}
+
+	tracing::info!("Scan complete: {} CIDs across {blocks_scanned} blocks", items.len());
+	Ok(items)
+}
+
+async fn discover_cids(
+	client: &OnlineClient<BulletinConfig>,
+	target_bytes: u64,
+	min_size: u32,
+	max_size: u32,
+	dag_pb_only: bool,
+) -> Result<Vec<DiscoveredItem>> {
+	tracing::info!(
+		"Discovering CIDs (size {}..{} bytes, target {} MB)...",
+		min_size,
+		max_size,
+		target_bytes / (1024 * 1024),
+	);
+
+	let all = discover_all_items(client).await?;
+	let discovered = all.len();
+	let mut items: Vec<DiscoveredItem> = all
+		.into_iter()
+		.filter(|item| item.size >= min_size && item.size <= max_size)
+		.filter(|item| !dag_pb_only || item.cid_codec == CODEC_DAG_PB)
+		.collect();
+	let skipped = discovered - items.len();
+	let total_bytes: u64 = items.iter().map(|item| item.size as u64).sum();
 
 	if items.is_empty() {
 		anyhow::bail!(
-			"No CIDs found matching size {min_size}..{max_size} bytes ({skipped} skipped)",
+			"No CIDs found matching size {}..{} bytes{} ({skipped} skipped)",
+			min_size,
+			max_size,
+			if dag_pb_only { ", dag-pb only" } else { "" },
 		);
 	}
 
+	use rand::seq::SliceRandom;
+	let available = items.len();
+	items.shuffle(&mut rand::thread_rng());
+	let mut selected_bytes = 0u64;
+	let mut selected = Vec::new();
+	for item in items {
+		if selected_bytes >= target_bytes {
+			break;
+		}
+		selected_bytes += item.size as u64;
+		selected.push(item);
+	}
+
 	tracing::info!(
-		"Discovery: {} CIDs, {} MB ({blocks_scanned} blocks, {skipped} skipped by size)",
-		items.len(),
+		"Discovery: selected {} random CIDs ({} MB) of {available} available ({} MB, \
+		 {skipped} skipped by size)",
+		selected.len(),
+		selected_bytes / (1024 * 1024),
 		total_bytes / (1024 * 1024),
 	);
 
-	Ok(items)
+	Ok(selected)
 }
 
 /// Prometheus `variant` label for this scenario.
 const VARIANT: &str = "bitswap-bulk-read";
 
-/// Run bulk Bitswap read: discover CIDs from chain, then download with
-/// specified concurrency.
+fn generate_random_cid() -> DiscoveredItem {
+	use rand::RngCore;
+	let mut digest = [0u8; 32];
+	rand::thread_rng().fill_bytes(&mut digest);
+	DiscoveredItem {
+		cid: cid_v1(CODEC_RAW, Hashing::Sha2_256, &digest),
+		size: 0,
+		chunk_root: [0; 32],
+		content_hash: digest,
+		hashing_variant: 1,
+		cid_codec: CODEC_RAW,
+		block_chunks: 0,
+		block_number: 0,
+	}
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_bulk_read(
 	client: &OnlineClient<BulletinConfig>,
-	multiaddrs: &[litep2p::types::multiaddr::Multiaddr],
+	source: ReadSource<'_>,
 	target_bytes: u64,
 	concurrency: usize,
 	min_size: u32,
 	max_size: u32,
 	batch_size: usize,
-	_ws_url: &str,
+	mode: BulkReadMode,
+	cancel: Arc<AtomicBool>,
 ) -> Result<ScenarioResult> {
-	let items = discover_cids(client, target_bytes, min_size, max_size).await?;
-	let available_items = items.len();
-	let available_bytes: u64 = items.iter().map(|i| i.size as u64).sum();
+	let batch_size = batch_size.clamp(1, source.max_batch_size());
+	let random_mode = mode == BulkReadMode::RandomCids;
+	let items = match mode {
+		BulkReadMode::RandomCids => Vec::new(),
+		BulkReadMode::OnChain =>
+			discover_cids(client, target_bytes, min_size, max_size, false).await?,
+		BulkReadMode::DagPbCar =>
+			discover_cids(client, target_bytes, min_size, max_size, true).await?,
+	};
+	let discovered_items = items.len();
+	let available_bytes: u64 = items.iter().map(|item| item.size as u64).sum();
+	let transport = source.transport();
+	let endpoints = source.endpoints();
 
-	tracing::info!(
-		"Bulk read: {} items on chain ({} MB), target download: {} MB, \
-		 concurrency={}, batch_size={}, peers={}",
-		available_items,
-		available_bytes / (1024 * 1024),
-		target_bytes / (1024 * 1024),
-		concurrency,
-		batch_size,
-		multiaddrs.len(),
-	);
+	match mode {
+		BulkReadMode::RandomCids => tracing::info!(
+			"Bulk read (random CIDs): unique random requests until Ctrl+C, \
+			 concurrency={concurrency}, batch_size={batch_size}, \
+			 transport={transport}, endpoints={endpoints}",
+		),
+		BulkReadMode::OnChain | BulkReadMode::DagPbCar => tracing::info!(
+			"Bulk read{}: {discovered_items} items on chain ({} MB), target download: {} MB, \
+			 concurrency={concurrency}, batch_size={batch_size}, transport={transport}, \
+			 endpoints={endpoints}",
+			if mode == BulkReadMode::DagPbCar { " (dag-pb, CAR fan-out)" } else { "" },
+			available_bytes / (1024 * 1024),
+			target_bytes / (1024 * 1024),
+		),
+	}
 
-	// Create workers distributed across peers.
-	// Each worker is a (client, peer_id) pair.
-	let mut workers: Vec<(BitswapClient, litep2p::PeerId)> = Vec::with_capacity(concurrency);
-	for i in 0..concurrency {
-		let addr = &multiaddrs[i % multiaddrs.len()];
-		let peer_id = BitswapClient::peer_id_from_multiaddr(addr)?;
-		match bitswap::create_connected_client(addr).await {
-			Ok(c) => {
-				tracing::info!("Worker {i}: connected to peer {peer_id} ({})", addr);
-				workers.push((c, peer_id));
-			},
-			Err(e) => tracing::warn!("Worker {i}: failed to connect to {addr}: {e}"),
-		}
-	}
-	if workers.is_empty() {
-		anyhow::bail!("No Bitswap clients connected");
-	}
+	let fetch_mode = if mode == BulkReadMode::DagPbCar { FetchMode::Car } else { FetchMode::Raw };
+	let workers = connect_fetchers(&source, concurrency, fetch_mode).await?;
 	let actual_concurrency = workers.len();
-	tracing::info!("Bulk read: {actual_concurrency}/{concurrency} workers connected");
 
 	let work = Arc::new(items);
 	let next_idx = Arc::new(AtomicU64::new(0));
-	let abort = Arc::new(AtomicBool::new(false));
 	let bytes_downloaded = Arc::new(AtomicU64::new(0));
 	let reads_ok = Arc::new(AtomicU64::new(0));
 	let reads_failed = Arc::new(AtomicU64::new(0));
@@ -324,10 +350,10 @@ pub async fn run_bulk_read(
 	// Spawn one task per worker — each pulls batches from the shared
 	// queue until the download target is reached.
 	let mut handles = Vec::with_capacity(actual_concurrency);
-	for (client_idx, (client, peer_id)) in workers.into_iter().enumerate() {
+	for (client_idx, fetcher) in workers.into_iter().enumerate() {
 		let work = Arc::clone(&work);
 		let next_idx = Arc::clone(&next_idx);
-		let abort = Arc::clone(&abort);
+		let cancel = Arc::clone(&cancel);
 		let bytes_downloaded = Arc::clone(&bytes_downloaded);
 		let reads_ok = Arc::clone(&reads_ok);
 		let reads_failed = Arc::clone(&reads_failed);
@@ -338,32 +364,28 @@ pub async fn run_bulk_read(
 			let mut consecutive_failures = 0u32;
 
 			loop {
-				if abort.load(Ordering::Relaxed) {
+				if cancel.load(Ordering::Relaxed) {
 					break;
 				}
-				// Stop once global target is reached.
-				if bytes_downloaded.load(Ordering::Relaxed) >= target {
-					break;
-				}
-
-				// Check how much is left to download.
-				let downloaded_so_far = bytes_downloaded.load(Ordering::Relaxed);
-				if downloaded_so_far >= target {
+				if !random_mode && bytes_downloaded.load(Ordering::Relaxed) >= target {
 					break;
 				}
 
-				// Grab a batch of items round-robin.
-				let start_raw = next_idx.fetch_add(batch_size as u64, Ordering::Relaxed) as usize;
-				let batch_items: Vec<_> = (0..batch_size)
-					.map(|i| {
-						let idx = (start_raw + i) % work.len();
-						(idx, &work[idx])
-					})
-					.collect();
+				let start = next_idx.fetch_add(batch_size as u64, Ordering::Relaxed) as usize;
+				let batch_items: Vec<(usize, DiscoveredItem)> = if random_mode {
+					(0..batch_size).map(|offset| (start + offset, generate_random_cid())).collect()
+				} else {
+					(0..batch_size)
+						.map(|offset| {
+							let idx = (start + offset) % work.len();
+							(idx, work[idx].clone())
+						})
+						.collect()
+				};
 				let cids: Vec<cid::Cid> = batch_items.iter().map(|(_, item)| item.cid).collect();
 
 				let start = Instant::now();
-				match client.fetch_blocks(peer_id, &cids, Duration::from_secs(30)).await {
+				match fetcher.fetch_blocks(&cids, FETCH_TIMEOUT).await {
 					Ok(blocks) => {
 						let elapsed = start.elapsed();
 						let batch_bytes: usize = blocks.iter().map(|b| b.len()).sum();
@@ -414,7 +436,7 @@ pub async fn run_bulk_read(
 							timings.push((elapsed, false));
 						}
 						consecutive_failures += 1;
-						if consecutive_failures >= 10 {
+						if !random_mode && consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
 							tracing::warn!(
 								"Client {client_idx}: {consecutive_failures} consecutive \
 								 failures, this worker stopping"
@@ -463,12 +485,17 @@ pub async fn run_bulk_read(
 		downloaded / (1024 * 1024),
 	);
 
+	let mode_label = match mode {
+		BulkReadMode::RandomCids => "Random-CID ",
+		BulkReadMode::DagPbCar => "dag-pb CAR ",
+		BulkReadMode::OnChain => "",
+	};
+	let report_items = if random_mode { total_reads } else { discovered_items as u64 };
 	Ok(ScenarioResult {
 		name: format!(
-			"Bulk Bitswap Read ({} unique CIDs, {} MB downloaded, concurrency={})",
-			available_items,
+			"Bulk {mode_label}{transport} Read ({report_items} CIDs, {} MB downloaded, \
+			 concurrency={concurrency})",
 			downloaded / (1024 * 1024),
-			concurrency,
 		),
 		variant: VARIANT.to_string(),
 		duration: wall_time,
