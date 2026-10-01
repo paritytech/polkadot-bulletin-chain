@@ -23,7 +23,7 @@ type BulletinWestendNet = BulletinWestend<WestendMockNet>;
 ///
 /// The message passes the barrier (siblings get explicit unpaid execution) and
 /// fails inside the `Transact` instruction: the `SafeCallFilter`
-/// (`EverythingBut<StorageCallInspector>`) rejects the decoded call with
+/// (`EverythingBut<XcmBlockedCalls>`) rejects the decoded call with
 /// `XcmError::NoPermission` before origin conversion and dispatch. The executor
 /// emits `PolkadotXcm::ProcessXcmError` and the message queue reports the
 /// message as processed unsuccessfully.
