@@ -655,6 +655,38 @@ fn renews_data() {
 	});
 }
 
+/// Root bypasses the extension that charges renews, but expiry still decrements.
+#[test]
+fn force_renew_root_accounts_permanent_storage() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), vec![0u8; 2000]));
+		run_to_block(6, || None);
+		assert_ok!(DataRenewal::force_renew(
+			RuntimeOrigin::root(),
+			TransactionRef::Position { block: 1, index: 0 },
+		));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+		// The `Renew` entry lands in `Transactions` when block 6 finalizes.
+		run_to_block(7, || None);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+
+		let proof_provider = || {
+			let block_num = System::block_number();
+			if block_num == 11 || block_num == 16 {
+				let parent_hash = System::parent_hash();
+				build_proof(parent_hash.as_ref(), vec![vec![0u8; 2000]]).unwrap()
+			} else {
+				None
+			}
+		};
+		run_to_block(17, proof_provider);
+		assert!(pallet_bulletin_transaction_storage::Transactions::<Test>::get(6).is_none());
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+	});
+}
+
 /// `renew` accepts a content-hash variant of [`TransactionRef`] equivalently to
 /// the position variant.
 #[test]
