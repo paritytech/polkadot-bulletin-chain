@@ -42,6 +42,7 @@ bulletin-transaction-storage-primitives = { version = "0.1.0", path = "pallets/t
 bulletin-westend-runtime = { path = "runtimes/bulletin-westend" }
 pallet-bulletin-data-renewal = { version = "0.1.0", path = "pallets/data-renewal", default-features = false }
 pallet-bulletin-hop-promotion = { version = "0.1.0", path = "pallets/hop-promotion", default-features = false }
+bulletin-hop-rpc-client = { path = "hop-rpc-client" }
 pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/transaction-storage", default-features = false }
 pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "pallets/transaction-storage/runtime-api", default-features = false }
 
@@ -132,6 +133,7 @@ members = [
 	"runtimes/bulletin-paseo",
 	"runtimes/bulletin-westend",
 	"runtimes/bulletin-westend/integration-tests",
+	"hop-rpc-client",
 	"sdk/rust",
 	"stress-test",
 	"zombienet-sdk-tests",
