@@ -37,6 +37,9 @@ prost = "0.13"
 async-trait = "0.1"
 bytes = "1"
 
+# HTTP IPFS gateway reads
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+
 # Reporting + formatting
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
@@ -47,6 +50,8 @@ substrate-prometheus-endpoint = "0.17"
 
 # Hashing
 blake2 = "0.10"
+sha2 = "0.10"
+sha3 = "0.10"
 twox-hash = "2"
 
 # Ed25519 (HOP ephemeral recipient keys)
@@ -54,6 +59,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 
 # Utilities
 anyhow = "1"
+fdlimit = "0.3"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 hex = { workspace = true }
