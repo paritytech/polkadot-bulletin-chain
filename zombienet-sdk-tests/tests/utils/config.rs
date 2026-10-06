@@ -33,7 +33,6 @@ pub const LOG_ERROR_TIMEOUT_SECS: u64 = 10;
 
 // Test constants
 pub const TEST_DATA_SIZE: usize = 2048;
-pub const TRANSACTION_STORAGE_COLUMN: &str = "col11";
 pub const NODE_LOG_CONFIG: &str = "-lsync=trace,sub-libp2p=trace,litep2p=trace,request-response=trace,transaction-storage=trace,bitswap=trace";
 /// For pruning-eviction tests. Deliberately omits `NODE_LOG_CONFIG`'s libp2p/sync trace
 /// targets: they emit ~10 MB per node in minutes, truncating the shared-network log files
@@ -53,7 +52,3 @@ pub const PARACHAIN_CHAIN_ID_ENV: &str = "PARACHAIN_CHAIN_ID";
 pub const DEFAULT_PARACHAIN_CHAIN_ID: &str = "bulletin-westend";
 
 pub const PARACHAIN_TEST_DATA_PATTERN: &[u8] = b"ZOMBIENET_PARACHAIN_TEST_DATA_";
-
-// LDB tool
-pub const LDB_PATH_ENV: &str = "ROCKSDB_LDB_PATH";
-pub const DEFAULT_LDB_PATH: &str = "rocksdb_ldb";

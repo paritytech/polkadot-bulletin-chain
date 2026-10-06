@@ -190,8 +190,7 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
         "{{filter}}" \
-        -- --test-threads=1 --nocapture \
-        --skip parachain_ldb_storage_verification_test
+        -- --test-threads=1 --nocapture
 
 
 # ---------------------------------------------------------------------------
