@@ -17,6 +17,30 @@ const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
 /// Domain-separator prefix the runtime uses when verifying `hop_claim` signatures.
 const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
 
+/// Domain-separator prefix the runtime uses when verifying `hop_ack` signatures.
+/// Distinct from the claim context: a claim signature is not a valid ack signature.
+const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
+
+// Numeric codes from `sc-hop`'s `HopError -> ErrorObjectOwned` mapping. Classify on
+// these rather than on `Display` text: the codes are the RPC contract, and matching
+// substrings of the message conflates errors whose wording happens to overlap.
+
+/// `HopError::PoolFull` — the node's pool is at `--hop-max-pool-size`. Node-wide, so it
+/// clears only as entries are acked or expire; rotating accounts does not help.
+pub const HOP_ERR_POOL_FULL: i32 = 1002;
+
+/// `HopError::NotFound`. Acking an entry that is already gone - fully acked by every
+/// recipient, or expired - is a benign terminal state rather than a failure.
+const HOP_ERR_NOT_FOUND: i32 = 1004;
+
+/// `HopError::UserQuotaExceeded` — `--hop-max-user-size` is spent for this
+/// `(node, account)` pair. Another account still has its own budget on the same node.
+pub const HOP_ERR_USER_QUOTA: i32 = 1011;
+
+/// `HopError::RateLimited` — the per-account token bucket is empty. Transient, and
+/// per account, so another account can submit immediately.
+pub const HOP_ERR_RATE_LIMITED: i32 = 1020;
+
 /// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
 fn op_signing_payload(context: &[u8], hash: &[u8]) -> [u8; 32] {
 	let mut buf = Vec::with_capacity(context.len() + hash.len());
@@ -181,6 +205,38 @@ pub async fn hop_claim(
 	Ok((data, latency))
 }
 
+/// Acknowledge claimed data. Returns latency.
+///
+/// Claiming only reads: the node holds the entry until *every* recipient has acked, so a
+/// claim without an ack leaves the payload occupying both the pool and the submitter's
+/// per-user byte budget until it expires. Callers that claim should ack.
+pub async fn hop_ack(
+	ws: &WsClient,
+	hash: &[u8],
+	recipient: &RecipientKeypair,
+) -> Result<std::time::Duration> {
+	let hash_hex = format!("0x{}", hex::encode(hash));
+	let payload = op_signing_payload(HOP_ACK_CONTEXT, hash);
+	let signature = recipient.sign_multi_signature(&payload);
+	let sig_hex = format!("0x{}", hex::encode(&signature));
+
+	let start = Instant::now();
+	let outcome = ws.request::<(), _>("hop_ack", rpc_params![hash_hex, sig_hex]).await;
+	let latency = start.elapsed();
+
+	match outcome {
+		Ok(()) => Ok(latency),
+		Err(err) => {
+			let err = anyhow::Error::new(err);
+			if error_code(&err) == Some(HOP_ERR_NOT_FOUND) {
+				Ok(latency)
+			} else {
+				Err(err).context("hop_ack")
+			}
+		},
+	}
+}
+
 /// Get pool status.
 pub async fn hop_pool_status(ws: &WsClient) -> Result<PoolStatus> {
 	let status: PoolStatus = ws
@@ -197,6 +253,21 @@ pub fn error_code(err: &anyhow::Error) -> Option<i32> {
 		Some(jsonrpsee::core::ClientError::Call(obj)) => Some(obj.code()),
 		_ => None,
 	}
+}
+
+/// Whether the WS transport itself failed, as opposed to the node rejecting the call.
+///
+/// `WsClient` does not reconnect, so a caller that keeps one connection for the length of
+/// a run must redial when this returns true; retrying on the same client only repeats the
+/// same failure.
+pub fn is_transport_error(err: &anyhow::Error) -> bool {
+	use jsonrpsee::core::ClientError;
+	matches!(
+		err.downcast_ref::<ClientError>(),
+		Some(
+			ClientError::RestartNeeded(_) | ClientError::Transport(_) | ClientError::RequestTimeout
+		)
+	)
 }
 
 // ---------------------------------------------------------------------------
