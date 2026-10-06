@@ -26,6 +26,8 @@ Renewals fire at the retention boundary: the storage pallet's `handle_obsolete` 
 
 Renewed bytes are capped twice — per account against the authorization's `bytes_allowance`, and chain-wide by `MaxPermanentStorageSize`. Crossing 80% of the chain-wide cap emits `PermanentStorageNearCap` once per crossing, as a signal for governance to raise the cap.
 
+`PermanentStorageUsed` moves synchronously — the cap check reads it live — but both events are emitted from `on_finalize`, at most once per block and only when the block-end value differs from the block-start value. A retention-boundary block that frees renewed bytes and re-charges the same bytes emits neither; per-renewal detail lives in `DataRenewed` / `RenewalFailed`.
+
 ## Dependencies
 
 - [`pallet-bulletin-transaction-storage`](../transaction-storage/) — the storage pallet this layer renews entries in
