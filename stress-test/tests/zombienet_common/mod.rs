@@ -117,6 +117,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
 							"--ipfs-server".into(),
+							"--authoring=slot-based".into(),
 							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
 							// limiter so a short burst isn't throttled.
 							"--enable-hop".into(),
@@ -137,6 +138,7 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 							"-lparachain=info,runtime=debug,runtime::transaction-storage=trace"
 								.into(),
 							"--ipfs-server".into(),
+							"--authoring=slot-based".into(),
 							// Serve the hop_ RPCs the HOP sanity test drives; disable the rate
 							// limiter so a short burst isn't throttled.
 							"--enable-hop".into(),
