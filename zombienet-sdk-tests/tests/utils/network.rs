@@ -112,6 +112,9 @@ pub fn verify_parachain_binaries() -> Result<()> {
 	Ok(())
 }
 
+/// The runtime enforces `RelayParentOffset`; only the slot-based collator can satisfy it.
+const SLOT_BASED_AUTHORING: &str = "--authoring=slot-based";
+
 /// Parachain network: 3 relay validators (for stable GRANDPA finality) + 1 collator.
 pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,
@@ -128,7 +131,10 @@ pub fn build_parachain_network_config_three_relay_validators(
 	let relay_args2 = relay_args.clone();
 	let relay_args3 = relay_args.clone();
 
-	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
+	let para_args: Vec<_> = std::iter::once(SLOT_BASED_AUTHORING)
+		.chain(para_node_args.iter().map(String::as_str))
+		.map(Into::into)
+		.collect();
 
 	let relay_chain = get_relay_chain();
 	let para_id = get_para_id();
@@ -179,7 +185,10 @@ pub fn build_parachain_network_config_three_collators(
 	let relay_args2 = relay_args.clone();
 	let relay_args3 = relay_args.clone();
 
-	let para_args: Vec<_> = para_node_args.iter().map(|s| s.as_str().into()).collect();
+	let para_args: Vec<_> = std::iter::once(SLOT_BASED_AUTHORING)
+		.chain(para_node_args.iter().map(String::as_str))
+		.map(Into::into)
+		.collect();
 	let para_args2 = para_args.clone();
 	let para_args3 = para_args.clone();
 
