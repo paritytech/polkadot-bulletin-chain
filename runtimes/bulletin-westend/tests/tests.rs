@@ -1676,7 +1676,7 @@ fn sudo_store_works_for_sudo_key_holder() {
 // ============================================================================
 
 /// XCM Transact with `store` must be blocked by the SafeCallFilter
-/// (`EverythingBut<StorageCallInspector>`). Storage operations must go through
+/// (`EverythingBut<XcmBlockedCalls>`). Storage operations must go through
 /// signed extrinsics, never through XCM.
 #[test]
 fn xcm_transact_store_is_blocked() {
@@ -1749,7 +1749,7 @@ fn xcm_transact_store_is_blocked() {
 }
 
 /// XCM Transact with `store` wrapped in `utility::batch` must also be blocked.
-/// The `StorageCallInspector` recursively inspects inner calls.
+/// `XcmBlockedCalls` recursively inspects inner calls.
 #[test]
 fn xcm_transact_wrapped_store_is_blocked() {
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
@@ -1802,6 +1802,36 @@ fn xcm_transact_wrapped_store_is_blocked() {
 				},
 			);
 		});
+}
+
+/// Sudo and DataRenewal calls must not pass the XCM `SafeCallFilter`, directly or wrapped.
+#[test]
+fn xcm_safe_call_filter_blocks_sudo_and_renewal() {
+	use frame_support::traits::Contains;
+	type SafeCallFilter =
+		<bulletin_westend_runtime::xcm_config::XcmConfig as xcm_executor::Config>::SafeCallFilter;
+
+	let store = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: vec![1] });
+	let entry = TransactionRef::Position { block: 1, index: 0 };
+	let sudo_store = RuntimeCall::Sudo(pallet_sudo::Call::sudo { call: Box::new(store) });
+	let force_renew =
+		RuntimeCall::DataRenewal(DataRenewalCall::force_renew { entry: entry.clone() });
+	let batch_renew = RuntimeCall::Utility(pallet_utility::Call::batch {
+		calls: vec![RuntimeCall::DataRenewal(DataRenewalCall::renew { entry })],
+	});
+	for call in [sudo_store, force_renew, batch_renew] {
+		assert!(!SafeCallFilter::contains(&call), "must be blocked: {call:?}");
+	}
+
+	let authorize = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+		who: Sr25519Keyring::Alice.to_account_id(),
+		transactions: 1,
+		bytes: 1,
+	});
+	let remark = RuntimeCall::System(frame_system::Call::remark { remark: vec![] });
+	for call in [authorize, remark] {
+		assert!(SafeCallFilter::contains(&call), "must be allowed: {call:?}");
+	}
 }
 
 /// XCM Transact with `authorize_account` must succeed — management calls are
