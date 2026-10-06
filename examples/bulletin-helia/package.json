@@ -1,0 +1,45 @@
+{
+  "name": "bulletin-helia",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    "./ipfs": {
+      "types": "./dist-cli/ipfs.d.ts",
+      "default": "./dist-cli/ipfs.js"
+    },
+    "./logger-base": {
+      "types": "./dist-cli/logger-base.d.ts",
+      "default": "./dist-cli/logger-base.js"
+    },
+    "./logger-cli": {
+      "types": "./dist-cli/logger-cli.d.ts",
+      "default": "./dist-cli/logger-cli.js"
+    }
+  },
+  "bin": {
+    "bulletin-helia": "./dist-cli/cli.js"
+  },
+  "scripts": {
+    "prepare": "npm run build",
+    "dev:cli": "npm run build:lib && tsx src/cli.ts",
+    "build": "npm run build:lib && npm run build:cli",
+    "build:lib": "tsc --project tsconfig.lib.json",
+    "build:cli": "tsc --project tsconfig.cli.json",
+    "lint": "biome check src",
+    "format": "biome check --write src"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/node": "^25.9.3",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@helia/block-brokers": "^5.2.4",
+    "@multiformats/blake2": "^2.0.2",
+    "@multiformats/multiaddr": "^13.0.1",
+    "helia": "^6.0.11",
+    "multiformats": "^13.4.1"
+  }
+}
