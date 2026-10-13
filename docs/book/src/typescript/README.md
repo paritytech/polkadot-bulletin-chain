@@ -25,7 +25,7 @@ The `@parity/bulletin-sdk` package is a type-safe client for Node.js and the bro
 
 ```typescript
 import { BulletinClient, blobFromBytes } from '@parity/bulletin-sdk';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 
 // The SDK owns its PAPI connection — give it a providers factory.
 const client = new BulletinClient({

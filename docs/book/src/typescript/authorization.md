@@ -187,7 +187,7 @@ if (auth?.expiration) {
 ## Complete Example
 
 ```typescript
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 

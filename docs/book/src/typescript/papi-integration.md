@@ -18,7 +18,7 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 
 ```typescript
 import { BulletinClient } from '@parity/bulletin-sdk';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
 import { getTxCreator } from 'polkadot-api/tx-creator';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';

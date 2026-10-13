@@ -48,7 +48,7 @@ npm install @parity/bulletin-sdk polkadot-api
 
 ```typescript
 import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
 async function main() {

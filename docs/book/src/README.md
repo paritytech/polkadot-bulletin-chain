@@ -68,7 +68,7 @@ See [Data Retrieval](./concepts/retrieval.md) for details.
 ```typescript
 // TypeScript - Store data
 import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
-import { getWsProvider } from "polkadot-api/ws-provider/node";
+import { getWsProvider } from "polkadot-api/ws";
 
 // The SDK owns its PAPI connection.
 const client = new BulletinClient({

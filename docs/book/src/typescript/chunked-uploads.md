@@ -8,7 +8,7 @@ A single chunk needs no manifest — its own CID is the retrieval id.
 
 ```typescript
 import { BulletinClient, blobFromBytes, UploadStatus } from '@parity/bulletin-sdk';
-import { getWsProvider } from 'polkadot-api/ws-provider/node';
+import { getWsProvider } from 'polkadot-api/ws';
 
 const client = new BulletinClient({
   providers: () => [getWsProvider('ws://localhost:9944')],
