@@ -90,7 +90,7 @@ describe("PAPI tx event to progress mapping", () => {
     ])
   })
 
-  it("resolves at inBestBlock when waiting for in_block", async () => {
+  it("resolves at inBestBlock for in_block and reports nothing afterwards", async () => {
     const { client, statuses, onProgress } = await setup()
 
     const pending = client
@@ -110,6 +110,8 @@ describe("PAPI tx event to progress mapping", () => {
 
     const result = await pending
     expect(result.blockNumber).toBe(block.number)
+
+    observer.next({ type: "finalized", txHash: "0x01", block, events: [] })
     expect(statuses).toEqual([
       TxStatus.Created,
       TxStatus.Broadcasted,
