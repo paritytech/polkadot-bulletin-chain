@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Keyring } from '@polkadot/keyring';
-import { getPolkadotSigner } from '@polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { blake2AsU8a, keccak256AsU8a, sha256AsU8a } from '@polkadot/util-crypto'
 import { getWsProvider } from 'polkadot-api/ws';
 import { getSmProvider } from 'polkadot-api/sm-provider';
@@ -97,7 +97,7 @@ export async function buildProviders({ mode, wsUrl, relaySpecPath, paraSpecPath,
  * Creates a PAPI-compatible signer from a Keyring account
  */
 export function createSigner(account) {
-  return getPolkadotSigner(
+  return getTxCreator(
     account.publicKey,
     'Sr25519',
     (input) => account.sign(input)

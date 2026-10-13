@@ -20,12 +20,12 @@ npm install polkadot-api @polkadot-labs/hdkd @polkadot-labs/hdkd-helpers
 import { BulletinClient } from '@parity/bulletin-sdk';
 import { getWsProvider } from 'polkadot-api/ws-provider/node';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
-import { getPolkadotSigner } from 'polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
 import { bulletin } from '@polkadot-api/descriptors';
 
 const kp = sr25519CreateDerive(DEV_MINI_SECRET)('//Alice');
-const signer = getPolkadotSigner(kp.publicKey, 'Sr25519', kp.sign);
+const signer = getTxCreator(kp.publicKey, 'Sr25519', kp.sign);
 
 const client = new BulletinClient({
   providers: () => [getWsProvider('ws://localhost:9944')],
@@ -121,7 +121,7 @@ const account = extension.getAccounts()[0];
 
 const client = new BulletinClient({
   providers: () => [getWsProvider(url)],
-  uploadSigner: account.polkadotSigner,
+  uploadSigner: account.txCreator,
 });
 ```
 

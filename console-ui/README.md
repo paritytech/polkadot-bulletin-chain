@@ -12,7 +12,7 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 ## Features
 
-- **Wallet Connection**: Connect Polkadot.js, Talisman, SubWallet, or other browser wallets
+- **Wallet Connection**: Connect Polkadot.js, Talisman, SubWallet, PolkaGate, or other browser wallets
 - **Data Upload**: Store data on-chain with configurable CID formats (hash algorithm, codec)
 - **Data Download**: Retrieve data by CID via IPFS gateway
 - **Authorization Management**: View account and preimage authorizations
@@ -23,7 +23,7 @@ A web-based console for interacting with the Polkadot Bulletin Chain. Upload and
 
 - Node.js 18+ or Bun
 - A running Bulletin Chain node (for local development)
-- A browser wallet extension (Polkadot.js, Talisman, etc.)
+- A browser wallet extension (Polkadot.js, Talisman, PolkaGate, etc.)
 
 ## Getting Started
 

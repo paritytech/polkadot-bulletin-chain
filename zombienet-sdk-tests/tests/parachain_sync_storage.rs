@@ -1134,7 +1134,8 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 	);
 
 	// Calculate when both stores should have expired
-	let expiration_block = second_store_block + LDB_TEST_RETENTION_PERIOD as u64 + 2; // +2 for safety margin
+	// +2 for safety margin
+	let expiration_block = second_store_block + LDB_TEST_RETENTION_PERIOD as u64 + 2;
 
 	tracing::info!(
 		"Waiting for block {} (second_store_block {} + retention {} + margin 2)",

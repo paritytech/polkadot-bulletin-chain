@@ -133,18 +133,25 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     echo "   Log: {{ test_dir }}/zombienet.log"
     just _wait-for-rpc $ZOMBIENET_PID "{{ test_dir }}/zombienet.log"
 
-# Build a runtime that lives in an external (Fellows) repo and print the WASM path.
-# Different feature sets use separate checkouts so their build caches don't collide.
-build-external-runtime name features="":
+# Print `<sha> <wasm-dir> <src-dir> <cache-key>`, dirs repo-relative.
+# The CI cache action reads this so its key and path cannot drift from the recipe below.
+external-runtime-paths name features="":
     #!/usr/bin/env bash
     set -e
-    ROOT_DIR="{{ justfile_directory() }}/.."
-    MATRIX="$ROOT_DIR/scripts/runtimes-matrix.json"
-
+    MATRIX="{{ justfile_directory() }}/../scripts/runtimes-matrix.json"
     REPO=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.repo' "$MATRIX")
     REF=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.ref' "$MATRIX")
-    SUBPATH=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.path' "$MATRIX")
-    PACKAGE=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .package' "$MATRIX")
+
+    # A ref that is already a sha needs no resolution (ls-remote only sees refs).
+    if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
+        SHA="$REF"
+    else
+        SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
+        if [ -z "$SHA" ]; then
+            >&2 echo "❌ Cannot resolve $REF in $REPO"
+            exit 1
+        fi
+    fi
 
     FEATURES="{{ features }}"
     if [ -n "$FEATURES" ]; then
@@ -152,22 +159,68 @@ build-external-runtime name features="":
     else
         VARIANT_SUFFIX=""
     fi
-    CHECKOUT_DIR="$ROOT_DIR/target/external-runtimes/{{ name }}${VARIANT_SUFFIX}"
-    WASM_PATH="$CHECKOUT_DIR/target/release/wbuild/$PACKAGE/${PACKAGE//-/_}.compact.compressed.wasm"
 
-    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $REF ($SUBPATH) [features=${FEATURES:-default}]"
+    echo "$SHA" \
+        ".external-runtimes/wasm/{{ name }}${VARIANT_SUFFIX}/$SHA" \
+        ".external-runtimes/src/{{ name }}${VARIANT_SUFFIX}" \
+        "external-runtime-wasm-{{ name }}${VARIANT_SUFFIX}-$SHA"
 
-    mkdir -p "$(dirname "$CHECKOUT_DIR")"
-    if [ ! -d "$CHECKOUT_DIR/.git" ]; then
-        >&2 echo "📥 Cloning $REPO into $CHECKOUT_DIR..."
-        git clone --filter=blob:none "$REPO" "$CHECKOUT_DIR" >&2
-    else
-        git -C "$CHECKOUT_DIR" remote set-url origin "$REPO"
+# Build a runtime that lives in an external (Fellows) repo and print the WASM path.
+# Different feature sets get separate checkouts and cached blobs.
+build-external-runtime name features="":
+    #!/usr/bin/env bash
+    set -e
+    ROOT_DIR="{{ justfile_directory() }}/.."
+    MATRIX="$ROOT_DIR/scripts/runtimes-matrix.json"
+
+    REPO=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.repo' "$MATRIX")
+    SUBPATH=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .external_runtime.path' "$MATRIX")
+    PACKAGE=$(jq -er --arg n "{{ name }}" '.[] | select(.name == $n) | .package' "$MATRIX")
+    FEATURES="{{ features }}"
+
+    # Only the blob is kept between runs: the checkout and its `target/` run to several
+    # GB, enough to evict every other cache in the repo.
+    read -r SHA WASM_REL SRC_REL _ < <(just external-runtime-paths "{{ name }}" "$FEATURES")
+    WASM_DIR="$ROOT_DIR/$WASM_REL"
+    WASM_PATH="$WASM_DIR/${PACKAGE//-/_}.compact.compressed.wasm"
+    SRC_DIR="$ROOT_DIR/$SRC_REL"
+
+    >&2 echo "🔧 build-external-runtime: {{ name }} from $REPO @ $SHA ($SUBPATH) [features=${FEATURES:-default}]"
+
+    if [ -f "$WASM_PATH" ]; then
+        >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
+        echo "$WASM_PATH"
+        exit 0
     fi
 
-    >&2 echo "🔀 Fetching ref: $REF..."
-    git -C "$CHECKOUT_DIR" fetch --depth 1 origin "$REF" >&2
-    git -C "$CHECKOUT_DIR" checkout -q FETCH_HEAD
+    sync_checkout() {
+        if [ ! -d "$SRC_DIR/.git" ]; then
+            >&2 echo "📥 Cloning $REPO into $SRC_DIR..."
+            git clone --filter=blob:none "$REPO" "$SRC_DIR" >&2
+        else
+            git -C "$SRC_DIR" remote set-url origin "$REPO"
+        fi
+
+        >&2 echo "🔀 Fetching ref: $SHA..."
+        git -C "$SRC_DIR" fetch --depth 1 origin "$SHA" >&2
+        # --force: HEAD can already be at $SHA with worktree files missing, where a
+        # plain checkout is a no-op.
+        git -C "$SRC_DIR" checkout -q --force FETCH_HEAD
+    }
+
+    mkdir -p "$(dirname "$SRC_DIR")"
+    sync_checkout
+
+    # For a checkout `--force` cannot repair.
+    if [ ! -d "$SRC_DIR/$SUBPATH" ]; then
+        >&2 echo "🧹 $SUBPATH missing after checkout, re-cloning $SRC_DIR..."
+        rm -rf "$SRC_DIR"
+        sync_checkout
+    fi
+    if [ ! -d "$SRC_DIR/$SUBPATH" ]; then
+        >&2 echo "❌ $SUBPATH not found in $REPO @ $SHA"
+        exit 1
+    fi
 
     # --locked: honor the external repo's Cargo.lock; fresh resolution can
     # drift to dep versions the pinned rev never built against.
@@ -176,17 +229,16 @@ build-external-runtime name features="":
         BUILD_ARGS+=(--features "$FEATURES")
     fi
 
-    if [ ! -f "$WASM_PATH" ]; then
-        >&2 echo "🔨 Building $PACKAGE [features=${FEATURES:-default}]..."
-        (cd "$CHECKOUT_DIR/$SUBPATH" && cargo build "${BUILD_ARGS[@]}" >&2)
-    else
-        >&2 echo "♻️  Reusing cached WASM at $WASM_PATH"
-    fi
+    >&2 echo "🔨 Building $PACKAGE [features=${FEATURES:-default}]..."
+    (cd "$SRC_DIR/$SUBPATH" && cargo build "${BUILD_ARGS[@]}" >&2)
 
-    if [ ! -f "$WASM_PATH" ]; then
-        >&2 echo "❌ WASM not produced at: $WASM_PATH"
+    BUILT="$SRC_DIR/target/release/wbuild/$PACKAGE/${PACKAGE//-/_}.compact.compressed.wasm"
+    if [ ! -f "$BUILT" ]; then
+        >&2 echo "❌ WASM not produced at: $BUILT"
         exit 1
     fi
+    mkdir -p "$WASM_DIR"
+    cp "$BUILT" "$WASM_PATH"
 
     echo "$WASM_PATH"
 

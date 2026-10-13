@@ -8,9 +8,15 @@
 import type { JsonRpcProvider } from "@polkadot-api/json-rpc-provider"
 import { ss58Address } from "@polkadot-labs/hdkd-helpers"
 import type { CID } from "multiformats/cid"
-import { Binary, createClient, type PolkadotSigner } from "polkadot-api"
+import { Binary, createClient } from "polkadot-api"
+import type { SignerTxCreator, TxCreator } from "polkadot-api/tx-creator"
 import type { BlobSource, SeekableSource } from "./blob-source.js"
-import { type RenewShape, resolveRenewShape } from "./compat.js"
+import {
+  type AutoRenewCall,
+  autoRenewPallet,
+  type RenewalSupport,
+  renewalSupport,
+} from "./compat.js"
 import {
   isStallError,
   type PipelineBootstrap,
@@ -66,14 +72,12 @@ interface RuntimeEvent {
 }
 
 /**
- * Minimal interface for PAPI transaction status events
- * (union of TxSigned, TxBroadcasted, TxBestBlocksState, TxFinalized).
+ * Minimal interface for PAPI transaction status events (union of TxCreated,
+ * TxBroadcasted, TxInBestBlock, TxNotInBestBlock, TxFinalized).
  */
 interface TxStatusEvent {
   txHash?: string
   type?: string
-  found?: boolean
-  nPeers?: number
   block?: { hash: string; number: number; index?: number }
   events?: RuntimeEvent[]
 }
@@ -86,12 +90,7 @@ interface TxStatusEvent {
  * requiring generated chain types as a dependency.
  */
 interface PapiTransaction {
-  signAndSubmit(signer: PolkadotSigner): Promise<{
-    block?: { hash: string; number: number }
-    txHash: string
-    events?: RuntimeEvent[]
-  }>
-  signSubmitAndWatch(signer: PolkadotSigner): {
+  createSubmitAndWatch(creator: TxCreator): {
     subscribe(observer: {
       next: (ev: TxStatusEvent) => void
       error: (err: unknown) => void
@@ -298,14 +297,10 @@ function mapPapiEventToProgress(
   if (ev.txHash && !currentTxHash) {
     result.txHash = ev.txHash as string
     progressCallback?.({
-      type: TxStatus.Signed,
+      type: TxStatus.Created,
       txHash: result.txHash,
       chunkIndex,
     })
-  }
-
-  if (ev.type === "validated") {
-    progressCallback?.({ type: TxStatus.Validated, chunkIndex })
   }
 
   if (ev.type === "broadcasted") {
@@ -315,21 +310,21 @@ function mapPapiEventToProgress(
     })
   }
 
-  if (ev.type === "txBestBlocksState") {
-    if (ev.found && ev.block) {
-      progressCallback?.({
-        type: TxStatus.InBlock,
-        blockHash: ev.block.hash,
-        blockNumber: ev.block.number,
-        txIndex: ev.block.index,
-        chunkIndex,
-      })
-      if (waitFor === "in_block") {
-        result.finish = { block: ev.block, events: ev.events }
-      }
-    } else {
-      progressCallback?.({ type: TxStatus.NoLongerInBlock, chunkIndex })
+  if (ev.type === "inBestBlock" && ev.block) {
+    progressCallback?.({
+      type: TxStatus.InBlock,
+      blockHash: ev.block.hash,
+      blockNumber: ev.block.number,
+      txIndex: ev.block.index,
+      chunkIndex,
+    })
+    if (waitFor === "in_block") {
+      result.finish = { block: ev.block, events: ev.events }
     }
+  }
+
+  if (ev.type === "notInBestBlock") {
+    progressCallback?.({ type: TxStatus.NoLongerInBlock, chunkIndex })
   }
 
   if (ev.type === "finalized" && ev.block) {
@@ -373,6 +368,8 @@ export interface BulletinClientInterface {
   authorizePreimage(contentHash: Uint8Array, maxSize: bigint): AuthCallBuilder
   renew(ref: TransactionRefInput): CallBuilder
   forceRenew(ref: TransactionRefInput): CallBuilder
+  enableAutoRenew(contentHash: Uint8Array): CallBuilder
+  disableAutoRenew(contentHash: Uint8Array): CallBuilder
   refreshAccountAuthorization(who: string): AuthCallBuilder
   refreshPreimageAuthorization(contentHash: Uint8Array): AuthCallBuilder
   removeExpiredAccountAuthorization(who: string): CallBuilder
@@ -680,7 +677,7 @@ export interface BulletinClientOptions extends Partial<ClientConfig> {
    * Upload signer. Optional — pass `undefined` for unsigned-only mode.
    * Signed paths throw `UNSUPPORTED_OPERATION` on a signer-less client.
    */
-  uploadSigner?: PolkadotSigner
+  uploadSigner?: SignerTxCreator
 }
 
 export class BulletinClient implements BulletinClientInterface {
@@ -689,7 +686,7 @@ export class BulletinClient implements BulletinClientInterface {
   /** Stream-watch submission, exposed for advanced callers. */
   public submitAndWatch: SubmitAndWatchFn
   /** Upload signer (undefined → unsigned-only mode). */
-  public signer: PolkadotSigner | undefined
+  public signer: SignerTxCreator | undefined
   /** Client configuration */
   public config: ResolvedClientConfig
   /** Offline operations (chunking, CID calculation, estimation) */
@@ -704,8 +701,8 @@ export class BulletinClient implements BulletinClientInterface {
    * the lifetime of the client.
    */
   private pipelineBootstrap: PipelineBootstrap = {}
-  /** Cached `renew` shape resolution for the connected chain (see compat.ts). */
-  private renewShapePromise?: Promise<RenewShape>
+  /** Cached renewal-call resolution for the connected chain (see compat.ts). */
+  private renewalSupportPromise?: Promise<RenewalSupport>
 
   /**
    * Construct a client.
@@ -915,7 +912,7 @@ export class BulletinClient implements BulletinClientInterface {
    * primary upload signer. This guards against accidental use of the
    * upload account for permission grants.
    */
-  private requireAuthorizerSigner(operation: string): PolkadotSigner {
+  private requireAuthorizerSigner(operation: string): SignerTxCreator {
     const s = this.config.authorizerSigner
     if (!s) {
       throw new BulletinError(
@@ -949,7 +946,7 @@ export class BulletinClient implements BulletinClientInterface {
   /**
    * Sign, submit, and watch a transaction with progress callbacks.
    *
-   * Uses PAPI's signSubmitAndWatch which provides real-time status updates
+   * Uses PAPI's createSubmitAndWatch which provides real-time status updates
    * as the transaction progresses through the network.
    *
    * @param tx - The transaction to submit
@@ -961,7 +958,7 @@ export class BulletinClient implements BulletinClientInterface {
     progressCallback?: ProgressCallback,
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
-    signerOverride?: PolkadotSigner,
+    signerOverride?: SignerTxCreator,
   ): Promise<{
     blockHash: string
     txHash: string
@@ -1001,7 +998,7 @@ export class BulletinClient implements BulletinClientInterface {
         })
       }
 
-      const subscription = tx.signSubmitAndWatch(useSigner).subscribe({
+      const subscription = tx.createSubmitAndWatch(useSigner).subscribe({
         next: (ev: TxStatusEvent) => {
           const result = mapPapiEventToProgress(
             ev,
@@ -1033,10 +1030,10 @@ export class BulletinClient implements BulletinClientInterface {
         },
         complete: () => {
           // PAPI can complete the Observable without a finalized/in_block
-          // event (e.g. txBestBlocksState fires with found:false after a
-          // reorg or node restart, causing the internal continueWith() to
-          // map to rxjs.EMPTY which completes immediately). Without this
-          // handler the Promise hangs until the defensive timeout fires.
+          // event (e.g. notInBestBlock fires after a reorg or node restart,
+          // causing the internal continueWith() to map to rxjs.EMPTY which
+          // completes immediately). Without this handler the Promise hangs
+          // until the defensive timeout fires.
           if (!resolved) {
             resolved = true
             cleanup()
@@ -1092,7 +1089,7 @@ export class BulletinClient implements BulletinClientInterface {
     errorMessage: string,
     errorCode: ErrorCode,
     options?: CallOptions,
-    signerOverride?: PolkadotSigner,
+    signerOverride?: SignerTxCreator,
   ): Promise<TransactionReceipt> {
     try {
       const waitFor = options?.waitFor ?? "in_block"
@@ -1565,7 +1562,7 @@ export class BulletinClient implements BulletinClientInterface {
       // encode via the unsafe api (codecs built from the live metadata) so
       // a stale caller descriptor can't veto a compatible chain.
       const entry = toTransactionRef(ref)
-      const shape = await this.renewShape()
+      const { shape } = await this.renewalSupport()
       const txs = this.papiClient.getUnsafeApi().tx
       let tx: PapiTransaction
       if (shape === "data-renewal") {
@@ -1607,7 +1604,7 @@ export class BulletinClient implements BulletinClientInterface {
    */
   forceRenew(ref: TransactionRefInput): CallBuilder {
     return new CallBuilder(async (options) => {
-      const shape = await this.renewShape()
+      const { shape } = await this.renewalSupport()
       if (shape === "positional") {
         throw new BulletinError(
           "force_renew is not supported by this runtime",
@@ -1630,13 +1627,63 @@ export class BulletinClient implements BulletinClientInterface {
   }
 
   /**
-   * Which `renew` shape the connected chain speaks, resolved once per client
-   * by checksumming the live metadata (one RPC + a local hash — see
-   * compat.ts). A failed resolution is not cached, so a transient RPC error
-   * retries on the next call.
+   * Register recurring auto-renewal for stored content.
+   *
+   * The first cycle is prepaid at registration; later cycles charge the
+   * owner's authorization and stop once it is exhausted. Fails if any renewal
+   * is already registered for `contentHash`. Rejects with
+   * `UNSUPPORTED_OPERATION` on runtimes without the call.
    */
-  private renewShape(): Promise<RenewShape> {
-    if (!this.renewShapePromise) {
+  enableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return this.autoRenewCallBuilder(
+      "enable_auto_renew",
+      contentHash,
+      "Failed to enable auto-renew",
+    )
+  }
+
+  /**
+   * Cancel a renewal registration.
+   *
+   * The chain rejects this while the registration's next cycle is still
+   * prepaid, so it only succeeds once the prepaid cycle has fired.
+   */
+  disableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return this.autoRenewCallBuilder(
+      "disable_auto_renew",
+      contentHash,
+      "Failed to disable auto-renew",
+    )
+  }
+
+  private autoRenewCallBuilder(
+    call: AutoRenewCall,
+    contentHash: Uint8Array,
+    errorMessage: string,
+  ): CallBuilder {
+    return new CallBuilder(async (options) => {
+      const pallet = autoRenewPallet(await this.renewalSupport(), call)
+      const palletTx = this.papiClient.getUnsafeApi().tx[pallet]
+      const tx = (palletTx[call] as (args: object) => PapiTransaction)({
+        content_hash: Binary.toHex(contentHash),
+      })
+      return this.submitTx(
+        tx,
+        errorMessage,
+        ErrorCode.TRANSACTION_FAILED,
+        options,
+      )
+    })
+  }
+
+  /**
+   * The connected chain's renewal calls, resolved once per client by
+   * checksumming the live metadata (one RPC + a local hash — see compat.ts).
+   * A failed resolution is not cached, so a transient RPC error retries on
+   * the next call.
+   */
+  private renewalSupport(): Promise<RenewalSupport> {
+    if (!this.renewalSupportPromise) {
       const resolved = (async () => {
         const metadataApis = this.papiClient.getUnsafeApi().apis.Metadata
         // OpaqueMetadata; v15 preferred, default version as fallback.
@@ -1647,16 +1694,16 @@ export class BulletinClient implements BulletinClientInterface {
         // Binary-like too in case that representation changes.
         const bytes: Uint8Array =
           opaque instanceof Uint8Array ? opaque : opaque.asBytes()
-        return resolveRenewShape(bytes)
+        return renewalSupport(bytes)
       })()
       resolved.catch(() => {
-        if (this.renewShapePromise === resolved) {
-          this.renewShapePromise = undefined
+        if (this.renewalSupportPromise === resolved) {
+          this.renewalSupportPromise = undefined
         }
       })
-      this.renewShapePromise = resolved
+      this.renewalSupportPromise = resolved
     }
-    return this.renewShapePromise
+    return this.renewalSupportPromise
   }
 
   /**

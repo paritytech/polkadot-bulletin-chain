@@ -19,8 +19,11 @@
 
 #![allow(deprecated)]
 
-use crate::{mock::*, EntryKind, PendingAutoRenewals, PermanentExtent, RenewalData, Renewals};
-use bulletin_transaction_storage_primitives::cids::{CidConfig, HashingAlgorithm};
+use crate::{mock::*, PendingRenewals, PermanentExtent, RenewalData, Renewals};
+use bulletin_transaction_storage_primitives::{
+	cids::{CidConfig, HashingAlgorithm},
+	EntryKind,
+};
 use codec::{Decode, Encode};
 use pallet_bulletin_transaction_storage::{
 	self as txs, pallet::Origin, AuthorizationExtent, AuthorizationScope, TransactionInfo,
@@ -45,7 +48,7 @@ use sp_transaction_storage_proof::{num_chunks, registration::build_proof};
 fn pallet_compiles_and_storage_is_separate_from_transaction_storage() {
 	new_test_ext().execute_with(|| {
 		assert!(Renewals::<Test>::iter().next().is_none());
-		assert!(PendingAutoRenewals::<Test>::get().is_empty());
+		assert!(PendingRenewals::<Test>::get().is_empty());
 		use polkadot_sdk_frame::deps::frame_support::traits::GetStorageVersion;
 		assert_eq!(
 			crate::Pallet::<Test>::on_chain_storage_version(),
@@ -80,7 +83,7 @@ fn on_obsolete_callback_queues_pending_renewals_for_is_latest_entries_with_regis
 		let items = [(info, true)];
 		<crate::Pallet<Test> as OnObsoleteTransactions<u64, EntryKind>>::handle_obsolete(1, &items);
 
-		let pending = PendingAutoRenewals::<Test>::get();
+		let pending = PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 1);
 		assert_eq!(pending[0].0, content_hash);
 	});
@@ -111,7 +114,7 @@ fn on_obsolete_callback_skips_stale_shadow_entries() {
 		};
 		let items = [(info, false)];
 		<crate::Pallet<Test> as OnObsoleteTransactions<u64, EntryKind>>::handle_obsolete(1, &items);
-		assert!(PendingAutoRenewals::<Test>::get().is_empty());
+		assert!(PendingRenewals::<Test>::get().is_empty());
 	});
 }
 
@@ -193,12 +196,12 @@ fn relocation_migration_moves_permanent_storage_used() {
 	});
 }
 
-/// `PendingAutoRenewals` is relocated byte-exactly to the key the pallet reads.
+/// `PendingRenewals` is relocated byte-exactly to the key the pallet reads.
 ///
 /// The value is produced by encoding through the storage item itself and then moved to the
 /// legacy prefix, so the test never has to name the (`Config`-dependent) value type.
 #[test]
-fn relocation_migration_moves_pending_auto_renewals() {
+fn relocation_migration_moves_pending_renewals() {
 	use bulletin_transaction_storage_primitives::ContentHash;
 	use polkadot_sdk_frame::deps::{
 		frame_support::traits::StorageVersion,
@@ -216,7 +219,7 @@ fn relocation_migration_moves_pending_auto_renewals() {
 			block_chunks: 1,
 			meta: EntryKind::Renew,
 		};
-		PendingAutoRenewals::<Test>::mutate(|pending| {
+		PendingRenewals::<Test>::mutate(|pending| {
 			pending
 				.try_push((
 					content_hash,
@@ -228,7 +231,7 @@ fn relocation_migration_moves_pending_auto_renewals() {
 
 		// Relocate the encoded value back to the legacy prefix to build the pre-migration
 		// state, then reset the version gate.
-		let new_key = PendingAutoRenewals::<Test>::hashed_key();
+		let new_key = PendingRenewals::<Test>::hashed_key();
 		let raw = sp_io::storage::get(&new_key).expect("just written").to_vec();
 		sp_io::storage::clear(&new_key);
 		let old_key = storage_prefix(b"TransactionStorage", b"PendingAutoRenewals");
@@ -237,7 +240,7 @@ fn relocation_migration_moves_pending_auto_renewals() {
 
 		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
 
-		let pending = PendingAutoRenewals::<Test>::get();
+		let pending = PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 1, "pending entry must be readable through the storage item");
 		assert_eq!(pending[0].0, content_hash);
 		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
@@ -264,7 +267,7 @@ fn relocation_migration_try_runtime_checks_pass() {
 			&RenewalData::<u64> { account: 3, recurring: false, paid: true }.encode(),
 		);
 
-		// Both relocated `StorageValue`s. `PendingAutoRenewals` is left absent, which is
+		// Both relocated `StorageValue`s. `PendingRenewals` is left absent, which is
 		// the real-world case the `on_finalize` drain invariant guarantees.
 		sp_io::storage::set(
 			&storage_prefix(b"TransactionStorage", b"PermanentStorageUsed"),
@@ -288,6 +291,31 @@ fn relocation_migration_try_runtime_checks_pass() {
 		let extent = txs::Authorizations::<Test>::get(&scope).expect("still present").extent;
 		assert_eq!(extent.extra.bytes_permanent, 700);
 		assert_eq!(extent.bytes_allowance, 900);
+	});
+}
+
+/// The try-runtime checks must also pass on a chain that already ran the relocation and has
+/// taken renewals since: the old prefix is empty, so the scan moves nothing, and the entries
+/// under the new prefix are the chain's own — not evidence of a dropped entry.
+#[cfg(feature = "try-runtime")]
+#[test]
+fn relocation_migration_try_runtime_checks_pass_when_already_relocated() {
+	use bulletin_transaction_storage_primitives::ContentHash;
+	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+	new_test_ext().execute_with(|| {
+		let hash: ContentHash = BlakeTwo256::hash(b"already-relocated").into();
+		Renewals::<Test>::insert(
+			hash,
+			RenewalData::<u64> { account: 7, recurring: true, paid: false },
+		);
+
+		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
+			.expect("pre_upgrade must accept already-relocated state");
+		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
+			.expect("post_upgrade checks must pass");
+
+		assert!(Renewals::<Test>::get(hash).is_some(), "pre-existing entry must survive");
 	});
 }
 
@@ -350,7 +378,7 @@ fn enable_auto_renew_works() {
 		let call = crate::Call::<Test>::enable_auto_renew { content_hash };
 		assert_eq!(
 			DataRenewal::validate_renewal_signed(&who, &call).map(|_| ()),
-			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+			Err(crate::RENEWAL_ALREADY_ENABLED.into()),
 		);
 	});
 }
@@ -498,7 +526,7 @@ fn pending_auto_renewals_populated_only_for_registered_items() {
 		let items = [(info_a, true), (info_b, true)];
 		<crate::Pallet<Test> as OnObsoleteTransactions<u64, EntryKind>>::handle_obsolete(1, &items);
 
-		let pending = PendingAutoRenewals::<Test>::get();
+		let pending = PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 1, "only the registered item should be queued");
 		assert_eq!(pending[0].0, hash_a);
 	});
@@ -525,7 +553,7 @@ fn process_auto_renewals_rejects_signed_origin() {
 fn process_auto_renewals_noop_when_empty() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
-		assert!(PendingAutoRenewals::<Test>::get().is_empty());
+		assert!(PendingRenewals::<Test>::get().is_empty());
 		assert_ok!(DataRenewal::process_pending_renewals(RuntimeOrigin::none()));
 	});
 }
@@ -1173,11 +1201,11 @@ fn auto_renewal_lifecycle() {
 		run_to_block(11, proof_provider);
 
 		// Block 12: on_initialize takes `Transactions[1]` and schedules the
-		// auto-renewal into `PendingAutoRenewals`.
+		// auto-renewal into `PendingRenewals`.
 		init_block(12);
 
-		// Verify PendingAutoRenewals was populated
-		let pending = crate::PendingAutoRenewals::<Test>::get();
+		// Verify PendingRenewals was populated
+		let pending = crate::PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 1);
 		assert_eq!(pending[0].0, content_hash);
 
@@ -1187,8 +1215,8 @@ fn auto_renewal_lifecycle() {
 
 		assert_ok!(apply_block_inherents_full(None));
 
-		// Verify PendingAutoRenewals is now empty
-		assert!(crate::PendingAutoRenewals::<Test>::get().is_empty());
+		// Verify PendingRenewals is now empty
+		assert!(crate::PendingRenewals::<Test>::get().is_empty());
 
 		// Data was renewed into the current block.
 		assert_eq!(
@@ -1199,7 +1227,7 @@ fn auto_renewal_lifecycle() {
 		);
 
 		// Verify event
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -1319,13 +1347,13 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 		// headroom — `bytes_permanent + size > bytes_allowance` fires.
 		init_block(23);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 1000));
-		let pending = crate::PendingAutoRenewals::<Test>::get();
+		let pending = crate::PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 1, "Should have pending renewal");
 
 		assert_ok!(apply_block_inherents_full(None));
 
 		// Should have failed — event emitted and auto-renewal removed.
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash,
 			account: who,
 		}));
@@ -1453,8 +1481,8 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 			100_000_000
 		));
 
-		// Verify PendingAutoRenewals was populated with 3 items
-		let pending = crate::PendingAutoRenewals::<Test>::get();
+		// Verify PendingRenewals was populated with 3 items
+		let pending = crate::PendingRenewals::<Test>::get();
 		assert_eq!(pending.len(), 3);
 
 		// Fill block with (max - 1) dummy transactions so only 1 renewal fits
@@ -1466,23 +1494,23 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 		// Process auto-renewals — should NOT return an error even though 2 of 3 fail
 		assert_ok!(apply_block_inherents_full(None));
 
-		// PendingAutoRenewals should be fully consumed
-		assert!(crate::PendingAutoRenewals::<Test>::get().is_empty());
+		// PendingRenewals should be fully consumed
+		assert!(crate::PendingRenewals::<Test>::get().is_empty());
 
-		// First item should have succeeded (DataAutoRenewed event).
+		// First item should have succeeded (DataRenewed event).
 		// Index is max_txns - 1 because the block already has max_txns - 1 items (0-indexed).
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: max_txns - 1,
 			content_hash: hashes[0],
 			account: who,
 		}));
 
-		// Remaining items should have failed (AutoRenewalFailed events)
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		// Remaining items should have failed (RenewalFailed events)
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash: hashes[1],
 			account: who,
 		}));
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash: hashes[2],
 			account: who,
 		}));
@@ -1495,7 +1523,7 @@ fn process_auto_renewals_continues_on_per_item_failure() {
 
 /// `paid = true` cycle rejected by the per-block slot cap refunds chain-wide
 /// `PermanentStorageUsed`. Per-account `bytes_permanent` / `transactions` are
-/// intentionally left burned — see the inline rationale in `do_process_auto_renewals`.
+/// intentionally left burned — see the inline rationale in `do_process_pending_renewals`.
 #[test]
 fn paid_cycle_refunds_on_block_slot_cap() {
 	new_test_ext().execute_with(|| {
@@ -1518,7 +1546,7 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 		let transactions_before = auth.extent.transactions;
 
 		init_block(12);
-		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
+		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 
 		// Fill `BlockTransactions` so the paid drain has no slot to land in.
 		let max_txns =
@@ -1529,7 +1557,7 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 
 		assert_ok!(apply_block_inherents_full(None));
 
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash,
 			account: who,
 		}));
@@ -1567,8 +1595,8 @@ fn one_shot_fires_once_then_unregisters() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(apply_block_inherents_full(None));
 
-		// DataAutoRenewed fired AND the registration was consumed.
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		// DataRenewed fired AND the registration was consumed.
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -1651,7 +1679,7 @@ fn one_shot_cycle_does_not_recharge_auth() {
 		init_block(12);
 		assert_ok!(apply_block_inherents_full(None));
 
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -1686,7 +1714,7 @@ fn renew_and_enable_auto_renew_conflict() {
 			crate::Call::<Test>::renew { entry: TransactionRef::Position { block: 1, index: 0 } };
 		assert_eq!(
 			DataRenewal::validate_renewal_signed(&who, &dup_call).map(|_| ()),
-			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+			Err(crate::RENEWAL_ALREADY_ENABLED.into()),
 		);
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), permanent_used_before);
 
@@ -1695,13 +1723,13 @@ fn renew_and_enable_auto_renew_conflict() {
 			Origin::<Test>::Authorized { who, scope: AuthorizationScope::Account(who) }.into();
 		assert_noop!(
 			DataRenewal::renew(origin, TransactionRef::Position { block: 1, index: 0 }),
-			crate::Error::<Test>::AutoRenewalAlreadyEnabled,
+			crate::Error::<Test>::RenewalAlreadyEnabled,
 		);
 
 		let call = crate::Call::<Test>::enable_auto_renew { content_hash };
 		assert_eq!(
 			DataRenewal::validate_renewal_signed(&who, &call).map(|_| ()),
-			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+			Err(crate::RENEWAL_ALREADY_ENABLED.into()),
 		);
 	});
 }
@@ -1727,7 +1755,7 @@ fn renew_rejects_unsigned_and_root_origin() {
 
 /// Run a normal block lifecycle past expiry without invoking `apply_block_inherents`.
 ///
-/// `on_initialize` populates `PendingAutoRenewals`; `on_finalize` then enforces that the
+/// `on_initialize` populates `PendingRenewals`; `on_finalize` then enforces that the
 /// inherent ran, asserting that the storage is empty. The mock's `run_to_block` always
 /// invokes the inherent, hiding this safeguard. This test bypasses the helper to confirm
 /// the assert actually fires when an auto-renewal is pending and the inherent is missing.
@@ -1735,9 +1763,7 @@ fn renew_rejects_unsigned_and_root_origin() {
 // catch.
 #[cfg(not(feature = "try-runtime"))]
 #[test]
-#[should_panic(
-	expected = "All pending auto-renewals must be processed by process_pending_renewals"
-)]
+#[should_panic(expected = "All pending renewals must be processed by process_pending_renewals")]
 fn on_finalize_panics_when_inherent_missing() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
@@ -1771,28 +1797,28 @@ fn on_finalize_panics_when_inherent_missing() {
 
 		// Run normally up to (and including) block 12 — proofs supplied via the inherent.
 		// The block-1 `Store` entry expires at block 12 but the latest-entry guard
-		// skips it (force-renew at block 2 is the latest), so no PendingAutoRenewals
+		// skips it (force-renew at block 2 is the latest), so no PendingRenewals
 		// build up here. The force-renewed entry ages out at block 13.
 		run_to_block(12, proof_provider);
 
 		// Manually advance to block 13 and run only on_initialize, which populates
-		// PendingAutoRenewals as Transactions(2) expires. We deliberately do NOT call
+		// PendingRenewals as Transactions(2) expires. We deliberately do NOT call
 		// apply_block_inherents, simulating an inherent that was lost or never built.
 		init_block(13);
 		assert_eq!(
-			crate::PendingAutoRenewals::<Test>::get().len(),
+			crate::PendingRenewals::<Test>::get().len(),
 			1,
 			"on_initialize should have populated pending"
 		);
 
-		// on_finalize must panic on the PendingAutoRenewals invariant. The assert
+		// on_finalize must panic on the PendingRenewals invariant. The assert
 		// now lives on the renewal pallet (the inherent moved there in the split).
 		<DataRenewal as polkadot_sdk_frame::traits::Hooks<u64>>::on_finalize(13);
 	});
 }
 
 /// Verify that `ProvideInherent::create_inherent` actually emits the composite inherent call
-/// when `PendingAutoRenewals` is non-empty, even with no storage proof in `InherentData`.
+/// when `PendingRenewals` is non-empty, even with no storage proof in `InherentData`.
 ///
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
@@ -1823,7 +1849,7 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 		// The block-1 `Store` is no longer the latest reference after the
 		// force-renew, so the latest-entry guard skips it at block 12. The
 		// force-renewed entry ages out at block 13, populating
-		// `PendingAutoRenewals` then. We need a proof provider because block 12
+		// `PendingRenewals` then. We need a proof provider because block 12
 		// needs a proof for the (still-on-chain) block-2 Renew entry.
 		let proof_provider = move || {
 			let block_num = System::block_number();
@@ -1843,7 +1869,7 @@ fn create_inherent_emits_call_when_pending_renewals_present() {
 		};
 		run_to_block(12, proof_provider);
 		init_block(13);
-		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
+		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 
 		// `InherentData` carries no proof, but the renewal pallet must still emit its
 		// drain inherent so the pending renewals are processed in this block.
@@ -1904,8 +1930,8 @@ fn renew_bumps_permanent_used_and_records_kind() {
 }
 
 /// `renew` rejects with [`crate::PERMANENT_ALLOWANCE_EXCEEDED`] when the per-account hard cap is
-/// reached: `bytes_permanent + size > bytes_allowance`. The chain-wide counter must remain
-/// untouched.
+/// reached: `bytes_permanent + size > bytes_allowance`. [`crate::PermanentStorageUsed`] must
+/// remain untouched.
 #[test]
 fn renew_rejects_when_per_account_allowance_exceeded() {
 	new_test_ext().execute_with(|| {
@@ -2110,20 +2136,18 @@ fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 	});
 }
 
-/// `EntryKind` must keep the retired `TransactionKind`'s exact encoding (1 byte;
-/// `Store = 0`, `Renew = 1`): live `Transactions` entries written before the split
-/// decode through `TransactionInfo<EntryKind>` without a storage migration.
+/// Live `Transactions` entries carry this exact layout (1-byte `kind` tail) and must
+/// decode through `TransactionInfo<EntryKind>` as-is; the enum's byte values are
+/// pinned in the primitives' `entry_kind_encoding_is_frozen`.
 #[test]
-fn entry_kind_encoding_is_frozen() {
+fn transaction_info_encoding_matches_pre_split_layout() {
+	use crate::RenewMeta;
 	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
 
-	assert_eq!(EntryKind::Store.encode(), vec![0u8]);
-	assert_eq!(EntryKind::Renew.encode(), vec![1u8]);
-	assert_eq!(EntryKind::default(), EntryKind::Store);
+	// This pallet's writes must hit the frozen `Renew` byte.
+	assert_eq!(EntryKind::renew(), EntryKind::Renew);
 
-	// Frozen copy of the pre-split `TransactionInfo` layout (tail field was
-	// `kind: TransactionKind`). Bytes written by the old runtime must decode
-	// as the new generic type.
+	// The layout live entries were encoded with.
 	#[derive(Encode)]
 	struct FrozenTransactionInfo {
 		chunk_root: <BlakeTwo256 as Hash>::Output,
@@ -2133,7 +2157,7 @@ fn entry_kind_encoding_is_frozen() {
 		size: u32,
 		extrinsic_index: u32,
 		block_chunks: u32,
-		kind: u8, // TransactionKind::Renew
+		kind: u8, // EntryKind::Renew
 	}
 	let frozen = FrozenTransactionInfo {
 		chunk_root: BlakeTwo256::hash(b"root"),
@@ -2154,7 +2178,7 @@ fn entry_kind_encoding_is_frozen() {
 }
 
 /// Renew emits `PermanentStorageUsedUpdated { used }` so off-chain capacity-planning
-/// dashboards can track the chain-wide counter without polling storage.
+/// dashboards can track [`crate::PermanentStorageUsed`] without polling storage.
 #[test]
 fn renew_emits_permanent_storage_used_updated() {
 	new_test_ext().execute_with(|| {
@@ -2180,7 +2204,7 @@ fn renew_emits_permanent_storage_used_updated() {
 }
 
 /// `enable_auto_renew` rejects a second call for the same content hash, even from the
-/// same account, with `AutoRenewalAlreadyEnabled`.
+/// same account, with `RenewalAlreadyEnabled`.
 #[test]
 fn enable_auto_renew_rejects_already_enabled() {
 	new_test_ext().execute_with(|| {
@@ -2198,7 +2222,7 @@ fn enable_auto_renew_rejects_already_enabled() {
 		let call = crate::Call::<Test>::enable_auto_renew { content_hash };
 		assert_eq!(
 			DataRenewal::validate_renewal_signed(&who, &call).map(|_| ()),
-			Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into()),
+			Err(crate::RENEWAL_ALREADY_ENABLED.into()),
 		);
 	});
 }
@@ -2252,11 +2276,11 @@ fn enable_auto_renew_rejects_insufficient_capacity() {
 }
 
 /// `disable_auto_renew` dispatched in the same block as the renewal does NOT prevent the
-/// renewal. `on_initialize` captures the entry into `PendingAutoRenewals` as a snapshot;
-/// `do_process_auto_renewals` then iterates that vec without re-reading
+/// renewal. `on_initialize` captures the entry into `PendingRenewals` as a snapshot;
+/// `do_process_pending_renewals` then iterates that vec without re-reading
 /// `AutoRenewals[hash]`. So disabling between `on_initialize` and `apply_block_inherents`
 /// in the renewal block is a no-op for the in-flight cycle — the caller still sees one
-/// final `DataAutoRenewed` event. Subsequent cycles are correctly suppressed because
+/// final `DataRenewed` event. Subsequent cycles are correctly suppressed because
 /// `AutoRenewals[hash]` is gone for the next on_initialize sweep.
 ///
 /// This is only reachable once the registration has cleared its prepaid window
@@ -2284,7 +2308,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 
 		// Cycle 2 block: on_initialize captures the block-12 renewal into pending.
 		init_block(23);
-		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
+		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 
 		// Refresh authorization for cycle 2 (block-12 grant expired at block 22).
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
@@ -2298,7 +2322,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 
 		// The mandatory inherent still iterates the captured pending vec and renews.
 		assert_ok!(apply_block_inherents_full(None));
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -2332,7 +2356,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 
 		// Cycle 1 block: on_initialize captures the prepaid entry into pending.
 		init_block(12);
-		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
+		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 
 		// Root disables in the normal section — bypasses both the owner check and the
 		// prepaid-window check.
@@ -2345,7 +2369,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 		// Mandatory inherent: the captured pending renewal still fires (the prepayment
 		// honestly delivers one cycle), but the post-cycle flip must not reinsert.
 		assert_ok!(apply_block_inherents_full(None));
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -2357,7 +2381,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 	});
 }
 
-/// `do_process_auto_renewals` emits `AutoRenewalFailed` when `check_authorization`
+/// `do_process_pending_renewals` emits `RenewalFailed` when `check_authorization`
 /// returns `crate::CHAIN_PERMANENT_CAP_REACHED` — i.e. the chain-wide `PermanentStorageUsed`
 /// counter would exceed `MaxPermanentStorageSize` — even if the per-account budget is
 /// fine. The chain-wide gate only applies on cycles that actually charge, so this
@@ -2384,7 +2408,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
 
-		// Cycle 1 (prepaid) fires free at block 12 — chain-wide counter is not bumped.
+		// Cycle 1 (prepaid) fires free at block 12 — PermanentStorageUsed is not bumped.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
@@ -2408,7 +2432,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 
 		assert_ok!(apply_block_inherents_full(None));
 
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash,
 			account: who,
 		}));
@@ -2442,7 +2466,7 @@ fn auto_renew_obeys_updated_retention_period() {
 		// (saturating). Transactions[1] must NOT be pulled.
 		init_block(12);
 		assert!(
-			crate::PendingAutoRenewals::<Test>::get().is_empty(),
+			crate::PendingRenewals::<Test>::get().is_empty(),
 			"RP change should push the obsolete boundary out",
 		);
 		assert!(
@@ -2453,9 +2477,9 @@ fn auto_renew_obeys_updated_retention_period() {
 		// Block 22 is the NEW renewal boundary (`obsolete = 22 - 21 = 1`).
 		init_block(22);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
-		assert_eq!(crate::PendingAutoRenewals::<Test>::get().len(), 1);
+		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 		assert_ok!(apply_block_inherents_full(None));
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: who,
@@ -2532,7 +2556,7 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 			TransactionStorage::account_authorization_extent(bob).extra.bytes_permanent,
 			2000
 		);
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataAutoRenewed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
 			account: bob,
@@ -2598,11 +2622,11 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		);
 
 		// Cycle 2 at block 23 must charge another 2000 against a per-account cap
-		// of 3000 already at 2000 → AutoRenewalFailed on the per-account axis (not
+		// of 3000 already at 2000 → RenewalFailed on the per-account axis (not
 		// on expiration — refresh kept the auth alive).
 		init_block(23);
 		assert_ok!(apply_block_inherents_full(None));
-		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalFailed {
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::RenewalFailed {
 			content_hash,
 			account: who,
 		}));
@@ -2957,27 +2981,31 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 	});
 }
 
-// ---- runtime-API composition helpers ----
-
-/// `account_authorization` (runtime-API summary) composes the storage pallet's native
-/// extent with this pallet's `PermanentExtent`; `None` when missing or expired.
+/// What `get_active_authorization` hands its callers with this pallet wired: the
+/// expiration, both allowances, and the renew quota in `extra` — and nothing once the
+/// authorization expires.
 #[test]
-fn account_authorization_returns_none_when_missing_or_expired() {
+fn active_authorization_exposes_the_permanent_extent() {
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let who = 1;
+		let scope = AuthorizationScope::Account(who);
+		let active = || TransactionStorage::get_active_authorization(&scope);
 
 		// No authorization yet.
-		assert_eq!(DataRenewal::account_authorization(who), None);
+		assert!(active().is_none());
 
-		// Authorize, then advance past expiry.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 4000));
-		let auth = DataRenewal::account_authorization(who).expect("active authorization");
-		assert_eq!(auth.bytes_allowance, 4000);
-		assert_eq!(auth.bytes_permanent_used, 0);
+		let auth = active().expect("active authorization");
+		// Granted at block 1, `AuthorizationPeriod` is 10 in the mock.
+		assert_eq!(auth.expiration, 11);
+		assert_eq!(auth.extent.bytes_allowance, 4000);
+		assert_eq!(auth.extent.transactions_allowance, 5);
+		assert_eq!(auth.extent.extra, PermanentExtent { bytes_permanent: 0 });
 
+		// Past expiry nothing is reported.
 		run_to_block(100, || None);
-		assert_eq!(DataRenewal::account_authorization(who), None);
+		assert!(active().is_none());
 	});
 }
 
@@ -3085,7 +3113,7 @@ fn try_state_detects_counter_drift() {
 		crate::PermanentStorageUsed::<Test>::put(2000);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
 		);
 
 		// Counter below the on-chain renewed sum: under-count, the direction that lets real
@@ -3107,7 +3135,7 @@ fn try_state_detects_counter_drift() {
 		);
 		assert_err!(
 			DataRenewal::do_try_state(System::block_number()),
-			"PermanentStorageUsed != Σ renewed sizes + Σ paid auto-renewal sizes",
+			"PermanentStorageUsed != Σ renewed sizes + Σ paid registration sizes",
 		);
 	});
 }

@@ -1,7 +1,8 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
+import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
+import type { SignerTxCreator } from "polkadot-api/tx-creator";
 import { getWsProvider, WsEvent } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
@@ -365,7 +366,7 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
  * const bulletinClient = createBulletinClient?.(signer);
  * ```
  */
-export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => BulletinClient) | undefined {
+export function useCreateBulletinClient(): ((signer?: SignerTxCreator) => BulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
   const network = useNetwork();
@@ -401,7 +402,7 @@ export function useCreateBulletinClient(): ((signer?: PolkadotSigner) => Bulleti
     const descriptor = network?.descriptor ?? bulletin_paseo_next_v2;
     const cache = cacheRef.current;
     const NO_SIGNER = {} as object;
-    return (signer?: PolkadotSigner) => {
+    return (signer?: SignerTxCreator) => {
       const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
       let bulletin = cache.get(key);
       if (!bulletin && providers) {

@@ -8,6 +8,9 @@
 # scripts/get_polkadot_binaries.sh
 /.polkadot-binaries/
 
+# External runtime checkouts and their WASM, from `just build-external-runtime`
+/.external-runtimes/
+
 # OS
 .DS_Store
 Thumbs.db

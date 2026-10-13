@@ -185,7 +185,7 @@ jobs:
           mode: consume
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           targets: "wasm32v1-none"
           components: "rust-src"
@@ -204,8 +204,6 @@ jobs:
         uses: ./.github/actions/build-external-runtime
         with:
           name: ${{ matrix.runtime.name }}
-          repo: ${{ matrix.runtime.external_runtime.repo }}
-          ref: ${{ matrix.runtime.external_runtime.ref }}
           features: try-runtime
 
       - name: Run ${{ matrix.runtime.name }} (${{ matrix.runtime.instance }}) Runtime Checks

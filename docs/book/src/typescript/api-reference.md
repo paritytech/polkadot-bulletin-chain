@@ -7,9 +7,11 @@ Reference for the `@parity/bulletin-sdk` package.
 The primary client. It owns its PAPI connection (built from `providers()[0]`) and exposes storage, authorization, and renewal operations.
 
 ```typescript
+import type { SignerTxCreator } from 'polkadot-api/tx-creator';
+
 class BulletinClient implements BulletinClientInterface {
   readonly api: BulletinTypedApi;       // typed PAPI API, for your own queries
-  readonly signer?: PolkadotSigner;     // upload signer (undefined → unsigned-only)
+  readonly signer?: SignerTxCreator;    // upload signer (undefined → unsigned-only)
   readonly config: ResolvedClientConfig;
 
   constructor(options: BulletinClientOptions);
@@ -25,7 +27,10 @@ class BulletinClient implements BulletinClientInterface {
 | `authorizeAccount(who, transactions, bytes)` | `AuthCallBuilder` | Authorize one account |
 | `authorizeAccount(entries)` | `AuthCallBuilder` | Authorize many atomically (`Utility.batch_all`) |
 | `authorizePreimage(contentHash, maxSize)` | `AuthCallBuilder` | Authorize a specific content hash |
-| `renew(block, index)` | `CallBuilder` | Renew the item stored at `(block, index)` |
+| `renew(ref)` | `CallBuilder` | Schedule a one-shot renewal; `ref` is `{ block, index }` or a content hash (legacy immediate renew on pre-`TransactionRef` runtimes) |
+| `forceRenew(ref)` | `CallBuilder` | Renew immediately; rejects with `UNSUPPORTED_OPERATION` on runtimes without `force_renew` |
+| `enableAutoRenew(contentHash)` | `CallBuilder` | Register recurring auto-renewal; rejects with `UNSUPPORTED_OPERATION` on runtimes without the call |
+| `disableAutoRenew(contentHash)` | `CallBuilder` | Cancel a renewal registration; refused while its next cycle is prepaid |
 | `refreshAccountAuthorization(who)` | `AuthCallBuilder` | Extend an account authorization's expiry |
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Extend a preimage authorization's expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
@@ -42,8 +47,8 @@ Extends `Partial<ClientConfig>`.
 ```typescript
 interface BulletinClientOptions extends Partial<ClientConfig> {
   providers: () => JsonRpcProvider[]; // REQUIRED for uploads; providers()[0] drives chainHead
-  uploadSigner?: PolkadotSigner;      // omit for an unsigned-only client
-  authorizerSigner?: PolkadotSigner;  // required to call authorize*/refresh*
+  uploadSigner?: SignerTxCreator;     // omit for an unsigned-only client
+  authorizerSigner?: SignerTxCreator; // required to call authorize*/refresh*
   descriptor?: unknown;               // papi descriptor; omit → getUnsafeApi()
 }
 ```
@@ -57,7 +62,7 @@ interface ClientConfig {
   createManifest?: boolean;           // default true
   txTimeout?: number;                 // default 420_000 ms (per tx)
   providers?: () => JsonRpcProvider[];
-  authorizerSigner?: PolkadotSigner;
+  authorizerSigner?: SignerTxCreator;
   blockLimits?: BlockLimits;          // chain block weight/length caps
 }
 ```
@@ -80,7 +85,7 @@ class SubmitBuilder {
 
 ### CallBuilder
 
-Returned by `renew` and the `removeExpired*` methods.
+Returned by the renewal and `removeExpired*` methods.
 
 ```typescript
 class CallBuilder {

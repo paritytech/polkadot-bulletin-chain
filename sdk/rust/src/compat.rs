@@ -61,7 +61,8 @@ pub enum RenewAdapter {
 /// Resolve the encoder for the renewal calls on the connected chain by hashing
 /// the live item — `DataRenewal.renew` when the pallet exists, otherwise
 /// `TransactionStorage.renew` — and looking it up in the registry. Fails
-/// closed on an absent or unknown shape.
+/// closed: [`Error::RenewalUnavailable`] when neither pallet has `renew`,
+/// [`Error::RenewalFailed`] on an unknown shape.
 ///
 /// Keys pair the hosting pallet with the item hash: subxt's per-item hash
 /// covers only the call's type tree, and the renewal split moved `renew`
@@ -73,7 +74,7 @@ pub fn renew_adapter(live: &subxt::Metadata) -> Result<RenewAdapter> {
 	} else if let Some(hash) = live_call_hash(live, "TransactionStorage", "renew") {
 		("TransactionStorage", hash)
 	} else {
-		return Err(Error::RenewalFailed("renew is not available on this chain".into()));
+		return Err(Error::RenewalUnavailable);
 	};
 	renew_registry().get(&(pallet, hash)).copied().ok_or_else(|| {
 		Error::RenewalFailed(format!(
@@ -175,5 +176,29 @@ mod tests {
 	#[test]
 	fn registry_keys_are_distinct() {
 		assert_eq!(renew_registry().len(), 3);
+	}
+
+	/// Runtimes built without `pallet-bulletin-data-renewal` and without the
+	/// pre-split `TransactionStorage.renew` report `UNSUPPORTED_OPERATION`, so
+	/// callers can tell "no renewal here" apart from a failed renewal.
+	#[test]
+	fn missing_renew_call_error() {
+		use subxt::ext::frame_metadata::{RuntimeMetadata, RuntimeMetadataPrefixed};
+
+		let mut prefixed =
+			RuntimeMetadataPrefixed::decode(&mut &include_bytes!("../../metadata.scale")[..])
+				.unwrap();
+		let RuntimeMetadata::V16(metadata) = &mut prefixed.1 else {
+			panic!("committed metadata is not V16");
+		};
+		metadata
+			.pallets
+			.retain(|pallet| pallet.name != "DataRenewal" && pallet.name != "TransactionStorage");
+		let without_renewal = subxt::Metadata::try_from(prefixed).unwrap();
+
+		let error = renew_adapter(&without_renewal).unwrap_err();
+
+		assert!(matches!(error, Error::RenewalUnavailable), "unexpected error: {error:?}");
+		assert_eq!(error.code(), "UNSUPPORTED_OPERATION");
 	}
 }

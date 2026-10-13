@@ -75,7 +75,8 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
     used: {
       transactions: BigInt(extent?.transactions ?? 0),
       bytesEphemeral: BigInt(extent?.bytes ?? 0n),
-      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+      // `extra` is the renewal pallet's single-field `PermanentExtent`, which PAPI unwraps to a bigint.
+      bytesPermanent: BigInt(extent?.extra ?? 0n),
     },
     allowance: {
       transactions: extentAllowanceTransactions(extent),
@@ -105,9 +106,15 @@ export interface RawTransactionInfo {
   kind?: { type: EntryKind };
 }
 
-/** Entry kind of a raw `Transactions` entry, tolerant of pre-split runtimes. */
+/**
+ * Entry kind of a raw `Transactions` entry, tolerant of pre-split runtimes.
+ *
+ * Runtimes that ship without `pallet-bulletin-data-renewal` wire `EntryMeta = ()`, which
+ * decodes to nothing — there is no renewal on such a chain, so every entry is a `Store`.
+ */
 export function entryKindOf(info: RawTransactionInfo | undefined): EntryKind | undefined {
-  return info?.meta?.type ?? info?.kind?.type;
+  if (!info) return undefined;
+  return info.meta?.type ?? info.kind?.type ?? "Store";
 }
 
 // Account authorization state

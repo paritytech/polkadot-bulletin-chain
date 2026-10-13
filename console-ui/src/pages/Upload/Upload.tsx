@@ -122,7 +122,7 @@ export function Upload() {
   }, [api, inputMode, textData, fileData, hashAlgorithm, getData]);
 
   const hasAccountAuth =
-    selectedAccount?.polkadotSigner &&
+    selectedAccount?.txCreator &&
     authorization &&
     authorization.bytes >= BigInt(dataSize) &&
     authorization.transactions > 0n;
@@ -205,7 +205,7 @@ export function Upload() {
           unsigned: true,
         });
       } else {
-        const bulletinClient = createBulletinClient!(selectedAccount!.polkadotSigner);
+        const bulletinClient = createBulletinClient!(selectedAccount!.txCreator);
         const items = [{ data, codec: cidCodec, hashAlgo: hashAlgorithm }];
         const { cids } = await bulletinClient
           .submit(await bulletinClient.estimateUpload(items), blobFromItems(items))

@@ -139,8 +139,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased =
-		(pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage<Runtime>,);
+	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -180,7 +179,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-paseo"),
 	authoring_version: 1,
-	spec_version: 1_000_022,
+	spec_version: 1_000_026,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -341,6 +340,7 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
 	type RelayParentOffset = ConstU32<0>;
+	type SchedulingSignatureVerifier = ();
 }
 
 type ConsensusHook = cumulus_pallet_aura_ext::FixedVelocityConsensusHook<
@@ -697,6 +697,10 @@ impl_runtime_apis! {
 		fn relay_parent_offset() -> u32 {
 			0
 		}
+
+		fn max_claim_queue_offset() -> u8 {
+			cumulus_pallet_parachain_system::Pallet::<Runtime>::max_claim_queue_offset()
+		}
 	}
 
 	impl cumulus_primitives_aura::AuraUnincludedSegmentApi<Block> for Runtime {
@@ -941,7 +945,7 @@ impl_runtime_apis! {
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
 		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
-			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+			HopPromotion::can_account_promote(&who, data_len)
 		}
 
 		fn create_promotion_extrinsic(
@@ -968,7 +972,7 @@ impl_runtime_apis! {
 		}
 
 		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
-			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+			HopPromotion::is_promoted_on_chain(hash)
 		}
 	}
 
@@ -976,22 +980,21 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_data_renewal::Pallet::<Runtime>::account_authorization(
-				account,
-			)
+			use pallet_bulletin_transaction_storage::AuthorizationScope;
+
+			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
+				.map(|auth| auth.to_account_authorization(auth.extent.extra.bytes_permanent))
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+			TransactionStorage::can_store(&account, data_len)
 		}
 
 		fn can_renew(
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_data_renewal::Pallet::<Runtime>::can_renew(
-				&account, &entry,
-			)
+			DataRenewal::can_renew(&account, &entry)
 		}
 	}
 
@@ -1120,6 +1123,11 @@ impl_runtime_apis! {
 						fun: Fungible(ExistentialDeposit::get()),
 					}
 				}
+
+				/// `Utility::batch`, so weighing a `Transact` recurses over every nested call.
+				fn batch_call(calls: Vec<RuntimeCall>) -> Option<RuntimeCall> {
+					Some(RuntimeCall::Utility(pallet_utility::Call::<Runtime>::batch { calls }))
+				}
 			}
 
 			parameter_types! {
@@ -1229,10 +1237,10 @@ impl_runtime_apis! {
 				}
 
 				fn alias_origin() -> Result<(Location, Location), BenchmarkError> {
-					Ok((
-						Location::new(1, [Parachain(1000)]),
-						Location::new(1, [Parachain(1000), AccountId32 { id: [111u8; 32], network: None }]),
-					))
+					// Worst case: `AuthorizedAliasers`, the last and priciest `Aliasers` entry.
+					Ok(parachains_common::benchmarking::set_up_worst_case_authorized_alias::<
+						Runtime,
+					>())
 				}
 			}
 

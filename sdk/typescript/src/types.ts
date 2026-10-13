@@ -6,7 +6,7 @@
  */
 
 import type { CID } from "multiformats/cid"
-import type { PolkadotSigner } from "polkadot-api"
+import type { SignerTxCreator } from "polkadot-api/tx-creator"
 
 /**
  * CID codec types supported by Bulletin Chain.
@@ -330,8 +330,7 @@ export type UploadCallback = (event: UploadEvent) => void
  * Transaction status event types
  */
 export enum TxStatus {
-  Signed = "signed",
-  Validated = "validated",
+  Created = "created",
   Broadcasted = "broadcasted",
   InBlock = "in_block",
   Finalized = "finalized",
@@ -341,11 +340,10 @@ export enum TxStatus {
 }
 
 /**
- * Transaction status event types (mirrors PAPI's signSubmitAndWatch events)
+ * Transaction status event types (mirrors PAPI's createSubmitAndWatch events)
  */
 export type TransactionStatusEvent =
-  | { type: TxStatus.Signed; txHash: string; chunkIndex?: number }
-  | { type: TxStatus.Validated; chunkIndex?: number }
+  | { type: TxStatus.Created; txHash: string; chunkIndex?: number }
   | { type: TxStatus.Broadcasted; chunkIndex?: number }
   | {
       type: TxStatus.InBlock
@@ -548,7 +546,7 @@ export interface ClientConfig {
    * Deliberately separate from the upload signer so an Authorizer key
    * is never used by accident for uploads (and vice-versa).
    */
-  authorizerSigner?: PolkadotSigner
+  authorizerSigner?: SignerTxCreator
   /**
    * Wire-level submission strategy. Today only `"nonce-tracking"` is
    * implemented; the field exists so additional strategies can be added

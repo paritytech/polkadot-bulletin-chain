@@ -23,6 +23,7 @@ const SUPPORTED_EXTENSIONS = [
   { id: "subwallet-js", name: "SubWallet", icon: "S" },
   { id: "talisman", name: "Talisman", icon: "T" },
   { id: "fearless-wallet", name: "Fearless", icon: "F" },
+  { id: "polkagate", name: "PolkaGate", icon: "G" },
 ];
 
 function ExtensionList() {

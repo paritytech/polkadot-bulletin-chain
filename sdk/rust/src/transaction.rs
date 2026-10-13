@@ -17,7 +17,6 @@ use crate::{
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
 use bulletin_transaction_storage_primitives::TransactionRef;
-use codec::Decode;
 use std::{
 	collections::{BTreeSet, HashMap, HashSet},
 	sync::Arc,
@@ -35,28 +34,10 @@ use subxt_signer::sr25519::Keypair;
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
-/// `TransactionStorage::Authorizations` values, decoded with plain SCALE instead of through the
-/// subxt-generated type.
-///
-/// The renewal split renamed `AuthorizationExtent::bytes_permanent` to `extra` (an opaque
-/// consumer-pallet payload) without moving it, so the encoding is byte-identical across the split
-/// but the field *names* are not. Subxt matches fields by name against the connected chain's
-/// metadata, so the generated accessor cannot read authorizations from a runtime that predates the
-/// split — which is every deployed chain until it upgrades. Decoding positionally reads both, the
-/// same compatibility the TypeScript SDK keeps for the renewal extrinsics.
-///
-/// The layout is frozen on the runtime side by
-/// `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
-#[derive(Decode)]
-struct StoredAuthorization {
-	transactions: u32,
-	transactions_allowance: u32,
-	bytes: u64,
-	/// `bytes_permanent` pre-split, `extra` after it.
-	_extra: u64,
-	bytes_allowance: u64,
-	expiration: u32,
-}
+/// Runtime API exposing the authorization summary, and the method on it that
+/// [`TransactionClient::query_account_authorization`] calls. Absent on runtimes that predate them.
+const AUTHORIZATION_API: &str = "BulletinTransactionStorageApi";
+const AUTHORIZATION_METHOD: &str = "account_authorization";
 
 /// Convert the primitives `TransactionRef` into the subxt-generated one.
 fn to_runtime_ref(
@@ -669,51 +650,55 @@ impl TransactionClient {
 	/// the transaction — it only forfeits the priority boost — so the returned remaining
 	/// values are a soft-budget preflight, not a hard precondition.
 	///
-	/// Returns `None` if no authorization exists or it has expired.
+	/// Returns `None` if no authorization exists or it has expired, and
+	/// [`Error::AuthorizationApiUnavailable`] on a runtime without [`AUTHORIZATION_API`].
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope as OnChainScope;
+		self.ensure_authorization_api_available()?;
 
-		let storage_query = bulletin::storage()
-			.transaction_storage()
-			.authorizations(OnChainScope::Account(who.clone()));
+		let call = bulletin::apis()
+			.bulletin_transaction_storage_api()
+			.account_authorization(who.clone());
 
-		// The key is encoded from the chain's own metadata (unchanged by the renewal split); only
-		// the value is decoded by hand — see `StoredAuthorization`.
-		let key = self
+		let maybe_auth = self
 			.api
-			.storage()
-			.address_bytes(&storage_query)
-			.map_err(|e| Error::NetworkError(format!("Failed to encode storage key: {e:?}")))?;
-
-		let latest_block = self
-			.api
-			.blocks()
+			.runtime_api()
 			.at_latest()
 			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?;
+			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?
+			.call(call)
+			.await
+			.map_err(|e| Error::NetworkError(format!("Failed to query authorization: {e:?}")))?;
 
-		let current_block_number = latest_block.number();
+		// The runtime API already filters out expired authorizations.
+		let Some(auth) = maybe_auth else { return Ok(None) };
 
-		let maybe_auth =
-			latest_block.storage().fetch_raw(key).await.map_err(|e| {
-				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
-			})?;
-
-		let Some(bytes) = maybe_auth else { return Ok(None) };
-
-		let auth = StoredAuthorization::decode(&mut &bytes[..])
-			.map_err(|e| Error::NetworkError(format!("Failed to decode authorization: {e}")))?;
-
-		if auth.expiration <= current_block_number {
-			return Ok(None); // expired
-		}
-
-		let transactions_remaining = auth.transactions_allowance.saturating_sub(auth.transactions);
-		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes);
+		let transactions_remaining =
+			auth.transactions_allowance.saturating_sub(auth.transactions_used);
+		// `bytes_permanent_used` is checked against `bytes_allowance` on its own and never adds to
+		// `bytes_used`, so a `store` preflight looks at `bytes_used` alone.
+		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes_used);
 		Ok(Some((transactions_remaining, bytes_remaining)))
+	}
+
+	/// Reject up front on a runtime that predates [`AUTHORIZATION_API`], where the call would
+	/// otherwise fail with subxt's metadata-validation error instead of the actual reason.
+	///
+	/// Checks the method rather than just the trait: a runtime can carry the trait at an older
+	/// version that does not yet declare [`AUTHORIZATION_METHOD`].
+	fn ensure_authorization_api_available(&self) -> Result<()> {
+		let has_method = self
+			.api
+			.metadata()
+			.runtime_api_trait_by_name(AUTHORIZATION_API)
+			.is_some_and(|api| api.method_by_name(AUTHORIZATION_METHOD).is_some());
+
+		if !has_method {
+			return Err(Error::AuthorizationApiUnavailable);
+		}
+		Ok(())
 	}
 
 	/// Check that sufficient authorization exists for a store operation.
@@ -729,13 +714,22 @@ impl TransactionClient {
 	///
 	/// If the query itself fails (e.g., network error), the error is returned
 	/// so the caller can decide whether to proceed.
+	///
+	/// A runtime without [`AUTHORIZATION_API`] is the one exception: there is nothing to
+	/// preflight against, and a soft check must not block a `store` the chain would accept,
+	/// so the check passes. Matches the TypeScript SDK, which also proceeds when it cannot
+	/// read the authorization.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,
 		required_transactions: u32,
 		required_bytes: u64,
 	) -> Result<()> {
-		let auth_data = self.query_account_authorization(who).await?;
+		let auth_data = match self.query_account_authorization(who).await {
+			Ok(auth_data) => auth_data,
+			Err(Error::AuthorizationApiUnavailable) => return Ok(()),
+			Err(e) => return Err(e),
+		};
 
 		match auth_data {
 			Some((transactions, bytes)) => {
@@ -950,6 +944,8 @@ impl TransactionClient {
 	/// does not renew synchronously. For immediate renewal use
 	/// [`force_renew`](Self::force_renew).
 	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without a `renew` call.
+	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
 	///
@@ -1008,6 +1004,8 @@ impl TransactionClient {
 	/// `(block, index)` tuple or a [`ContentHash`]. Requires a runtime that
 	/// ships `TransactionRef` / `force_renew`; legacy positional runtimes fail
 	/// closed.
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without a `renew` call.
 	pub async fn force_renew(
 		&self,
 		entry: impl Into<TransactionRef<u32>>,
@@ -1161,7 +1159,6 @@ pub struct RenewReceipt {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use codec::Encode;
 
 	fn plan_of(datas: &[&[u8]]) -> ChunkPlan {
 		let mut chunk_cids = Vec::new();
@@ -1198,23 +1195,5 @@ mod tests {
 		assert_eq!(err.code(), "INVALID_CONFIG");
 		let skip: BTreeSet<usize> = [2usize].into_iter().collect();
 		assert!(TransactionClient::assert_unique_content_hashes(&plan, &skip).is_ok());
-	}
-
-	/// Mirror of the runtime-side freeze test: the bytes a pre-split chain wrote must land in the
-	/// fields `query_account_authorization` reads.
-	#[test]
-	fn stored_authorization_decodes_pre_split_layout() {
-		// extent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }
-		// followed by `expiration`.
-		let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u32).encode();
-
-		let auth = StoredAuthorization::decode(&mut &pre_split[..]).unwrap();
-
-		assert_eq!(auth.transactions, 1);
-		assert_eq!(auth.transactions_allowance, 5);
-		assert_eq!(auth.bytes, 100);
-		assert_eq!(auth._extra, 700);
-		assert_eq!(auth.bytes_allowance, 900);
-		assert_eq!(auth.expiration, 50);
 	}
 }

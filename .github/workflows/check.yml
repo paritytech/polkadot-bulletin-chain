@@ -36,13 +36,13 @@ jobs:
         run: cat .github/env >> $GITHUB_ENV
 
       - name: Install Rust toolchains
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: nightly
           components: rustfmt
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
           toolchain: ${{ env.RUST_STABLE_VERSION }}
 
@@ -58,7 +58,7 @@ jobs:
 
       - name: Install taplo
         if: steps.cache-taplo.outputs.cache-hit != 'true'
-        run: cargo install taplo-cli --version ${{ env.TAPLO_VERSION }}
+        run: cargo install taplo-cli --locked --version ${{ env.TAPLO_VERSION }}
 
       - name: Cache zepter
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -98,7 +98,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: "bulletin-cache-clippy"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -134,7 +134,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: "bulletin-cache-tests-${{ matrix.target.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -178,7 +178,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           shared-key: "bulletin-cache-benchmarks-${{ matrix.runtime.name }}"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -191,7 +191,7 @@ jobs:
 
       - name: Run benchmarks (${{ matrix.runtime.name }})
         run: |
-          python3 ./scripts/cmd/cmd.py bench --runtime ${{ matrix.runtime.name }} --steps 2 --repeat 1 --profile release
+          python3 ./scripts/cmd/cmd.py bench --runtime ${{ matrix.runtime.name }} --steps 5 --repeat 1 --profile release
 
       - name: Run release check (${{ matrix.runtime.name }})
         run: |

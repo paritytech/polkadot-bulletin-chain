@@ -1,19 +1,13 @@
 name: Build external runtime
 description: |
-  Resolve an external runtime ref to a commit sha, restore the per-sha WASM
-  build cache, and build the runtime via `just build-external-runtime`.
-  Outputs the resolved sha and the built WASM path. Callers only need to
-  checkout the repo first.
+  Restore the per-sha WASM cache and build the runtime via
+  `just build-external-runtime`. Repo, ref, and paths all come from
+  scripts/runtimes-matrix.json via `just external-runtime-paths`. Callers only
+  need to checkout the repo first.
 
 inputs:
   name:
     description: Runtime name in scripts/runtimes-matrix.json.
-    required: true
-  repo:
-    description: Git URL of the external runtime repo.
-    required: true
-  ref:
-    description: Branch, tag, or pinned commit sha.
     required: true
   features:
     description: Cargo features to build with. Each feature set uses its own checkout and cache.
@@ -36,41 +30,25 @@ runs:
 
     # Key the WASM cache on the commit sha so re-runs skip the multi-minute
     # out-of-tree build.
-    - name: Resolve external runtime ref
+    - name: Resolve external runtime paths
       id: resolve
       shell: bash
+      working-directory: examples
       env:
-        REPO: ${{ inputs.repo }}
-        REF: ${{ inputs.ref }}
+        NAME: ${{ inputs.name }}
         FEATURES: ${{ inputs.features }}
       run: |
         set -euo pipefail
-        # A pinned commit sha needs no resolution (ls-remote only sees refs).
-        # POSIX sh here, no [[ =~ ]].
-        if echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
-          SHA="$REF"
-        else
-          SHA=$(git ls-remote "$REPO" "$REF" | awk '{print $1}' | head -n1)
-        fi
-        if [ -z "$SHA" ]; then
-          echo "Failed to resolve $REF in $REPO"
-          exit 1
-        fi
+        read -r SHA WASM_DIR _ KEY < <(just external-runtime-paths "$NAME" "$FEATURES")
         echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-        # Mirror the checkout-dir suffix logic of `build-external-runtime` in
-        # examples/justfile so the cache path matches the recipe's output dir.
-        if [ -n "$FEATURES" ]; then
-          SUFFIX="-$(echo "$FEATURES" | tr ',' '-' | tr -cd 'a-zA-Z0-9-')"
-        else
-          SUFFIX=""
-        fi
-        echo "variant-suffix=$SUFFIX" >> "$GITHUB_OUTPUT"
+        echo "wasm-dir=$WASM_DIR" >> "$GITHUB_OUTPUT"
+        echo "cache-key=$KEY" >> "$GITHUB_OUTPUT"
 
-    - name: Cache external runtime build
+    - name: Cache external runtime WASM
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
       with:
-        path: target/external-runtimes/${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}
-        key: external-runtime-${{ inputs.name }}${{ steps.resolve.outputs.variant-suffix }}-${{ steps.resolve.outputs.sha }}
+        path: ${{ steps.resolve.outputs.wasm-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
 
     - name: Build external runtime
       id: build

@@ -147,6 +147,8 @@ impl<T: Config> LeafValidator<T> for Tuple {
 		Ok(false)
 	}
 
+	// The binding is the `for_tuples!` accumulator; clippy's "return directly" would drop it.
+	#[allow(clippy::let_and_return)]
 	fn leaf_weight(call: &RuntimeCallOf<T>) -> Weight {
 		let mut weight = Weight::zero();
 		for_tuples!( #( weight = weight.saturating_add(Tuple::leaf_weight(call)); )* );

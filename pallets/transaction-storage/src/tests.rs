@@ -68,8 +68,6 @@ fn test_budget(transactions: u32, bytes: u64) -> AuthorizerBudget<u64> {
 
 const MAX_DATA_SIZE: u32 = DEFAULT_MAX_TRANSACTION_SIZE;
 
-mod runtime_api;
-
 /// `store` at `MaxBlockTransactions` reports `TooManyTransactions` and leaves the
 /// accumulator alone. Partial writes are already impossible — `#[pallet::call]` runs every
 /// dispatchable in a storage layer that undoes them on `Err` — so this pins the outcome,
@@ -923,7 +921,8 @@ fn try_state_detects_zero_authorization_allowance() {
 		// Authorization SCALE layout: extent(AuthorizationExtent), expiration(u64)
 		// AuthorizationExtent SCALE layout: transactions(u32), transactions_allowance(u32),
 		// bytes(u64), bytes_allowance(u64), extra(`()`, zero bytes)
-		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64); // all zero counters, bytes_allowance=0, expiration=100
+		// all zero counters, bytes_allowance=0, expiration=100
+		let corrupted_auth = (0u32, 0u32, 0u64, 0u64, 100u64);
 		let key = Authorizations::hashed_key_for(AuthorizationScope::Account(1u64));
 		unhashed::put_raw(&key, &corrupted_auth.encode());
 
@@ -1282,7 +1281,7 @@ fn genesis_populates_allowed_authorizers() {
 }
 
 /// Verify that `ProvideInherent::create_inherent` actually emits the composite inherent call
-/// when `PendingAutoRenewals` is non-empty, even with no storage proof in `InherentData`.
+/// when `PendingRenewals` is non-empty, even with no storage proof in `InherentData`.
 ///
 /// This is the direct test for "the block author will inject the inherent that drains pending
 /// renewals" — if `create_inherent` ever stops returning the call when only renewals (and no
@@ -2197,8 +2196,8 @@ fn store_records_extrinsic_index_in_transaction_info() {
 	});
 }
 
-/// Test to make sure we can actually access everything we need for build the
-/// output times for the runtime API.
+/// `TransactionInfo` carries every field the upstream `indexed_transactions` runtime
+/// API needs.
 #[test]
 fn transaction_info_projects_into_upstream_runtime_api_type() {
 	use bulletin_transaction_storage_primitives::cids::HashingAlgorithm as PalletHashingAlgorithm;
@@ -2254,4 +2253,67 @@ fn transaction_info_projects_into_upstream_runtime_api_type() {
 	assert_eq!(projected.hashing, HashingAlgorithm::Blake2b256);
 	assert_eq!(projected.cid_codec, RAW_CID_CODEC);
 	assert_eq!(projected.extrinsic_index, 7);
+}
+
+#[test]
+fn can_store_mirrors_store_validation() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+
+		// No authorization → can_store false, and the extrinsic would be rejected
+		// at validation time.
+		assert!(!TransactionStorage::can_store(&who, 100));
+		assert_noop!(
+			TransactionStorage::pre_dispatch_signed(&who, &Call::store { data: vec![0u8; 100] }),
+			InvalidTransaction::Payment,
+		);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 4000));
+
+		// Happy path.
+		assert!(TransactionStorage::can_store(&who, 100));
+		assert_ok!(TransactionStorage::pre_dispatch_signed(
+			&who,
+			&Call::store { data: vec![0u8; 100] }
+		));
+
+		// Oversize / zero-size rejected.
+		assert!(!TransactionStorage::can_store(&who, 0));
+		assert!(!TransactionStorage::can_store(&who, MAX_DATA_SIZE + 1));
+
+		// `store` saturates over the allowance and uses the priority boost — it is
+		// still valid, and can_store agrees.
+		assert!(TransactionStorage::can_store(&who, MAX_DATA_SIZE));
+
+		// Expired authorization → can_store false.
+		run_to_block(100, || None);
+		assert!(!TransactionStorage::can_store(&who, 100));
+	});
+}
+
+/// Each field of the runtime-API summary must come from the matching extent counter — the
+/// three `u64` byte counters and the two `u32` transaction counters are otherwise easy to
+/// transpose.
+#[test]
+fn to_account_authorization_maps_every_field() {
+	let authorization = super::Authorization {
+		extent: AuthorizationExtent {
+			transactions: 1,
+			transactions_allowance: 2,
+			bytes: 3,
+			extra: 4u64,
+			bytes_allowance: 5,
+		},
+		expiration: 6u32,
+	};
+
+	let summary = authorization.to_account_authorization(authorization.extent.extra);
+
+	assert_eq!(summary.transactions_used, 1);
+	assert_eq!(summary.transactions_allowance, 2);
+	assert_eq!(summary.bytes_used, 3);
+	assert_eq!(summary.bytes_permanent_used, 4);
+	assert_eq!(summary.bytes_allowance, 5);
+	assert_eq!(summary.expires_at, 6);
 }

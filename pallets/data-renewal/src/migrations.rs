@@ -121,12 +121,13 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// Number of `StorageValue`s actually relocated below; each costs a set + a clear.
 		let mut values_moved: u64 = 0;
 
-		// `PendingAutoRenewals` (StorageValue): transient per-block scratch. The pre-split
-		// `on_finalize` asserts it is drained every block, so it is always absent here —
-		// the move is belt-and-braces, kept so the relocation is complete by construction
-		// rather than by relying on an invariant in the pallet being split apart.
+		// `PendingAutoRenewals` (StorageValue, now [`crate::PendingRenewals`]): transient
+		// per-block scratch. The pre-split `on_finalize` asserts it is drained every block,
+		// so it is always absent here — the move is belt-and-braces, kept so the relocation
+		// is complete by construction rather than by relying on an invariant in the pallet
+		// being split apart.
 		let old_pending_key = old_prefix::<T>(b"PendingAutoRenewals");
-		let new_pending_key = crate::PendingAutoRenewals::<T>::hashed_key();
+		let new_pending_key = crate::PendingRenewals::<T>::hashed_key();
 		if let Some(raw) = sp_io::storage::get(&old_pending_key) {
 			sp_io::storage::set(&new_pending_key, &raw);
 			sp_io::storage::clear(&old_pending_key);
@@ -173,15 +174,8 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 	) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
 		use polkadot_sdk_frame::prelude::ensure;
 
-		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
-		let mut previous = old_auto_prefix.to_vec();
-		let mut renewals: u64 = 0;
-		while let Some(key) =
-			sp_io::storage::next_key(&previous).filter(|k| k.starts_with(&old_auto_prefix))
-		{
-			previous = key;
-			renewals = renewals.saturating_add(1);
-		}
+		let renewals = count_keys(&old_prefix::<T>(b"AutoRenewals"));
+		let already_relocated = count_keys(&crate::Renewals::<T>::final_prefix());
 		let permanent_used = sp_io::storage::get(&old_prefix::<T>(b"PermanentStorageUsed"))
 			.and_then(|raw| u64::decode(&mut &raw[..]).ok());
 		// Raw bytes, not the decoded vec: the move must be byte-exact, and the value type
@@ -196,7 +190,7 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 			"AutoRenewals exceeds the single-block entry budget",
 		);
 
-		Ok(PreUpgradeState { renewals, permanent_used, pending }.encode())
+		Ok(PreUpgradeState { renewals, already_relocated, permanent_used, pending }.encode())
 	}
 
 	#[cfg(feature = "try-runtime")]
@@ -222,7 +216,10 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 				.map_err(|_| "relocated AutoRenewals entry is not current RenewalData layout")?;
 			post = post.saturating_add(1);
 		}
-		ensure!(post == pre.renewals, "AutoRenewals entry count changed across migration");
+		ensure!(
+			post == pre.renewals.saturating_add(pre.already_relocated),
+			"AutoRenewals entry count changed across migration"
+		);
 
 		// No `AutoRenewals` must remain under the old `TransactionStorage` prefix.
 		let old_auto_prefix = old_prefix::<T>(b"AutoRenewals");
@@ -250,10 +247,9 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 		// Compared as raw bytes so a value present only at the wrong prefix is caught even
 		// though `ValueQuery` would read it back as an empty vec either way.
 		ensure!(
-			sp_io::storage::get(&crate::PendingAutoRenewals::<T>::hashed_key())
-				.map(|raw| raw.to_vec()) ==
+			sp_io::storage::get(&crate::PendingRenewals::<T>::hashed_key()).map(|raw| raw.to_vec()) ==
 				pre.pending,
-			"PendingAutoRenewals not relocated byte-exactly"
+			"PendingRenewals not relocated byte-exactly"
 		);
 		ensure!(
 			sp_io::storage::get(&old_prefix::<T>(b"PendingAutoRenewals")).is_none(),
@@ -269,7 +265,23 @@ impl<T: Config> OnRuntimeUpgrade for RelocateFromTransactionStorage<T> {
 #[derive(Encode, Decode)]
 struct PreUpgradeState {
 	renewals: u64,
+	/// Entries already under the new prefix. Non-zero on a chain that has run the
+	/// relocation and taken renewals since — `post_upgrade` must not count those as
+	/// missing.
+	already_relocated: u64,
 	permanent_used: Option<u64>,
 	/// Raw `PendingAutoRenewals` bytes, so the move can be checked byte-exactly.
 	pending: Option<alloc::vec::Vec<u8>>,
+}
+
+/// Number of keys under `prefix`.
+#[cfg(feature = "try-runtime")]
+fn count_keys(prefix: &[u8]) -> u64 {
+	let mut previous = prefix.to_vec();
+	let mut count: u64 = 0;
+	while let Some(key) = sp_io::storage::next_key(&previous).filter(|k| k.starts_with(prefix)) {
+		previous = key;
+		count = count.saturating_add(1);
+	}
+	count
 }

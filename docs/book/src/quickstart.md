@@ -5,7 +5,7 @@ This tutorial walks you through storing your first data on Bulletin Chain in und
 ## Prerequisites
 
 - Node.js 18+ or Rust toolchain
-- A Polkadot-compatible wallet (Polkadot.js extension, Talisman, etc.)
+- A Polkadot-compatible wallet (Polkadot.js extension, Talisman, PolkaGate, etc.)
 
 ## Option 1: Use the Console UI (Easiest)
 

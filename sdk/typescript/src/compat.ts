@@ -35,6 +35,15 @@ export type RenewShape = "data-renewal" | "transaction-ref" | "positional"
 const RENEW_PALLETS = ["DataRenewal", "TransactionStorage"] as const
 export type RenewPallet = (typeof RENEW_PALLETS)[number]
 
+const RENEW_SHAPE_PALLET: Readonly<Record<RenewShape, RenewPallet>> = {
+  "data-renewal": "DataRenewal",
+  "transaction-ref": "TransactionStorage",
+  positional: "TransactionStorage",
+}
+
+export type AutoRenewCall = "enable_auto_renew" | "disable_auto_renew"
+export type RenewalCall = "renew" | AutoRenewCall
+
 /**
  * pallet → checksum → shape (see module docs for how keys are derived and
  * verified). Keys pair the hosting pallet with the checksum: PAPI's per-item
@@ -60,24 +69,38 @@ export const RENEW_REGISTRY: Readonly<
   },
 }
 
-/**
- * Checksum of `<pallet>.renew` in opaque metadata bytes; `null` when the
- * pallet or call is absent.
- */
-export function renewChecksum(
-  metadataBytes: Uint8Array,
-  pallet: RenewPallet = "TransactionStorage",
-): string | null {
-  const unified = unifyMetadata(decAnyMetadata(metadataBytes))
-  return getChecksumBuilder(getLookupFn(unified)).buildCall(pallet, "renew")
+export const AUTO_RENEW_REGISTRY: Readonly<
+  Record<RenewPallet, readonly string[]>
+> = {
+  DataRenewal: ["dpbc5ga56ract"],
+  TransactionStorage: ["dpbc5ga56ract"],
+}
+
+export interface RenewalSupport {
+  shape: RenewShape
+  autoRenewChecksums: Readonly<Record<AutoRenewCall, string | null>>
 }
 
 /**
- * Resolve the `renew` encoder shape for the connected chain: the newest
- * pallet hosting a `renew` call decides. Fails closed on an absent or
- * unknown shape.
+ * Checksum of `<pallet>.<call>` in opaque metadata bytes; `null` when the
+ * pallet or call is absent.
  */
-export function resolveRenewShape(metadataBytes: Uint8Array): RenewShape {
+export function renewalCallChecksum(
+  metadataBytes: Uint8Array,
+  pallet: RenewPallet,
+  call: RenewalCall,
+): string | null {
+  const unified = unifyMetadata(decAnyMetadata(metadataBytes))
+  return getChecksumBuilder(getLookupFn(unified)).buildCall(pallet, call)
+}
+
+/**
+ * Resolve the renewal calls of the connected chain: the newest pallet hosting
+ * a `renew` call decides the `renew` encoder and hosts the auto-renew calls.
+ * Fails closed on an absent or unknown `renew` shape; auto-renew is checked
+ * per call by {@link autoRenewPallet}, so it never blocks `renew`.
+ */
+export function renewalSupport(metadataBytes: Uint8Array): RenewalSupport {
   const unified = unifyMetadata(decAnyMetadata(metadataBytes))
   const builder = getChecksumBuilder(getLookupFn(unified))
   for (const pallet of RENEW_PALLETS) {
@@ -90,10 +113,37 @@ export function resolveRenewShape(metadataBytes: Uint8Array): RenewShape {
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
-    return shape
+    return {
+      shape,
+      autoRenewChecksums: {
+        enable_auto_renew: builder.buildCall(pallet, "enable_auto_renew"),
+        disable_auto_renew: builder.buildCall(pallet, "disable_auto_renew"),
+      },
+    }
   }
   throw new BulletinError(
     "renew is not available on this chain",
     ErrorCode.UNSUPPORTED_OPERATION,
   )
+}
+
+export function autoRenewPallet(
+  support: RenewalSupport,
+  call: AutoRenewCall,
+): RenewPallet {
+  const pallet = RENEW_SHAPE_PALLET[support.shape]
+  const checksum = support.autoRenewChecksums[call]
+  if (checksum === null) {
+    throw new BulletinError(
+      `${call} is not supported by this runtime`,
+      ErrorCode.UNSUPPORTED_OPERATION,
+    )
+  }
+  if (!AUTO_RENEW_REGISTRY[pallet].includes(checksum)) {
+    throw new BulletinError(
+      `${pallet}.${call} has an unsupported shape on this chain (checksum ${checksum}); a newer runtime may need an SDK upgrade`,
+      ErrorCode.UNSUPPORTED_OPERATION,
+    )
+  }
+  return pallet
 }

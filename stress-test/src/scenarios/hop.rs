@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use crate::{
 	client,
 	hop::{self, RecipientKeypair},
+	metrics::{metrics, LatencyKind},
 	report::{self, ScenarioResult},
 };
 
@@ -128,8 +129,13 @@ pub async fn run_submit_throughput(
 	let tps =
 		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
+	let label = format_payload_label(payload_size);
+	let variant = format!("hop-submit-{label}");
+	metrics().observe_latencies(&variant, LatencyKind::Inclusion, &lats);
+
 	let result = ScenarioResult {
-		name: format!("HOP submit {}", format_payload_label(payload_size)),
+		name: format!("HOP submit {label}"),
+		variant,
 		duration,
 		total_submitted: submitted,
 		total_confirmed: submitted,
@@ -293,8 +299,13 @@ pub async fn run_full_cycle(
 		0.0
 	};
 
+	let variant = "hop-full-cycle";
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
+
 	let result = ScenarioResult {
 		name: format!("HOP full-cycle {}", format_payload_label(payload_size)),
+		variant: variant.into(),
 		duration: total_duration,
 		total_submitted: submitted,
 		total_confirmed: claimed,
@@ -421,8 +432,13 @@ pub async fn run_group(
 		0.0
 	};
 
+	let variant = "hop-group";
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &submit_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &claim_lats);
+
 	let result = ScenarioResult {
 		name: format!("HOP group ×{num_recipients} {}", format_payload_label(payload_size)),
+		variant: variant.into(),
 		duration: claim_duration,
 		total_submitted: submitted.len() as u64,
 		total_confirmed: claimed,
@@ -537,12 +553,16 @@ pub async fn run_pool_fill(
 	let tps =
 		if duration.as_secs_f64() > 0.0 { submitted as f64 / duration.as_secs_f64() } else { 0.0 };
 
+	let variant = "hop-pool-fill";
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &lats);
+
 	let result = ScenarioResult {
 		name: format!(
 			"HOP pool-fill {}{}",
 			format_payload_label(payload_size),
 			if pool_full { " (full)" } else { "" }
 		),
+		variant: variant.into(),
 		duration,
 		total_submitted: submitted,
 		total_confirmed: submitted,
@@ -756,8 +776,13 @@ pub async fn run_mixed(
 	let submit_tps = submitted as f64 / duration.as_secs_f64();
 	let claim_tps = claimed as f64 / duration.as_secs_f64();
 
+	let variant = "hop-mixed";
+	metrics().observe_latencies(variant, LatencyKind::Inclusion, &s_lats);
+	metrics().observe_latencies(variant, LatencyKind::Retrieval, &c_lats);
+
 	let result = ScenarioResult {
 		name: format!("HOP mixed {}s {}", duration_secs, format_payload_label(payload_size)),
+		variant: variant.into(),
 		duration,
 		total_submitted: submitted,
 		total_confirmed: claimed,

@@ -12,18 +12,16 @@
  *  4. Tests disable_auto_renew: removes the entry, verifies it's cleared
  *  5. Re-enables auto-renewal for the expiry test
  *  6. Advances to the expiry block. There `TransactionStorage::on_initialize`
- *     ages the data out and queues it into `DataRenewal.PendingAutoRenewals`
+ *     ages the data out and queues it into `DataRenewal.PendingRenewals`
  *     for the same block's `process_pending_renewals` mandatory inherent.
- *  7. Injects the `DataRenewal.process_pending_renewals` inherent into that
- *     block via `dev_newBlock({ transactions })` and verifies the drain:
- *       - PendingAutoRenewals is emptied (taken by the inherent)
+ *  7. Builds the expiry block and verifies the drain:
+ *       - PendingRenewals is emptied (taken by the inherent)
  *       - TransactionByContentHash now points at the expiry block (renewed)
  *       - the recurring registration survives with `paid = false`
  *
- * Chopsticks does not natively synthesize custom pallet inherents (see
- * AcalaNetwork/chopsticks#1037 — it only learned the storage-pallet proof
- * inherent). This test therefore injects the mandatory renewal inherent
- * explicitly, which exercises the exact on-chain code path a collator runs.
+ * Chopsticks synthesizes the mandatory `DataRenewal.process_pending_renewals`
+ * inherent itself (AcalaNetwork/chopsticks#1064), so plain `dev_newBlock()`
+ * exercises the exact on-chain code path a collator runs.
  *
  * Usage:
  *   node check_auto_renew_chopsticks.js [endpoint] [wasm_path]
@@ -46,17 +44,10 @@ import {
   Bytes,
   Vector,
   Tuple,
-  decAnyMetadata,
-  unifyMetadata,
 } from "@polkadot-api/substrate-bindings";
 
 const endpoint = process.argv[2] || "wss://westend-bulletin-rpc.polkadot.io";
 const runtimeWasm = process.argv[3] || null;
-
-// The mandatory drain inherent. Indices come from metadata, not hardcoded: a
-// `construct_runtime` change would otherwise point them at some other call.
-const PALLET_NAME = "DataRenewal";
-const CALL_NAME = "process_pending_renewals";
 
 // ─── PAPI Typed Codecs ────────────────────────────────────────────────────
 //
@@ -132,53 +123,6 @@ function encodeHex(codec, value) {
   return "0x" + toHex(codec.enc(value));
 }
 
-/**
- * Encode a bare (unsigned) extrinsic wrapping a nullary call. Bare extrinsics
- * are how inherents reach the runtime: version byte = EXTRINSIC_FORMAT_VERSION
- * (5) with the bare type bits (0), followed by the pallet+call indices, all
- * behind a SCALE compact length prefix.
- */
-function bareInherentExtrinsic(palletIndex, callIndex) {
-  const EXTRINSIC_FORMAT_VERSION = 5;
-  const body = new Uint8Array([EXTRINSIC_FORMAT_VERSION, palletIndex, callIndex]);
-  // Compact length for < 64 bytes is a single byte: len << 2.
-  const prefixed = new Uint8Array([body.length << 2, ...body]);
-  return "0x" + toHex(prefixed);
-}
-
-/** Resolve `pallet.call` to its `(palletIndex, callIndex)` from runtime metadata. */
-async function resolveCallIndices(provider, palletName, callName) {
-  const meta = unifyMetadata(decAnyMetadata(await provider.send("state_getMetadata", [], false)));
-
-  const pallet = meta.pallets.find((p) => p.name === palletName);
-  if (!pallet) {
-    throw new Error(
-      `Pallet ${palletName} is absent from the runtime metadata (found: ${meta.pallets
-        .map((p) => p.name)
-        .join(", ")})`,
-    );
-  }
-  if (pallet.calls === undefined) {
-    throw new Error(`Pallet ${palletName} declares no calls`);
-  }
-
-  const callsType = meta.lookup.find((entry) => entry.id === pallet.calls.type);
-  if (callsType?.def.tag !== "variant") {
-    throw new Error(`Call type ${pallet.calls.type} of ${palletName} is not a variant`);
-  }
-
-  const variant = callsType.def.value.find((v) => v.name === callName);
-  if (!variant) {
-    throw new Error(
-      `${palletName} has no call ${callName} (found: ${callsType.def.value
-        .map((v) => v.name)
-        .join(", ")})`,
-    );
-  }
-
-  return { palletIndex: pallet.index, callIndex: variant.index };
-}
-
 // ─── Logging helpers ──────────────────────────────────────────────────────
 
 function logHeader(text) {
@@ -236,7 +180,7 @@ async function main() {
   const testData = new Uint8Array(2000).fill(42);
   const contentHash = blake2AsU8a(testData, 256);
   const renewalsKey = mapKey("DataRenewal", "Renewals", contentHash);
-  const pendingKey = storageKey("DataRenewal", "PendingAutoRenewals");
+  const pendingKey = storageKey("DataRenewal", "PendingRenewals");
   const contentHashKey = mapKey("TransactionStorage", "TransactionByContentHash", contentHash);
   console.log(`  Content hash: 0x${toHex(contentHash).slice(0, 16)}...`);
 
@@ -349,29 +293,26 @@ async function main() {
     logOk(`Block #${chain.head.number} produced`);
   }
 
-  // ── Expiry block: on_initialize queues PendingAutoRenewals, and the injected
-  //    process_pending_renewals inherent drains it in the same block. ──
-  logStep(7, "Building the expiry block with the process_pending_renewals inherent injected...");
-  const { palletIndex, callIndex } = await resolveCallIndices(provider, PALLET_NAME, CALL_NAME);
-  logOk(`${PALLET_NAME}.${CALL_NAME} resolved from metadata to (${palletIndex}, ${callIndex})`);
-  const inherent = bareInherentExtrinsic(palletIndex, callIndex);
-  console.log(`  Injecting inherent extrinsic: ${inherent}`);
+  // ── Expiry block: on_initialize queues PendingRenewals, and the
+  //    process_pending_renewals inherent (synthesized by Chopsticks) drains it
+  //    in the same block. ──
+  logStep(7, "Building the expiry block (Chopsticks supplies the process_pending_renewals inherent)...");
   await provider.send("dev_setStorage", [[[proofCheckedKey, "0x01"]]], false);
-  await provider.send("dev_newBlock", [{ transactions: [inherent] }], false);
+  await provider.send("dev_newBlock", [], false);
   if (chain.head.number < expiryBlock) {
     throw new Error(`Expected block #${expiryBlock}, got #${chain.head.number}`);
   }
   logOk(`Block #${chain.head.number} produced (on_finalize did not panic)`);
 
   // ── Verify the drain results ──
-  logStep(8, "Verifying the inherent drained PendingAutoRenewals and renewed the data...");
+  logStep(8, "Verifying the inherent drained PendingRenewals and renewed the data...");
 
   const pendingAfter = await provider.send("state_getStorage", [pendingKey], false);
   if (!pendingAfter || pendingAfter === "0x00") {
-    logOk("PendingAutoRenewals is empty (drained by the inherent)");
+    logOk("PendingRenewals is empty (drained by the inherent)");
   } else {
-    logFail(`PendingAutoRenewals not drained: ${pendingAfter}`);
-    throw new Error("process_pending_renewals did not drain PendingAutoRenewals");
+    logFail(`PendingRenewals not drained: ${pendingAfter}`);
+    throw new Error("process_pending_renewals did not drain PendingRenewals");
   }
 
   const contentHashAfter = await provider.send("state_getStorage", [contentHashKey], false);
@@ -407,7 +348,7 @@ async function main() {
   console.log("  Verified:");
   console.log("  - enable_auto_renew: DataRenewal.Renewals entry created");
   console.log("  - disable_auto_renew: DataRenewal.Renewals entry removed");
-  console.log("  - on_initialize queues expiring data into PendingAutoRenewals");
+  console.log("  - on_initialize queues expiring data into PendingRenewals");
   console.log("  - process_pending_renewals inherent drains it and renews the data");
   console.log("  - recurring registration survives with the prepayment consumed");
   console.log("");

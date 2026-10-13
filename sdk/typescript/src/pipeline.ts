@@ -79,12 +79,8 @@ import {
   type SubstrateClient,
 } from "@polkadot-api/substrate-client"
 import type { CID } from "multiformats/cid"
-import {
-  AccountId,
-  Binary,
-  getOfflineApi,
-  type PolkadotSigner,
-} from "polkadot-api"
+import { AccountId, Binary, getOfflineApi } from "polkadot-api"
+import type { SignerTxCreator, TxCreator } from "polkadot-api/tx-creator"
 import type { BulletinTypedApi } from "./client.js"
 import {
   createNonceTrackingStrategy,
@@ -307,15 +303,15 @@ function stallError(
 
 /** Minimal subset of the offline API surface used by pipelineStore. */
 interface OfflineTxBuilder {
-  sign(
-    from: PolkadotSigner,
-    extensions: {
+  create(
+    creator: TxCreator,
+    options: {
       nonce: number
       mortality:
         | {
             mortal: true
             period: number
-            startAtBlock: { height: number; hash: string }
+            at: { number: number; hash: string }
           }
         | { mortal: false }
     },
@@ -375,7 +371,7 @@ export function isDefaultCidConfig(item: {
  */
 export async function pipelineStore(
   api: BulletinTypedApi,
-  signer: PolkadotSigner | undefined,
+  signer: SignerTxCreator | undefined,
   items: PipelineItem[],
   config: PipelineConfig,
 ): Promise<PipelineResult> {
@@ -1919,14 +1915,14 @@ function runNoProgressWatchdog(
 interface SignBatchArgs {
   /**
    * Offline storage for signed mode. Pre-built offline-API offers faster
-   * signing than the online api's `tx.sign(…)`. Ignored when `signer`
+   * signing than the online api's `tx.create(…)`. Ignored when `signer`
    * is `undefined` — unsigned txs build bareTx via the online `api`.
    */
   storage: OfflineTransactionStorage
   /** Online api — used by unsigned mode to build `getBareTx()` per item. */
   api: BulletinTypedApi
   /** `undefined` for unsigned (preimage-auth) mode — emits bare extrinsics. */
-  signer: PolkadotSigner | undefined
+  signer: SignerTxCreator | undefined
   items: PipelineItem[]
   /** Fetch an item's bytes (cache-backed; loads lazily on first use). */
   loadData: (i: number) => Promise<Uint8Array>
@@ -1953,7 +1949,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
     ? {
         mortal: true as const,
         period: 64,
-        startAtBlock: { height: anchor.number, hash: anchor.hash },
+        at: { number: anchor.number, hash: anchor.hash },
       }
     : undefined
   const signed: string[] = new Array(indexes.length)
@@ -1977,7 +1973,7 @@ async function signBatch(args: SignBatchArgs): Promise<string[]> {
       if (nonce === undefined) {
         throw new Error(`signBatch: itemNonce[${i}] not assigned`)
       }
-      const bytes = await tx.sign(signer, { nonce, mortality: mortality! })
+      const bytes = await tx.create(signer, { nonce, mortality: mortality! })
       signed[k] = Binary.toHex(bytes)
     } else {
       // Unsigned (preimage-auth): build bareTx from the online api.

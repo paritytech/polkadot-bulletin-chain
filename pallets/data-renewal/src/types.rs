@@ -17,25 +17,25 @@
 
 //! Type definitions for the data-renewal pallet.
 
+use bulletin_transaction_storage_primitives::EntryKind;
 use codec::{Decode, Encode, MaxEncodedLen};
 
-/// Per-entry `EntryMeta` wired into the storage pallet; `handle_obsolete` decrements
-/// the chain-wide counter for aged-out [`EntryKind::Renew`] entries.
-///
-/// INVARIANT: identical (names and 1-byte encoding) to the retired `TransactionKind`,
-/// so pre-split `Transactions` entries decode without migration. Locked by the
-/// `entry_kind_encoding_is_frozen` test.
-#[derive(
-	Copy, Clone, Debug, PartialEq, Eq, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
-)]
-pub enum EntryKind {
-	/// Created by `store`; ages out silently.
-	#[default]
-	#[codec(index = 0)]
-	Store,
-	/// Created by `renew`/auto-renewal; counted in the chain-wide counter.
-	#[codec(index = 1)]
-	Renew,
+/// Required of the runtime-wired `EntryMeta`: construct the value this pallet writes
+/// on renewed entries, and recognize it. [`EntryKind`] is the stock implementor.
+pub trait RenewMeta {
+	/// The value written on entries appended by `renew`/auto-renewal.
+	fn renew() -> Self;
+	fn is_renew(&self) -> bool;
+}
+
+impl RenewMeta for EntryKind {
+	fn renew() -> Self {
+		Self::Renew
+	}
+
+	fn is_renew(&self) -> bool {
+		matches!(self, Self::Renew)
+	}
 }
 
 /// Per-authorization `AuthorizationExtra` wired into the storage pallet: the

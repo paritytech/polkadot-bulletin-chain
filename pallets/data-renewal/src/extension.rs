@@ -127,7 +127,7 @@ impl<T: Config> Pallet<T> {
 				let info = txs::Pallet::<T>::resolve_transaction_ref(entry)
 					.map_err(|_| crate::RENEWED_NOT_FOUND)?;
 				if crate::Renewals::<T>::contains_key(info.content_hash) {
-					return Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into());
+					return Err(crate::RENEWAL_ALREADY_ENABLED.into());
 				}
 				Pallet::<T>::check_renew_authorization(
 					&AuthorizationScope::Account(who.clone()),
@@ -163,7 +163,7 @@ impl<T: Config> Pallet<T> {
 			},
 			Call::enable_auto_renew { content_hash } => {
 				if crate::Renewals::<T>::contains_key(*content_hash) {
-					return Err(crate::AUTO_RENEWAL_ALREADY_ENABLED.into());
+					return Err(crate::RENEWAL_ALREADY_ENABLED.into());
 				}
 				let (block, index) = txs::Pallet::<T>::lookup_by_content_hash(*content_hash)
 					.ok_or(crate::RENEWED_NOT_FOUND)?;

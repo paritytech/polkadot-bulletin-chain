@@ -11,6 +11,11 @@ updates:
     directory: "/console-ui"
     schedule:
       interval: "weekly"
+    ignore:
+      # Playwright >=1.62 dropped Debian 11; blocked until CI moves off the
+      # bullseye-based ci-unified image.
+      - dependency-name: "@playwright/test"
+        versions: [">=1.62"]
     groups:
       console-ui-deps:
         applies-to: version-updates

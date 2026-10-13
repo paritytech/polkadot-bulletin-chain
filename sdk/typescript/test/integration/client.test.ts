@@ -16,7 +16,7 @@ import { randomBytes } from "node:crypto"
 import { blake2b } from "@noble/hashes/blake2.js"
 import { sr25519CreateDerive } from "@polkadot-labs/hdkd"
 import { DEV_MINI_SECRET, ss58Address } from "@polkadot-labs/hdkd-helpers"
-import { getPolkadotSigner } from "polkadot-api/signer"
+import { getTxCreator } from "polkadot-api/tx-creator"
 import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
@@ -96,7 +96,7 @@ describe("BulletinClient Integration Tests", {
   beforeAll(async () => {
     const derive = sr25519CreateDerive(DEV_MINI_SECRET)
     const aliceKeyPair = derive("//Alice")
-    const aliceSigner = getPolkadotSigner(
+    const aliceSigner = getTxCreator(
       aliceKeyPair.publicKey,
       "Sr25519",
       aliceKeyPair.sign,
@@ -108,7 +108,7 @@ describe("BulletinClient Integration Tests", {
     // user. Signing `authorize_account` with Alice fails with `BadSigner`
     // because the `EnsureAllowedAuthorizers<T>` origin check rejects her.
     const eveKeyPair = derive("//Eve")
-    const eveSigner = getPolkadotSigner(
+    const eveSigner = getTxCreator(
       eveKeyPair.publicKey,
       "Sr25519",
       eveKeyPair.sign,
@@ -449,7 +449,7 @@ describe("BulletinClient Integration Tests", {
       const makeRivalClient = () => {
         const derive = sr25519CreateDerive(DEV_MINI_SECRET)
         const kp = derive("//Alice")
-        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        const rivalSigner = getTxCreator(kp.publicKey, "Sr25519", kp.sign)
         return new BulletinClient({
           providers: () => [getWsProvider(ENDPOINT)],
           uploadSigner: rivalSigner,
@@ -553,7 +553,7 @@ describe("BulletinClient Integration Tests", {
       const rivals = Array.from({ length: SESSIONS }, () => {
         const derive = sr25519CreateDerive(DEV_MINI_SECRET)
         const kp = derive("//Alice")
-        const rivalSigner = getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign)
+        const rivalSigner = getTxCreator(kp.publicKey, "Sr25519", kp.sign)
         return new BulletinClient({
           providers: () => [getWsProvider(ENDPOINT)],
           uploadSigner: rivalSigner,
@@ -619,7 +619,7 @@ describe("BulletinClient Integration Tests", {
         const kp = derive(path)
         return {
           address: ss58Address(kp.publicKey, 42),
-          signer: getPolkadotSigner(kp.publicKey, "Sr25519", kp.sign),
+          signer: getTxCreator(kp.publicKey, "Sr25519", kp.sign),
         }
       })
 

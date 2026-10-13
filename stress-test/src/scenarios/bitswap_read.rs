@@ -16,12 +16,18 @@ use crate::{
 	accounts::NonceTracker,
 	bitswap::{self, BitswapClient},
 	client::BulletinConfig,
+	metrics::{metrics, LatencyKind},
 	report::{compute_latency_stats, ScenarioResult},
 	store,
 };
 
 /// Concurrency levels to sweep.
 const B2_CONCURRENCY_LEVELS: &[usize] = &[1, 2, 4, 8, 16, 32, 64];
+
+/// Prometheus `variant` label for one concurrency level of the B2 sweep.
+fn b2_variant(concurrency: usize) -> String {
+	format!("bitswap-b2-c{concurrency}")
+}
 
 /// Run B2 at a single concurrency level: N independent BitswapClients each
 /// reading all items in parallel.
@@ -32,6 +38,7 @@ async fn run_b2_concurrent_read_level(
 	concurrency: usize,
 ) -> Result<ScenarioResult> {
 	let peer_id = BitswapClient::peer_id_from_multiaddr(multiaddr)?;
+	let variant: Arc<str> = Arc::from(b2_variant(concurrency));
 
 	// Create `concurrency` independent clients
 	let mut clients = Vec::with_capacity(concurrency);
@@ -63,6 +70,7 @@ async fn run_b2_concurrent_read_level(
 	for (idx, client) in clients.into_iter().enumerate() {
 		let items = Arc::clone(&items);
 		let abort = Arc::clone(&abort);
+		let variant = Arc::clone(&variant);
 		handles.push(tokio::spawn(async move {
 			let mut timings: Vec<(Duration, bool, bool)> = Vec::with_capacity(items.len());
 			let mut my_consecutive_failures = 0u32;
@@ -75,6 +83,8 @@ async fn run_b2_concurrent_read_level(
 				match client.fetch_block(peer_id, *cid, Duration::from_secs(10)).await {
 					Ok(data) => {
 						let elapsed = start.elapsed();
+						metrics().inc_reads(&variant, true, 1, data.len() as u64);
+						metrics().observe_latency(&variant, LatencyKind::Retrieval, elapsed);
 						let verified = data == *expected;
 						if !verified {
 							tracing::warn!(
@@ -88,6 +98,7 @@ async fn run_b2_concurrent_read_level(
 					},
 					Err(e) => {
 						let elapsed = start.elapsed();
+						metrics().inc_reads(&variant, false, 1, 0);
 						tracing::warn!("B2 client-{idx}: fetch failed: {e}");
 						timings.push((elapsed, false, false));
 						my_consecutive_failures += 1;
@@ -140,6 +151,7 @@ async fn run_b2_concurrent_read_level(
 
 	Ok(ScenarioResult {
 		name: format!("B2: Concurrent Read (128KB, concurrency={concurrency})"),
+		variant: variant.to_string(),
 		duration: wall_time,
 		payload_size,
 		retrieval_latency: compute_latency_stats(&mut all_durations),
@@ -227,6 +239,7 @@ pub async fn run_b2_concurrent_read_sweep(
 						"B2: Concurrent Read ({}KB, concurrency={concurrency} - FAILED)",
 						payload_size / 1024
 					),
+					variant: b2_variant(concurrency),
 					payload_size,
 					total_reads: Some(0),
 					successful_reads: Some(0),

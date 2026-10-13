@@ -17,6 +17,7 @@ use subxt::OnlineClient;
 use crate::{
 	bitswap::{self, BitswapClient},
 	client::BulletinConfig,
+	metrics::{metrics, LatencyKind},
 	report::{compute_latency_stats, ScenarioResult},
 };
 
@@ -229,6 +230,9 @@ async fn discover_cids(
 	Ok(items)
 }
 
+/// Prometheus `variant` label for this scenario.
+const VARIANT: &str = "bitswap-bulk-read";
+
 /// Run bulk Bitswap read: discover CIDs from chain, then download with
 /// specified concurrency.
 #[allow(clippy::too_many_arguments)]
@@ -368,8 +372,19 @@ pub async fn run_bulk_read(
 							batch_bytes as u64;
 						let ok_count = reads_ok.fetch_add(blocks.len() as u64, Ordering::Relaxed) +
 							blocks.len() as u64;
+						metrics().inc_reads(VARIANT, true, blocks.len() as u64, batch_bytes as u64);
+						// `fetch_blocks` can return an empty batch; `checked_div` keeps that at
+						// zero.
+						let per_block =
+							elapsed.checked_div(blocks.len() as u32).unwrap_or_default();
+						metrics().observe_latency_repeated(
+							VARIANT,
+							LatencyKind::Retrieval,
+							per_block,
+							blocks.len(),
+						);
 						for _ in 0..blocks.len() {
-							timings.push((elapsed / blocks.len() as u32, true));
+							timings.push((per_block, true));
 						}
 						consecutive_failures = 0;
 
@@ -387,6 +402,7 @@ pub async fn run_bulk_read(
 					Err(e) => {
 						let elapsed = start.elapsed();
 						reads_failed.fetch_add(batch_items.len() as u64, Ordering::Relaxed);
+						metrics().inc_reads(VARIANT, false, batch_items.len() as u64, 0);
 						let (idx, item) = &batch_items[0];
 						tracing::warn!(
 							"Client {client_idx}: batch FAILED ({} CIDs, item {idx}, \
@@ -454,6 +470,7 @@ pub async fn run_bulk_read(
 			downloaded / (1024 * 1024),
 			concurrency,
 		),
+		variant: VARIANT.to_string(),
 		duration: wall_time,
 		payload_size: downloaded as usize,
 		retrieval_latency: compute_latency_stats(&mut all_durations),

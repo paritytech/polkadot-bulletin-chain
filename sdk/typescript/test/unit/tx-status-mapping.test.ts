@@ -1,0 +1,119 @@
+// Copyright (C) Parity Technologies (UK) Ltd.
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it, vi } from "vitest"
+import { type ProgressEvent, TxStatus } from "../../src/types"
+
+interface Observer {
+  next: (ev: unknown) => void
+  error: (err: unknown) => void
+  complete?: () => void
+}
+
+const observers: Observer[] = []
+const makeTx = () => ({
+  createSubmitAndWatch: () => ({
+    subscribe: (obs: Observer) => {
+      observers.push(obs)
+      return { unsubscribe: () => {} }
+    },
+  }),
+  getBareTx: async () => new Uint8Array(),
+  decodedCall: {},
+})
+
+vi.mock("polkadot-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("polkadot-api")>()
+  return {
+    ...actual,
+    createClient: vi.fn(() => ({
+      getTypedApi: () => ({
+        tx: {
+          TransactionStorage: { remove_expired_account_authorization: makeTx },
+        },
+      }),
+      submitAndWatch: () => ({ subscribe: () => ({ unsubscribe() {} }) }),
+      destroy: () => {},
+    })),
+  }
+})
+
+const block = { hash: "0xbe57", number: 10, index: 0 }
+
+// Single-extrinsic calls (authorize, renew, remove-expired) report progress
+// through the PAPI event stream; uploads use the pipeline's UploadStatus.
+async function setup() {
+  observers.length = 0
+  const { BulletinClient } = await import("../../src/client")
+  const client = new BulletinClient({
+    descriptor: {},
+    // biome-ignore lint/suspicious/noExplicitAny: provider stub
+    providers: () => [{} as any],
+    // biome-ignore lint/suspicious/noExplicitAny: signer stub
+    uploadSigner: { publicKey: new Uint8Array(32) } as any,
+  })
+  const statuses: string[] = []
+  const onProgress = (ev: ProgressEvent) => {
+    statuses.push(ev.type)
+  }
+  return { client, statuses, onProgress }
+}
+
+describe("PAPI tx event to progress mapping", () => {
+  it("maps every event type when waiting for finalization", async () => {
+    const { client, statuses, onProgress } = await setup()
+
+    const pending = client
+      .removeExpiredAccountAuthorization("5Grw")
+      .withWaitFor("finalized")
+      .withCallback(onProgress)
+      .send()
+
+    const observer = await vi.waitFor(() => {
+      const first = observers[0]
+      if (!first) throw new Error("no subscription yet")
+      return first
+    })
+    observer.next({ type: "created", txHash: "0x01" })
+    observer.next({ type: "broadcasted", txHash: "0x01" })
+    observer.next({ type: "notInBestBlock", txHash: "0x01" })
+    observer.next({ type: "inBestBlock", txHash: "0x01", block, events: [] })
+    observer.next({ type: "finalized", txHash: "0x01", block, events: [] })
+
+    await expect(pending).resolves.toMatchObject({ blockHash: block.hash })
+    expect(statuses).toEqual([
+      TxStatus.Created,
+      TxStatus.Broadcasted,
+      TxStatus.NoLongerInBlock,
+      TxStatus.InBlock,
+      TxStatus.Finalized,
+    ])
+  })
+
+  it("resolves at inBestBlock when waiting for in_block", async () => {
+    const { client, statuses, onProgress } = await setup()
+
+    const pending = client
+      .removeExpiredAccountAuthorization("5Grw")
+      .withWaitFor("in_block")
+      .withCallback(onProgress)
+      .send()
+
+    const observer = await vi.waitFor(() => {
+      const first = observers[0]
+      if (!first) throw new Error("no subscription yet")
+      return first
+    })
+    observer.next({ type: "created", txHash: "0x01" })
+    observer.next({ type: "broadcasted", txHash: "0x01" })
+    observer.next({ type: "inBestBlock", txHash: "0x01", block, events: [] })
+
+    const result = await pending
+    expect(result.blockNumber).toBe(block.number)
+    expect(statuses).toEqual([
+      TxStatus.Created,
+      TxStatus.Broadcasted,
+      TxStatus.InBlock,
+    ])
+  })
+})
