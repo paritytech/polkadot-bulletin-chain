@@ -277,6 +277,27 @@ interface MappedTxStatus {
   }
 }
 
+interface SubmissionResult {
+  blockHash: string
+  txHash: string
+  blockNumber?: number
+  txIndex?: number
+  events?: RuntimeEvent[]
+}
+
+// Shape-matched (not instanceof) to work across polkadot-api instances;
+// narrow on purpose: no other invalid type is safe to retry.
+function isAncientBirthBlockError(err: unknown): boolean {
+  if (!(err instanceof Error) || err.name !== "InvalidTxError") return false
+  const validityError = (
+    err as { error?: { type?: unknown; value?: { type?: unknown } } }
+  ).error
+  return (
+    validityError?.type === "Invalid" &&
+    validityError?.value?.type === "AncientBirthBlock"
+  )
+}
+
 /**
  * Map a raw PAPI transaction status event to SDK progress events.
  *
@@ -953,6 +974,12 @@ export class BulletinClient implements BulletinClientInterface {
    * transaction stays broadcast and watched in the background until it
    * finalizes, so a reorg cannot silently drop it.
    *
+   * Retries once on mortality-era expiry (AncientBirthBlock): the node's
+   * pool can silently lose a broadcast tx around a reorg, surfacing only as
+   * era expiry. Safe: past the finalized era boundary the original
+   * signature can never be included, so re-signing cannot execute the call
+   * twice.
+   *
    * @param tx - The transaction to submit
    * @param progressCallback - Optional callback to receive transaction status events
    * @param waitFor - What to wait for: "in_block" (faster) or "finalized" (safer, default)
@@ -963,13 +990,7 @@ export class BulletinClient implements BulletinClientInterface {
     waitFor: "in_block" | "finalized" = "finalized",
     chunkIndex?: number,
     signerOverride?: SignerTxCreator,
-  ): Promise<{
-    blockHash: string
-    txHash: string
-    blockNumber?: number
-    txIndex?: number
-    events?: RuntimeEvent[]
-  }> {
+  ): Promise<SubmissionResult> {
     const useSigner = signerOverride ?? this.signer
     if (!useSigner) {
       throw new BulletinError(
@@ -977,6 +998,36 @@ export class BulletinClient implements BulletinClientInterface {
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
+    try {
+      return await this.submissionAttempt(
+        tx,
+        useSigner,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        true,
+      )
+    } catch (err) {
+      if (!isAncientBirthBlockError(err)) throw err
+      return this.submissionAttempt(
+        tx,
+        useSigner,
+        progressCallback,
+        waitFor,
+        chunkIndex,
+        false,
+      )
+    }
+  }
+
+  private submissionAttempt(
+    tx: PapiTransaction,
+    signer: SignerTxCreator,
+    progressCallback: ProgressCallback | undefined,
+    waitFor: "in_block" | "finalized",
+    chunkIndex: number | undefined,
+    isFirstAttempt: boolean,
+  ): Promise<SubmissionResult> {
     return new Promise((resolve, reject) => {
       let resolved = false
       let txHash: string | undefined
@@ -1006,7 +1057,7 @@ export class BulletinClient implements BulletinClientInterface {
         })
       }
 
-      const subscription = tx.createSubmitAndWatch(useSigner).subscribe({
+      const subscription = tx.createSubmitAndWatch(signer).subscribe({
         next: (ev: TxStatusEvent) => {
           if (!resolved) {
             const result = mapPapiEventToProgress(
@@ -1032,7 +1083,10 @@ export class BulletinClient implements BulletinClientInterface {
           }
           resolved = true
           cleanup()
-          if (progressCallback) {
+          if (
+            progressCallback &&
+            !(isFirstAttempt && isAncientBirthBlockError(err))
+          ) {
             const errorMsg = err instanceof Error ? err.message : String(err)
             // Distinguish pool-related drops from other transaction errors
             const isDropped =
