@@ -3,7 +3,7 @@
 > [!WARNING]
 > This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../../LICENSE-APACHE)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
 
 > Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
@@ -24,7 +24,7 @@ Get permission    Submit data       Fetch from validators   Extend retention
 Before storing data, accounts must be **authorized**. This prevents spam and manages storage costs.
 
 - Use the **Faucet** (testnet) or request authorization from a Root/Sudo user
-- Authorization grants permission to store a specified amount of data (bytes + transactions)
+- Authorization grants an allowance of bytes and transactions. Stores within it get a priority boost; stores beyond it still go through at lower priority. Renewals are hard-capped by the byte allowance
 - Authorization can be for an account or a specific content hash (preimage)
 - Learn more: [Authorization](./authorization.md)
 
@@ -32,18 +32,18 @@ Before storing data, accounts must be **authorized**. This prevents spam and man
 
 Once authorized, submit data to the chain:
 
-- **Small data** (< 2 MiB): Stored directly in a single transaction
-- **Large data** (> 2 MiB): Split into chunks with a DAG-PB manifest
+- **Small data** (up to the chunk size, 1 MiB by default): Stored directly in a single transaction
+- **Large data**: Split into chunks (1 MiB by default) with a DAG-PB manifest
 - On success, you receive:
   - **CID** (Content Identifier) for retrieval
-  - **Block number** and **index** (needed for renewal)
+  - The **block number** and **index** of each stored item, from the SDK's upload events (needed for renewal by position; renewal by content hash needs neither)
 - Learn more: [Storage Model](./storage.md)
 
 ### 3. Retrieval
 
 Data is retrieved from Bulletin validator nodes:
 
-- **Coming soon**: Smoldot light client with `bitswap_block` RPC (decentralized)
+- **Available now**: The `bitswap_v1_get` JSON-RPC method on Bulletin nodes and smoldot (raw blocks)
 - **Available now**: Direct P2P connection to validators via libp2p/Helia
 - **Deprecated**: Public IPFS gateways (centralized, not recommended)
 - Learn more: [Data Retrieval](./retrieval.md)

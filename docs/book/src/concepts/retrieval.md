@@ -2,56 +2,45 @@
 
 The Bulletin Chain uses a **write-to-chain, read-from-network** model. Data is stored on-chain via transactions, and retrieval happens through the Bulletin validator network.
 
-> **Important**: The SDK currently focuses on **storage operations only**. Data retrieval functionality will be added in a future release using the smoldot light client.
+> **Important**: The SDKs have no retrieval API. Bulletin nodes and smoldot serve stored blocks through the `bitswap_v1_get` JSON-RPC method, and validator nodes serve them over Bitswap.
 
 ## Retrieval Status
 
 | Method | Status | Description |
 |--------|--------|-------------|
-| **Smoldot `bitswap_block`** | Coming Soon | Decentralized retrieval via light client |
+| **Node / smoldot `bitswap_v1_get` RPC** | Available | Raw blocks by CID, over a node RPC connection or a smoldot light client |
 | **Direct P2P (Helia/libp2p)** | Available | Connect directly to validator nodes |
 | **IPFS Gateways** | Deprecated | Centralized, not recommended |
 
-## Future: Smoldot Light Client Retrieval (Recommended)
+## Node and Light Client RPC (`bitswap_v1_get`)
 
-Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC. This approach allows **fully decentralized** data retrieval directly from Bulletin validator nodes without relying on centralized gateways.
+Bulletin nodes expose stored data through the `bitswap_v1_get` JSON-RPC method. smoldot serves the same method and fetches the block from its peers over Bitswap, so retrieval works without a centralized gateway.
 
 ```
 ┌─────────────┐     store()      ┌──────────────────┐
 │   Your App  │ ───────────────► │  Bulletin Chain  │
 └─────────────┘                  └──────────────────┘
        │                                  │
-       │   bitswap_block RPC              │ Validators serve data
-       │   (via smoldot)                  │ via Bitswap protocol
+       │   bitswap_v1_get RPC             │ Validators serve data
+       │   (node or smoldot)              │ via Bitswap protocol
        │                                  ▼
        └─────────────────────────►┌──────────────────┐
                                   │ Validator Nodes  │
                                   └──────────────────┘
 ```
 
-### How It Will Work
+The method returns the raw block for a CID as 0x-prefixed hex, with no DAG assembly: for a manifest root you get the DAG-PB node bytes, not the file. With the TypeScript SDK, call it through the client's own connection (WebSocket or smoldot):
 
-```javascript
-// Future SDK API (not yet available)
-import { retrieve } from "@parity/bulletin-sdk";
+```typescript
+import { Binary } from "polkadot-api";
 
-// Retrieves data via smoldot's bitswap_block RPC
-const data = await retrieve(client, cid);
+const hex = await client.request<string>("bitswap_v1_get", [cid.toString()]);
+const block = Binary.fromHex(hex); // Uint8Array
 ```
 
-Under the hood, this will use smoldot's custom `bitswap_block` RPC:
+## Direct P2P via Helia
 
-```javascript
-// Low-level API (requires smoldot-bitswap fork)
-const result = await client._request("bitswap_block", [cidString]);
-const data = hexToBytes(result.slice(2)); // Strip "0x" prefix
-```
-
-See the development progress: [PR #264](https://github.com/paritytech/polkadot-bulletin-chain/pull/264)
-
-## Current Workaround: Direct P2P via Helia
-
-For applications that need retrieval now, you can connect directly to Bulletin validator nodes using libp2p/Helia. This is **decentralized** but requires additional dependencies.
+You can also connect directly to Bulletin validator nodes using libp2p/Helia. This is **decentralized** but requires additional dependencies. Bulletin CIDs use BLAKE2b-256 by default, which Helia does not support out of the box, so pass the hasher.
 
 ### Example (Browser)
 
@@ -61,21 +50,27 @@ import { unixfs } from "@helia/unixfs";
 import { webSockets } from "@libp2p/websockets";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
+import { multiaddr } from "@multiformats/multiaddr";
+import { blake2b256 } from "@multiformats/blake2/blake2b";
+import { CID } from "multiformats/cid";
+import { concat } from "uint8arrays/concat";
 
 // Bulletin validator node multiaddrs
 const BULLETIN_PEERS = [
-  "/dns4/bulletin-westend-rpc.polkadot.io/tcp/443/wss/p2p/12D3KooW...",
+  "/dns4/westend-bulletin-rpc-node-0.polkadot.io/tcp/443/wss/p2p/12D3KooWGb3sdXpdQPvL1wwHYHpQpMAEWxpgNNb6sndHmCByMXZw",
   // Add more validator multiaddrs
 ];
 
 async function fetchFromBulletin(cidString: string): Promise<Uint8Array> {
-  const helia = await createHelia({
+  const helia = createHelia({
+    hashers: [blake2b256],
     libp2p: {
       transports: [webSockets()],
       connectionEncrypters: [noise()],
       streamMuxers: [yamux()],
     },
   });
+  await helia.start();
 
   // Connect to Bulletin validators
   for (const addr of BULLETIN_PEERS) {
@@ -90,7 +85,7 @@ async function fetchFromBulletin(cidString: string): Promise<Uint8Array> {
   }
 
   await helia.stop();
-  return concatenate(chunks);
+  return concat(chunks);
 }
 ```
 
@@ -116,32 +111,27 @@ const data = await response.arrayBuffer();
 
 ## Retrieving Chunked Data
 
-For large files stored via `prepare_store_chunked`, the root CID points to a DAG-PB manifest. The retrieval method (smoldot, Helia, or gateway) will automatically reassemble the chunks:
+For large files, the root CID points to a DAG-PB manifest. Helia (`unixfs.cat`) and gateways reassemble the chunks. The `bitswap_v1_get` RPC returns raw blocks, so parse the manifest and fetch its chunks yourself:
 
-```javascript
-// Root CID automatically resolves to complete file
-const fullFile = await retrieve(client, rootCid);
-```
+```typescript
+import { UnixFsDagBuilder, type CID } from "@parity/bulletin-sdk";
+import { Binary } from "polkadot-api";
 
-For manual chunk retrieval (streaming, partial downloads):
+const fetchBlock = async (cid: CID) =>
+  Binary.fromHex(await client.request<string>("bitswap_v1_get", [cid.toString()]));
 
-```javascript
-// 1. Fetch manifest to get chunk CIDs
-const manifest = await retrieveManifest(client, rootCid);
+// 1. Fetch the manifest and read its chunk CIDs
+const { chunkCids } = await new UnixFsDagBuilder().parse(await fetchBlock(rootCid));
 
-// 2. Fetch individual chunks
-for (const link of manifest.Links) {
-  const chunkCid = link.Hash;
-  const chunk = await retrieve(client, chunkCid);
-  // Process chunk...
-}
+// 2. Fetch the chunks, in order
+const chunks = await Promise.all(chunkCids.map(fetchBlock));
 ```
 
 ## Data Availability
 
 ### Retention Period
 
-Data stored on Bulletin Chain is retained for a configurable **retention period** (check chain constants for the current value). After this period:
+Data stored on Bulletin Chain is retained for a configurable **retention period** (query the `TransactionStorage.RetentionPeriod` storage value; default 201,600 blocks). After this period:
 
 - The on-chain transaction data may be pruned
 - Validator nodes may no longer serve the data
@@ -157,29 +147,26 @@ For critical data that must outlive the retention period:
 
 ## Verifying Data Integrity
 
-The CID includes a cryptographic hash of the content. After retrieval, verify the data matches:
+A CID contains the hash of its block. After retrieving a raw block, hash it with the CID's hash algorithm and compare the result with the CID's digest:
 
 ```typescript
-import { calculateCid } from "@parity/bulletin-sdk";
+import { getContentHash, type HashAlgorithm } from "@parity/bulletin-sdk";
 import { CID } from "multiformats/cid";
 
-// After retrieving data
-const retrievedData = await retrieve(client, cidString);
+const cid = CID.parse(cidString);
+const block = await fetchBlock(cid); // raw block, e.g. from bitswap_v1_get
 
-// Verify integrity
-const computedCid = await calculateCid(retrievedData);
-const originalCid = CID.parse(cidString);
+const digest = await getContentHash(block, cid.multihash.code as HashAlgorithm);
+const expected = cid.multihash.digest;
+const verified =
+  digest.length === expected.length && digest.every((byte, i) => byte === expected[i]);
 
-if (computedCid.equals(originalCid)) {
-  console.log("Data integrity verified!");
-} else {
-  console.error("Data corruption detected!");
-}
+console.log(verified ? "Data integrity verified!" : "Data corruption detected!");
 ```
 
 ## SDK Roadmap
 
-The SDK will support retrieval once the smoldot `bitswap_block` RPC is production-ready:
+The SDKs do not wrap retrieval yet. Planned:
 
 | Feature | Status |
 |---------|--------|

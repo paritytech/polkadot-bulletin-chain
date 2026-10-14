@@ -8,7 +8,7 @@ Authorization is granted by **privileged accounts**:
 
 | Network | Authorizer | How to Request |
 |---------|------------|----------------|
-| **Testnets** (Paseo, Westend) | [Sudo account](#finding-the-sudo-account) | Use the **Faucet** in the Console UI |
+| **Testnets** (Paseo, Westend) | Registered authorizer accounts (the faucet signs as `//Eve`) or the [sudo account](#finding-the-sudo-account) | Use the **Faucet** in the Console UI |
 | **Mainnet** (Polkadot) | Governance (ideally) | Contact chain operators for now |
 
 ### Finding the Sudo Account
@@ -21,17 +21,14 @@ const sudoKey = await api.query.Sudo.Key.getValue();
 console.log("Sudo account:", sudoKey);
 ```
 
-Or check the **Dashboard** in the Console UI - the sudo account is displayed in the chain info section when connected.
-
 ### Using the Faucet (Testnets)
 
 The easiest way to get authorization on testnets:
 
 1. Open the **Console UI** (you're likely already here!)
-2. Connect your wallet (Polkadot.js, Talisman, PolkaGate, etc.)
-3. Navigate to **Faucet** in the menu
-4. Request authorization for your account
-5. The faucet will grant you a default allocation (transactions + bytes)
+2. Navigate to **Faucet** in the menu
+3. Enter the account to authorize (or the content to pre-authorize)
+4. Submit: the faucet signs with its own authorizer key (`//Eve`), so no wallet confirmation is needed. The form defaults to 100 transactions and 10 MB
 
 ### For Application Developers
 
@@ -45,26 +42,30 @@ If you're building an application that needs authorization:
 For local development, you have sudo access:
 
 ```bash
-# Start a local dev parachain node (requires polkadot-omni-node)
-polkadot-omni-node --dev
+# Build the Bulletin chain spec, then start a local dev node with it
+just binaries-polkadot
+just chain-spec westend
+$(just binaries-polkadot)/polkadot-omni-node --chain ./zombienet/bulletin-westend-spec.json --dev
 
-# The //Alice account has sudo privileges
-# Use it to authorize other accounts
+# The //Alice account has sudo privileges; //Eve is a registered authorizer
+# Use them to authorize other accounts
 ```
 
 ## Types of Authorization
 
 ### 1. Account Authorization (`authorize_account`)
 
-Authorizes a specific **account** to store data up to a limit.
+Authorizes a specific **account** to store data with an allowance of bytes and transactions.
 
 - **Flexible**: The account can store *any* data
 - **Best for**: Active users, applications with dynamic content
+- **Soft limit for stores**: stores within the allowance get a priority boost; stores beyond it still go through at lower priority. Renewals are hard-capped by `bytes`
+- Calling it again before the authorization expires adds to the allowance without extending the expiry
 
 **Parameters:**
 - `who`: The account to authorize
-- `transactions`: Number of storage transactions allowed
-- `bytes`: Total bytes allowed
+- `transactions`: Number of boost-tier storage transactions
+- `bytes`: Total boost-tier bytes
 
 ### 2. Preimage Authorization (`authorize_preimage`)
 
@@ -141,8 +142,9 @@ console.log(`Need ${transactions} transactions and ${bytes} bytes`);
 
 ## Authorization Expiry
 
-Authorization may have an optional expiry block:
-- If set, authorization becomes invalid after that block
+Every authorization has an expiry block (`expiration`):
+- It is set to the grant block plus `AuthorizationPeriod` (14 days on Westend), and no later than the granting authorizer's own `valid_until`
+- The authorization becomes invalid at that block; `refresh_account_authorization` / `refresh_preimage_authorization` extend it
 - Unused authorization is not refunded
 - Plan your uploads accordingly
 

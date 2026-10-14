@@ -3,7 +3,7 @@
 > [!WARNING]
 > This is a reference implementation provided for research, experimentation, and developer education. This code has not been fully audited. It is actively under development and may contain bugs, vulnerabilities, or incomplete features. It is not recommended for production use without independent review. Use at your own risk.
 
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../../../LICENSE-APACHE)
 [![Status: experimental](https://img.shields.io/badge/status-experimental-yellow.svg)](#)
 
 > Part of the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain).
@@ -51,13 +51,13 @@ The SDKs provide high-level abstractions for:
 - DAG-PB manifest generation
 - Authorization management
 
-> **Note**: The SDKs currently support storage operations only. Data retrieval will be added once the smoldot `bitswap_block` RPC is production-ready. See [Data Retrieval](./concepts/retrieval.md) for current options.
+> **Note**: The SDKs have no retrieval API yet. Bulletin nodes and smoldot serve stored blocks through the `bitswap_v1_get` JSON-RPC method (TypeScript: `client.request("bitswap_v1_get", [cid.toString()])`). See [Data Retrieval](./concepts/retrieval.md) for current options.
 
 ### Data Retrieval
 
 | Method | Status | Description |
 |--------|--------|-------------|
-| **Smoldot Light Client** | Coming Soon | Decentralized retrieval via `bitswap_block` RPC |
+| **Node / Smoldot RPC** | Available | Raw block fetch via `bitswap_v1_get` |
 | **Direct P2P (Helia)** | Available | Connect to validator nodes via libp2p |
 | **IPFS Gateways** | Deprecated | Centralized, not recommended |
 
@@ -95,7 +95,7 @@ println!("Stored in block: {}", receipt.block_hash);
 
 | Network | Endpoint | Status |
 |---------|----------|--------|
-| Polkadot | - | Not released yet |
+| Polkadot | `wss://bulletin-rpc.polkadot.io` | Active |
 | Paseo (Testnet) | `wss://paseo-bulletin-next-rpc.polkadot.io` | Active |
 | Westend (Testnet) | `wss://westend-bulletin-rpc.polkadot.io` | Active |
 | Previewnet | `wss://previewnet.substrate.dev/bulletin` | Active |

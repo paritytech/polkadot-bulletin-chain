@@ -44,4 +44,4 @@ Rules:
 | File | Source chain (fetched) | Covers |
 |---|---|---|
 | `transaction-storage-v1000011.scale` | bulletin-westend v1000011, `wss://westend-bulletin-rpc.polkadot.io` (2026-07-08) | positional `renew(block, index)` |
-| `transaction-storage-v1000016.scale` | bulletin-westend v1000016, trimmed from the pre-split workspace `sdk/metadata.scale` (2026-08-07) | `renew(entry: TransactionRef)` / `force_renew` in `TransactionStorage` (pre renewal split) |
+| `transaction-storage-v1000016.scale` | bulletin-westend v1000016, trimmed from the pre-split workspace `sdk/metadata.scale` (2026-08-07) | `renew(entry: TransactionRef)` / `force_renew` (Rust + TypeScript) and `enable_auto_renew` / `disable_auto_renew` (TypeScript) in `TransactionStorage` (pre renewal split) |

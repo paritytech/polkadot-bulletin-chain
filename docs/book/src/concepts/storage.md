@@ -4,13 +4,13 @@ The SDK supports two primary modes of operation.
 
 ## Simple Storage (Direct)
 
-For small data (less than 2 MiB), you can store the data directly in a single transaction.
+For small data (up to one chunk, 1 MiB by default; the chain accepts up to 2 MiB per transaction), the data is stored directly in a single transaction.
 
 - **Pros**: Simple, atomic (all or nothing).
 - **Cons**: Limited by block size and transaction size limits.
-- **Underlying Call**: `TransactionStorage.store(data)`
+- **Underlying Call**: `TransactionStorage.store(data)`, or `TransactionStorage.store_with_cid_config(cid, data)` for a non-default codec or hash
 
-The SDK calculates the CID for you and wraps the data in a `StorageOperation`.
+The SDK calculates the CID for you (Rust offline API: `BulletinClient::prepare_store` returns a `StorageOperation`).
 
 ## Chunked Storage (DAG-PB)
 
@@ -29,5 +29,5 @@ We use the **DAG-PB** (UnixFS) standard for chunked data:
 - **Parallel retrieval**: Chunks can be fetched independently and in parallel
 
 The SDK manages this complexity for you:
-- `client.prepare_store_chunked` (Rust)
-- `client.prepareStoreChunked` (TS)
+- Rust: `TransactionClient::estimate_upload` → `submit` (offline preparation: `BulletinClient::prepare_store_chunked`)
+- TypeScript: `client.submit(await client.estimateUpload(src), src).send()` (offline preparation: `new BulletinPreparer().prepareStoreChunked(data)`)
