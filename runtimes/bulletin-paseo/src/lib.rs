@@ -25,8 +25,8 @@ extern crate alloc;
 
 use crate::paseo_constants::{
 	consensus::{
-		async_backing::UNINCLUDED_SEGMENT_CAPACITY, BLOCK_PROCESSING_VELOCITY,
-		MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
+		async_backing::{RELAY_PARENT_OFFSET, UNINCLUDED_SEGMENT_CAPACITY},
+		BLOCK_PROCESSING_VELOCITY, MAXIMUM_BLOCK_WEIGHT, RELAY_CHAIN_SLOT_DURATION_MILLIS,
 	},
 	currency::*,
 	fee::WeightToFee,
@@ -339,7 +339,7 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type ReservedXcmpWeight = ReservedXcmpWeight;
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
-	type RelayParentOffset = ConstU32<0>;
+	type RelayParentOffset = ConstU32<RELAY_PARENT_OFFSET>;
 	type SchedulingSignatureVerifier = ();
 }
 
@@ -695,7 +695,7 @@ impl_runtime_apis! {
 
 	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn relay_parent_offset() -> u32 {
-			0
+			RELAY_PARENT_OFFSET
 		}
 
 		fn max_claim_queue_offset() -> u8 {

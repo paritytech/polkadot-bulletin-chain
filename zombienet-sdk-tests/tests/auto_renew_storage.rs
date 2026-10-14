@@ -3340,6 +3340,9 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 // collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
+/// Slot-based authoring is capped at one block per 6s relay block with no catch-up, so the target
+/// nominally takes `TARGET * 6s`; allow 2x for session-boundary gaps.
+const PRUNE_RESTART_INITIAL_BLOCKS_TIMEOUT_SECS: u64 = PRUNE_RESTART_INITIAL_BLOCKS_TARGET * 6 * 2;
 
 fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	let prefix_eq = format!("{}=", name);
@@ -3519,7 +3522,7 @@ async fn run_pruning_restart_scenario(
 	wait_for_block_height(
 		collator1,
 		PRUNE_RESTART_INITIAL_BLOCKS_TARGET,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
+		PRUNE_RESTART_INITIAL_BLOCKS_TIMEOUT_SECS,
 	)
 	.await?;
 
