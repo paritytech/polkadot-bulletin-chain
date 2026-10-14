@@ -22,10 +22,14 @@ use crate::{
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
+use frame_support::dispatch::{DispatchClass, DispatchInfo};
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
-	traits::{AsSystemOriginSigner, Implication, OriginTrait},
+	traits::{
+		AsSystemOriginSigner, Dispatchable, Implication, OriginTrait, PostDispatchInfoOf,
+		UniqueSaturatedInto,
+	},
 };
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
@@ -513,6 +517,116 @@ where
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		Ok(())
+	}
+}
+
+pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
+const QUEUE_BONUS_STEP_BYTES: u64 = 1024;
+const _: () = assert!(MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST);
+
+#[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking)]
+pub struct NonceCheckWithQueueBonus<T: Config>(pub frame_system::CheckNonce<T>);
+
+impl<T: Config> NonceCheckWithQueueBonus<T> {
+	pub fn new(nonce: T::Nonce) -> Self {
+		Self(frame_system::CheckNonce::from(nonce))
+	}
+
+	fn queue_bonus(queued_transactions: u64, len: usize) -> TransactionPriority {
+		let block_length = *T::BlockLength::get().max.get(DispatchClass::Normal);
+		let minimum_cost_bytes = u64::from(block_length / T::MaxBlockTransactions::get().max(1));
+		let cost_steps = (len as u64).max(minimum_cost_bytes) / QUEUE_BONUS_STEP_BYTES;
+		MAX_QUEUE_BONUS.saturating_sub(queued_transactions.saturating_mul(cost_steps))
+	}
+}
+
+impl<T: Config> fmt::Debug for NonceCheckWithQueueBonus<T> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		fmt::Debug::fmt(&self.0, f)
+	}
+}
+
+impl<T: Config> scale_info::TypeInfo for NonceCheckWithQueueBonus<T> {
+	type Identity = frame_system::CheckNonce<T>;
+
+	fn type_info() -> scale_info::Type {
+		frame_system::CheckNonce::<T>::type_info()
+	}
+}
+
+impl<T: Config> TransactionExtension<RuntimeCallOf<T>> for NonceCheckWithQueueBonus<T>
+where
+	RuntimeCallOf<T>: Dispatchable<Info = DispatchInfo>,
+	T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId> + Clone,
+{
+	const IDENTIFIER: &'static str = "CheckNonce";
+	type Implicit = ();
+	type Val = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Val;
+	type Pre = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Pre;
+
+	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
+		self.0.weight(call).saturating_add(T::DbWeight::get().reads(1))
+	}
+
+	fn bare_validate(
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+	) -> TransactionValidity {
+		let mut validity = frame_system::CheckNonce::<T>::bare_validate(call, info, len)?;
+		validity.priority = validity.priority.saturating_add(MAX_QUEUE_BONUS);
+		Ok(validity)
+	}
+
+	fn validate(
+		&self,
+		origin: T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+		self_implicit: Self::Implicit,
+		inherited_implication: &impl Implication,
+		source: TransactionSource,
+	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
+		let transaction_nonce = self.0 .0;
+		let queued_transactions: u64 = origin.as_system_origin_signer().map_or(0, |who| {
+			transaction_nonce
+				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
+				.unique_saturated_into()
+		});
+		let (mut validity, val, origin) = self.0.validate(
+			origin,
+			call,
+			info,
+			len,
+			self_implicit,
+			inherited_implication,
+			source,
+		)?;
+		validity.priority =
+			validity.priority.saturating_add(Self::queue_bonus(queued_transactions, len));
+		Ok((validity, val, origin))
+	}
+
+	fn prepare(
+		self,
+		val: Self::Val,
+		origin: &T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		self.0.prepare(val, origin, call, info, len)
+	}
+
+	fn post_dispatch_details(
+		pre: Self::Pre,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		post_info: &PostDispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+		result: &DispatchResult,
+	) -> Result<Weight, TransactionValidityError> {
+		frame_system::CheckNonce::<T>::post_dispatch_details(pre, info, post_info, len, result)
 	}
 }
 
