@@ -293,14 +293,20 @@ pub mod pallet {
 
 		/// Renew previously stored data synchronously. Charges `info.size` against
 		/// the caller's `bytes_permanent` and the chain-wide `PermanentStorageUsed`.
+		/// Root skips both caps but is still counted in `PermanentStorageUsed`.
 		#[pallet::call_index(1)]
-		#[pallet::weight((<T as Config>::WeightInfo::force_renew(), DispatchClass::Operational))]
+		// The benchmark runs unsigned, so Root's `PermanentStorageUsed` r/w is added here.
+		#[pallet::weight((
+			<T as Config>::WeightInfo::force_renew()
+				.saturating_add(T::DbWeight::get().reads_writes(1, 1)),
+			DispatchClass::Operational,
+		))]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _entry: &TransactionRef<BlockNumberFor<T>>| -> bool { true })]
 		pub fn force_renew(
 			origin: OriginFor<T>,
 			entry: TransactionRef<BlockNumberFor<T>>,
 		) -> DispatchResultWithPostInfo {
-			let _caller =
+			let caller =
 				pallet_bulletin_transaction_storage::Pallet::<T>::ensure_authorized(origin)?;
 			let info =
 				pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(&entry)
@@ -312,7 +318,13 @@ pub mod pallet {
 			.map_err(|_| Error::<T>::BadDataSize)?;
 
 			let content_hash = info.content_hash;
+			let size: u64 = info.size.into();
 			let new_index = Self::do_renew(info)?;
+			// Other origins are charged in the extension. Root bypasses it, but
+			// `handle_obsolete` still decrements this entry on expiry.
+			if matches!(caller, AuthorizedCaller::Root) {
+				Self::update_permanent_storage_used(|used| used.saturating_add(size));
+			}
 			Self::deposit_event(Event::Renewed { index: new_index, content_hash });
 			Ok(().into())
 		}
