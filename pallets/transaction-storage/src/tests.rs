@@ -29,7 +29,7 @@ use super::{
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
 	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
-	AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
+	TransactionStorageProof, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
 	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
 };
 
@@ -2316,4 +2316,109 @@ fn to_account_authorization_maps_every_field() {
 	assert_eq!(summary.bytes_permanent_used, 4);
 	assert_eq!(summary.bytes_allowance, 5);
 	assert_eq!(summary.expires_at, 6);
+}
+
+fn store_unique(block_tag: u8) -> Vec<u8> {
+	vec![block_tag; 2000]
+}
+
+fn proof_for_data(data: &[u8]) -> Option<TransactionStorageProof> {
+	let parent_hash = System::parent_hash();
+	build_proof(parent_hash.as_ref(), vec![data.to_vec()]).unwrap()
+}
+
+fn run_to_block_with_retention_proofs(to: u64, stored: Vec<(u64, Vec<u8>)>) {
+	run_to_block(to, move || {
+		let n = System::block_number();
+		let period = RetentionPeriod::get();
+		let target = n.saturating_sub(period);
+		if target == 0 {
+			return None;
+		}
+		let data = stored.iter().find(|(b, _)| *b == target).map(|(_, d)| d.as_slice());
+		data.and_then(proof_for_data)
+	});
+}
+
+/// Mirrors the scenario from issue #159: decreasing retention keeps proofs aligned with the
+/// current period, while increasing retention after aggressive cleanup cannot resurrect
+/// metadata for blocks already pruned under a shorter period.
+#[test]
+fn retention_period_live_changes_follow_current_period() {
+	new_test_ext().execute_with(|| {
+		RetentionPeriod::put(3u64);
+		let stored = vec![
+			(1u64, store_unique(1)),
+			(2u64, store_unique(2)),
+			(3u64, store_unique(3)),
+		];
+
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), stored[0].1.clone()));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), stored[1].1.clone()));
+		run_to_block(3, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), stored[2].1.clone()));
+
+		let stored_for_block4 = stored.clone();
+		run_to_block(4, move || {
+			let target = System::block_number().saturating_sub(RetentionPeriod::get());
+			stored_for_block4
+				.iter()
+				.find(|(b, _)| *b == target)
+				.and_then(|(_, d)| proof_for_data(d))
+		});
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), store_unique(4)));
+		RetentionPeriod::put(2u64);
+
+		let stored_for_block5 = stored.clone();
+		run_to_block(5, move || {
+			let target = System::block_number().saturating_sub(RetentionPeriod::get());
+			stored_for_block5
+				.iter()
+				.find(|(b, _)| *b == target)
+				.and_then(|(_, d)| proof_for_data(d))
+		});
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), store_unique(5)));
+		assert!(!Transactions::contains_key(2), "block 2 metadata must be pruned under retention 2");
+		RetentionPeriod::put(4u64);
+		let stored_for_block6 = stored.clone();
+		run_to_block(6, move || {
+			let target = System::block_number().saturating_sub(RetentionPeriod::get());
+			stored_for_block6
+				.iter()
+				.find(|(b, _)| *b == target)
+				.and_then(|(_, d)| proof_for_data(d))
+		});
+
+		let data2 = store_unique(2);
+		assert_noop!(
+			TransactionStorage::apply_block_inherents(
+				RuntimeOrigin::none(),
+				proof_for_data(&data2),
+			),
+			Error::MissingStateData,
+		);
+		assert!(!Transactions::contains_key(2));
+	});
+}
+
+/// After decreasing retention, metadata outside the new window is pruned one block at a time
+/// via `on_initialize`; `try_state` eventually reports no stale entries.
+#[test]
+fn retention_period_decrease_eventually_prunes_stale_metadata() {
+	new_test_ext().execute_with(|| {
+		RetentionPeriod::put(10u64);
+		let stored = vec![(1u64, store_unique(1))];
+		run_to_block(1, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), stored[0].1.clone()));
+
+		run_to_block_with_retention_proofs(20, stored.clone());
+
+		RetentionPeriod::put(3u64);
+		run_to_block_with_retention_proofs(30, stored);
+
+		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
+		assert!(!Transactions::contains_key(1));
+	});
 }
