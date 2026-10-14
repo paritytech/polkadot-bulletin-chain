@@ -61,11 +61,15 @@ A content hash carries at most one registration, so `renew` and `enableAutoRenew
 
 ## Querying the Retention Period
 
-`RetentionPeriod` is an on-chain storage value (default 201,600 blocks, ~14 days at 6s/block), not a constant — read it from storage:
+`RetentionPeriod` is an on-chain storage value (default 201,600 blocks, ~14 days at 6s/block), not a constant — read it from storage. `client.api` is statically typed as the SDK's minimal `BulletinTypedApi`; when the client was built with your descriptor, cast it to the full typed API:
 
 ```typescript
-const retentionPeriod = await client.api.query.TransactionStorage.RetentionPeriod.getValue();
-const currentBlock = await client.api.query.System.Number.getValue();
+import type { TypedApi } from "polkadot-api";
+import { bulletin } from "@polkadot-api/descriptors";
+
+const api = client.api as unknown as TypedApi<typeof bulletin>;
+const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
+const currentBlock = await api.query.System.Number.getValue();
 
 const storedAtBlock = 1000; // your stored block number
 const expiresAtBlock = storedAtBlock + retentionPeriod;
@@ -92,7 +96,7 @@ class RenewalTracker {
     this.items.set(cid, { cid, blockNumber, index });
   }
 
-  async getItemsNeedingRenewal(api: TypedApi, bufferBlocks = 100) {
+  async getItemsNeedingRenewal(api: TypedApi<typeof bulletin>, bufferBlocks = 100) {
     const currentBlock = await api.query.System.Number.getValue();
     const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
 
@@ -106,7 +110,7 @@ class RenewalTracker {
 const tracker = new RenewalTracker();
 tracker.add(cids[0].toString(), blockNumber!, index!);
 
-for (const item of await tracker.getItemsNeedingRenewal(client.api)) {
+for (const item of await tracker.getItemsNeedingRenewal(api)) {
   await client.renew({ block: item.blockNumber, index: item.index }).send();
 }
 ```
@@ -117,21 +121,21 @@ Against the **current** runtime, bypassing the SDK client: `renew` / `force_rene
 
 ```typescript
 // One-shot scheduled renewal
-api.tx.TransactionStorage.renew({
+api.tx.DataRenewal.renew({
   entry: { type: "Position", value: { block, index } },
 });
 
 // Immediate renewal (emits Renewed with a new index)
-api.tx.TransactionStorage.force_renew({
+api.tx.DataRenewal.force_renew({
   entry: { type: "Position", value: { block, index } },
 });
 
 // Recurring auto-renewal (takes the content hash directly, not an `entry`;
 // fixed-size hashes are passed as 0x-prefixed hex)
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+api.tx.DataRenewal.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
-On current runtimes these calls live on `api.tx.DataRenewal` instead; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
+Pre-split runtimes host these calls on `api.tx.TransactionStorage`; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
 
 `disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.
 
@@ -141,14 +145,14 @@ The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for
 api.tx.TransactionStorage.store({ data: myData });
 
 api.tx.TransactionStorage.store_with_cid_config({
-  cid: { codec: 0x55n, hashing: { type: "Blake2b256" } },
+  cid: { codec: 0x55n, hashing: { type: "Blake2b256", value: undefined } },
   data: myData,
 });
 ```
 
 ## Authorization for Renewal
 
-Renewal is accounted differently from storing. Going over budget on a store only lowers its priority; a renewal charges the data size against `bytes_permanent` (the account's renew quota) plus one transaction unit, and against the chain-wide permanent-storage **hard cap**. Exceeding either limit **rejects** the renewal (see [Authorization](./authorization.md)).
+Renewal is accounted differently from storing. Going over budget on a store only lowers its priority; a renewal charges one transaction unit and adds the data size to the account's `bytes_permanent` counter, which may not exceed its `bytes_allowance`, and to the chain-wide `PermanentStorageUsed`, which may not exceed `MaxPermanentStorageSize`. Exceeding either limit **rejects** the renewal (see [Authorization](./authorization.md)).
 
 ## Error Handling
 

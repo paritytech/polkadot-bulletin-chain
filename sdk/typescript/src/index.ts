@@ -15,29 +15,13 @@
  * - DAG-PB manifest generation
  * - Transaction preparation and submission
  *
- * ## Data Retrieval (Not Yet Supported)
+ * ## Data Retrieval (Not Supported)
  *
- * **Important**: This SDK currently does NOT provide data retrieval functionality.
- *
- * ### Deprecated: IPFS Gateway Retrieval
- *
- * Retrieving data via public IPFS gateways (e.g., `https://ipfs.io/ipfs/{cid}`) is
- * **deprecated** and not recommended. Public gateways are centralized infrastructure
- * that goes against the decentralization goals of the Bulletin Chain.
- *
- * ### Future: Smoldot Light Client Retrieval
- *
- * Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC.
- * This approach allows fully decentralized data retrieval directly from Bulletin
- * validator nodes without relying on centralized gateways.
- *
- * See: https://github.com/paritytech/polkadot-bulletin-chain/pull/264
- *
- * ### Current Workaround: Direct P2P via Helia
- *
- * For applications that need retrieval now, connect directly to Bulletin validator
- * nodes using libp2p/Helia with their P2P multiaddrs. This is decentralized but
- * requires additional dependencies. See the console-ui implementation for reference.
+ * This SDK has no retrieval API. Bulletin nodes and smoldot serve stored blocks
+ * through the `bitswap_v1_get` JSON-RPC method (raw blocks, no DAG assembly):
+ * `client.request("bitswap_v1_get", [cid.toString()])`. For whole files, connect
+ * to Bulletin validator nodes with libp2p/Helia (see the console-ui). Public IPFS
+ * gateways (e.g. `https://ipfs.io/ipfs/{cid}`) are centralized and not recommended.
  *
  * @packageDocumentation
  */

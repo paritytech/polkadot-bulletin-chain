@@ -10,13 +10,16 @@ The primary client. It owns its PAPI connection (built from `providers()[0]`) an
 import type { SignerTxCreator } from 'polkadot-api/tx-creator';
 
 class BulletinClient implements BulletinClientInterface {
-  readonly api: BulletinTypedApi;       // typed PAPI API, for your own queries
-  readonly signer?: SignerTxCreator;    // upload signer (undefined → unsigned-only)
-  readonly config: ResolvedClientConfig;
+  api: BulletinTypedApi;                // PAPI API, for your own queries (statically typed as the SDK's minimal API)
+  submitAndWatch: SubmitAndWatchFn;     // stream-watch submission of the internal PAPI client
+  signer: SignerTxCreator | undefined;  // upload signer (undefined → unsigned-only)
+  config: ResolvedClientConfig;
 
   constructor(options: BulletinClientOptions);
 }
 ```
+
+`BulletinClientOptions` and `ResolvedClientConfig` are not exported from the package; pass the options as an object literal.
 
 ### Methods
 
@@ -35,7 +38,8 @@ class BulletinClient implements BulletinClientInterface {
 | `refreshPreimageAuthorization(contentHash)` | `AuthCallBuilder` | Extend a preimage authorization's expiry |
 | `removeExpiredAccountAuthorization(who)` | `CallBuilder` | Remove an expired account authorization |
 | `removeExpiredPreimageAuthorization(contentHash)` | `CallBuilder` | Remove an expired preimage authorization |
-| `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Authorization a data size will consume |
+| `estimateAuthorization(dataSize)` | `{ transactions: number; bytes: number }` | Approximate authorization a data size will consume |
+| `request(method, params?)` | `Promise<T>` | Raw JSON-RPC call over the client's connection (e.g. `bitswap_v1_get`) |
 | `destroy()` | `Promise<void>` | Tear down the PAPI connection |
 
 `estimateUpload` + `submit` are the only storage path; see [Basic Storage](./basic-storage.md).
@@ -46,10 +50,10 @@ Extends `Partial<ClientConfig>`.
 
 ```typescript
 interface BulletinClientOptions extends Partial<ClientConfig> {
-  providers: () => JsonRpcProvider[]; // REQUIRED for uploads; providers()[0] drives chainHead
+  providers: () => JsonRpcProvider[]; // REQUIRED (constructor throws INVALID_CONFIG without it); providers()[0] drives chainHead
   uploadSigner?: SignerTxCreator;     // omit for an unsigned-only client
   authorizerSigner?: SignerTxCreator; // required to call authorize*/refresh*
-  descriptor?: unknown;               // papi descriptor; omit → getUnsafeApi()
+  descriptor?: any;                   // papi descriptor; omit → getUnsafeApi()
 }
 ```
 
@@ -58,12 +62,13 @@ interface BulletinClientOptions extends Partial<ClientConfig> {
 ```typescript
 interface ClientConfig {
   defaultChunkSize?: number;          // default 1 MiB (max 2 MiB)
-  chunkingThreshold?: number;         // default 2 MiB
+  chunkingThreshold?: number;         // default 2 MiB; only used by BulletinPreparer.prepareStore
   createManifest?: boolean;           // default true
-  txTimeout?: number;                 // default 420_000 ms (per tx)
+  txTimeout?: number;                 // default 420_000 ms; single-transaction calls only, not submit()
   providers?: () => JsonRpcProvider[];
   authorizerSigner?: SignerTxCreator;
   blockLimits?: BlockLimits;          // chain block weight/length caps
+  submissionStrategy?: "nonce-tracking"; // the only strategy
 }
 ```
 
@@ -75,7 +80,7 @@ Returned by `submit()`.
 
 ```typescript
 class SubmitBuilder {
-  withWaitFor(waitFor: WaitFor): this;     // 'in_block' (default) | 'finalized'
+  withWaitFor(waitFor: WaitFor): this;     // 'in_block' | 'finalized' (default)
   withCallback(cb: UploadCallback): this;  // per-item UploadEvent
   ensureAuthorized(): this;                // pre-flight authorization check
   asUnsigned(): this;                      // preimage-authorized, no signer
@@ -97,11 +102,14 @@ class CallBuilder {
 
 ### AuthCallBuilder
 
-Returned by the authorization methods. Extends `CallBuilder` with sudo.
+Returned by the authorization methods. A separate class with the same methods as `CallBuilder` plus `withSudo()`.
 
 ```typescript
-class AuthCallBuilder extends CallBuilder {
+class AuthCallBuilder {
+  withWaitFor(waitFor: WaitFor): this;
+  withCallback(cb: ProgressCallback): this;
   withSudo(): this; // wrap the call in Sudo.sudo
+  send(): Promise<TransactionReceipt>;
 }
 ```
 
@@ -120,10 +128,10 @@ await client.authorizeAccount([
 ```typescript
 function blobFromBytes(data: Uint8Array): SeekableSource;          // a single blob
 function blobFromItems(items: { data: Uint8Array }[]): SeekableSource; // discrete items
-function blobFromFactory(open: () => AsyncIterable<Uint8Array>): BlobSource; // re-openable stream
+function blobFromFactory(open: () => AsyncIterable<Uint8Array>, size?: number): BlobSource; // re-openable stream
 ```
 
-`blobFromBytes` / `blobFromItems` return a `SeekableSource` (random-access `read` + known `size`) and work with both `estimateUpload` and `submit`. `blobFromFactory` returns a forward-only `BlobSource` — fine for `estimateUpload`, but `submit` needs a `SeekableSource` (implement one for file-backed streaming; see [Chunked Uploads](./chunked-uploads.md)). A `BlobSource.open()` must be callable more than once and yield the same bytes — `estimateUpload` streams it to hash, `submit` reads it again to upload.
+`blobFromBytes` / `blobFromItems` return a `SeekableSource` (random-access `read` + known `size`) and work with both `estimateUpload` and `submit`. `blobFromFactory` returns a forward-only `BlobSource` — fine for `estimateUpload`, but `submit` needs a `SeekableSource` (implement one for file-backed streaming; see [Chunked Uploads](./chunked-uploads.md)). A `BlobSource.open()` must be callable more than once and yield the same bytes. `estimateUpload` streams `open()` to hash the data; `submit` fetches each unit with `read(offset, length)`, which must return the same bytes.
 
 ## MockBulletinClient
 
@@ -268,8 +276,8 @@ interface ChunkPlan {
 
 type UploadEvent =
   | { type: UploadStatus.ItemStarted;   index: number; total: number; cid: CID }
-  | { type: UploadStatus.ItemInBlock;   index: number; total: number; cid: CID; blockHash: string; blockNumber: number; extrinsicIndex?: number }
-  | { type: UploadStatus.ItemFinalized; index: number; total: number; cid: CID; blockHash: string; blockNumber: number; extrinsicIndex?: number }
+  | { type: UploadStatus.ItemInBlock;   index: number; total: number; cid: CID; blockHash: string; blockNumber: number; transactionIndex?: number }
+  | { type: UploadStatus.ItemFinalized; index: number; total: number; cid: CID; blockHash: string; blockNumber: number; transactionIndex?: number }
   | { type: UploadStatus.ItemFailed;    index: number; total: number; cid: CID; error: Error };
 
 type UploadCallback = (event: UploadEvent) => void;

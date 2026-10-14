@@ -27,7 +27,7 @@ try {
 | Code | Description | Recovery Hint |
 |---|---|---|
 | `EMPTY_DATA` | Data is empty | Provide non-empty data |
-| `DATA_TOO_LARGE` | Exceeds the 64 MiB limit | Reduce the data size |
+| `DATA_TOO_LARGE` | Exceeds 64 MiB (`FixedSizeChunker` / `prepareStoreChunked`) or `chunkingThreshold` (`BulletinPreparer.prepareStore`); never thrown by `estimateUpload` / `submit` | Reduce data size or use chunked upload |
 | `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB | Use a chunk size ≤ 2 MiB |
 | `INVALID_CHUNK_SIZE` | Chunk size is zero or negative | Use 1 byte – 2 MiB |
 | `INVALID_CONFIG` | Invalid config (e.g. duplicate content hashes in one submit) | Check the inputs |
@@ -40,9 +40,9 @@ try {
 
 | Code | Description | Recovery Hint |
 |---|---|---|
-| `INSUFFICIENT_AUTHORIZATION` | Quota insufficient or no/expired entry | Authorize via `authorizeAccount()` |
-| `AUTHORIZATION_FAILED` | Authorization call failed | Check the account has authorizer privileges |
-| `UNSUPPORTED_OPERATION` | Called a signed path on a signer-less client (and similar) | Provide the required signer |
+| `INSUFFICIENT_AUTHORIZATION` | No authorization entry, or it expired (checked only by `.ensureAuthorized()`) | Authorize via `authorizeAccount()` |
+| `AUTHORIZATION_FAILED` | An `authorize*` / `refresh*` call failed | Check the account has authorizer privileges |
+| `UNSUPPORTED_OPERATION` | Called a signed path on a signer-less client, or a call the runtime doesn't have | This operation is not supported in this context |
 
 ### Transaction & Upload
 
@@ -50,13 +50,13 @@ try {
 |---|---|---|
 | `TRANSACTION_FAILED` | Yes | On-chain transaction failed |
 | `TIMEOUT` | Yes | Not included within the timeout window |
-| `STORE_STALLED` | Yes | Submission stalled (pool saturation / reorg); the SDK retries internally |
+| `STORE_STALLED` | Yes | Submission stalled (pool saturation / reorg); the signed path retries internally |
 | `CHUNK_FAILED` | No | A chunk failed to prepare |
 | `MISSING_CHUNK` | No | A chunk was missing during reassembly |
 | `HIJACK_BUDGET_EXCEEDED` | No | Too many nonce reassignments under concurrent same-account submission |
 | `UPLOAD_INCOMPLETE` | No | Some items failed permanently and are not on chain; `cause.failedIndices` lists them |
 
-`error.retryable` is true for `TRANSACTION_FAILED`, `TIMEOUT`, and `STORE_STALLED`. Note that `submit()` already retries stalls internally before surfacing one.
+`error.retryable` is true for `TRANSACTION_FAILED`, `TIMEOUT`, and `STORE_STALLED`. Note that a signed `submit()` already retries stalls internally (up to 3 times) before surfacing one; `.asUnsigned()` does not.
 
 ```typescript
 try {
@@ -101,11 +101,11 @@ await client
 | Event | Value | Fields |
 |---|---|---|
 | `ItemStarted` | `"item_started"` | `index`, `total`, `cid` |
-| `ItemInBlock` | `"item_in_block"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `extrinsicIndex?` |
-| `ItemFinalized` | `"item_finalized"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `extrinsicIndex?` |
+| `ItemInBlock` | `"item_in_block"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `transactionIndex?` |
+| `ItemFinalized` | `"item_finalized"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `transactionIndex?` |
 | `ItemFailed` | `"item_failed"` | `index`, `total`, `cid`, `error` |
 
-`ItemFinalized` carries the `blockNumber` and `extrinsicIndex` you need to [renew](./renewal.md) the item later.
+`ItemFinalized` carries the `blockNumber` and `transactionIndex` you need to [renew](./renewal.md) the item later.
 
 ## Authorization Flow
 
@@ -113,23 +113,29 @@ await client
 import { BulletinError, ErrorCode } from '@parity/bulletin-sdk'
 
 try {
-  await client.submit(await client.estimateUpload(src), src).send()
+  await client.submit(await client.estimateUpload(src), src).ensureAuthorized().send()
 } catch (error) {
   if (!(error instanceof BulletinError)) throw error
-  switch (error.code) {
-    case ErrorCode.INSUFFICIENT_AUTHORIZATION:
-      console.error('Need authorization:', error.recoveryHint)
-      break
-    case ErrorCode.AUTHORIZATION_FAILED:
-      console.error('Authorization call failed:', error.message)
-      break
-    default:
-      console.error(error.code, error.message)
+  if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
+    console.error('Need authorization:', error.recoveryHint)
+  } else {
+    console.error(error.code, error.message)
+  }
+}
+
+// AUTHORIZATION_FAILED comes from the authorization calls themselves
+try {
+  await client.authorizeAccount(address, 10, 10_000_000n).send()
+} catch (error) {
+  if (error instanceof BulletinError && error.code === ErrorCode.AUTHORIZATION_FAILED) {
+    console.error('Authorization call failed:', error.message)
+  } else {
+    throw error
   }
 }
 ```
 
-Use `.ensureAuthorized()` on the builder to fail fast with `INSUFFICIENT_AUTHORIZATION` before any bytes are submitted.
+`.ensureAuthorized()` on the builder fails fast with `INSUFFICIENT_AUTHORIZATION` before any bytes are submitted; without it, the SDK does not check authorization before submitting.
 
 ## Wrapping External Errors
 

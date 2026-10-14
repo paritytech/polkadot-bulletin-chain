@@ -33,7 +33,7 @@ console.log('Stored', cids.length, 'units, root', rootCid.toString());
 
 ## Reading from a File Without Buffering
 
-`blobFromBytes` holds the whole buffer in memory. `submit()` instead takes a `SeekableSource` — it fetches each chunk lazily by `read(offset, length)` and frees it on finalization — so a file-backed source keeps only one chunk resident at a time:
+`blobFromBytes` holds the whole buffer in memory. `submit()` instead takes a `SeekableSource` — it fetches each chunk lazily by `read(offset, length)` and frees it on finalization — so a file-backed source keeps only the in-flight chunks resident (a wave spans up to about 2 blocks' worth of chunks):
 
 ```typescript
 import { open } from 'node:fs/promises';
@@ -88,7 +88,7 @@ const client = new BulletinClient({
 Guidelines:
 - Maximum: 2 MiB (`MAX_CHUNK_SIZE`) — the Bitswap block-size limit.
 - Default: 1 MiB — a good balance of efficiency and compatibility.
-- Maximum total file size: 64 MiB (`MAX_FILE_SIZE`).
+- `MAX_FILE_SIZE` (64 MiB) applies only to `FixedSizeChunker` / `BulletinPreparer.prepareStoreChunked`; `estimateUpload` + `submit` stream sources of any size.
 
 ## Sizing Authorization
 
@@ -138,4 +138,4 @@ await client
 
 ## Atomicity
 
-Chunked uploads are **not atomic**. If submission fails partway, chunks already stored remain on chain. The SDK retries transient stalls and dedupes against what already landed (so it never double-stores), but a hard failure leaves the earlier chunks in place.
+Chunked uploads are **not atomic**. If submission fails partway, chunks already stored remain on chain. Within one `send()`, the SDK retries transient stalls and skips what already landed (so it never double-stores), but a hard failure leaves the earlier chunks in place. A new `submit()` stores every chunk again unless the estimate was made with `{ skipExisting: true }`, which leaves out the chunks already on chain.

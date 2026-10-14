@@ -28,7 +28,7 @@ console.log('Stored with CID:', cids[cids.length - 1].toString());
 
 ## Storing Items
 
-For one or more discrete values (each stored as its own `store` extrinsic), pass a list and source it with `blobFromItems`:
+For one or more discrete values (each stored as its own extrinsic: `store`, or `store_with_cid_config` for a non-default codec or hash), pass a list and source it with `blobFromItems`:
 
 ```typescript
 import { blobFromItems, CidCodec, HashAlgorithm } from '@parity/bulletin-sdk';
@@ -53,7 +53,7 @@ const { cids } = await client
 ```typescript
 const { cids } = await client
   .submit(estimate, src)
-  .withWaitFor('finalized')        // 'in_block' (default) | 'finalized'
+  .withWaitFor('finalized')        // 'in_block' | 'finalized' (default)
   .ensureAuthorized()              // pre-flight: fail fast if not authorized
   .withCallback((ev) => console.log(ev.type, ev.index))
   .send();
@@ -68,7 +68,7 @@ const { cids } = await client
 
 ## Estimating First
 
-`estimateUpload` is offline and cheap — call it before paying:
+`estimateUpload` hashes the data offline (it queries the chain only with `skipExisting`), so call it before submitting:
 
 ```typescript
 const estimate = await client.estimateUpload(src);
@@ -84,7 +84,8 @@ Pass `{ skipExisting: true }` to also query the chain and drop items already sto
 import { BulletinError, ErrorCode } from '@parity/bulletin-sdk';
 
 try {
-  await client.submit(await client.estimateUpload(src), src).send();
+  // INSUFFICIENT_AUTHORIZATION comes from the `.ensureAuthorized()` pre-flight
+  await client.submit(await client.estimateUpload(src), src).ensureAuthorized().send();
 } catch (error) {
   if (error instanceof BulletinError) {
     if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {

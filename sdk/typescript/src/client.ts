@@ -1524,8 +1524,8 @@ export class BulletinClient implements BulletinClientInterface {
    * wraps them in `Utility.batch_all` — atomic: either every
    * authorization is applied or none of them are.
    *
-   * Signed by `config.authorizerSigner` if set, otherwise by the
-   * client's primary upload signer.
+   * Signed by `config.authorizerSigner`; throws `UNSUPPORTED_OPERATION`
+   * when it is not set.
    */
   authorizeAccount(
     who: string,

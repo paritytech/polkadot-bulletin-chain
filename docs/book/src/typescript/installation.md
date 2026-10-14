@@ -12,8 +12,8 @@ pnpm add @parity/bulletin-sdk
 
 ## Dependencies
 
-We recommend using Polkadot API (PAPI) to let the sdk interact with the chain:
+The SDK requires Node.js 22 or later. Install its peer dependencies, Polkadot API (PAPI) and `multiformats`:
 
 ```bash
-npm install polkadot-api
+npm install polkadot-api@^3.1.0 multiformats@^14
 ```

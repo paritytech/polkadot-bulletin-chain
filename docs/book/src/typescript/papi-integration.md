@@ -1,12 +1,12 @@
 # PAPI Integration
 
-The SDK owns its PAPI connection. You give the constructor a **providers factory** and a signer; the SDK builds the `PolkadotClient`, derives the typed API, and tears it all down on `destroy()`. The factory is called once per upload (and on each retry), so dead WebSockets are replaced with fresh ones.
+The SDK owns its PAPI connection. You give the constructor a **providers factory** and a signer; the SDK builds the `PolkadotClient`, derives the typed API, and tears it all down on `destroy()`. The constructor calls the factory once, and each upload attempt (including retries) calls it twice — for the broadcast clients and for a separate chainHead monitor — so dead WebSockets are replaced with fresh ones.
 
 ```typescript
 providers: () => JsonRpcProvider[]
 ```
 
-`providers()[0]` drives the chainHead subscription; every provider in the array receives broadcast transactions. A factory is **required** for any signed or unsigned upload.
+`providers()[0]` drives the chainHead subscription; every provider in the array receives broadcast transactions. A factory is **required**: the constructor throws `INVALID_CONFIG` without one.
 
 ## Setup
 
@@ -49,7 +49,7 @@ const chain = await smoldot.addChain({
 });
 
 const client = new BulletinClient({
-  providers: () => [getSmProvider(chain)],
+  providers: () => [getSmProvider(() => chain)], // takes a function returning the chain
   uploadSigner: signer,
   descriptor: bulletin,
 });
@@ -70,7 +70,7 @@ const chain = await smoldot.addChain({
 Generate descriptors with `papi` for compile-time chain types:
 
 ```bash
-npx papi add wss://bulletin-rpc.polkadot.io -n bulletin
+npx papi add bulletin -w wss://bulletin-rpc.polkadot.io
 ```
 
 ```typescript
@@ -78,15 +78,19 @@ import { bulletin } from '@polkadot-api/descriptors';
 // pass `descriptor: bulletin` to the constructor
 ```
 
-Omit `descriptor` to fall back to `getUnsafeApi()` — it works at runtime but loses the types.
+Omit `descriptor` to fall back to `getUnsafeApi()` — it works at runtime but has no chain types.
 
 ## Sharing the Connection
 
-The SDK exposes its typed API as `client.api`, so your own queries reuse the same connection:
+The SDK exposes its typed API as `client.api`, so your own queries reuse the same connection. `client.api` is statically typed as the SDK's minimal `BulletinTypedApi` with or without a descriptor; when you passed a descriptor, cast it to the full typed API:
 
 ```typescript
-const blockNumber = await client.api.query.System.Number.getValue();
-const auth = await client.api.query.TransactionStorage.Authorizations.getValue({
+import type { TypedApi } from 'polkadot-api';
+import { bulletin } from '@polkadot-api/descriptors';
+
+const api = client.api as unknown as TypedApi<typeof bulletin>;
+const blockNumber = await api.query.System.Number.getValue();
+const auth = await api.query.TransactionStorage.Authorizations.getValue({
   type: 'Account',
   value: address,
 });
@@ -143,8 +147,8 @@ const client = new BulletinClient({
   providers: () => [getWsProvider(url)],
   uploadSigner: signer,
   defaultChunkSize: 1024 * 1024,        // 1 MiB (max 2 MiB)
-  chunkingThreshold: 2 * 1024 * 1024,   // single-tx limit
-  txTimeout: 420_000,                   // per-tx inclusion timeout (ms)
+  chunkingThreshold: 2 * 1024 * 1024,   // only used by BulletinPreparer.prepareStore
+  txTimeout: 420_000,                   // timeout (ms) for single-transaction calls such as authorizeAccount() and renew(); not used by submit()
 });
 ```
 
