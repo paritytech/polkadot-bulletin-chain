@@ -81,7 +81,9 @@ Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a r
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
 
-In-budget `store` txs sort strictly above over-budget ones. Pool nonce / arrival ordering breaks ties.
+In-budget `store` txs sort strictly above over-budget ones.
+
+Within the same level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` minus the KiB the signer has queued ahead in the pool: (tx nonce − account nonce) × tx length, at least block length / `MaxBlockTransactions` per tx. Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Unsigned txs get the full bonus. `MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST`, so the boost always decides first.
 
 [ext]: ../pallets/transaction-storage/src/extension.rs
 
