@@ -25,14 +25,13 @@ use std::sync::Arc;
 let client = TransactionClient::new("ws://localhost:10000").await?;
 let signer = dev::alice();
 
-// Upload in-memory items: plan, then submit. Items already on chain (by
-// content hash) are skipped, so a re-run never pays twice for the same CID.
+// Upload in-memory items: plan, then submit. With `skip_existing`, items already
+// on chain (by content hash) are left out, so a re-run does not store them again.
 let items = vec![UploadItem::new(b"hello".to_vec()), UploadItem::new(b"world".to_vec())];
 let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
 
-let estimate = client
-    .estimate_upload(UploadInput::Items(items), UploadEstimateOptions::default())
-    .await?;
+let options = UploadEstimateOptions { skip_existing: true, ..Default::default() };
+let estimate = client.estimate_upload(UploadInput::Items(items), options).await?;
 
 let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(datas));
 let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
@@ -45,18 +44,21 @@ println!("stored CIDs: {:?}", result.cids);
 Uploads go through one primitive: **`estimate_upload` → `submit`**.
 
 `estimate_upload(input, ..)` plans the upload (per-unit CIDs, sizes, offsets, and
-— for a file — a DAG-PB manifest) and sizes the authorization, skipping units
-already on chain. `input` is either:
+— for a file — a DAG-PB manifest) and sizes the authorization. With
+`skip_existing: true` it also leaves out units already on chain. `input` is either:
 
 - `UploadInput::Items(items)` — each item stored as its own unit (no manifest).
-- `UploadInput::Source(source)` — a re-openable byte source chunked into a file
-  with a DAG-PB manifest. The source is streamed once in `O(chunk_size)` memory.
+- `UploadInput::Source(source)` — a re-openable byte source, chunked, with a
+  DAG-PB manifest when it spans more than one chunk. The estimate streams the
+  source once and holds about one chunk in memory when the source yields bounded
+  parts (`blob_from_bytes` yields its whole buffer at once).
 
 `submit(signer, estimate, source, config)` then drives the items to the requested
 confirmation level. Bytes are fetched **lazily** from the source on each
 (re-)broadcast and freed on finalization, so resident memory tracks the in-flight
 window, not the whole upload. Pass the matching source — `blob_from_items(..)`
-for items, `blob_from_bytes(..)` / `blob_from_factory(..)` for a file.
+for items, `blob_from_bytes(..)` for a file. A `blob_from_factory(..)` stream is
+forward-only: buffer it with `collect_blob` first, or implement `SeekableSource`.
 
 ### Streaming a large file
 
@@ -70,7 +72,8 @@ let estimate = client
     .await?;
 // `estimate.base.transactions` / `.bytes` size the authorization to request.
 let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
-// `result.cids` ends with the manifest root CID (the file's retrieval id).
+// When the file spans more than one chunk, `result.cids` ends with the manifest
+// root CID (the file's retrieval id).
 # Ok(()) }
 ```
 
@@ -87,11 +90,14 @@ The pipeline mirrors the TypeScript SDK and provides the same guarantees:
 - **Wave batching** to the chain's per-block capacity (`BlockLimits`).
 - **Pool-aware nonce floor** + **finalized mortality anchor** (survives tip reorgs).
 - **Reconcile-driven inclusion** via the on-chain `TransactionByContentHash` map.
-- **Exactly-once** — content-hash dedup, one nonce slot per item; re-runs never double-pay.
+- **Exactly-once** — content-hash dedup, one nonce slot per item; a resumed run never
+  double-pays. A new run stores content already on chain again unless the estimate
+  used `skip_existing: true`.
 - **Hijack recovery** — a slot taken by a concurrent same-signer tx is re-queued.
 - **Watchdogs + retry-resume** — a stall/disconnect triggers a re-subscribe and
   re-broadcast of not-yet-confirmed items at their carried nonce (exactly-once);
-  only after the retry budget does it surface `Error::StoreStalled`.
+  only after the retry budget does it surface `Error::StoreStalled` or
+  `Error::NetworkError`.
 - **Multi-provider broadcast** — fan-out to every provider (accepted-if-any).
 
 ## Authorization
@@ -109,8 +115,8 @@ client.authorize_accounts(entries, false, &authorizer, WaitFor::Finalized).await
 # Ok(()) }
 ```
 
-`authorize_preimage`, `renew`, `refresh_*`, and `remove_expired_*` round out the
-authorization API.
+`authorize_preimage`, `refresh_*`, and `remove_expired_*` round out the
+authorization API; `renew` and `force_renew` extend retention.
 
 ## Connecting
 
@@ -149,7 +155,7 @@ submit them via your own subxt client.
 # fn run(data: Vec<u8>) -> Result<()> {
 let client = BulletinClient::new();
 let operation = client.prepare_store(data, StoreOptions::default())?;
-println!("CID: {:?}", operation.cid_bytes);
+println!("CID: {:?}", cid_to_bytes(&operation.calculate_cid()?)?);
 # Ok(()) }
 ```
 
@@ -172,16 +178,18 @@ bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
 ```bash
 cargo build --release
 cargo test                 # unit tests
-# Live integration tests need a node at ws://localhost:10000:
-cargo test --test pipeline_live -- --ignored --nocapture
+# Live integration tests need a node at ws://localhost:10000 (BULLETIN_RPC_URL)
+# and, for the multi-provider test, a second one at ws://localhost:12346
+# (BULLETIN_RPC_URL_2). They share //Alice, so run them serially:
+cargo test -p bulletin-sdk-rust --test pipeline_live -- --ignored --test-threads=1 --nocapture
 ```
 
 ## Data Retrieval
 
 This SDK does **not** provide retrieval. Public IPFS gateways are discouraged
-(centralized). Decentralized retrieval via the smoldot light client's
-`bitswap_block` RPC is planned — see
-<https://github.com/paritytech/polkadot-bulletin-chain/pull/264>.
+(centralized). Bulletin nodes and smoldot serve stored blocks through the
+`bitswap_v1_get` JSON-RPC method (raw blocks, no DAG assembly); call it through
+your own RPC client. See [Data Retrieval](../../docs/book/src/concepts/retrieval.md).
 
 ## Security
 

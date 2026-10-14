@@ -59,13 +59,41 @@ println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 
 ## Storing and Tracking
 
-`TransactionClient::store` submits data; record the `(block, index)` from the `Stored` event (see [Basic Storage](./basic-storage.md)) to build the `StorageRef` used for renewal.
+The upload pipeline reports each item's `(block, index)` in its `UploadEvent::ItemFinalized` event; use it to build the `StorageRef` used for renewal. `StoreReceipt` (from `TransactionClient::store`) does not contain the index.
 
 ```rust
-let receipt = tx_client.store(data, &signer, WaitFor::Finalized).await?;
-// Read (block, index) from the Stored event to construct:
+use std::sync::{Arc, Mutex};
+
+let position = Arc::new(Mutex::new(None));
+let position_sink = position.clone();
+let config = UploadConfig {
+    on_event: Some(Arc::new(move |event: UploadEvent| {
+        if let UploadEvent::ItemFinalized {
+            block_number: Some(block),
+            transaction_index: Some(index),
+            ..
+        } = event
+        {
+            *position_sink.lock().unwrap() = Some((block, index));
+        }
+    })),
+    ..Default::default()
+};
+
+let estimate = tx_client
+    .estimate_upload(
+        UploadInput::Items(vec![UploadItem::new(data.clone())]),
+        UploadEstimateOptions::default(),
+    )
+    .await?;
+let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(vec![data]));
+tx_client.submit(&signer, estimate, source, config).await?;
+
+let (block_number, index) = position.lock().unwrap().expect("item finalized");
 let storage_ref = StorageRef::new(block_number, index);
 ```
+
+Alternatively, renew by content hash, which does not change across renewals.
 
 ## Using RenewalTracker
 
@@ -87,27 +115,20 @@ tracker.track(
 
 // Periodically find entries close to expiry.
 let buffer = 1000; // renew this many blocks before expiration
-let expiring: Vec<StorageRef> = tracker
+let expiring: Vec<Vec<u8>> = tracker
     .expiring_before(current_block + buffer)
     .iter()
-    .map(|e| e.storage_ref)
+    .map(|e| e.content_hash.clone())
     .collect();
 
-for storage_ref in expiring {
-    let renewal = client.prepare_renew(storage_ref)?;
-    tx_client
-        .renew((renewal.block(), renewal.index()), &signer, WaitFor::Finalized)
-        .await?;
-
-    // Update the tracker with the new reference (read from the Renewed event
-    // when using the pallet's force_renew; see concepts).
-    tracker.update_after_renewal(
-        storage_ref,
-        StorageRef::new(new_block, new_index),
-        retention_period,
-    );
+for content_hash in expiring {
+    let content_hash: ContentHash = content_hash.as_slice().try_into()?;
+    // Schedules a one-shot renewal that fires at the retention boundary
+    tx_client.renew(content_hash, &signer, WaitFor::Finalized).await?;
 }
 ```
+
+`renew` does not move the data right away. When the scheduled renewal fires, the chain stores the data again and emits `DataRenewal.DataRenewed { index, .. }` in that block; `force_renew` stores it again in its own inclusion block and emits `DataRenewal.Renewed { index, .. }`. Pass that block and index to `tracker.update_after_renewal(old_ref, StorageRef::new(block, index), retention_period)`.
 
 `TrackedEntry` fields: `storage_ref` (with `.block` / `.index`), `content_hash`, `size`, `expires_at`.
 
@@ -158,7 +179,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash):
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal and `force_renew` with `RenewalFailed` before submitting:
 
 ```rust
 match client.prepare_renew(storage_ref) {

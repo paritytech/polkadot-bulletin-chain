@@ -8,7 +8,7 @@ This guide shows how to store data on Bulletin Chain using the SDK.
 
 ## Using TransactionClient (Recommended)
 
-The simplest way to store data is using `TransactionClient`:
+The simplest way to store data is `TransactionClient::store`, which submits one `store` transaction and waits for it. For uploads with exactly-once delivery, retries, and reorg handling, use `estimate_upload` → `submit` (see [Chunked Uploads](./chunked-uploads.md); it also accepts small in-memory items via `UploadInput::Items`).
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -17,24 +17,24 @@ use std::str::FromStr;
 use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     // Connect to Bulletin Chain
     let client = TransactionClient::new("ws://localhost:10000").await?;
     info!("Connected to Bulletin Chain");
 
-    // Create signer from seed phrase or dev account
-    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
-    let signer = Keypair::from_uri(&uri)?;
+    // Create signers from seed phrases or dev accounts
+    let signer = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Alice")?)?;
+    let authorizer = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Eve")?)?;
     let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
-    // Step 1: Authorize account (requires sudo/admin privileges)
+    // Step 1: Authorize the account (the signer must be a registered authorizer)
     let auth_receipt = client.authorize_account(
         account.clone(),
         10,                    // 10 transactions
         10 * 1024 * 1024,      // 10 MiB
-        &signer,
+        &authorizer,
         WaitFor::InBlock,
     ).await?;
     info!("Account authorized in block: {}", auth_receipt.block_hash);
@@ -107,15 +107,9 @@ match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         tracing::info!("Stored in block: {}", receipt.block_hash);
     }
-    Err(Error::EmptyData) => {
-        tracing::error!("Cannot store empty data");
-    }
     Err(Error::InsufficientAuthorization { need, available }) => {
-        tracing::error!(
-            need_bytes = need,
-            available_bytes = available,
-            "Insufficient authorization - authorize your account first"
-        );
+        // Transactions or bytes, whichever is short
+        tracing::error!(need, available, "Insufficient authorization - authorize your account first");
     }
     Err(e) if e.is_retryable() => {
         tracing::warn!(
@@ -130,6 +124,8 @@ match client.store(data, &signer, WaitFor::InBlock).await {
     }
 }
 ```
+
+`store` does not check for empty data; the chain rejects it and the error surfaces as `StorageFailed`. Validate locally with `BulletinClient::prepare_store`, which returns `EmptyData`.
 
 See the [Error Handling](./error-handling.md) guide for the full error reference.
 
@@ -155,12 +151,14 @@ tracing::info!(
 
 ### Step 2: Submit via Subxt
 
+`bulletin` is your own subxt-generated module (see [Authorization](./authorization.md#two-step-approach-advanced)).
+
 ```rust
 // Submit using your own subxt client
 let tx = bulletin::tx().transaction_storage().store(
     operation.data,
 );
-let result = tx.sign_and_submit_then_watch_default(&api, &signer).await?;
+let result = api.tx().sign_and_submit_then_watch_default(&tx, &signer).await?;
 ```
 
 This is useful when:
@@ -170,6 +168,6 @@ This is useful when:
 
 ## Next Steps
 
-- [Chunked Uploads](./chunked-uploads.md) - For files > 2 MiB
+- [Chunked Uploads](./chunked-uploads.md) - For large files
 - [Authorization](./authorization.md) - Managing storage authorization
 - [Error Handling](./error-handling.md) - Error codes, retry logic, recovery hints

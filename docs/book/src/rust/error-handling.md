@@ -14,15 +14,9 @@ match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         info!(block_hash = %receipt.block_hash, "Stored successfully");
     }
-    Err(Error::EmptyData) => {
-        error!("Data cannot be empty");
-    }
     Err(Error::InsufficientAuthorization { need, available }) => {
-        error!(
-            need_bytes = need,
-            available_bytes = available,
-            "Need more authorization"
-        );
+        // Transactions or bytes, whichever is short
+        error!(need, available, "Need more authorization");
     }
     Err(e) if e.is_retryable() => {
         error!(?e, hint = e.recovery_hint(), "Retryable error");
@@ -77,8 +71,8 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
         "Storage failed: {}",
         e
     );
-    // Logs: Storage failed: Data cannot be empty
-    //       code="EMPTY_DATA" hint="Provide non-empty data"
+    // Logs: Storage failed: Authorization not found for account: 5Grw...
+    //       code="AUTHORIZATION_NOT_FOUND" hint="Call authorizeAccount() or authorizePreimage() first"
 }
 ```
 
@@ -93,6 +87,8 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | `ChunkTooLarge(size)` | `CHUNK_TOO_LARGE` | Reduce chunk size to 2 MiB or less |
 | `InvalidChunkSize(msg)` | `INVALID_CHUNK_SIZE` | Use a chunk size between 1 byte and 2 MiB |
 | `InvalidConfig(msg)` | `INVALID_CONFIG` | Check configuration parameters |
+
+`EmptyData` comes from the offline and planning APIs (`prepare_store`, `prepare_store_chunked`, `estimate_upload`). `store` does not check for empty data; the chain rejects it and the error surfaces as `StorageFailed`.
 
 ### CID & Encoding Errors (Non-Retryable)
 
@@ -110,6 +106,8 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | No | Request additional authorization via authorize_account() |
 | `AuthorizationExpired { expired_at, current_block }` | `AUTHORIZATION_EXPIRED` | Yes | Call refreshAccountAuthorization() to extend expiry |
 
+The runtime API that the pre-store check queries leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
+
 ### Network & Transaction Errors (Retryable)
 
 | Variant | Code | Recovery Hint |
@@ -119,6 +117,23 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | `TransactionFailed(msg)` | `TRANSACTION_FAILED` | Verify transaction parameters and account nonce |
 | `RetrievalFailed(msg)` | `RETRIEVAL_FAILED` | The data may not be available yet; try again |
 | `RenewalFailed(msg)` | `RENEWAL_FAILED` | Check that storage hasn't expired, then retry |
+| `StoreStalled(msg)` | `STORE_STALLED` | The RPC connection sent no chainHead progress; retry on a fresh client |
+
+### Upload Pipeline Errors (Non-Retryable)
+
+| Variant | Code | Recovery Hint |
+|---|---|---|
+| `UploadIncomplete(msg)` | `UPLOAD_INCOMPLETE` | Some items were not stored; re-run estimate_upload with skip_existing, then submit to retry only the missing items |
+| `HijackBudgetExceeded(msg)` | `HIJACK_BUDGET_EXCEEDED` | Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account |
+
+The current pipeline does not return `HijackBudgetExceeded`: an item that exhausts its retries emits `ItemFailed`, and the run ends with `UploadIncomplete`.
+
+### Chain Capability Errors (Non-Retryable)
+
+| Variant | Code | Recovery Hint |
+|---|---|---|
+| `RenewalUnavailable` | `UNSUPPORTED_OPERATION` | This chain has no renewal pallet; data expires at the retention period |
+| `AuthorizationApiUnavailable` | `UNSUPPORTED_OPERATION` | Upgrade the chain's runtime, or skip the authorization preflight |
 
 ### Other Errors (Non-Retryable)
 
@@ -157,13 +172,16 @@ Track the lifecycle of a submitted transaction:
 
 | Variant | Description |
 |---|---|
-| `Validated` | Transaction validated and added to the pool |
-| `Broadcasted` | Transaction broadcast to network peers |
-| `InBestBlock { block_hash, block_number, extrinsic_index }` | Included in a best block |
-| `Finalized { block_hash, block_number, extrinsic_index }` | Finalized (irreversible) |
-| `NoLongerInBestBlock` | Removed from best block (chain reorg) |
-| `Invalid { error }` | Transaction is no longer valid |
-| `Dropped { error }` | Transaction dropped from the pool |
+| `Signed { tx_hash, chunk_index }` | Transaction signed (not emitted by `store_with_progress`) |
+| `Validated { chunk_index }` | Transaction validated and added to the pool |
+| `Broadcasted { chunk_index }` | Transaction broadcast to network peers |
+| `InBlock { block_hash, block_number, tx_index, chunk_index }` | Included in a best block |
+| `Finalized { block_hash, block_number, tx_index, chunk_index }` | Finalized (irreversible) |
+| `NoLongerInBlock { chunk_index }` | Removed from best block (chain reorg) |
+| `Invalid { error, chunk_index }` | Transaction is no longer valid |
+| `Dropped { error, chunk_index }` | Transaction dropped from the pool |
+
+`tx_index` is the `Stored` event index that `renew` takes, not the extrinsic index; `store_with_progress` sets it to `None`.
 
 Each event has a `description()` method that returns a human-readable string:
 
@@ -171,22 +189,23 @@ Each event has a `description()` method that returns a human-readable string:
 let event = TransactionStatusEvent::Finalized {
     block_hash: "0xabc".into(),
     block_number: Some(42),
-    extrinsic_index: None,
+    tx_index: None,
+    chunk_index: None,
 };
 assert_eq!(event.description(), "Transaction finalized in block #42 (0xabc)");
 ```
 
 ### Chunk Progress Events (`ChunkProgressEvent`)
 
-Track progress of chunked uploads:
+Only `BulletinClient::prepare_store_chunked` emits chunk events: `ChunkStarted { index: 0, total }` once, then `ManifestStarted` and `ManifestCreated` when it builds a manifest. No SDK method emits the other variants.
 
 | Variant | Description |
 |---|---|
-| `ChunkStarted { index, total }` | A chunk upload has started |
+| `ChunkStarted { index, total }` | Chunk preparation started |
 | `ChunkCompleted { index, total, cid }` | A chunk uploaded successfully |
 | `ChunkFailed { index, total, error }` | A chunk upload failed |
 | `ManifestStarted` | Manifest creation started |
-| `ManifestCreated { cid }` | Manifest created and stored |
+| `ManifestCreated { cid }` | Manifest built (not yet stored) |
 | `Completed { manifest_cid }` | All uploads completed |
 
 ### Combined `ProgressEvent` Enum
@@ -208,6 +227,17 @@ let event = ProgressEvent::tx_validated();
 let event = ProgressEvent::tx_finalized("0xabc".into(), Some(42), None);
 ```
 
+### Upload Events (`UploadEvent`)
+
+`submit` and `submit_unsigned` report progress through `UploadConfig.on_event`:
+
+| Variant | Description |
+|---|---|
+| `ItemStarted { index, total, cid }` | Item accepted into the pipeline |
+| `ItemInBlock { index, total, cid, block_hash, block_number, transaction_index }` | Item included in a best block; fires again if a reorg moves the item |
+| `ItemFinalized { index, total, cid, block_hash, block_number, transaction_index }` | Item finalized |
+| `ItemFailed { index, total, cid, error }` | Item failed permanently; the run ends with `UploadIncomplete` |
+
 ## Cross-SDK Consistency
 
 Error codes are consistent between the Rust and TypeScript SDKs where applicable. The Rust `Error::code()` method returns the same `SCREAMING_SNAKE_CASE` string as the TypeScript `ErrorCode` enum:
@@ -217,12 +247,13 @@ Error codes are consistent between the Rust and TypeScript SDKs where applicable
 | `Error::EmptyData` | `ErrorCode.EMPTY_DATA` | `"EMPTY_DATA"` |
 | `Error::TransactionFailed(_)` | `ErrorCode.TRANSACTION_FAILED` | `"TRANSACTION_FAILED"` |
 | `Error::InsufficientAuthorization { .. }` | `ErrorCode.INSUFFICIENT_AUTHORIZATION` | `"INSUFFICIENT_AUTHORIZATION"` |
+| `Error::RenewalUnavailable`, `Error::AuthorizationApiUnavailable` | `ErrorCode.UNSUPPORTED_OPERATION` | `"UNSUPPORTED_OPERATION"` |
 
 Some codes exist only in one SDK:
 - **Rust-only**: `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `RENEWAL_NOT_FOUND`, `AUTHORIZATION_NOT_FOUND`, `AUTHORIZATION_EXPIRED`, `CHUNKING_FAILED`, `FILE_TOO_LARGE`
-- **TypeScript-only**: `MISSING_CHUNK`, `DATA_TOO_LARGE`, `TIMEOUT`, `UNSUPPORTED_OPERATION`
+- **TypeScript-only**: `DATA_TOO_LARGE`, `INVALID_HASH_ALGORITHM`, `AUTHORIZATION_FAILED`, `CHUNK_FAILED`, `MISSING_CHUNK`, `TIMEOUT`
 
-The `is_retryable()` / `retryable` sets also differ: Rust includes more network-related codes (`NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `AUTHORIZATION_EXPIRED`), while TypeScript covers `TRANSACTION_FAILED` and `TIMEOUT`.
+The `is_retryable()` / `retryable` sets also differ: both SDKs treat `TRANSACTION_FAILED` and `STORE_STALLED` as retryable; Rust adds `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, and `AUTHORIZATION_EXPIRED`, while TypeScript adds `TIMEOUT`.
 
 ## Common Error Patterns
 
@@ -231,14 +262,11 @@ The `is_retryable()` / `retryable` sets also differ: Rust includes more network-
 ```rust
 match client.store(data, &signer, WaitFor::InBlock).await {
     Err(Error::AuthorizationNotFound(_)) => {
-        tracing::error!("No authorization found. Call authorize_account() first.");
+        // Missing or expired authorization
+        tracing::error!("No authorization found. Call authorize_account() or refresh it.");
     }
     Err(Error::InsufficientAuthorization { need, available }) => {
         tracing::error!(need, available, "Insufficient authorization");
-    }
-    Err(Error::AuthorizationExpired { expired_at, current_block }) => {
-        tracing::error!(expired_at, current_block, "Authorization expired, refreshing...");
-        // Refresh authorization
     }
     Ok(result) => {
         tracing::info!("Success!");
@@ -248,6 +276,8 @@ match client.store(data, &signer, WaitFor::InBlock).await {
 ```
 
 ### Retry with Backoff
+
+Each retry of `store` submits a new transaction. For exactly-once uploads, use `estimate_upload` → `submit`, which retries internally.
 
 ```rust
 let mut attempts = 0;

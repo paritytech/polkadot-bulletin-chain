@@ -14,36 +14,19 @@
 //! - **Progress Tracking**: Callback-based progress events for uploads
 //! - **no_std Compatible**: Core functionality works in no_std environments
 //!
-//! ## Data Retrieval (Not Yet Supported)
+//! ## Data Retrieval (Not Supported)
 //!
-//! **Important**: This SDK currently does NOT provide data retrieval functionality.
-//!
-//! ### Deprecated: IPFS Gateway Retrieval
-//!
-//! Retrieving data via public IPFS gateways (e.g., `https://ipfs.io/ipfs/{cid}`) is
-//! **deprecated** and not recommended. Public gateways are centralized infrastructure
-//! that goes against the decentralization goals of the Bulletin Chain.
-//!
-//! ### Future: Smoldot Light Client Retrieval
-//!
-//! Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC.
-//! This approach allows fully decentralized data retrieval directly from Bulletin
-//! validator nodes without relying on centralized gateways.
-//!
-//! See: <https://github.com/paritytech/polkadot-bulletin-chain/pull/264>
-//!
-//! ### Current Workaround: Direct P2P via libp2p
-//!
-//! For applications that need retrieval now, connect directly to Bulletin validator
-//! nodes using libp2p with their P2P multiaddrs. This is decentralized but requires
-//! additional dependencies. See the console-ui implementation for reference.
+//! This SDK does not provide data retrieval. Bulletin nodes and smoldot serve
+//! stored blocks through the `bitswap_v1_get` JSON-RPC method (raw blocks, no DAG
+//! assembly); call it through your own RPC client. Public IPFS gateways (e.g.
+//! `https://ipfs.io/ipfs/{cid}`) are centralized and not recommended.
 //!
 //! ## Usage
 //!
 //! Uploads go through one primitive: [`estimate_upload`] → [`submit`]. The
-//! estimate plans the upload and sizes the authorization (skipping units already
-//! on chain); `submit` drives the items to finality through a wave-batched,
-//! reconcile-driven pipeline with exactly-once guarantees, fetching each unit's
+//! estimate plans the upload and sizes the authorization (with `skip_existing`,
+//! leaving out units already on chain); `submit` drives the items to finality through a
+//! wave-batched, reconcile-driven pipeline with exactly-once guarantees, fetching each unit's
 //! bytes lazily from the source.
 //!
 //! [`estimate_upload`]: crate::TransactionClient::estimate_upload
@@ -54,9 +37,10 @@
 //! use std::sync::Arc;
 //!
 //! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 //!     // Connect (use `from_endpoints` for multi-provider broadcast).
 //!     let client = TransactionClient::new("ws://localhost:10000").await?;
+//!     let signer = subxt_signer::sr25519::dev::alice();
 //!
 //!     // Upload in-memory items: plan, then submit.
 //!     let items = vec![UploadItem::new(b"hello".to_vec())];
@@ -73,9 +57,10 @@
 //!
 //! ### Streaming a large file
 //!
-//! For files, pass a [`SeekableSource`] — chunked into a DAG-PB file, streamed
-//! once for the estimate, then range-read lazily during submission so resident
-//! memory tracks the in-flight window, not the whole file.
+//! For files, pass a [`SeekableSource`] — chunked (with a DAG-PB manifest when it
+//! spans more than one chunk), streamed once for the estimate, then range-read
+//! lazily during submission so resident memory tracks the in-flight window, not
+//! the whole file.
 //!
 //! ```ignore
 //! use bulletin_sdk_rust::prelude::*;
@@ -86,7 +71,7 @@
 //!     .estimate_upload(UploadInput::Source(source.clone()), UploadEstimateOptions::default())
 //!     .await?;
 //! let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
-//! // `result.cids` ends with the manifest root CID.
+//! // With a manifest, `result.cids` ends with its root CID.
 //! ```
 //!
 //! Use [`submit_unsigned`] for the preimage-authorized (no-signer) path.
@@ -105,13 +90,12 @@
 //!
 //! let client = BulletinClient::new();
 //! let operation = client.prepare_store(b"Hello, Bulletin!".to_vec(), StoreOptions::default())?;
-//! println!("CID: {:?}", operation.cid_bytes);
+//! println!("CID: {:?}", cid_to_bytes(&operation.calculate_cid()?)?);
 //! ```
 //!
 //! ## Feature Flags
 //!
 //! - `std` (default): Enable standard library support and subxt helpers
-//! - `serde-support`: Enable serialization support for DAG structures
 //!
 //! ## no_std Support
 //!
@@ -119,7 +103,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! bulletin-sdk-rust = { version = "0.1", default-features = false }
+//! bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain", default-features = false }
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]

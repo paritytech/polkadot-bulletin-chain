@@ -2,7 +2,7 @@
 
 The Rust SDK is designed to be compatible with `no_std` environments, making it ideal for use in constrained environments like embedded systems or WebAssembly runtimes.
 
-> **Important**: The `no_std` feature is for **data preparation and verification** only. You cannot call `store()` or `retrieve()` methods in no_std contexts. These high-level APIs require networking and async support which are only available with the `std` feature.
+> **Important**: Without the `std` feature (`default-features = false`) the SDK is for **data preparation and verification** only. `TransactionClient` (`store`, `estimate_upload`, `submit`, `authorize_*`, `renew`, ...), the upload pipeline, and the byte sources require networking and async support, which are only available with the `std` feature. The SDK has no retrieval API.
 
 ## Configuration
 
@@ -17,7 +17,7 @@ bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-cha
 
 When using the SDK without the `std` feature:
 
-- **No `store()` or `retrieve()`**: High-level client APIs require std for networking
+- **No `TransactionClient`**: storing, uploading, authorization, and renewal calls require std for networking
 - **No Networking**: Cannot use `subxt` or connect to nodes
 - **No Async**: Async/await requires std library support
 - **Data Preparation Only**: Use for CID calculation, chunking, and verification
@@ -60,8 +60,8 @@ use alloc::vec::Vec;
 fn prepare_chunks(data: &[u8]) -> Vec<Vec<u8>> {
     let config = ChunkerConfig {
         chunk_size: 1024 * 1024, // 1 MiB chunks
-        max_parallel: 1, // Serial processing in no_std
         create_manifest: false,
+        ..Default::default()
     };
 
     let chunker = FixedSizeChunker::new(config).expect("Invalid chunker config");
@@ -85,7 +85,7 @@ fn prepare_chunks(data: &[u8]) -> Vec<Vec<u8>> {
 
 In no_std environments, be mindful of memory constraints:
 
-- Use streaming chunking for large files
-- Process one chunk at a time instead of loading all data into memory
+- `FixedSizeChunker::chunk` takes the whole input (at most 64 MiB); there is no streaming chunker without `std`, so split larger inputs into segments yourself
+- Process one chunk at a time instead of keeping all chunks in memory
 - Consider chunk size based on available RAM
 - Use iterators where possible to avoid allocations

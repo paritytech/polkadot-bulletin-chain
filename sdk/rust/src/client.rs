@@ -39,12 +39,10 @@ impl Default for ClientConfig {
 	}
 }
 
-/// High-level client for Bulletin Chain operations.
+/// Offline client that prepares Bulletin Chain operations (CID calculation,
+/// chunking, manifest creation) without network access.
 ///
-/// This provides a simplified API for common operations like storing
-/// and retrieving data, with automatic chunking and manifest creation.
-///
-/// For full functionality with blockchain integration, enable the `std` feature.
+/// For submission, use `TransactionClient` (`std` feature).
 #[derive(Debug, Clone)]
 pub struct BulletinClient {
 	/// Client configuration.

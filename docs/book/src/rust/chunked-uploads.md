@@ -1,215 +1,132 @@
 # Chunked Uploads
 
-The Bulletin SDK automatically handles chunking for large files up to **64 MiB**. When data exceeds the chunk size threshold (default 1 MiB), it is split into chunks of up to **2 MiB** each (ensuring IPFS Bitswap compatibility).
+`estimate_upload` → `submit` uploads a large file in chunks (default 1 MiB). When the file spans more than one chunk, the SDK also stores a DAG-PB manifest that links the chunks; the manifest CID is the file's retrieval CID.
 
 > **Complete Working Example**: See [`examples/rust/authorize-and-store`](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples/rust/authorize-and-store) for a complete runnable example demonstrating chunked storage with DAG-PB manifests.
 
-## Using TransactionClient with DAG-PB Manifest
-
-For most use cases, use `BulletinClient` to prepare chunks and `TransactionClient` to submit them:
+## Uploading a File
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
-use subxt_signer::sr25519::Keypair;
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
+use subxt_signer::{sr25519::Keypair, SecretUri};
 use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Connect and setup signer
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let client = TransactionClient::new("ws://localhost:10000").await?;
-    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
-    let signer = Keypair::from_uri(&uri)?;
+    let signer = Keypair::from_uri(&SecretUri::from_str("//Alice")?)?;
 
-    // Create large data (3 MiB)
-    let large_data: Vec<u8> = (0..3 * 1024 * 1024)
-        .map(|i| (i % 256) as u8)
-        .collect();
+    // 3 MiB of data
+    let large_data: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 256) as u8).collect();
+    let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(large_data));
 
-    // Configure chunking
-    let chunker_config = ChunkerConfig {
-        chunk_size: 1024 * 1024,  // 1 MiB chunks
-        max_parallel: 4,
-        create_manifest: true,    // Create DAG-PB manifest
+    // Plan: chunk CIDs, DAG-PB manifest, and the authorization the upload needs
+    let options = UploadEstimateOptions {
+        chunker: ChunkerConfig { chunk_size: 1024 * 1024, ..Default::default() },
+        ..Default::default()
     };
+    let estimate = client.estimate_upload(UploadInput::Source(source.clone()), options).await?;
+    info!("{} transactions, {} bytes", estimate.base.transactions, estimate.base.bytes);
 
-    let dag_options = StoreOptions {
-        cid_codec: CidCodec::DagPb,
-        hash_algorithm: HashingAlgorithm::Blake2b256,
-        wait_for: WaitFor::InBlock,
+    // Submit: the pipeline assigns nonces, packs chunks into blocks, and handles reorgs
+    let config = UploadConfig {
+        on_event: Some(Arc::new(|event: UploadEvent| info!("{event:?}"))),
+        ..Default::default()
     };
+    let result = client.submit(&signer, estimate, source, config).await?;
 
-    // Prepare chunks using BulletinClient (no network needed)
-    let sdk_client = BulletinClient::new();
-    let progress_callback = Arc::new(|event: ProgressEvent| {
-        info!("Chunk progress: {:?}", event);
-    });
-
-    let (batch_operation, manifest_data) = sdk_client
-        .prepare_store_chunked(&large_data, Some(chunker_config), dag_options, Some(progress_callback))?;
-
-    info!("Prepared {} chunks", batch_operation.operations.len());
-
-    // Submit each chunk
-    for (i, chunk_op) in batch_operation.operations.iter().enumerate() {
-        info!("Submitting chunk {}/{}...", i + 1, batch_operation.operations.len());
-        let receipt = client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await?;
-        info!("  Chunk {} stored in block: {}", i + 1, receipt.block_hash);
-    }
-
-    // Submit the manifest
-    if let Some(manifest) = manifest_data {
-        info!("Submitting DAG-PB manifest ({} bytes)...", manifest.len());
-        let receipt = client.store(manifest, &signer, WaitFor::InBlock).await?;
-        info!("Manifest stored in block: {}", receipt.block_hash);
-        info!("Use this manifest CID to retrieve the complete file via IPFS/Bitswap");
-    }
-
+    // CIDs in plan order; the manifest root CID is last
+    info!("Manifest CID: {:?}", result.cids.last());
     Ok(())
 }
 ```
 
 ## How It Works
 
-The chunked upload flow:
+1. **`estimate_upload`** reads the source once, splits it into chunks, calculates each chunk's CID, and builds a DAG-PB manifest when there is more than one chunk. The returned `StreamEstimate` contains the plan and the `transactions`/`bytes` the upload consumes.
+2. **`submit`** reads each chunk from the source when it is sent (`SeekableSource::read`), groups chunks into waves sized to the block limits, and confirms each chunk through the chain's `TransactionByContentHash` index. The manifest is submitted last.
+3. **Returns** `UploadResult { cids }`: one CID per plan unit, with the manifest root CID last.
 
-1. **Splits data** into chunks (default 1 MiB, max 2 MiB)
-2. **Calculates CIDs** for each chunk
-3. **Creates DAG-PB manifest** linking all chunks (optional)
-4. **Submits chunks** as individual `TransactionStorage.store` transactions
-5. **Submits manifest** as the final transaction
-6. **Returns** all chunk data and the manifest bytes
+By default, `submit` stores every chunk again even if the same content is already on chain (this refreshes its retention). Set `skip_existing: true` in `UploadEstimateOptions` to leave out chunks that are already stored.
 
 ## Configuration Options
 
 ### Chunk Size
 
 ```rust
-let config = ChunkerConfig {
-    chunk_size: 2 * 1024 * 1024,  // 2 MiB chunks (MAX_CHUNK_SIZE)
-    max_parallel: 4,
-    create_manifest: true,
+let options = UploadEstimateOptions {
+    chunker: ChunkerConfig { chunk_size: 2 * 1024 * 1024, ..Default::default() },
+    ..Default::default()
 };
 ```
 
 **Guidelines:**
-- Minimum: 1 byte
-- Maximum: 2 MiB (2,097,152 bytes) — ensures IPFS Bitswap compatibility
-- Default: 1 MiB — good balance of transaction overhead and throughput
-- Maximum file size: 64 MiB (MAX_FILE_SIZE)
+- Default: 1 MiB
+- Maximum: 2 MiB (2,097,152 bytes), the chain's maximum transaction size. `estimate_upload` only rejects a chunk size of 0, so keep the value within this limit yourself.
+- `estimate_upload` and `submit` have no file size limit. `BulletinClient::prepare_store_chunked` accepts up to 64 MiB.
 
 ### Manifest Creation
 
 ```rust
-// With manifest (recommended for large files)
-let config = ChunkerConfig {
-    chunk_size: 1024 * 1024,
-    max_parallel: 8,
-    create_manifest: true,  // Creates DAG-PB manifest
-};
-
 // Without manifest (just upload chunks)
-let config = ChunkerConfig {
-    chunk_size: 1024 * 1024,
-    max_parallel: 8,
-    create_manifest: false,  // No manifest, just chunks
+let options = UploadEstimateOptions {
+    chunker: ChunkerConfig { create_manifest: false, ..Default::default() },
+    ..Default::default()
 };
 ```
 
-### Upload Timing
+A source that fits in one chunk never gets a manifest; its chunk CID is the retrieval CID.
 
-Bulletin Chain has a **6 second block time**. Each chunk requires one transaction, so:
+### Block Usage
 
-| File Size | Chunk Size | Chunks | Transactions | Min Time (sequential) |
-|-----------|------------|--------|--------------|----------------------|
-| 2 MiB | 2 MiB | 1 | 2 (data + manifest) | ~12 seconds |
-| 32 MiB | 2 MiB | 16 | 17 | ~102 seconds |
-| 64 MiB | 2 MiB | 32 | 33 | ~198 seconds |
-
-**Note**: Times shown are for sequential uploads waiting for each transaction to be included in a block. Actual times may vary based on network conditions and finalization requirements.
+`submit` sizes each wave of chunks to the chain's block limits (`UploadConfig.block_limits`, default `DEFAULT_BLOCK_LIMITS`), so one block can include several chunks. Bulletin Chain has a 6 second block time. `submit` returns when every chunk reaches `UploadConfig.complete_on` (default `WaitFor::Finalized`).
 
 ## Progress Tracking
 
-Track chunk preparation progress with callbacks:
+Upload progress arrives through `UploadConfig.on_event`:
 
 ```rust
 use std::sync::Arc;
 
-let progress = Arc::new(|event: ProgressEvent| {
-    match event {
-        ProgressEvent::Chunk(chunk_event) => {
-            match chunk_event {
-                ChunkProgressEvent::ChunkStarted { index, total } => {
-                    tracing::info!("[{}/{}] Starting chunk...", index + 1, total);
-                }
-                ChunkProgressEvent::ChunkCompleted { index, total, cid } => {
-                    tracing::info!("[{}/{}] Chunk ready", index + 1, total);
-                }
-                ChunkProgressEvent::ManifestStarted => {
-                    tracing::info!("Creating manifest...");
-                }
-                ChunkProgressEvent::ManifestCreated { cid } => {
-                    tracing::info!("Manifest CID ready");
-                }
-                ChunkProgressEvent::Completed { manifest_cid } => {
-                    tracing::info!("All chunks prepared!");
-                }
-                _ => {}
-            }
-        }
-        ProgressEvent::Transaction(tx_event) => {
-            tracing::info!("{}", tx_event.description());
-        }
+let on_event: UploadCallback = Arc::new(|event| match event {
+    UploadEvent::ItemStarted { index, total, .. } => {
+        tracing::info!("[{}/{}] Started", index + 1, total);
+    }
+    UploadEvent::ItemInBlock { index, total, block_number, .. } => {
+        // Fires again if a reorg moves the chunk to another block
+        tracing::info!("[{}/{}] In block {:?}", index + 1, total, block_number);
+    }
+    UploadEvent::ItemFinalized { index, total, block_number, transaction_index, .. } => {
+        tracing::info!(
+            "[{}/{}] Finalized in block {:?}, transaction index {:?}",
+            index + 1, total, block_number, transaction_index
+        );
+    }
+    UploadEvent::ItemFailed { index, total, error, .. } => {
+        tracing::error!("[{}/{}] Failed: {}", index + 1, total, error);
     }
 });
-
-let (batch, manifest) = sdk_client
-    .prepare_store_chunked(&data, Some(config), options, Some(progress))?;
+let config = UploadConfig { on_event: Some(on_event), ..Default::default() };
 ```
+
+`BulletinClient::prepare_store_chunked` takes a separate `ProgressCallback`. It emits `ChunkStarted { index: 0, total }` once, then `ManifestStarted` and `ManifestCreated` when it builds a manifest.
 
 ## Authorization for Chunked Uploads
 
-For large chunked uploads, check authorization before starting to avoid wasting time uploading many chunks only to fail partway through.
-
-### Estimate Requirements
-
-```rust
-let sdk_client = BulletinClient::new();
-let file_size = std::fs::metadata("large-file.bin")?.len();
-
-// Estimate what's needed (transactions + bytes)
-let (txs_needed, bytes_needed) = sdk_client.estimate_authorization(file_size);
-
-tracing::info!("This upload will need:");
-tracing::info!("  {} transactions", txs_needed);
-tracing::info!("  {} bytes authorized", bytes_needed);
-```
-
-### Check Before Upload
+Check authorization before a large upload. The estimate contains the exact numbers:
 
 ```rust
 use subxt::utils::AccountId32;
 
 let account = AccountId32::from(signer.public_key().0);
+let (transactions, bytes) = (estimate.base.transactions, estimate.base.bytes);
 
-// Check current authorization on-chain
-match client.check_authorization_for_store(&account, txs_needed, bytes_needed).await {
-    Ok(()) => {
-        tracing::info!("Authorization sufficient, proceeding with upload");
-    }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        tracing::error!(
-            need_bytes = need,
-            available_bytes = available,
-            "Insufficient authorization"
-        );
-        // Authorize first
-        client.authorize_account(account, txs_needed, bytes_needed, &signer, WaitFor::InBlock).await?;
-    }
-    Err(Error::AuthorizationNotFound(_)) => {
-        tracing::error!("No authorization found, authorizing...");
-        client.authorize_account(account, txs_needed, bytes_needed, &signer, WaitFor::InBlock).await?;
+match client.check_authorization_for_store(&account, transactions, bytes).await {
+    Ok(()) => tracing::info!("Authorization sufficient, proceeding with upload"),
+    Err(Error::InsufficientAuthorization { .. } | Error::AuthorizationNotFound(_)) => {
+        // `authorizer` must be a registered authorizer
+        client.authorize_account(account, transactions, bytes, &authorizer, WaitFor::InBlock).await?;
     }
     Err(e) => return Err(e.into()),
 }
@@ -217,61 +134,36 @@ match client.check_authorization_for_store(&account, txs_needed, bytes_needed).a
 
 ## Error Handling
 
+`estimate_upload` returns `EmptyData` for an empty source and `InvalidChunkSize` for a chunk size of 0. `submit` errors:
+
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-// Preparation errors (from BulletinClient)
-match sdk_client.prepare_store_chunked(&data, Some(config), options, None) {
-    Ok((batch, manifest)) => {
-        tracing::info!("Prepared {} chunks", batch.len());
+match client.submit(&signer, estimate, source, config).await {
+    Ok(result) => tracing::info!("Stored {} units", result.cids.len()),
+    Err(Error::UploadIncomplete(message)) => {
+        // Some chunks failed permanently (see the ItemFailed events). Run
+        // estimate_upload with skip_existing: true and submit again to upload
+        // only the missing chunks.
+        tracing::error!("Upload incomplete: {message}");
     }
-    Err(Error::EmptyData) => {
-        tracing::error!("No data to upload");
+    Err(e) if e.is_retryable() => {
+        // StoreStalled or NetworkError after the pipeline's own retries
+        tracing::warn!(code = e.code(), hint = e.recovery_hint(), "Upload interrupted: {e}");
     }
-    Err(Error::FileTooLarge(size)) => {
-        tracing::error!("File size {} exceeds 64 MiB limit", size);
-    }
-    Err(Error::ChunkTooLarge(size)) => {
-        tracing::error!("Chunk size {} exceeds 2 MiB limit", size);
-    }
-    Err(e) => {
-        tracing::error!(?e, "Preparation failed");
-    }
-}
-
-// Submission errors (from TransactionClient)
-for (i, chunk_op) in batch.operations.iter().enumerate() {
-    match client.store(chunk_op.data.clone(), &signer, WaitFor::InBlock).await {
-        Ok(receipt) => {
-            tracing::info!("Chunk {} stored in block: {}", i + 1, receipt.block_hash);
-        }
-        Err(Error::InsufficientAuthorization { need, available }) => {
-            tracing::error!(
-                need_bytes = need,
-                available_bytes = available,
-                chunk = i + 1,
-                "Insufficient authorization mid-upload"
-            );
-            break;
-        }
-        Err(e) if e.is_retryable() => {
-            tracing::warn!(code = e.code(), "Retryable error on chunk {}", i + 1);
-            // Implement retry logic
-        }
-        Err(e) => {
-            tracing::error!(code = e.code(), "Chunk {} failed: {}", i + 1, e);
-            break;
-        }
-    }
+    Err(e) => tracing::error!(code = e.code(), "Upload failed: {e}"),
 }
 ```
 
 ## Two-Step Approach (Advanced)
 
-For more control, prepare chunks with `BulletinClient` and submit via your own subxt client:
+For more control, prepare chunks with `BulletinClient` and submit them via your own subxt client. `prepare_store_chunked` accepts up to 64 MiB with chunks of up to 2 MiB. This path has none of the pipeline's nonce, retry, or reorg handling. `bulletin` is your own subxt-generated module (see [Authorization](./authorization.md#two-step-approach-advanced)).
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use bulletin::runtime_types::bulletin_transaction_storage_primitives::cids::{
+    CidConfig, HashingAlgorithm,
+};
 
 // Step 1: Prepare chunks locally (no network needed)
 let client = BulletinClient::new();
@@ -282,35 +174,31 @@ let (batch, manifest_data) = client.prepare_store_chunked(
     None, // no progress callback
 )?;
 
-// Step 2: Submit manually via your own subxt client
+// Step 2: Submit each chunk (raw codec, blake2b-256: the defaults of `store`)
 for operation in &batch.operations {
-    let tx = bulletin::tx().transaction_storage().store(
-        operation.data.clone(),
-    );
-    let result = api.tx()
-        .sign_and_submit_then_watch_default(&tx, &signer)
-        .await?;
+    let tx = bulletin::tx().transaction_storage().store(operation.data.clone());
+    api.tx().sign_and_submit_then_watch_default(&tx, &signer).await?;
 }
 
+// The manifest CID uses the DAG-PB codec (0x70)
 if let Some(manifest_bytes) = manifest_data {
-    let tx = bulletin::tx().transaction_storage().store(manifest_bytes);
-    let result = api.tx()
-        .sign_and_submit_then_watch_default(&tx, &signer)
-        .await?;
+    let cid_config = CidConfig { codec: 0x70, hashing: HashingAlgorithm::Blake2b256 };
+    let tx = bulletin::tx().transaction_storage().store_with_cid_config(cid_config, manifest_bytes);
+    api.tx().sign_and_submit_then_watch_default(&tx, &signer).await?;
 }
 ```
 
 ## Best Practices
 
-1. **Estimate and check authorization** before starting large uploads to avoid wasting fees
-2. **Choose appropriate chunk size** — 1 MiB is a good default (balances transaction overhead vs. throughput)
-3. **Enable manifest creation** for files that need to be retrieved as a whole via IPFS
-4. **Track progress** with callbacks to show users what's happening
-5. **Handle partial failures** — chunked uploads are not atomic; if a chunk fails, previously submitted chunks remain on-chain
-6. **Keep the manifest CID** — use it to retrieve the complete file later via IPFS/Bitswap
+1. **Estimate and check authorization** before starting large uploads
+2. **Choose an appropriate chunk size**: 1 MiB is a good default; never exceed 2 MiB
+3. **Keep manifest creation enabled** for files that need to be retrieved as a whole via IPFS
+4. **Track progress** with `UploadConfig.on_event` to show users what's happening
+5. **Handle partial failures**: uploads are not atomic. After `UploadIncomplete`, the chunks that were stored remain on chain; re-run with `skip_existing: true` to upload only the missing ones
+6. **Keep the manifest CID**: use it to retrieve the complete file later via IPFS/Bitswap
 
 ## Next Steps
 
 - [Authorization](./authorization.md) - Manage storage authorization
-- [Basic Storage](./basic-storage.md) - For small files < 2 MiB
+- [Basic Storage](./basic-storage.md) - For small data
 - [Error Handling](./error-handling.md) - Error codes, retry logic, recovery hints

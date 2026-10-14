@@ -651,7 +651,8 @@ impl TransactionClient {
 	/// values are a soft-budget preflight, not a hard precondition.
 	///
 	/// Returns `None` if no authorization exists or it has expired, and
-	/// [`Error::AuthorizationApiUnavailable`] on a runtime without [`AUTHORIZATION_API`].
+	/// [`Error::AuthorizationApiUnavailable`] on a runtime without the
+	/// `BulletinTransactionStorageApi` runtime API.
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
@@ -715,10 +716,10 @@ impl TransactionClient {
 	/// If the query itself fails (e.g., network error), the error is returned
 	/// so the caller can decide whether to proceed.
 	///
-	/// A runtime without [`AUTHORIZATION_API`] is the one exception: there is nothing to
-	/// preflight against, and a soft check must not block a `store` the chain would accept,
-	/// so the check passes. Matches the TypeScript SDK, which also proceeds when it cannot
-	/// read the authorization.
+	/// A runtime without the `BulletinTransactionStorageApi` runtime API is the one exception:
+	/// there is nothing to preflight against, and a soft check must not block a `store` the chain
+	/// would accept, so the check passes. Matches the TypeScript SDK, which also proceeds when it
+	/// cannot read the authorization.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,

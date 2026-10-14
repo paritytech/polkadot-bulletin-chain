@@ -3,7 +3,7 @@
 
 //! Version dispatch for items that changed incompatibly across the live fleet.
 //!
-//! `../metadata.scale` (the [`crate::transaction::bulletin`] module) tracks the
+//! `../metadata.scale` (the crate-private `transaction::bulletin` module) tracks the
 //! workspace runtime and is the SDK's canonical interface. Live chains lag it;
 //! when an item the SDK uses changed shape incompatibly, its legacy encoding
 //! lives here as a module generated from a snapshot of the oldest supported

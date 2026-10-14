@@ -15,18 +15,18 @@ use std::str::FromStr;
 use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let client = TransactionClient::new("ws://localhost:10000").await?;
-    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
-    let signer = Keypair::from_uri(&uri)?;
-    let account = subxt::utils::AccountId32::from(signer.public_key().0);
+    let uploader = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Alice")?)?;
+    let authorizer = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Eve")?)?;
+    let account = subxt::utils::AccountId32::from(uploader.public_key().0);
 
     // Authorize: 10 transactions, 10 MiB
     let receipt = client.authorize_account(
         account,
         10,                   // transactions
         10 * 1024 * 1024,     // bytes
-        &signer,              // must have authorizer privileges
+        &authorizer,          // a registered authorizer (//Eve in the dev preset)
         WaitFor::InBlock,
     ).await?;
 
@@ -63,11 +63,9 @@ match client.check_authorization_for_store(&account, 1, data.len() as u64).await
         tracing::error!("No authorization found — call authorize_account() first");
     }
     Err(Error::InsufficientAuthorization { need, available }) => {
-        tracing::error!(
-            need_bytes = need,
-            available_bytes = available,
-            "Insufficient authorization"
-        );
+        // Transactions are checked first: `need`/`available` count transactions
+        // when the transaction quota is short, bytes otherwise.
+        tracing::error!(need, available, "Insufficient authorization");
     }
     Err(e) => {
         tracing::error!(?e, "Authorization check failed");
@@ -98,23 +96,28 @@ client.remove_expired_preimage_authorization(content_hash, &signer, WaitFor::InB
 
 ## Estimating Authorization
 
-Use `BulletinClient` to calculate authorization requirements before submitting:
+`estimate_upload` returns the exact `transactions` and `bytes` of an upload plan (chunks plus manifest):
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
+use std::sync::Arc;
 
-let client = BulletinClient::new();
-let file_size = 100 * 1024 * 1024; // 100 MiB
-
-// Automatically calculates transactions and bytes needed
-// (accounts for chunking and manifest overhead)
-let (txs, bytes) = client.estimate_authorization(file_size);
-tracing::info!(transactions = txs, bytes = bytes, "Authorization needed");
+let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(file_bytes));
+let estimate = client
+    .estimate_upload(UploadInput::Source(source), UploadEstimateOptions::default())
+    .await?;
+tracing::info!(
+    transactions = estimate.base.transactions,
+    bytes = estimate.base.bytes,
+    "Authorization needed"
+);
 ```
+
+`BulletinClient::estimate_authorization(size)` is an offline approximation: it assumes 1 MiB chunks and estimates the manifest as 10 bytes per chunk plus 1000 bytes.
 
 ## Automatic Pre-Store Check
 
-`TransactionClient.store()` automatically checks authorization before submitting a transaction. If the account lacks sufficient authorization, it returns an `InsufficientAuthorization` or `AuthorizationNotFound` error immediately — without submitting or paying for a transaction.
+`TransactionClient.store()` automatically checks authorization before submitting a transaction. If the account lacks sufficient authorization, it returns an `InsufficientAuthorization` or `AuthorizationNotFound` error immediately, without submitting a transaction. On runtimes without the `BulletinTransactionStorageApi` runtime API the check is skipped.
 
 ```rust
 match client.store(data, &signer, WaitFor::InBlock).await {
@@ -135,9 +138,12 @@ match client.store(data, &signer, WaitFor::InBlock).await {
 
 ## Two-Step Approach (Advanced)
 
-When using `BulletinClient` with your own subxt client, submit authorization transactions manually:
+When using `BulletinClient` with your own subxt client, submit authorization transactions manually. The SDK's generated chain module is private, so generate your own from the chain metadata (for example `sdk/metadata.scale`):
 
 ```rust
+#[subxt::subxt(runtime_metadata_path = "metadata.scale")]
+pub mod bulletin {}
+
 let tx = bulletin::tx().transaction_storage().authorize_account(
     target_account,
     txs,

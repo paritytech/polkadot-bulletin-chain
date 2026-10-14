@@ -243,7 +243,7 @@ mod integration_tests {
     use subxt_signer::sr25519::Keypair;
     use std::str::FromStr;
 
-    // Run with: cargo test --features std -- --ignored
+    // Run with: cargo test -- --ignored
     #[tokio::test]
     #[ignore] // Requires a running local node
     async fn test_store_and_retrieve() {
