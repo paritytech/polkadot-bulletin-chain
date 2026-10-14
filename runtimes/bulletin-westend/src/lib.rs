@@ -97,7 +97,7 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 		frame_system::CheckTxVersion<Runtime>,
 		frame_system::CheckGenesis<Runtime>,
 		frame_system::CheckEra<Runtime>,
-		frame_system::CheckNonce<Runtime>,
+		pallet_bulletin_transaction_storage::extension::NonceCheckWithQueueBonus<Runtime>,
 		frame_system::CheckWeight<Runtime>,
 		pallet_skip_feeless_payment::SkipCheckIfFeeless<
 			Runtime,
@@ -552,7 +552,7 @@ where
 			frame_system::CheckTxVersion::<Runtime>::new(),
 			frame_system::CheckGenesis::<Runtime>::new(),
 			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
-			frame_system::CheckNonce::<Runtime>::from(0),
+			pallet_bulletin_transaction_storage::extension::NonceCheckWithQueueBonus::<Runtime>::new(0),
 			frame_system::CheckWeight::<Runtime>::new(),
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
