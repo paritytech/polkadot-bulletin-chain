@@ -39,6 +39,31 @@ Rules:
   pallets unchanged (the renewal split) keeps its hash and the pallet is the
   only discriminator.
 
+## Regenerating `sdk/metadata.scale`
+
+Extract the metadata from the workspace runtime wasm with the papi CLI
+(installed by `npm ci` in `examples/`). Run `papi add` in an empty directory:
+it writes a `.papi/` folder there.
+
+```bash
+repo=$(git rev-parse --show-toplevel)
+cargo build --release -p bulletin-westend-runtime
+
+cd "$(mktemp -d)"
+"$repo/examples/node_modules/.bin/papi" add bulletin --skip-codegen \
+    --wasm "$repo/target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.wasm"
+cp .papi/metadata/bulletin.scale "$repo/sdk/metadata.scale"
+
+cd "$repo"
+cargo clean -p bulletin-sdk-rust
+cargo test -p bulletin-sdk-rust --lib
+(cd sdk/typescript && npm run test:unit)
+```
+
+The output is V16 `RuntimeMetadataPrefixed`, the format subxt reads. The
+compat unit tests fail if a renewal call changed shape; add the registry rows
+described above.
+
 ## Snapshots
 
 | File | Source chain (fetched) | Covers |
