@@ -76,15 +76,25 @@ Extends `expiration` by another `AuthorizationPeriod` and leaves all consumed co
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - `check_authorization` saturates `bytes` and `transactions` upward and never rejects.
-- The boost applies to **signed account-scoped `store` / `store_with_cid_config`**. Preimage-scoped stores get `0`.
-- Account-scoped `renew` / `force_renew` / `enable_auto_renew` always get `ALLOWANCE_PRIORITY_BOOST`, added by the renewal validator in `pallet-bulletin-data-renewal`: the hard cap rejects an over-quota renew, so every renew in the pool is in-budget. Preimage-scoped `force_renew` and `disable_auto_renew` get `0`.
+- The boost applies to **signed account-scoped `store` / `store_with_cid_config`** while in-budget.
 - The strategy is fed the **post-this-tx** extent so the decision is "would this leave the holder in-budget on both axes?".
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
 
-In-budget `store` txs sort strictly above over-budget ones.
+Preimage stores (signed or unsigned) always get `ALLOWANCE_PRIORITY_BOOST`, added in the pallet's preimage store validation. Every renew-family call (`renew`, `force_renew`, `enable_auto_renew`, `disable_auto_renew`) gets the same level through the runtime's `RenewTxParams`; the hard cap rejects an over-quota renew, so no budget check is needed.
 
-Within the same level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` minus the number of txs the signer has queued ahead in the pool (tx nonce − account nonce). Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Unsigned txs get the full bonus. `MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST`, so the boost always decides first.
+### Priority levels
+
+| Level | Transactions | Priority |
+|---|---|---|
+| 1 | `apply_authorized_upgrade` (frame-system) | `MAX` |
+| 2 | Cleanup (`remove_expired_*`, `remove_exhausted_authorizer`) | `MAX / 2` |
+| 3 | `authorize_account`, `authorize_preimage`, `refresh_*_authorization` | `MAX / 4` |
+| 4 | In-budget store, preimage store, renew family | `1 + MAX / 8` |
+| 5 | Over-budget store, fee-paying calls | `1`; fee-paying calls add their payment priority (tip-based) |
+| 6 | HOP promotion | `0` |
+
+Within a level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` minus the number of txs the signer has queued ahead in the pool (tx nonce − account nonce). Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Bare txs get the full bonus; unsigned general txs (HOP promotion) get none. `MAX_QUEUE_BONUS` is far below the gap between levels, so the level always decides first.
 
 [ext]: ../pallets/transaction-storage/src/extension.rs
 
