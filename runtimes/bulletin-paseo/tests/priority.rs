@@ -217,7 +217,10 @@ fn priority_ladder_across_call_types() {
 			in_budget_store > over_budget_store,
 			"the allowance boost must lift in-budget stores"
 		);
-		assert_eq!(renew, over_budget_store, "renew must rank level with an over-budget store");
+		assert_eq!(
+			renew, in_budget_store,
+			"an account-scoped renew must rank level with an in-budget store"
+		);
 		assert_eq!(
 			authorize, over_budget_store,
 			"authorize_account must rank level with an over-budget store"
@@ -228,6 +231,60 @@ fn priority_ladder_across_call_types() {
 		);
 		assert!(over_budget_store > transfer, "fee-paying calls must rank below every store");
 		assert!(transfer > promotion, "HOP promotion must rank lowest");
+	});
+}
+
+#[test]
+fn renew_family_priority_levels() {
+	externalities().execute_with(|| {
+		next_block();
+		let renewer = Sr25519Keyring::Dave;
+		let in_budget = Sr25519Keyring::Eve;
+		let over_budget = Sr25519Keyring::Ferdie;
+		for account in [renewer, in_budget] {
+			account_authorization(account, LARGE_ALLOWANCE_BYTES);
+		}
+		account_authorization(over_budget, SMALL_ALLOWANCE_BYTES);
+		let account_content = vec![1u8; SMALL_STORE_BYTES];
+		let preimage_content = vec![2u8; SMALL_STORE_BYTES];
+		inclusion(renewer, store_call(SMALL_STORE_BYTES, 1));
+		inclusion(renewer, store_call(SMALL_STORE_BYTES, 2));
+		let stored_block = System::block_number();
+		next_block();
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			sp_io::hashing::blake2_256(&preimage_content),
+			preimage_content.len() as u64,
+		));
+
+		let entry = |index| TransactionRef::Position { block: stored_block, index };
+		let renew_priority = |call| queued_priority(renewer, RuntimeCall::DataRenewal(call), 0, 0);
+		let in_budget_store = queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 3), 0, 0);
+		let over_budget_store =
+			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 3), 0, 0);
+
+		assert_eq!(
+			renew_priority(DataRenewalCall::<Runtime>::renew { entry: entry(0) }),
+			in_budget_store,
+			"an account-scoped renew must rank level with an in-budget store"
+		);
+		assert_eq!(
+			renew_priority(DataRenewalCall::<Runtime>::force_renew { entry: entry(0) }),
+			in_budget_store,
+			"an account-scoped force_renew must rank level with an in-budget store"
+		);
+		assert_eq!(
+			renew_priority(DataRenewalCall::<Runtime>::enable_auto_renew {
+				content_hash: sp_io::hashing::blake2_256(&account_content),
+			}),
+			in_budget_store,
+			"enable_auto_renew must rank level with an in-budget store"
+		);
+		assert_eq!(
+			renew_priority(DataRenewalCall::<Runtime>::force_renew { entry: entry(1) }),
+			over_budget_store,
+			"a preimage-scoped force_renew must rank level with an over-budget store"
+		);
 	});
 }
 

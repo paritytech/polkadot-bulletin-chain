@@ -460,7 +460,8 @@ fn allowance_based_priority_works() {
 			advance_block();
 			assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
-			// `renew` carries `Origin::Authorized` too, but must not be boosted.
+			// `renew` carries `Origin::Authorized` too; its boost comes from the renewal validator,
+			// not this extension.
 			let renew = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::force_renew {
 				entry: TransactionRef::Position { block: 1, index: 0 },
 			});
