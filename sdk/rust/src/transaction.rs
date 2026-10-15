@@ -515,7 +515,7 @@ impl TransactionClient {
 		&self,
 		tx: &impl subxt::tx::Payload,
 		signer: &Keypair,
-		make_error: &impl Fn(String) -> Error,
+		operation: &str,
 	) -> Result<subxt::tx::TxProgress<PolkadotConfig, OnlineClient<PolkadotConfig>>> {
 		let account = AccountId32::from(signer.public_key().0);
 
@@ -523,14 +523,14 @@ impl TransactionClient {
 			.rpc
 			.system_account_next_index(&account)
 			.await
-			.map_err(|e| make_error(format!("{e:?}")))?;
+			.map_err(|e| submission_error(operation, e.into()))?;
 
 		let params = DefaultExtrinsicParamsBuilder::<PolkadotConfig>::new().nonce(nonce).build();
 		self.api
 			.tx()
 			.sign_and_submit_then_watch(tx, signer, params)
 			.await
-			.map_err(|e| make_error(format!("{e:?}")))
+			.map_err(|e| submission_error(operation, e))
 	}
 
 	/// Submit a transaction, stream status events, and return when the target
@@ -546,9 +546,9 @@ impl TransactionClient {
 		signer: &Keypair,
 		wait_for: WaitFor,
 		progress_callback: Option<ProgressCallback>,
-		make_error: impl Fn(String) -> Error,
+		operation: &str,
 	) -> Result<SubmitResult> {
-		let mut progress = self.submit_with_pool_nonce(tx, signer, &make_error).await?;
+		let mut progress = self.submit_with_pool_nonce(tx, signer, operation).await?;
 
 		let mut result_block_hash = None;
 		let mut result_extrinsic_hash = None;
@@ -585,7 +585,7 @@ impl TransactionClient {
 
 							if wait_for == WaitFor::InBlock {
 								in_block.wait_for_success().await.map_err(|e| {
-									make_error(format!("Transaction failed: {e:?}"))
+									Error::TransactionFailed(format!("{operation} failed: {e:?}"))
 								})?;
 								break;
 							}
@@ -607,10 +607,9 @@ impl TransactionClient {
 							result_block_hash = Some(block_hash);
 							result_extrinsic_hash = Some(extrinsic_hash);
 
-							in_block
-								.wait_for_success()
-								.await
-								.map_err(|e| make_error(format!("Transaction failed: {e:?}")))?;
+							in_block.wait_for_success().await.map_err(|e| {
+								Error::TransactionFailed(format!("{operation} failed: {e:?}"))
+							})?;
 							break;
 						},
 						TxStatus::NoLongerInBestBlock =>
@@ -630,7 +629,10 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(make_error(format!("Transaction invalid: {message}")));
+							return Err(Error::TransactionInvalid {
+								custom_code: invalid_custom_code(&message),
+								message: format!("{operation}: {message}"),
+							});
 						},
 						TxStatus::Dropped { message } => {
 							if let Some(ref cb) = progress_callback {
@@ -641,20 +643,29 @@ impl TransactionClient {
 									},
 								));
 							}
-							return Err(make_error(format!("Transaction dropped: {message}")));
+							return Err(Error::TransactionFailed(format!(
+								"{operation} failed: dropped: {message}"
+							)));
 						},
 						TxStatus::Error { message } =>
-							return Err(make_error(format!("Transaction error: {message}"))),
+							return Err(Error::TransactionFailed(format!(
+								"{operation} failed: {message}"
+							))),
 					}
 				},
-				Err(e) => return Err(make_error(format!("Status error: {e:?}"))),
+				Err(e) =>
+					return Err(Error::TransactionFailed(format!(
+						"{operation} failed: status error: {e:?}"
+					))),
 			}
 		}
 
 		match (result_block_hash, result_extrinsic_hash) {
 			(Some(block_hash), Some(extrinsic_hash)) =>
 				Ok(SubmitResult { block_hash, extrinsic_hash }),
-			_ => Err(make_error("Transaction stream ended without block inclusion".into())),
+			_ => Err(Error::TransactionFailed(format!(
+				"{operation} failed: status stream ended without block inclusion"
+			))),
 		}
 	}
 
@@ -800,11 +811,8 @@ impl TransactionClient {
 		self.check_authorization_for_store(&account, 1, data_size).await?;
 
 		let tx = bulletin::tx().transaction_storage().store(data);
-		let result = self
-			.submit_and_watch(&tx, signer, wait_for, progress_callback, |e| {
-				Error::StorageFailed(format!("Store failed: {e}"))
-			})
-			.await?;
+		let result =
+			self.submit_and_watch(&tx, signer, wait_for, progress_callback, "store").await?;
 
 		Ok(StoreReceipt {
 			block_hash: result.block_hash,
@@ -845,11 +853,8 @@ impl TransactionClient {
 			bytes,
 		);
 
-		let result = self
-			.submit_and_watch(&tx, signer, wait_for, None, |e| {
-				Error::TransactionFailed(format!("Authorization failed: {e}"))
-			})
-			.await?;
+		let result =
+			self.submit_and_watch(&tx, signer, wait_for, None, "authorize_account").await?;
 
 		Ok(AuthorizationReceipt {
 			account: who,
@@ -885,7 +890,6 @@ impl TransactionClient {
 				"authorize_accounts requires at least one entry".into(),
 			));
 		}
-		let err = |e: String| Error::TransactionFailed(format!("Authorization failed: {e}"));
 
 		let calls: Vec<RuntimeCall> = entries
 			.iter()
@@ -906,7 +910,9 @@ impl TransactionClient {
 				RuntimeCall::Utility(UtilityCall::batch_all { calls })
 			};
 			let tx = bulletin::tx().sudo().sudo(call);
-			self.submit_and_watch(&tx, signer, wait_for, None, err).await?.block_hash
+			self.submit_and_watch(&tx, signer, wait_for, None, "authorize_accounts")
+				.await?
+				.block_hash
 		} else if calls.len() == 1 {
 			let e = &entries[0];
 			let tx = bulletin::tx().transaction_storage().authorize_account(
@@ -914,10 +920,14 @@ impl TransactionClient {
 				e.transactions,
 				e.bytes,
 			);
-			self.submit_and_watch(&tx, signer, wait_for, None, err).await?.block_hash
+			self.submit_and_watch(&tx, signer, wait_for, None, "authorize_accounts")
+				.await?
+				.block_hash
 		} else {
 			let tx = bulletin::tx().utility().batch_all(calls);
-			self.submit_and_watch(&tx, signer, wait_for, None, err).await?.block_hash
+			self.submit_and_watch(&tx, signer, wait_for, None, "authorize_accounts")
+				.await?
+				.block_hash
 		};
 
 		Ok(entries
@@ -943,11 +953,8 @@ impl TransactionClient {
 	) -> Result<PreimageAuthorizationReceipt> {
 		let tx = bulletin::tx().transaction_storage().authorize_preimage(content_hash, max_size);
 
-		let result = self
-			.submit_and_watch(&tx, signer, wait_for, None, |e| {
-				Error::TransactionFailed(format!("Authorization failed: {e}"))
-			})
-			.await?;
+		let result =
+			self.submit_and_watch(&tx, signer, wait_for, None, "authorize_preimage").await?;
 
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
@@ -958,7 +965,7 @@ impl TransactionClient {
 	/// does not renew synchronously. For immediate renewal use
 	/// [`force_renew`](Self::force_renew).
 	///
-	/// Returns [`Error::RenewalUnavailable`] on a chain without a `renew` call.
+	/// Returns [`Error::UnsupportedOperation`] on a chain without a `renew` call.
 	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
@@ -979,32 +986,23 @@ impl TransactionClient {
 		let result = match compat::renew_adapter(&self.api.metadata())? {
 			compat::RenewAdapter::DataRenewal => {
 				let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
-				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-					Error::RenewalFailed(format!("Renew failed: {e}"))
-				})
-				.await?
+				self.submit_and_watch(&tx, signer, wait_for, None, "renew").await?
 			},
 			compat::RenewAdapter::TransactionRef => {
 				let tx = compat::bulletin_v1000016::tx()
 					.transaction_storage()
 					.renew(to_v1000016_ref(&entry));
-				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-					Error::RenewalFailed(format!("Renew failed: {e}"))
-				})
-				.await?
+				self.submit_and_watch(&tx, signer, wait_for, None, "renew").await?
 			},
 			compat::RenewAdapter::Positional => {
 				let TransactionRef::Position { block, index } = &entry else {
-					return Err(Error::RenewalFailed(
+					return Err(Error::UnsupportedOperation(
 						"content-hash renewal is not supported by this runtime".into(),
 					));
 				};
 				let tx =
 					compat::bulletin_v1000011::tx().transaction_storage().renew(*block, *index);
-				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-					Error::RenewalFailed(format!("Renew failed: {e}"))
-				})
-				.await?
+				self.submit_and_watch(&tx, signer, wait_for, None, "renew").await?
 			},
 		};
 
@@ -1019,7 +1017,7 @@ impl TransactionClient {
 	/// ships `TransactionRef` / `force_renew`; legacy positional runtimes fail
 	/// closed.
 	///
-	/// Returns [`Error::RenewalUnavailable`] on a chain without a `renew` call.
+	/// Returns [`Error::UnsupportedOperation`] on a chain without a `renew` call.
 	pub async fn force_renew(
 		&self,
 		entry: impl Into<TransactionRef<u32>>,
@@ -1030,22 +1028,16 @@ impl TransactionClient {
 		let result = match compat::renew_adapter(&self.api.metadata())? {
 			compat::RenewAdapter::DataRenewal => {
 				let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
-				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-					Error::RenewalFailed(format!("Force renew failed: {e}"))
-				})
-				.await?
+				self.submit_and_watch(&tx, signer, wait_for, None, "force_renew").await?
 			},
 			compat::RenewAdapter::TransactionRef => {
 				let tx = compat::bulletin_v1000016::tx()
 					.transaction_storage()
 					.force_renew(to_v1000016_ref(&entry));
-				self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-					Error::RenewalFailed(format!("Force renew failed: {e}"))
-				})
-				.await?
+				self.submit_and_watch(&tx, signer, wait_for, None, "force_renew").await?
 			},
 			compat::RenewAdapter::Positional =>
-				return Err(Error::RenewalFailed(
+				return Err(Error::UnsupportedOperation(
 					"force_renew is not supported by this runtime".into(),
 				)),
 		};
@@ -1082,28 +1074,26 @@ impl TransactionClient {
 	) -> Result<()> {
 		use compat::{AutoRenewAdapter, AutoRenewCall};
 
-		let make_error =
-			|e: String| Error::RenewalFailed(format!("{} failed: {e}", call.call_name()));
 		match (compat::auto_renew_adapter(&self.api.metadata(), call)?, call) {
 			(AutoRenewAdapter::DataRenewal, AutoRenewCall::Enable) => {
 				let tx = bulletin::tx().data_renewal().enable_auto_renew(content_hash);
-				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+				self.submit_and_watch(&tx, signer, wait_for, None, call.call_name()).await?;
 			},
 			(AutoRenewAdapter::DataRenewal, AutoRenewCall::Disable) => {
 				let tx = bulletin::tx().data_renewal().disable_auto_renew(content_hash);
-				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+				self.submit_and_watch(&tx, signer, wait_for, None, call.call_name()).await?;
 			},
 			(AutoRenewAdapter::TransactionStorage, AutoRenewCall::Enable) => {
 				let tx = compat::bulletin_v1000016::tx()
 					.transaction_storage()
 					.enable_auto_renew(content_hash);
-				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+				self.submit_and_watch(&tx, signer, wait_for, None, call.call_name()).await?;
 			},
 			(AutoRenewAdapter::TransactionStorage, AutoRenewCall::Disable) => {
 				let tx = compat::bulletin_v1000016::tx()
 					.transaction_storage()
 					.disable_auto_renew(content_hash);
-				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+				self.submit_and_watch(&tx, signer, wait_for, None, call.call_name()).await?;
 			},
 		}
 		Ok(())
@@ -1119,10 +1109,8 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().refresh_account_authorization(who);
-		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-			Error::TransactionFailed(format!("Refresh failed: {e}"))
-		})
-		.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, "refresh_account_authorization")
+			.await?;
 		Ok(())
 	}
 
@@ -1138,10 +1126,8 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.refresh_preimage_authorization(content_hash);
-		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-			Error::TransactionFailed(format!("Refresh failed: {e}"))
-		})
-		.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, "refresh_preimage_authorization")
+			.await?;
 		Ok(())
 	}
 
@@ -1153,10 +1139,8 @@ impl TransactionClient {
 		wait_for: WaitFor,
 	) -> Result<()> {
 		let tx = bulletin::tx().transaction_storage().remove_expired_account_authorization(who);
-		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-			Error::TransactionFailed(format!("Removal failed: {e}"))
-		})
-		.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, "remove_expired_account_authorization")
+			.await?;
 		Ok(())
 	}
 
@@ -1170,12 +1154,37 @@ impl TransactionClient {
 		let tx = bulletin::tx()
 			.transaction_storage()
 			.remove_expired_preimage_authorization(content_hash);
-		self.submit_and_watch(&tx, signer, wait_for, None, |e| {
-			Error::TransactionFailed(format!("Removal failed: {e}"))
-		})
-		.await?;
+		self.submit_and_watch(&tx, signer, wait_for, None, "remove_expired_preimage_authorization")
+			.await?;
 		Ok(())
 	}
+}
+
+const INVALID_TRANSACTION_RPC_CODE: i32 = 1010;
+
+fn submission_error(operation: &str, error: subxt::Error) -> Error {
+	use subxt::{error::RpcError, ext::subxt_rpcs};
+
+	if let subxt::Error::Rpc(RpcError::ClientError(subxt_rpcs::Error::User(user_error))) = &error {
+		if user_error.code == INVALID_TRANSACTION_RPC_CODE {
+			let detail = user_error
+				.data
+				.as_ref()
+				.map(|data| data.get().trim_matches('"').to_string())
+				.unwrap_or_default();
+			return Error::TransactionInvalid {
+				custom_code: invalid_custom_code(&detail),
+				message: format!("{operation}: {} ({detail})", user_error.message),
+			};
+		}
+	}
+	Error::TransactionFailed(format!("{operation} failed: {error:?}"))
+}
+
+fn invalid_custom_code(detail: &str) -> Option<u8> {
+	let (_, after_prefix) = detail.split_once("Custom error: ")?;
+	let digits: String = after_prefix.chars().take_while(char::is_ascii_digit).collect();
+	digits.parse().ok()
 }
 
 /// Internal result from `submit_and_watch`.
@@ -1253,6 +1262,13 @@ mod tests {
 			root_cid: None,
 			manifest_data: None,
 		}
+	}
+
+	#[test]
+	fn invalid_transaction_custom_code() {
+		assert_eq!(invalid_custom_code("Custom error: 11"), Some(11));
+		assert_eq!(invalid_custom_code("Invalid Transaction (Custom error: 12)"), Some(12));
+		assert_eq!(invalid_custom_code("Transaction is outdated"), None);
 	}
 
 	/// Leftover duplicates (dedup disabled) are rejected; estimate-collapsed

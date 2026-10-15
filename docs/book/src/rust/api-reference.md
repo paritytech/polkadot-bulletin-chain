@@ -308,7 +308,7 @@ pub enum RenewAdapter {
 }
 ```
 
-`renew_adapter` returns `RenewalUnavailable` when the chain has no `renew` call and `RenewalFailed` for an unknown call shape.
+`renew_adapter` returns `UnsupportedOperation` when the chain has no `renew` call or the call shape is unknown.
 
 ---
 
@@ -653,29 +653,25 @@ pub enum AuthorizationScope {
 
 ### Error
 
-All 23 error variants with structured metadata.
+All 19 error variants with structured metadata. The codes are shared with the TypeScript SDK; see [Error Handling](./error-handling.md).
 
 ```rust
 pub enum Error {
     ChunkTooLarge(u64),
-    FileTooLarge(u64),
+    DataTooLarge(String),
     EmptyData,
     InvalidCid(String),
     AuthorizationNotFound(String),
     InsufficientAuthorization { need: u64, available: u64 },
-    AuthorizationExpired { expired_at: u32, current_block: u32 },
-    StorageFailed(String),
     DagEncodingFailed(String),
     NetworkError(String),
     InvalidConfig(String),
     ChunkingFailed(String),
-    RetrievalFailed(String),
-    RenewalNotFound { block: u32, index: u32 },
-    RenewalFailed(String),
     CidCalculationFailed(String),
     TransactionFailed(String),
+    TransactionInvalid { custom_code: Option<u8>, message: String },
     InvalidChunkSize(String),
-    RenewalUnavailable,
+    UnsupportedOperation(String),
     AuthorizationApiUnavailable,
     StoreStalled(String),
     HijackBudgetExceeded(String),

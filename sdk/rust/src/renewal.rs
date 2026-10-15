@@ -50,7 +50,7 @@ impl RenewalOperation {
 	pub fn validate(&self) -> Result<()> {
 		// Block 0 is typically genesis and unlikely to have user transactions
 		if self.storage_ref.block == 0 {
-			return Err(Error::RenewalFailed("Block 0 is not a valid renewal target".into()));
+			return Err(Error::InvalidConfig("block 0 is not a valid renewal target".into()));
 		}
 		Ok(())
 	}

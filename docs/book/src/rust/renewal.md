@@ -80,7 +80,7 @@ A content hash carries at most one registration, so `renew` and `enable_auto_ren
 | `disable_auto_renew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
 | `disable_auto_renew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
 
-The call then returns `Error::RenewalFailed`, whose message carries the RPC error `1010 Invalid Transaction` with data `Custom error: <code>`.
+The call then returns `Error::TransactionInvalid` with `custom_code: Some(<code>)`.
 
 ## Storing and Tracking
 
@@ -204,7 +204,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including the pool's invalid-transaction rejections such as custom error 11 (`RENEWAL_ALREADY_ENABLED`, a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal, `force_renew` and the auto-renew calls with `RenewalFailed` before submitting:
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::InvalidConfig`. Submission errors surface as `Error::TransactionInvalid` when the transaction pool rejects the call (for example custom error 11, `RENEWAL_ALREADY_ENABLED`: a renewal is already scheduled for the content hash) and as `Error::TransactionFailed` otherwise. A chain without any `renew` call, and legacy runtimes that take only `(block, index)`, return `Error::UnsupportedOperation` (code `UNSUPPORTED_OPERATION`) for the calls they cannot encode, before submitting:
 
 ```rust
 match client.prepare_renew(storage_ref) {
@@ -214,7 +214,7 @@ match client.prepare_renew(storage_ref) {
             tracing::error!(?e, "Renewal submission failed");
         }
     }
-    Err(Error::RenewalFailed(msg)) => {
+    Err(Error::InvalidConfig(msg)) => {
         tracing::error!(reason = %msg, "Invalid renewal parameters");
     }
     Err(e) => {

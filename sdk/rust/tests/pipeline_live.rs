@@ -930,8 +930,8 @@ async fn store_precheck_wait_for() {
 		.expect("store rejected after the authorization was finalized");
 }
 
-const RENEWAL_ALREADY_ENABLED: &str = "Custom error: 11";
-const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: &str = "Custom error: 12";
+const RENEWAL_ALREADY_ENABLED: u8 = 11;
+const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: u8 = 12;
 
 #[tokio::test]
 #[ignore]
@@ -974,13 +974,28 @@ async fn auto_renew_registration() {
 		.enable_auto_renew(content_hash, &alice, WaitFor::InBlock)
 		.await
 		.expect_err("second enable_auto_renew accepted");
-	assert!(error.to_string().contains(RENEWAL_ALREADY_ENABLED), "{error}");
+	assert!(
+		matches!(
+			error,
+			Error::TransactionInvalid { custom_code: Some(RENEWAL_ALREADY_ENABLED), .. }
+		),
+		"{error:?}"
+	);
 
 	let error = client
 		.disable_auto_renew(content_hash, &alice, WaitFor::InBlock)
 		.await
 		.expect_err("disable_auto_renew accepted before the prepaid cycle");
-	assert!(error.to_string().contains(CANNOT_DISABLE_PREPAID_AUTO_RENEWAL), "{error}");
+	assert!(
+		matches!(
+			error,
+			Error::TransactionInvalid {
+				custom_code: Some(CANNOT_DISABLE_PREPAID_AUTO_RENEWAL),
+				..
+			}
+		),
+		"{error:?}"
+	);
 }
 
 /// Estimate dedup/skip-existing + duplicate-content submit. Builds `[a, b, a]`

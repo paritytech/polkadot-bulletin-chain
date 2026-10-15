@@ -107,8 +107,8 @@ mod tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            Error::FileTooLarge(_) => {} // Expected
-            e => panic!("Expected FileTooLarge, got: {:?}", e),
+            Error::DataTooLarge(_) => {} // Expected
+            e => panic!("Expected DataTooLarge, got: {:?}", e),
         }
     }
 }
@@ -274,7 +274,7 @@ mod integration_tests {
 ## Best Practices
 
 1. **Use `BulletinClient` for unit tests** — no network needed, fast, deterministic
-2. **Test error paths** — verify your code handles `EmptyData`, `FileTooLarge`, `InsufficientAuthorization`, etc.
+2. **Test error paths** — verify your code handles `EmptyData`, `DataTooLarge`, `InsufficientAuthorization`, etc.
 3. **Test CID determinism** — same data with same options should always produce the same CID
 4. **Mark integration tests with `#[ignore]`** — they require a running node and should not run in CI by default
 5. **Test chunking edge cases** — files that don't divide evenly, single-chunk files, maximum file size

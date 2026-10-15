@@ -125,7 +125,7 @@ match client.store(data, &signer, WaitFor::InBlock).await {
 }
 ```
 
-`store` does not check for empty data; the chain rejects it and the error surfaces as `StorageFailed`. Validate locally with `BulletinClient::prepare_store`, which returns `EmptyData`.
+`store` does not check for empty data; the transaction pool rejects it, and the error surfaces as `TransactionInvalid` with `custom_code: Some(1)` (`BAD_DATA_SIZE`). Validate locally with `BulletinClient::prepare_store`, which returns `EmptyData`.
 
 See the [Error Handling](./error-handling.md) guide for the full error reference.
 

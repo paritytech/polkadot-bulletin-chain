@@ -72,7 +72,7 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
         e
     );
     // Logs: Storage failed: Authorization not found for account: 5Grw...
-    //       code="AUTHORIZATION_NOT_FOUND" hint="Call authorizeAccount() or authorizePreimage() first"
+    //       code="AUTHORIZATION_NOT_FOUND" hint="Authorize the account or the content hash first, then retry"
 }
 ```
 
@@ -83,12 +83,12 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | Variant | Code | Recovery Hint |
 |---|---|---|
 | `EmptyData` | `EMPTY_DATA` | Provide non-empty data |
-| `FileTooLarge(size)` | `FILE_TOO_LARGE` | Reduce file size or use chunked upload |
+| `DataTooLarge(msg)` | `DATA_TOO_LARGE` | Reduce the data size or use a chunked upload |
 | `ChunkTooLarge(size)` | `CHUNK_TOO_LARGE` | Reduce chunk size to 2 MiB or less |
 | `InvalidChunkSize(msg)` | `INVALID_CHUNK_SIZE` | Use a chunk size between 1 byte and 2 MiB |
 | `InvalidConfig(msg)` | `INVALID_CONFIG` | Check configuration parameters |
 
-`EmptyData` comes from the offline and planning APIs (`prepare_store`, `prepare_store_chunked`, `estimate_upload`). `store` does not check for empty data; the chain rejects it and the error surfaces as `StorageFailed`.
+`EmptyData` comes from the offline and planning APIs (`prepare_store`, `prepare_store_chunked`, `estimate_upload`). `store` does not check for empty data; the transaction pool rejects it, and the error surfaces as `TransactionInvalid` with `custom_code: Some(1)` (`BAD_DATA_SIZE`).
 
 ### CID & Encoding Errors (Non-Retryable)
 
@@ -97,33 +97,38 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | `InvalidCid(msg)` | `INVALID_CID` | Verify CID format |
 | `CidCalculationFailed(msg)` | `CID_CALCULATION_FAILED` | Verify data and hash algorithm |
 | `DagEncodingFailed(msg)` | `DAG_ENCODING_FAILED` | Check chunk CIDs and data integrity |
+| `ChunkingFailed(msg)` | `CHUNKING_FAILED` | Verify data integrity and chunker configuration |
 
-### Authorization Errors
-
-| Variant | Code | Retryable | Recovery Hint |
-|---|---|---|---|
-| `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | No | Call authorizeAccount() or authorizePreimage() first |
-| `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | No | Request additional authorization via authorize_account() |
-| `AuthorizationExpired { expired_at, current_block }` | `AUTHORIZATION_EXPIRED` | Yes | Call refreshAccountAuthorization() to extend expiry |
-
-The runtime API that the pre-store check queries leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
-
-### Network & Transaction Errors (Retryable)
+### Authorization Errors (Non-Retryable)
 
 | Variant | Code | Recovery Hint |
 |---|---|---|
-| `NetworkError(msg)` | `NETWORK_ERROR` | Check network connectivity to the RPC endpoint |
-| `StorageFailed(msg)` | `STORAGE_FAILED` | Check node connectivity and try again |
-| `TransactionFailed(msg)` | `TRANSACTION_FAILED` | Verify transaction parameters and account nonce |
-| `RetrievalFailed(msg)` | `RETRIEVAL_FAILED` | The data may not be available yet; try again |
-| `RenewalFailed(msg)` | `RENEWAL_FAILED` | Check that storage hasn't expired, then retry |
+| `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | Authorize the account or the content hash first, then retry |
+| `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | Request additional authorization, then retry |
+
+The runtime API that the pre-store check queries leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
+
+### Transaction Errors
+
+| Variant | Code | Retryable | Recovery Hint |
+|---|---|---|---|
+| `TransactionInvalid { custom_code, message }` | `TRANSACTION_INVALID` | No | The transaction pool rejected the transaction; check the validity error before retrying |
+| `TransactionFailed(msg)` | `TRANSACTION_FAILED` | Yes | Verify transaction parameters and account nonce, then retry |
+
+Every submission method (`store`, `authorize_*`, `refresh_*`, `remove_expired_*`, `renew`, `force_renew`, `enable_auto_renew`, `disable_auto_renew`) reports failures through these two variants, and the message names the call. `TransactionInvalid` means the transaction pool rejected the transaction; `custom_code` holds `n` when the rejection is `InvalidTransaction::Custom(n)` (for example 11, `RENEWAL_ALREADY_ENABLED`; see [Renewal](./renewal.md)). `TransactionFailed` covers a dispatch error, a dropped transaction and a status stream that ends before inclusion.
+
+### Network Errors (Retryable)
+
+| Variant | Code | Recovery Hint |
+|---|---|---|
+| `NetworkError(msg)` | `NETWORK_ERROR` | Check network connectivity to the RPC endpoint, then retry |
 | `StoreStalled(msg)` | `STORE_STALLED` | The RPC connection sent no chainHead progress; retry on a fresh client |
 
 ### Upload Pipeline Errors (Non-Retryable)
 
 | Variant | Code | Recovery Hint |
 |---|---|---|
-| `UploadIncomplete(msg)` | `UPLOAD_INCOMPLETE` | Some items were not stored; re-run estimate_upload with skip_existing, then submit to retry only the missing items |
+| `UploadIncomplete(msg)` | `UPLOAD_INCOMPLETE` | Some items were not stored; re-run the estimate with skip-existing enabled, then submit to retry only the missing items |
 | `HijackBudgetExceeded(msg)` | `HIJACK_BUDGET_EXCEEDED` | Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account |
 
 The current pipeline does not return `HijackBudgetExceeded`: an item that exhausts its retries emits `ItemFailed`, and the run ends with `UploadIncomplete`.
@@ -132,15 +137,10 @@ The current pipeline does not return `HijackBudgetExceeded`: an item that exhaus
 
 | Variant | Code | Recovery Hint |
 |---|---|---|
-| `RenewalUnavailable` | `UNSUPPORTED_OPERATION` | This chain has no renewal pallet; data expires at the retention period |
-| `AuthorizationApiUnavailable` | `UNSUPPORTED_OPERATION` | Upgrade the chain's runtime, or skip the authorization preflight |
+| `UnsupportedOperation(msg)` | `UNSUPPORTED_OPERATION` | This operation is not supported by this client or the connected runtime |
+| `AuthorizationApiUnavailable` | `UNSUPPORTED_OPERATION` | This operation is not supported by this client or the connected runtime |
 
-### Other Errors (Non-Retryable)
-
-| Variant | Code | Recovery Hint |
-|---|---|---|
-| `ChunkingFailed(msg)` | `CHUNKING_FAILED` | Verify data integrity and chunker configuration |
-| `RenewalNotFound { block, index }` | `RENEWAL_NOT_FOUND` | Verify the block number and extrinsic index |
+`UnsupportedOperation` covers a chain without a `renew` call, renewal and auto-renew call shapes that this SDK release does not know, and content-hash renewal or `force_renew` on legacy runtimes. `AuthorizationApiUnavailable` is a separate variant because the `store` pre-check skips itself on it.
 
 ## Progress Events
 
@@ -240,20 +240,17 @@ let event = ProgressEvent::tx_finalized("0xabc".into(), Some(42), None);
 
 ## Cross-SDK Consistency
 
-Error codes are consistent between the Rust and TypeScript SDKs where applicable. The Rust `Error::code()` method returns the same `SCREAMING_SNAKE_CASE` string as the TypeScript `ErrorCode` enum:
+Both SDKs use the same error codes, the same retryable set and the same recovery hints: `Error::code()` returns the `SCREAMING_SNAKE_CASE` string of the TypeScript `ErrorCode` for the same failure. Three TypeScript codes have no Rust counterpart because the failure cannot occur in the Rust SDK:
 
-| Rust | TypeScript | Code String |
-|---|---|---|
-| `Error::EmptyData` | `ErrorCode.EMPTY_DATA` | `"EMPTY_DATA"` |
-| `Error::TransactionFailed(_)` | `ErrorCode.TRANSACTION_FAILED` | `"TRANSACTION_FAILED"` |
-| `Error::InsufficientAuthorization { .. }` | `ErrorCode.INSUFFICIENT_AUTHORIZATION` | `"INSUFFICIENT_AUTHORIZATION"` |
-| `Error::RenewalUnavailable`, `Error::AuthorizationApiUnavailable` | `ErrorCode.UNSUPPORTED_OPERATION` | `"UNSUPPORTED_OPERATION"` |
+- `TIMEOUT`: the TypeScript client stops waiting after `txTimeout`; the Rust client has no submission timeout.
+- `INVALID_HASH_ALGORITHM`: `HashingAlgorithm` is a Rust enum, so an unknown algorithm does not compile.
+- `MISSING_CHUNK`: only the TypeScript chunker reassembles chunks.
 
-Some codes exist only in one SDK:
-- **Rust-only**: `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `RENEWAL_NOT_FOUND`, `AUTHORIZATION_NOT_FOUND`, `AUTHORIZATION_EXPIRED`, `CHUNKING_FAILED`, `FILE_TOO_LARGE`
-- **TypeScript-only**: `DATA_TOO_LARGE`, `INVALID_HASH_ALGORITHM`, `AUTHORIZATION_FAILED`, `CHUNK_FAILED`, `MISSING_CHUNK`, `TIMEOUT`
+`INSUFFICIENT_AUTHORIZATION` comes only from this SDK's capacity check; the TypeScript pre-flight checks existence and expiry only.
 
-The `is_retryable()` / `retryable` sets also differ: both SDKs treat `TRANSACTION_FAILED` and `STORE_STALLED` as retryable; Rust adds `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, and `AUTHORIZATION_EXPIRED`, while TypeScript adds `TIMEOUT`.
+Retryable codes: `TRANSACTION_FAILED`, `NETWORK_ERROR` and `STORE_STALLED`, plus `TIMEOUT` in TypeScript.
+
+A transaction pool rejection is `TRANSACTION_INVALID` in both SDKs. Rust carries the custom validity code in `Error::TransactionInvalid { custom_code, .. }`; TypeScript keeps PAPI's `InvalidTxError` as the error's `cause`.
 
 ## Common Error Patterns
 

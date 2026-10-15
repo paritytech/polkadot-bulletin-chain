@@ -86,7 +86,10 @@ impl Chunker for FixedSizeChunker {
 			return Err(Error::EmptyData);
 		}
 		if data.len() > MAX_FILE_SIZE {
-			return Err(Error::FileTooLarge(data.len() as u64));
+			return Err(Error::DataTooLarge(alloc::format!(
+				"data size {} exceeds the maximum of {MAX_FILE_SIZE} bytes (64 MiB)",
+				data.len()
+			)));
 		}
 
 		let chunk_size = self.config.chunk_size as usize;
@@ -340,8 +343,8 @@ mod tests {
 
 		assert!(result.is_err());
 		match result {
-			Err(Error::FileTooLarge(size)) => assert_eq!(size, data_size as u64),
-			_ => panic!("Expected FileTooLarge error"),
+			Err(Error::DataTooLarge(message)) => assert!(message.contains(&data_size.to_string())),
+			_ => panic!("DataTooLarge error missing"),
 		}
 	}
 

@@ -350,7 +350,7 @@ fn sign_store(
 	let signed = api
 		.tx()
 		.create_partial_offline(&call, params)
-		.map_err(|e| Error::StorageFailed(format!("sign: {e:?}")))?
+		.map_err(|e| Error::TransactionFailed(format!("sign: {e:?}")))?
 		.sign(signer);
 	Ok(signed.into_encoded())
 }
@@ -1136,7 +1136,7 @@ async fn dispatch_wave(
 	let unsigned = signer.is_none();
 	let count = select_wave_count(&st.send_queue, resolved, &st.limits);
 	if count == 0 {
-		return Err(Error::StorageFailed("a single item exceeds the per-wave block budget".into()));
+		return Err(Error::DataTooLarge("a single item exceeds the per-wave block budget".into()));
 	}
 
 	// Pop the wave.
@@ -1251,7 +1251,7 @@ fn build_unsigned(
 	let unsigned = api
 		.tx()
 		.create_unsigned(&call)
-		.map_err(|e| Error::StorageFailed(format!("build unsigned: {e:?}")))?;
+		.map_err(|e| Error::TransactionFailed(format!("build unsigned: {e:?}")))?;
 	Ok(unsigned.into_encoded())
 }
 

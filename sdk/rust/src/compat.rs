@@ -61,8 +61,8 @@ pub enum RenewAdapter {
 /// Resolve the encoder for the renewal calls on the connected chain by hashing
 /// the live item — `DataRenewal.renew` when the pallet exists, otherwise
 /// `TransactionStorage.renew` — and looking it up in the registry. Fails
-/// closed: [`Error::RenewalUnavailable`] when neither pallet has `renew`,
-/// [`Error::RenewalFailed`] on an unknown shape.
+/// closed: [`Error::UnsupportedOperation`] when neither pallet has `renew` or the shape is
+/// unknown.
 ///
 /// Keys pair the hosting pallet with the item hash: subxt's per-item hash
 /// covers only the call's type tree, and the renewal split moved `renew`
@@ -74,10 +74,10 @@ pub fn renew_adapter(live: &subxt::Metadata) -> Result<RenewAdapter> {
 	} else if let Some(hash) = live_call_hash(live, "TransactionStorage", "renew") {
 		("TransactionStorage", hash)
 	} else {
-		return Err(Error::RenewalUnavailable);
+		return Err(Error::UnsupportedOperation("renew is not available on this chain".into()));
 	};
 	renew_registry().get(&(pallet, hash)).copied().ok_or_else(|| {
-		Error::RenewalFailed(format!(
+		Error::UnsupportedOperation(format!(
 			"{pallet}.renew has an unsupported shape on this chain (item hash 0x{}); \
 			 this SDK release supports {} shape(s) — a newer runtime may need an SDK upgrade",
 			hex32(&hash),
@@ -167,10 +167,13 @@ pub fn auto_renew_adapter(live: &subxt::Metadata, call: AutoRenewCall) -> Result
 	};
 	let pallet = adapter.pallet_name();
 	let live_hash = live_call_hash(live, pallet, call.call_name()).ok_or_else(|| {
-		Error::RenewalFailed(format!("{} is not supported by this runtime", call.call_name()))
+		Error::UnsupportedOperation(format!(
+			"{} is not supported by this runtime",
+			call.call_name()
+		))
 	})?;
 	if auto_renew_registry().get(&(adapter, call)) != Some(&live_hash) {
-		return Err(Error::RenewalFailed(format!(
+		return Err(Error::UnsupportedOperation(format!(
 			"{pallet}.{} has an unsupported shape on this chain (item hash 0x{}); \
 			 a newer runtime may need an SDK upgrade",
 			call.call_name(),
@@ -267,7 +270,7 @@ mod tests {
 				AutoRenewAdapter::TransactionStorage
 			);
 			let error = auto_renew_adapter(&legacy, call).unwrap_err();
-			assert_eq!(error.code(), "RENEWAL_FAILED");
+			assert_eq!(error.code(), "UNSUPPORTED_OPERATION");
 			assert!(error.to_string().contains("not supported by this runtime"), "{error}");
 		}
 	}
@@ -299,7 +302,7 @@ mod tests {
 
 		let error = renew_adapter(&without_renewal).unwrap_err();
 
-		assert!(matches!(error, Error::RenewalUnavailable), "unexpected error: {error:?}");
+		assert!(matches!(error, Error::UnsupportedOperation(_)), "unexpected error: {error:?}");
 		assert_eq!(error.code(), "UNSUPPORTED_OPERATION");
 	}
 }
