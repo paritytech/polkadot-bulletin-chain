@@ -551,10 +551,16 @@ where
 	RuntimeCallOf<T>: Dispatchable<Info = DispatchInfo>,
 	T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId> + Clone,
 {
-	const IDENTIFIER: &'static str = "CheckNonce";
-	type Implicit = ();
+	const IDENTIFIER: &'static str =
+		<frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::IDENTIFIER;
+	type Implicit =
+		<frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Implicit;
 	type Val = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Val;
 	type Pre = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Pre;
+
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
+		self.0.implicit()
+	}
 
 	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
 		self.0.weight(call).saturating_add(T::DbWeight::get().reads(1))
