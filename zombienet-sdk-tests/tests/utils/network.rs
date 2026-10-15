@@ -116,6 +116,20 @@ pub fn verify_parachain_binaries() -> Result<()> {
 pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {
+	parachain_network_config(para_node_args, None)
+}
+
+pub fn parachain_network_config_with_retention_period(
+	para_node_args: Vec<String>,
+	genesis_retention_period: u32,
+) -> Result<NetworkConfig> {
+	parachain_network_config(para_node_args, Some(genesis_retention_period))
+}
+
+fn parachain_network_config(
+	para_node_args: Vec<String>,
+	genesis_retention_period: Option<u32>,
+) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
@@ -145,16 +159,20 @@ pub fn build_parachain_network_config_three_relay_validators(
 				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
-			parachain
-				.with_id(para_id)
-				.with_chain_spec_path(para_chain_spec.as_str())
-				.cumulus_based(true)
-				.with_collator(|c| {
-					c.with_name("collator-1")
-						.validator(true)
-						.with_command(para_binary.as_str())
-						.with_args(para_args)
-				})
+			let parachain =
+				parachain.with_id(para_id).with_chain_spec_path(para_chain_spec.as_str());
+			let parachain = match genesis_retention_period {
+				Some(retention_period) => parachain.with_genesis_overrides(serde_json::json!({
+					"transactionStorage": { "retentionPeriod": retention_period }
+				})),
+				None => parachain,
+			};
+			parachain.cumulus_based(true).with_collator(|c| {
+				c.with_name("collator-1")
+					.validator(true)
+					.with_command(para_binary.as_str())
+					.with_args(para_args)
+			})
 		})
 		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
 			Ok(val) => gs.with_base_dir(val),

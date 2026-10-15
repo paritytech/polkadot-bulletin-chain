@@ -13,7 +13,8 @@ use crate::{
 		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
 		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization, resolve_canonical_store_block,
+		initialize_network, override_alice_authorization,
+		parachain_network_config_with_retention_period, resolve_canonical_store_block,
 		set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
 		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
@@ -382,7 +383,10 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_LESS_THAN_RETENTION);
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = parachain_network_config_with_retention_period(
+		para_args,
+		BLOCKS_PRUNING_LESS_THAN_RETENTION,
+	)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -457,7 +461,10 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(BLOCKS_PRUNING_LESS_THAN_RETENTION);
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = parachain_network_config_with_retention_period(
+		para_args,
+		BLOCKS_PRUNING_LESS_THAN_RETENTION,
+	)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -3340,6 +3347,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 // collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
+const PRUNE_RESTART_RETENTION_PERIOD: u32 = 10;
 
 fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
 	let prefix_eq = format!("{}=", name);
@@ -3503,7 +3511,8 @@ async fn run_pruning_restart_scenario(
 		Some(n) => get_para_node_args_with_pruning(n),
 		None => get_para_node_args(),
 	};
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config =
+		parachain_network_config_with_retention_period(para_args, PRUNE_RESTART_RETENTION_PERIOD)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -3554,6 +3563,43 @@ async fn run_pruning_restart_scenario(
 		last_30.join("\n")
 	);
 
+	// A storage chain resolves its gap-sync body policy when `ChainSync` is constructed and
+	// refuses to start when the pruning window is below the runtime's retention period.
+	// Nothing in this scenario changes the genesis retention period.
+	let retention = PRUNE_RESTART_RETENTION_PERIOD;
+	let expect_refusal = restart_pruning.is_some_and(|window| window < retention);
+
+	// `exit` is `None` when the node outlived the capture window, i.e. it started fine.
+	if expect_refusal {
+		assert!(
+			matches!(exit, Some(code) if code != 0),
+			"[{}] node accepted --blocks-pruning={:?} against a retention period of {}; \
+			 expected it to refuse to start (exit={:?})",
+			scenario,
+			restart_pruning,
+			retention,
+			exit,
+		);
+		assert!(
+			log.contains("must be at least the runtime's transaction storage retention period"),
+			"[{}] node exited ({:?}) but not for the pruning-window reason:\n{}",
+			scenario,
+			exit,
+			relevant,
+		);
+	} else {
+		assert!(
+			exit.is_none(),
+			"[{}] node exited ({:?}) with --blocks-pruning={:?}, which the retention period \
+			 of {} permits:\n{}",
+			scenario,
+			exit,
+			restart_pruning,
+			retention,
+			relevant,
+		);
+	}
+
 	network.destroy().await?;
 	Ok(())
 }
@@ -3564,7 +3610,7 @@ async fn parachain_restart_archive_to_pruning_test() -> Result<()> {
 	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from archive (no --blocks-pruning) → --blocks-pruning=10 ===");
 	run_pruning_restart_scenario("archive_to_10", None, Some(10)).await?;
-	test_log!(TEST, "=== finished — see log above for substrate's response ===");
+	test_log!(TEST, "=== finished ===");
 	Ok(())
 }
 
@@ -3574,7 +3620,7 @@ async fn parachain_restart_pruning_increase_test() -> Result<()> {
 	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from --blocks-pruning=10 → --blocks-pruning=20 (increase) ===");
 	run_pruning_restart_scenario("10_to_20", Some(10), Some(20)).await?;
-	test_log!(TEST, "=== finished — see log above for substrate's response ===");
+	test_log!(TEST, "=== finished ===");
 	Ok(())
 }
 
@@ -3584,7 +3630,7 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 	crate::utils::init_logging();
 	test_log!(TEST, "=== Restart from --blocks-pruning=20 → --blocks-pruning=10 (decrease) ===");
 	run_pruning_restart_scenario("20_to_10", Some(20), Some(10)).await?;
-	test_log!(TEST, "=== finished — see log above for substrate's response ===");
+	test_log!(TEST, "=== finished ===");
 	Ok(())
 }
 
