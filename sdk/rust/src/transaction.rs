@@ -87,6 +87,7 @@ pub struct TransactionClient {
 	/// pipeline fans `author_submitExtrinsic` out to all of them, so a single
 	/// dead provider can't stall a wave.
 	submit_rpcs: Vec<LegacyRpcMethods<PolkadotConfig>>,
+	authorization_confirmation: WaitFor,
 }
 
 impl TransactionClient {
@@ -131,12 +132,17 @@ impl TransactionClient {
 			.map_err(|e| Error::NetworkError(format!("Failed to connect: {e:?}")))?;
 		let submit_rpcs =
 			clients.into_iter().map(LegacyRpcMethods::<PolkadotConfig>::new).collect();
-		Ok(Self { api, rpc, submit_rpcs })
+		Ok(Self { api, rpc, submit_rpcs, authorization_confirmation: WaitFor::InBlock })
 	}
 
 	/// Create a transaction client from a single existing RPC client.
 	pub async fn from_rpc_client(rpc_client: RpcClient) -> Result<Self> {
 		Self::from_rpc_clients(vec![rpc_client]).await
+	}
+
+	pub fn with_authorization_confirmation(mut self, confirmation: WaitFor) -> Self {
+		self.authorization_confirmation = confirmation;
+		self
 	}
 
 	/// Get the underlying subxt client.
@@ -663,15 +669,24 @@ impl TransactionClient {
 			.bulletin_transaction_storage_api()
 			.account_authorization(who.clone());
 
-		let maybe_auth = self
-			.api
-			.runtime_api()
-			.at_latest()
-			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?
-			.call(call)
-			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to query authorization: {e:?}")))?;
+		let block_hash = match self.authorization_confirmation {
+			WaitFor::InBlock => self
+				.rpc
+				.chain_get_block_hash(None)
+				.await
+				.map_err(|e| {
+					Error::NetworkError(format!("failed to get the best block hash: {e:?}"))
+				})?
+				.ok_or_else(|| Error::NetworkError("best block hash unavailable".into()))?,
+			WaitFor::Finalized => self.rpc.chain_get_finalized_head().await.map_err(|e| {
+				Error::NetworkError(format!("failed to get the finalized block hash: {e:?}"))
+			})?,
+		};
+
+		let maybe_auth =
+			self.api.runtime_api().at(block_hash).call(call).await.map_err(|e| {
+				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
+			})?;
 
 		// The runtime API already filters out expired authorizations.
 		let Some(auth) = maybe_auth else { return Ok(None) };

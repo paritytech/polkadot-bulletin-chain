@@ -30,6 +30,10 @@ impl TransactionClient {
     // Create from a single existing RpcClient
     pub async fn from_rpc_client(rpc_client: RpcClient) -> Result<Self>;
 
+    // Block that the authorization queries and the `store` pre-check read:
+    // WaitFor::InBlock (default) = best block, WaitFor::Finalized = finalized block
+    pub fn with_authorization_confirmation(self, confirmation: WaitFor) -> Self;
+
     // Access the underlying subxt client
     pub fn api(&self) -> &OnlineClient<PolkadotConfig>;
 }

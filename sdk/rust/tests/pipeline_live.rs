@@ -883,6 +883,53 @@ async fn authorize_accounts_batched() {
 	);
 }
 
+#[tokio::test]
+#[ignore]
+async fn store_precheck_authorization_confirmation() {
+	let client = TransactionClient::new(&ws()).await.expect("connection failure");
+	let finalized_client = TransactionClient::new(&ws())
+		.await
+		.expect("connection failure")
+		.with_authorization_confirmation(WaitFor::Finalized);
+	let seed = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap()
+		.as_nanos();
+	let uploader_uri = format!("//store-precheck-{seed}").parse().expect("invalid secret URI");
+	let uploader = Keypair::from_uri(&uploader_uri).expect("invalid keypair URI");
+	let first_data = format!("store pre-check first {seed}").into_bytes();
+	let second_data = format!("store pre-check other {seed}").into_bytes();
+
+	client
+		.authorize_account(
+			AccountId32::from(uploader.public_key().0),
+			2,
+			(first_data.len() + second_data.len()) as u64,
+			&dev::eve(),
+			WaitFor::InBlock,
+		)
+		.await
+		.expect("authorization failure");
+
+	let error = finalized_client
+		.store(first_data.clone(), &uploader, WaitFor::InBlock)
+		.await
+		.expect_err("store accepted before the authorization was finalized");
+	assert_eq!(error.code(), "AUTHORIZATION_NOT_FOUND");
+
+	let receipt = client
+		.store(first_data.clone(), &uploader, WaitFor::Finalized)
+		.await
+		.expect("store rejected right after an in-block authorization");
+	receipt_block_number(&client, &receipt.block_hash).await;
+	assert_eq!(receipt.data_size, first_data.len() as u64);
+
+	finalized_client
+		.store(second_data, &uploader, WaitFor::InBlock)
+		.await
+		.expect("store rejected after the authorization was finalized");
+}
+
 /// Estimate dedup/skip-existing + duplicate-content submit. Builds `[a, b, a]`
 /// (item 2 duplicates item 0):
 /// - `estimate_upload` (dedup_input default) marks index 2 as DuplicateInput, excludes it from

@@ -50,7 +50,16 @@ let receipt = client.authorize_preimage(
 
 ### Check Authorization
 
-Query the current authorization status before submitting a store transaction:
+Query the current authorization status before submitting a store transaction.
+The check reads the best block, so an authorization included with
+`WaitFor::InBlock` passes it right away. To read the finalized block instead,
+build the client with `with_authorization_confirmation(WaitFor::Finalized)`.
+`store` runs the same check before it submits.
+
+The transaction pool validates a new transaction against its view of the newest
+best block, and it builds that view a moment after the block's `InBlock` events
+fire. A store sent by a newly authorized account in that moment can fail as an
+invalid transaction; sending it again succeeds.
 
 ```rust
 let account = subxt::utils::AccountId32::from(signer.public_key().0);
