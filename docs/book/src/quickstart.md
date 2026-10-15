@@ -147,7 +147,7 @@ The faucet signs with its own authorizer key, so no wallet confirmation is neede
 
 | Error | Solution |
 |-------|----------|
-| `Invalid: Payment`, `AUTHORIZATION_NOT_FOUND` (Rust), or `INSUFFICIENT_AUTHORIZATION` (TypeScript `.ensureAuthorized()`) | No active authorization: get one via the Faucet |
+| `Invalid: Payment` or `AUTHORIZATION_NOT_FOUND` (Rust `store()`, TypeScript `.ensureAuthorized()`) | No active authorization: get one via the Faucet |
 | "Connection refused" | Check the RPC endpoint is correct |
 | Stores take long to be included | The allowance is used up: stores beyond it still go through, at lower priority. Top up via the Faucet |
 
