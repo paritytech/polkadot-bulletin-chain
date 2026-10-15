@@ -632,6 +632,46 @@ fn check_nonce_wire_format_compatibility() {
 }
 
 #[test]
+fn check_nonce_weight_equality() {
+	let call = RuntimeCall::System(frame_system::Call::remark { remark: vec![] });
+	assert_eq!(
+		NonceCheckWithQueueBonus::<Runtime>::new(0).weight(&call),
+		frame_system::CheckNonce::<Runtime>::from(0).weight(&call),
+	);
+}
+
+#[test]
+fn stale_nonce_rejection_through_queue_bonus() {
+	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let sender = Sr25519Keyring::Eve;
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				sender.to_account_id(),
+				100,
+				LARGE_ALLOWANCE_BYTES,
+			));
+			let store_call = |byte| {
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: vec![byte; SMALL_STORE_BYTES],
+				})
+			};
+			assert_ok_ok(construct_and_apply_extrinsic(Some(sender.pair()), store_call(1)));
+
+			let stale = extrinsic_with_nonce(Some(sender.pair()), store_call(2), 0)
+				.expect("invalid extension data");
+			assert_eq!(
+				bulletin_westend_runtime::Executive::validate_transaction(
+					TransactionSource::External,
+					stale,
+					PcHash::default(),
+				),
+				Err(TransactionValidityError::Invalid(InvalidTransaction::Stale)),
+			);
+		});
+}
+
+#[test]
 fn store_with_cid_config_works() {
 	ExtBuilder::<Runtime>::default().with_tracing().build().execute_with(|| {
 		// prepare data
