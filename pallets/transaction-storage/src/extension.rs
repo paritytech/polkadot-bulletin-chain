@@ -530,6 +530,19 @@ impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
 	pub fn new(nonce: T::Nonce) -> Self {
 		Self(frame_system::CheckNonce::from(nonce))
 	}
+
+	fn queue_bonus(&self, origin: &T::RuntimeOrigin) -> TransactionPriority
+	where
+		T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId>,
+	{
+		let transaction_nonce = self.0 .0;
+		let queued_transactions: u64 = origin.as_system_origin_signer().map_or(0, |who| {
+			transaction_nonce
+				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
+				.unique_saturated_into()
+		});
+		MAX_QUEUE_BONUS.saturating_sub(queued_transactions)
+	}
 }
 
 impl<T: frame_system::Config> fmt::Debug for NonceCheckWithQueueBonus<T> {
@@ -563,7 +576,7 @@ where
 	}
 
 	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
-		self.0.weight(call).saturating_add(T::DbWeight::get().reads(1))
+		self.0.weight(call)
 	}
 
 	fn bare_validate(
@@ -586,12 +599,8 @@ where
 		inherited_implication: &impl Implication,
 		source: TransactionSource,
 	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
-		let transaction_nonce = self.0 .0;
-		let queued_transactions: u64 = origin.as_system_origin_signer().map_or(0, |who| {
-			transaction_nonce
-				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
-				.unique_saturated_into()
-		});
+		let queue_bonus =
+			if source == TransactionSource::InBlock { 0 } else { self.queue_bonus(&origin) };
 		let (mut validity, val, origin) = self.0.validate(
 			origin,
 			call,
@@ -601,9 +610,7 @@ where
 			inherited_implication,
 			source,
 		)?;
-		validity.priority = validity
-			.priority
-			.saturating_add(MAX_QUEUE_BONUS.saturating_sub(queued_transactions));
+		validity.priority = validity.priority.saturating_add(queue_bonus);
 		Ok((validity, val, origin))
 	}
 
