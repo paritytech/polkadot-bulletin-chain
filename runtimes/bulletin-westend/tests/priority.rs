@@ -33,7 +33,7 @@ const ALLOWANCE_TRANSACTIONS: u32 = 1000;
 const FUNDS: Balance = 1_000_000_000_000;
 const TRANSFER_VALUE: Balance = 10_000_000_000;
 const TIP: Balance = 1_000_000_000;
-const SPAMMER_BACKLOG: Nonce = 50;
+const BACKLOG_LENGTH: Nonce = 50;
 const PAST_TRANSACTIONS: Nonce = 5;
 
 fn externalities() -> sp_io::TestExternalities {
@@ -269,24 +269,29 @@ fn queue_position_order_without_size_effect() {
 }
 
 #[test]
-fn newcomer_first_transaction_above_spammer_backlog() {
+fn first_transaction_above_other_signer_backlog() {
 	externalities().execute_with(|| {
-		let spammer = Sr25519Keyring::Eve;
-		let newcomer = Sr25519Keyring::Ferdie;
-		for account in [spammer, newcomer] {
+		let backlogged_signer = Sr25519Keyring::Eve;
+		let other_signer = Sr25519Keyring::Ferdie;
+		for account in [backlogged_signer, other_signer] {
 			account_authorization(account, LARGE_ALLOWANCE_BYTES);
 		}
 
-		let newcomer_first = queued_priority(newcomer, store_call(SMALL_STORE_BYTES, 0), 0, 0);
+		let other_signer_first =
+			queued_priority(other_signer, store_call(SMALL_STORE_BYTES, 0), 0, 0);
 
 		assert_eq!(
-			queued_priority(spammer, store_call(SMALL_STORE_BYTES, 0), 0, 0),
-			newcomer_first
+			queued_priority(backlogged_signer, store_call(SMALL_STORE_BYTES, 0), 0, 0),
+			other_signer_first
 		);
-		for queue_position in 1..=SPAMMER_BACKLOG {
+		for queue_position in 1..=BACKLOG_LENGTH {
 			assert!(
-				queued_priority(spammer, store_call(SMALL_STORE_BYTES, 0), queue_position, 0) <
-					newcomer_first
+				queued_priority(
+					backlogged_signer,
+					store_call(SMALL_STORE_BYTES, 0),
+					queue_position,
+					0
+				) < other_signer_first
 			);
 		}
 	});
@@ -296,19 +301,19 @@ fn newcomer_first_transaction_above_spammer_backlog() {
 fn past_transactions_without_effect_on_next_transaction() {
 	externalities().execute_with(|| {
 		next_block();
-		let veteran = Sr25519Keyring::Eve;
-		let newcomer = Sr25519Keyring::Ferdie;
-		for account in [veteran, newcomer] {
+		let signer_with_history = Sr25519Keyring::Eve;
+		let signer_without_history = Sr25519Keyring::Ferdie;
+		for account in [signer_with_history, signer_without_history] {
 			account_authorization(account, LARGE_ALLOWANCE_BYTES);
 		}
 		for fill in 0..PAST_TRANSACTIONS as u8 {
-			inclusion(veteran, store_call(SMALL_STORE_BYTES, fill));
+			inclusion(signer_with_history, store_call(SMALL_STORE_BYTES, fill));
 		}
 
-		assert_eq!(System::account_nonce(veteran.to_account_id()), PAST_TRANSACTIONS);
+		assert_eq!(System::account_nonce(signer_with_history.to_account_id()), PAST_TRANSACTIONS);
 		assert_eq!(
-			queued_priority(veteran, store_call(SMALL_STORE_BYTES, 9), 0, 0),
-			queued_priority(newcomer, store_call(SMALL_STORE_BYTES, 9), 0, 0),
+			queued_priority(signer_with_history, store_call(SMALL_STORE_BYTES, 9), 0, 0),
+			queued_priority(signer_without_history, store_call(SMALL_STORE_BYTES, 9), 0, 0),
 		);
 	});
 }
@@ -316,18 +321,18 @@ fn past_transactions_without_effect_on_next_transaction() {
 #[test]
 fn over_budget_signers_round_robin() {
 	externalities().execute_with(|| {
-		let first_spammer = Sr25519Keyring::Eve;
-		let second_spammer = Sr25519Keyring::Ferdie;
-		for spammer in [first_spammer, second_spammer] {
-			account_authorization(spammer, SMALL_ALLOWANCE_BYTES);
+		let first_signer = Sr25519Keyring::Eve;
+		let second_signer = Sr25519Keyring::Ferdie;
+		for signer in [first_signer, second_signer] {
+			account_authorization(signer, SMALL_ALLOWANCE_BYTES);
 		}
-		let priority = |spammer, queue_position| {
-			queued_priority(spammer, store_call(SMALL_STORE_BYTES, 0), queue_position, 0)
+		let priority = |signer, queue_position| {
+			queued_priority(signer, store_call(SMALL_STORE_BYTES, 0), queue_position, 0)
 		};
 
-		assert_eq!(priority(first_spammer, 0), priority(second_spammer, 0));
-		assert_eq!(priority(first_spammer, 1), priority(second_spammer, 1));
-		assert!(priority(first_spammer, 1) < priority(second_spammer, 0));
+		assert_eq!(priority(first_signer, 0), priority(second_signer, 0));
+		assert_eq!(priority(first_signer, 1), priority(second_signer, 1));
+		assert!(priority(first_signer, 1) < priority(second_signer, 0));
 	});
 }
 
