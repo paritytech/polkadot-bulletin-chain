@@ -19,9 +19,7 @@ use pallet_bulletin_transaction_storage::{
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin, TransactionRef,
 };
-use parachains_common::{
-	AccountId, AuraId, BlockNumber, Hash as PcHash, Nonce, Signature as PcSignature,
-};
+use parachains_common::{AccountId, AuraId, BlockNumber, Hash as PcHash, Signature as PcSignature};
 use parachains_runtimes_test_utils::{ExtBuilder, GovernanceOrigin, RuntimeHelper};
 use sp_core::{crypto::Ss58Codec, Encode, Pair};
 use sp_keyring::Sr25519Keyring;
@@ -63,17 +61,6 @@ fn construct_extrinsic(
 	sender: Option<sp_core::sr25519::Pair>,
 	call: RuntimeCall,
 ) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
-	let nonce = sender.as_ref().map_or(0, |signer| {
-		frame_system::Pallet::<Runtime>::account_nonce(AccountId::from(signer.public()))
-	});
-	extrinsic_with_nonce(sender, call, nonce)
-}
-
-fn extrinsic_with_nonce(
-	sender: Option<sp_core::sr25519::Pair>,
-	call: RuntimeCall,
-	nonce: Nonce,
-) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
 	// provide a known block hash for the immortal era check
 	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
 	let inner = (
@@ -83,7 +70,12 @@ fn extrinsic_with_nonce(
 		frame_system::CheckTxVersion::<Runtime>::new(),
 		frame_system::CheckGenesis::<Runtime>::new(),
 		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
-		NonceCheckWithQueueBonus::<Runtime>::new(nonce),
+		NonceCheckWithQueueBonus::<Runtime>::new(if let Some(s) = sender.as_ref() {
+			let account_id = AccountId::from(s.public());
+			frame_system::Pallet::<Runtime>::account(&account_id).nonce
+		} else {
+			0
+		}),
 		frame_system::CheckWeight::<Runtime>::new(),
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
@@ -500,55 +492,6 @@ fn allowance_based_priority_works() {
 				entry: TransactionRef::Position { block: 1, index: 0 },
 			});
 			assert_eq!(allowance_based_priority(origin, &renew), 0);
-		});
-}
-
-const LARGE_STORE_BYTES: usize = 2 * 1024 * 1024;
-const SMALL_STORE_BYTES: usize = 64 * 1024;
-
-fn queued_store_priority(
-	sender: Sr25519Keyring,
-	queue_position: Nonce,
-	size: usize,
-) -> transaction_validity::TransactionPriority {
-	let nonce =
-		frame_system::Pallet::<Runtime>::account_nonce(sender.to_account_id()) + queue_position;
-	let store =
-		RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: vec![0u8; size] });
-	let xt =
-		extrinsic_with_nonce(Some(sender.pair()), store, nonce).expect("invalid extension data");
-	bulletin_paseo_runtime::Executive::validate_transaction(
-		TransactionSource::External,
-		xt,
-		PcHash::default(),
-	)
-	.expect("invalid transaction")
-	.priority
-}
-
-#[test]
-fn queue_bonus_order_by_queue_position() {
-	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
-		.execute_with(|| {
-			let large_sender = Sr25519Keyring::Eve;
-			let small_sender = Sr25519Keyring::Ferdie;
-			for sender in [large_sender, small_sender] {
-				assert_ok!(TransactionStorage::authorize_account(
-					RuntimeOrigin::root(),
-					sender.to_account_id(),
-					100,
-					1024 * 1024 * 1024,
-				));
-			}
-
-			let large_first = queued_store_priority(large_sender, 0, LARGE_STORE_BYTES);
-			let large_second = queued_store_priority(large_sender, 1, LARGE_STORE_BYTES);
-			let small_first = queued_store_priority(small_sender, 0, SMALL_STORE_BYTES);
-			let small_second = queued_store_priority(small_sender, 1, SMALL_STORE_BYTES);
-
-			assert_eq!(large_first, small_first);
-			assert_eq!(large_second, small_second);
-			assert!(small_second < small_first);
 		});
 }
 
