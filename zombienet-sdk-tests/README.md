@@ -96,8 +96,9 @@ are resource-intensive.
 |---|---|---|---|
 | `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE |
 | `parachain_fast_sync_with_pruning_test` | fast | yes | Sync fails (pruned blocks) |
-| `parachain_warp_sync_test` | warp | no | Sync completes, bitswap DONT_HAVE |
-| `parachain_warp_sync_with_pruning_test` | warp | yes | Sync completes, bitswap DONT_HAVE |
+| `parachain_warp_sync_test` | warp | no | Sync completes, the node resolves `GapSyncBodyPolicy::All`, gap sync restores the indexed transactions and bitswap serves every item |
+| `parachain_warp_sync_with_pruning_test` | warp | yes (sync node) | Sync completes, the node resolves `GapSyncBodyPolicy::BodiesWithinWindow`, bitswap serves items inside the gap body window and returns DONT_HAVE below it |
+| `parachain_pruning_below_retention_test` | full, warp | yes | `--blocks-pruning` below the retention period: the full-sync node refuses to start, the warp-sync node shuts down after state sync |
 | `parachain_full_sync_test` | full | no | Sync completes, bitswap works |
 | `parachain_full_sync_with_pruning_test` | full | yes | Sync fails (pruned blocks) |
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
