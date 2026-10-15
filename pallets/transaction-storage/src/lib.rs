@@ -1587,6 +1587,16 @@ pub mod pallet {
 			Ok(())
 		}
 
+		fn preimage_store_params() -> ValidTransactionParams {
+			let params = T::StoreTxParams::get();
+			ValidTransactionParams {
+				priority: params
+					.priority
+					.saturating_add(crate::extension::ALLOWANCE_PRIORITY_BOOST),
+				..params
+			}
+		}
+
 		fn check_store_unsigned(
 			size: usize,
 			content_hash: impl FnOnce() -> ContentHash,
@@ -1610,7 +1620,7 @@ pub mod pallet {
 
 			Ok(context
 				.want_valid_transaction()
-				.then(|| T::StoreTxParams::get().provides(content_hash)))
+				.then(|| Self::preimage_store_params().provides(content_hash)))
 		}
 
 		fn check_unsigned(
@@ -1731,7 +1741,7 @@ pub mod pallet {
 			let (valid_tx, scope) = if context.want_valid_transaction() {
 				let (valid_tx, scope) = if used_preimage_auth {
 					(
-						T::StoreTxParams::get().provides(content_hash),
+						Self::preimage_store_params().provides(content_hash),
 						AuthorizationScope::Preimage(content_hash),
 					)
 				} else {

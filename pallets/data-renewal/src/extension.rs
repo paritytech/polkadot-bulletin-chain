@@ -114,14 +114,6 @@ impl<T: Config> Pallet<T> {
 		Self::check_renewal_signed(who, call, txs::CheckContext::PreDispatch).map(|_| ())
 	}
 
-	fn account_renew_params() -> txs::ValidTransactionParams {
-		let params = <T as Config>::RenewTxParams::get();
-		txs::ValidTransactionParams {
-			priority: params.priority.saturating_add(txs::extension::ALLOWANCE_PRIORITY_BOOST),
-			..params
-		}
-	}
-
 	fn check_renewal_signed(
 		who: &T::AccountId,
 		call: &Call<T>,
@@ -144,7 +136,7 @@ impl<T: Config> Pallet<T> {
 				)?;
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					Self::account_renew_params().provides((who, info.content_hash))
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};
@@ -162,7 +154,7 @@ impl<T: Config> Pallet<T> {
 						// hash alone so they don't dedup against the account path.
 						AuthorizationScope::Preimage(hash) =>
 							<T as Config>::RenewTxParams::get().provides(*hash),
-						_ => Self::account_renew_params().provides((who, info.content_hash)),
+						_ => <T as Config>::RenewTxParams::get().provides((who, info.content_hash)),
 					}
 				} else {
 					ValidTransaction::default()
@@ -186,7 +178,7 @@ impl<T: Config> Pallet<T> {
 
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
-					Self::account_renew_params().provides((who, info.content_hash))
+					<T as Config>::RenewTxParams::get().provides((who, info.content_hash))
 				} else {
 					ValidTransaction::default()
 				};

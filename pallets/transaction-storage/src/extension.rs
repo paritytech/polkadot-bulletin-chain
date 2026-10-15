@@ -362,8 +362,9 @@ where
 	}
 }
 
-/// Priority bonus given to an in-budget signer. Over-budget signers get `0`.
-pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
+/// Priority bonus for in-budget account stores and for preimage stores. Over-budget signers get
+/// `0`.
+pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = TransactionPriority::MAX / 8;
 
 /// Maps the prospective post-this-tx [`AuthorizationExtent`] to the priority bonus
 /// added by [`AllowanceBasedPriority`]. Pick a concrete impl in the runtime's
@@ -526,7 +527,8 @@ pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
 
 /// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus the number of the
 /// signer's transactions ahead of this one in the pool. Each signer's next transaction ranks first,
-/// so the pool alternates between signers. Unsigned transactions get the full bonus.
+/// so the pool alternates between signers. Bare transactions get the full bonus; unsigned general
+/// transactions get none.
 ///
 /// Uses the identifier, encoding and metadata type of `CheckNonce`, so the transaction format stays
 /// the same. Skips the bonus for `TransactionSource::InBlock`, where the runtime ignores priority,
@@ -545,12 +547,12 @@ impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
 		T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId>,
 	{
 		let transaction_nonce = self.0 .0;
-		let queued_transactions: u64 = origin.as_system_origin_signer().map_or(0, |who| {
-			transaction_nonce
+		origin.as_system_origin_signer().map_or(0, |who| {
+			let queued_transactions: u64 = transaction_nonce
 				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
-				.unique_saturated_into()
-		});
-		MAX_QUEUE_BONUS.saturating_sub(queued_transactions)
+				.unique_saturated_into();
+			MAX_QUEUE_BONUS.saturating_sub(queued_transactions)
+		})
 	}
 }
 

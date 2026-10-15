@@ -10,8 +10,8 @@ use bulletin_westend_runtime::{
 use frame_support::{assert_ok, pallet_prelude::Hooks, traits::fungible::Mutate};
 use pallet_bulletin_data_renewal::Call as DataRenewalCall;
 use pallet_bulletin_transaction_storage::{
-	extension::NonceCheckWithQueueBonus, Call as TxStorageCall, Config as TxStorageConfig,
-	TransactionRef,
+	extension::{NonceCheckWithQueueBonus, MAX_QUEUE_BONUS},
+	Call as TxStorageCall, Config as TxStorageConfig, TransactionRef,
 };
 use parachains_common::{Balance, Hash, Nonce};
 use sp_core::{Encode, Pair};
@@ -212,24 +212,28 @@ fn priority_ladder_across_call_types() {
 			TransactionSource::Local,
 		);
 
-		assert!(cleanup > in_budget_store, "cleanup must rank above every store");
+		assert!(cleanup > authorize, "cleanup must rank above authorization calls");
+		assert!(authorize > in_budget_store, "authorization calls must rank above every store");
+		assert_eq!(renew, in_budget_store, "a renew must rank level with an in-budget store");
+		assert_eq!(
+			preimage_store, in_budget_store,
+			"an authorized preimage store must rank level with an in-budget store"
+		);
 		assert!(
 			in_budget_store > over_budget_store,
 			"the allowance boost must lift in-budget stores"
 		);
-		assert_eq!(
-			renew, in_budget_store,
-			"an account-scoped renew must rank level with an in-budget store"
+		assert!(in_budget_store > transfer, "fee-paying calls must rank below in-budget stores");
+		assert!(
+			transfer.abs_diff(over_budget_store) < MAX_QUEUE_BONUS,
+			"fee-paying calls and over-budget stores must share a level"
 		);
-		assert_eq!(
-			authorize, over_budget_store,
-			"authorize_account must rank level with an over-budget store"
+		assert!(over_budget_store > promotion, "HOP promotion must rank lowest");
+		assert!(
+			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 4), BACKLOG_LENGTH, 0) >
+				promotion,
+			"HOP promotion must rank below queued over-budget stores too"
 		);
-		assert_eq!(
-			preimage_store, over_budget_store,
-			"a preimage-authorized store must rank level with an over-budget store"
-		);
-		assert!(over_budget_store > transfer, "fee-paying calls must rank below every store");
 		assert!(transfer > promotion, "HOP promotion must rank lowest");
 	});
 }
@@ -240,15 +244,15 @@ fn renew_family_priority_levels() {
 		next_block();
 		let renewer = Sr25519Keyring::Dave;
 		let in_budget = Sr25519Keyring::Eve;
-		let over_budget = Sr25519Keyring::Ferdie;
 		for account in [renewer, in_budget] {
 			account_authorization(account, LARGE_ALLOWANCE_BYTES);
 		}
-		account_authorization(over_budget, SMALL_ALLOWANCE_BYTES);
 		let account_content = vec![1u8; SMALL_STORE_BYTES];
 		let preimage_content = vec![2u8; SMALL_STORE_BYTES];
+		let auto_renew_content = vec![6u8; SMALL_STORE_BYTES];
 		inclusion(renewer, store_call(SMALL_STORE_BYTES, 1));
 		inclusion(renewer, store_call(SMALL_STORE_BYTES, 2));
+		inclusion(renewer, store_call(SMALL_STORE_BYTES, 6));
 		let stored_block = System::block_number();
 		next_block();
 		assert_ok!(TransactionStorage::authorize_preimage(
@@ -256,22 +260,33 @@ fn renew_family_priority_levels() {
 			sp_io::hashing::blake2_256(&preimage_content),
 			preimage_content.len() as u64,
 		));
+		pallet_bulletin_data_renewal::Renewals::<Runtime>::insert(
+			sp_io::hashing::blake2_256(&auto_renew_content),
+			pallet_bulletin_data_renewal::RenewalData {
+				account: renewer.to_account_id(),
+				recurring: true,
+				paid: false,
+			},
+		);
 
 		let entry = |index| TransactionRef::Position { block: stored_block, index };
 		let renew_priority = |call| queued_priority(renewer, RuntimeCall::DataRenewal(call), 0, 0);
 		let in_budget_store = queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 3), 0, 0);
-		let over_budget_store =
-			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 3), 0, 0);
 
 		assert_eq!(
 			renew_priority(DataRenewalCall::<Runtime>::renew { entry: entry(0) }),
 			in_budget_store,
-			"an account-scoped renew must rank level with an in-budget store"
+			"renew must rank level with an in-budget store"
 		);
 		assert_eq!(
 			renew_priority(DataRenewalCall::<Runtime>::force_renew { entry: entry(0) }),
 			in_budget_store,
 			"an account-scoped force_renew must rank level with an in-budget store"
+		);
+		assert_eq!(
+			renew_priority(DataRenewalCall::<Runtime>::force_renew { entry: entry(1) }),
+			in_budget_store,
+			"a preimage-scoped force_renew must rank level with an in-budget store"
 		);
 		assert_eq!(
 			renew_priority(DataRenewalCall::<Runtime>::enable_auto_renew {
@@ -281,9 +296,44 @@ fn renew_family_priority_levels() {
 			"enable_auto_renew must rank level with an in-budget store"
 		);
 		assert_eq!(
-			renew_priority(DataRenewalCall::<Runtime>::force_renew { entry: entry(1) }),
-			over_budget_store,
-			"a preimage-scoped force_renew must rank level with an over-budget store"
+			renew_priority(DataRenewalCall::<Runtime>::disable_auto_renew {
+				content_hash: sp_io::hashing::blake2_256(&auto_renew_content),
+			}),
+			in_budget_store,
+			"disable_auto_renew must rank level with an in-budget store"
+		);
+	});
+}
+
+#[test]
+fn preimage_store_level_with_in_budget_store() {
+	externalities().execute_with(|| {
+		let in_budget = Sr25519Keyring::Eve;
+		let over_budget = Sr25519Keyring::Ferdie;
+		account_authorization(in_budget, LARGE_ALLOWANCE_BYTES);
+		account_authorization(over_budget, SMALL_ALLOWANCE_BYTES);
+		let preimage_content = vec![2u8; SMALL_STORE_BYTES];
+		assert_ok!(TransactionStorage::authorize_preimage(
+			RuntimeOrigin::root(),
+			sp_io::hashing::blake2_256(&preimage_content),
+			preimage_content.len() as u64,
+		));
+
+		let in_budget_store = queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 3), 0, 0);
+		let unsigned_preimage_store = pool_priority(
+			UncheckedExtrinsic::new_bare(store_call(SMALL_STORE_BYTES, 2)),
+			TransactionSource::External,
+		);
+		let signed_preimage_store =
+			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 2), 0, 0);
+
+		assert_eq!(
+			unsigned_preimage_store, in_budget_store,
+			"an unsigned preimage store must rank level with an in-budget store"
+		);
+		assert_eq!(
+			signed_preimage_store, in_budget_store,
+			"a preimage store signed by an over-budget account must rank level with an in-budget store"
 		);
 	});
 }
