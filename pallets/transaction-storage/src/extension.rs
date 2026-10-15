@@ -22,7 +22,7 @@ use crate::{
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
-use frame_support::dispatch::{DispatchClass, DispatchInfo};
+use frame_support::dispatch::DispatchInfo;
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
@@ -521,32 +521,24 @@ where
 }
 
 pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
-const QUEUE_BONUS_STEP_BYTES: u64 = 1024;
 const _: () = assert!(MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST);
 
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking)]
-pub struct NonceCheckWithQueueBonus<T: Config>(pub frame_system::CheckNonce<T>);
+pub struct NonceCheckWithQueueBonus<T: frame_system::Config>(pub frame_system::CheckNonce<T>);
 
-impl<T: Config> NonceCheckWithQueueBonus<T> {
+impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
 	pub fn new(nonce: T::Nonce) -> Self {
 		Self(frame_system::CheckNonce::from(nonce))
 	}
-
-	fn queue_bonus(queued_transactions: u64, len: usize) -> TransactionPriority {
-		let block_length = *T::BlockLength::get().max.get(DispatchClass::Normal);
-		let minimum_cost_bytes = u64::from(block_length / T::MaxBlockTransactions::get().max(1));
-		let cost_steps = (len as u64).max(minimum_cost_bytes) / QUEUE_BONUS_STEP_BYTES;
-		MAX_QUEUE_BONUS.saturating_sub(queued_transactions.saturating_mul(cost_steps))
-	}
 }
 
-impl<T: Config> fmt::Debug for NonceCheckWithQueueBonus<T> {
+impl<T: frame_system::Config> fmt::Debug for NonceCheckWithQueueBonus<T> {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		fmt::Debug::fmt(&self.0, f)
 	}
 }
 
-impl<T: Config> scale_info::TypeInfo for NonceCheckWithQueueBonus<T> {
+impl<T: frame_system::Config> scale_info::TypeInfo for NonceCheckWithQueueBonus<T> {
 	type Identity = frame_system::CheckNonce<T>;
 
 	fn type_info() -> scale_info::Type {
@@ -554,7 +546,7 @@ impl<T: Config> scale_info::TypeInfo for NonceCheckWithQueueBonus<T> {
 	}
 }
 
-impl<T: Config> TransactionExtension<RuntimeCallOf<T>> for NonceCheckWithQueueBonus<T>
+impl<T: frame_system::Config> TransactionExtension<RuntimeCallOf<T>> for NonceCheckWithQueueBonus<T>
 where
 	RuntimeCallOf<T>: Dispatchable<Info = DispatchInfo>,
 	T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId> + Clone,
@@ -603,8 +595,9 @@ where
 			inherited_implication,
 			source,
 		)?;
-		validity.priority =
-			validity.priority.saturating_add(Self::queue_bonus(queued_transactions, len));
+		validity.priority = validity
+			.priority
+			.saturating_add(MAX_QUEUE_BONUS.saturating_sub(queued_transactions));
 		Ok((validity, val, origin))
 	}
 

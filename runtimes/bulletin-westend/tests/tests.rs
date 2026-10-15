@@ -530,7 +530,7 @@ fn queued_store_priority(
 }
 
 #[test]
-fn queue_bonus_order_by_queued_bytes() {
+fn queue_bonus_order_by_queue_position() {
 	sp_io::TestExternalities::new(RuntimeGenesisConfig::default().build_storage().unwrap())
 		.execute_with(|| {
 			let large_sender = Sr25519Keyring::Eve;
@@ -550,8 +550,8 @@ fn queue_bonus_order_by_queued_bytes() {
 			let small_second = queued_store_priority(small_sender, 1, SMALL_STORE_BYTES);
 
 			assert_eq!(large_first, small_first);
+			assert_eq!(large_second, small_second);
 			assert!(small_second < small_first);
-			assert!(large_second < small_second);
 		});
 }
 
