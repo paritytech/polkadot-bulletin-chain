@@ -204,9 +204,8 @@ fn parachain_network_config(
 			let parachain =
 				parachain.with_id(para_id).with_chain_spec_path(para_chain_spec.as_str());
 			let parachain = match genesis_retention_period {
-				Some(retention_period) => parachain.with_genesis_overrides(serde_json::json!({
-					"transactionStorage": { "retentionPeriod": retention_period }
-				})),
+				Some(retention_period) => parachain
+					.with_genesis_overrides(retention_period_genesis_overrides(retention_period)),
 				None => parachain,
 			};
 			parachain.cumulus_based(true).with_collator(|c| {
@@ -227,9 +226,14 @@ fn parachain_network_config(
 		})
 }
 
+fn retention_period_genesis_overrides(retention_period: u32) -> serde_json::Value {
+	serde_json::json!({ "transactionStorage": { "retentionPeriod": retention_period } })
+}
+
 /// 3 relay validators + 3 collators, all collators using the same `para_node_args`.
 pub fn build_parachain_network_config_three_collators(
 	para_node_args: Vec<String>,
+	genesis_retention_period: u32,
 ) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
@@ -259,6 +263,9 @@ pub fn build_parachain_network_config_three_collators(
 			parachain
 				.with_id(para_id)
 				.with_chain_spec_path(para_chain_spec.as_str())
+				.with_genesis_overrides(retention_period_genesis_overrides(
+					genesis_retention_period,
+				))
 				.cumulus_based(true)
 				.with_collator(|c| {
 					c.with_name("collator-1")

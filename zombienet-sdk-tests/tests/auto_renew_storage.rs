@@ -146,7 +146,7 @@ async fn spawn_shared_harness(
 	// 3 relay validators give a fault-tolerant GRANDPA quorum; with only 2, any brief stall
 	// halts finality and widens the best-vs-finalized window, which leaks into event-reading
 	// race conditions.
-	let config = build_parachain_network_config_three_relay_validators(para_node_args)?;
+	let config = parachain_network_config_with_retention_period(para_node_args, RETENTION_PERIOD)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 	let relay_alice = network
@@ -2311,8 +2311,9 @@ async fn parachain_auto_renew_many_items_prune_eviction_test() -> Result<()> {
 	);
 
 	verify_parachain_binaries()?;
-	let config = build_parachain_network_config_three_relay_validators(
+	let config = parachain_network_config_with_retention_period(
 		get_para_node_args_with_pruning(PRUNE_EVICTION_BLOCKS_PRUNING),
+		BULK_ENABLE_RETENTION_PERIOD,
 	)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
@@ -3145,7 +3146,10 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(SOAK_BLOCKS_PRUNING);
-	let config = crate::utils::build_parachain_network_config_three_collators(para_args)?;
+	let config = crate::utils::build_parachain_network_config_three_collators(
+		para_args,
+		SOAK_RETENTION_PERIOD,
+	)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
