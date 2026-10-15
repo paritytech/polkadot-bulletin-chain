@@ -226,6 +226,10 @@ fn priority_ladder_across_call_types() {
 		);
 		assert!(in_budget_store > transfer, "fee-paying calls must rank below in-budget stores");
 		assert!(
+			transfer > over_budget_store,
+			"an untipped fee-paying call must rank above an over-budget store at the same queue position"
+		);
+		assert!(
 			transfer.abs_diff(over_budget_store) < QUEUE_BONUS_STEP,
 			"an untipped fee-paying call and an over-budget store at the same queue position must differ by less than one queue step"
 		);
