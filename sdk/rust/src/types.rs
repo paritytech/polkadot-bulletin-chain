@@ -37,13 +37,6 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("Authorization not found for account: {0}"))]
 	AuthorizationNotFound(String),
 
-	/// Insufficient authorization.
-	#[cfg_attr(
-		feature = "std",
-		error("Insufficient authorization: need {need} bytes, have {available} bytes")
-	)]
-	InsufficientAuthorization { need: u64, available: u64 },
-
 	/// DAG-PB encoding failed.
 	#[cfg_attr(feature = "std", error("DAG-PB encoding failed: {0}"))]
 	DagEncodingFailed(String),
@@ -107,7 +100,6 @@ impl Error {
 			Error::EmptyData => "EMPTY_DATA",
 			Error::InvalidCid(_) => "INVALID_CID",
 			Error::AuthorizationNotFound(_) => "AUTHORIZATION_NOT_FOUND",
-			Error::InsufficientAuthorization { .. } => "INSUFFICIENT_AUTHORIZATION",
 			Error::DagEncodingFailed(_) => "DAG_ENCODING_FAILED",
 			Error::NetworkError(_) => "NETWORK_ERROR",
 			Error::InvalidConfig(_) => "INVALID_CONFIG",
@@ -141,8 +133,6 @@ impl Error {
 			Error::InvalidCid(_) => "Verify CID format",
 			Error::AuthorizationNotFound(_) =>
 				"Authorize the account or the content hash first, then retry",
-			Error::InsufficientAuthorization { .. } =>
-				"Request additional authorization, then retry",
 			Error::DagEncodingFailed(_) => "Check chunk CIDs and data integrity",
 			Error::NetworkError(_) => "Check network connectivity to the RPC endpoint, then retry",
 			Error::InvalidConfig(_) => "Check configuration parameters",
@@ -527,7 +517,6 @@ mod tests {
 			Error::EmptyData,
 			Error::InvalidCid("bad".into()),
 			Error::AuthorizationNotFound("acct".into()),
-			Error::InsufficientAuthorization { need: 10, available: 5 },
 			Error::DagEncodingFailed("bad dag".into()),
 			Error::NetworkError("timeout".into()),
 			Error::InvalidConfig("bad config".into()),
@@ -552,7 +541,6 @@ mod tests {
 			"EMPTY_DATA",
 			"INVALID_CID",
 			"AUTHORIZATION_NOT_FOUND",
-			"INSUFFICIENT_AUTHORIZATION",
 			"DAG_ENCODING_FAILED",
 			"NETWORK_ERROR",
 			"INVALID_CONFIG",

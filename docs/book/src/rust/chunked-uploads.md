@@ -122,13 +122,14 @@ use subxt::utils::AccountId32;
 let account = AccountId32::from(signer.public_key().0);
 let (transactions, bytes) = (estimate.base.transactions, estimate.base.bytes);
 
-match client.check_authorization_for_store(&account, transactions, bytes).await {
-    Ok(()) => tracing::info!("Authorization sufficient, proceeding with upload"),
-    Err(Error::InsufficientAuthorization { .. } | Error::AuthorizationNotFound(_)) => {
-        // `authorizer` must be a registered authorizer
-        client.authorize_account(account, transactions, bytes, &authorizer, WaitFor::Finalized).await?;
-    }
-    Err(e) => return Err(e.into()),
+let sufficient = matches!(
+    client.query_account_authorization(&account).await?,
+    Some((remaining_transactions, remaining_bytes))
+        if remaining_transactions >= transactions && remaining_bytes >= bytes
+);
+if !sufficient {
+    // `authorizer` must be a registered authorizer
+    client.authorize_account(account, transactions, bytes, &authorizer, WaitFor::Finalized).await?;
 }
 ```
 

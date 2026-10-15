@@ -6,7 +6,6 @@
 //! This module provides the actual blockchain interaction layer using subxt.
 
 use crate::{
-	authorization::{Authorization, AuthorizationManager},
 	blob_source::{
 		plan_stream, ChunkPlan, GetData, ItemData, SeekableSource, SkipReason, StreamEstimate,
 		UploadEstimate, UploadEstimateItem, UploadEstimateOptions,
@@ -14,7 +13,7 @@ use crate::{
 	cid::{calculate_cid_with_config, cid_to_bytes, CidCodec, ContentHash, HashingAlgorithm},
 	compat,
 	pipeline::{h256_hex, run_resolved, ResolvedItem, UploadConfig, UploadResult},
-	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
+	types::{Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
 use bulletin_transaction_storage_primitives::TransactionRef;
 use std::{
@@ -726,50 +725,6 @@ impl TransactionClient {
 		Ok(())
 	}
 
-	/// Check that sufficient authorization exists for a store operation.
-	///
-	/// Queries the chain for the account's current authorization and validates
-	/// that it has enough transactions and bytes remaining for the boost tier.
-	///
-	/// This is a soft preflight: under the soft-cap design, on-chain validation
-	/// no longer rejects a `store` for being over-budget — it only drops the
-	/// priority boost. Use this check to decide whether to send (likely-boosted)
-	/// or to top up the authorization first; do not treat a failure here as
-	/// "the chain will reject this tx".
-	///
-	/// If the query itself fails (e.g., network error), the error is returned
-	/// so the caller can decide whether to proceed.
-	///
-	/// A runtime without the `BulletinTransactionStorageApi` runtime API is the one exception:
-	/// there is nothing to preflight against, and a soft check must not block a `store` the chain
-	/// would accept, so the check passes.
-	pub async fn check_authorization_for_store(
-		&self,
-		who: &AccountId32,
-		required_transactions: u32,
-		required_bytes: u64,
-	) -> Result<()> {
-		let auth_data = match self.query_account_authorization(who).await {
-			Ok(auth_data) => auth_data,
-			Err(Error::AuthorizationApiUnavailable) => return Ok(()),
-			Err(e) => return Err(e),
-		};
-
-		match auth_data {
-			Some((transactions, bytes)) => {
-				let auth = Authorization {
-					scope: AuthorizationScope::Account,
-					transactions,
-					max_size: bytes,
-					expires_at: None, // already filtered out expired
-				};
-				let manager = AuthorizationManager::new();
-				manager.check_authorization(&auth, required_bytes, required_transactions)
-			},
-			None => Err(Error::AuthorizationNotFound(format!("{who}"))),
-		}
-	}
-
 	/// Store data on-chain.
 	///
 	/// Submits a `TransactionStorage.store` extrinsic.
@@ -789,8 +744,8 @@ impl TransactionClient {
 	///
 	/// Before submitting, checks that the account has an unexpired authorization and
 	/// returns [`Error::AuthorizationNotFound`] otherwise. It does not reject a store beyond
-	/// the allowance, because the chain accepts one without the priority boost. Use
-	/// [`Self::check_authorization_for_store`] to detect one.
+	/// the allowance, because the chain accepts one without the priority boost.
+	/// [`Self::query_account_authorization`] returns the remaining allowance.
 	///
 	/// Progress events emitted:
 	/// - `TransactionStatusEvent::Validated` - Transaction validated in pool

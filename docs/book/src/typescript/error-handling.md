@@ -43,7 +43,6 @@ try {
 | Code | Description | Recovery Hint |
 |---|---|---|
 | `AUTHORIZATION_NOT_FOUND` | No unexpired authorization entry (checked only by `.ensureAuthorized()`) | Authorize the account or the content hash first, then retry |
-| `INSUFFICIENT_AUTHORIZATION` | Raised only by the Rust SDK's `check_authorization_for_store`; this SDK's pre-flight checks existence and expiry only | Request additional authorization, then retry |
 
 ### Capability (non-retryable)
 
@@ -157,6 +156,6 @@ try {
 
 ## Cross-SDK Consistency
 
-Both SDKs use the same error codes, the same retryable set and the same recovery hints: an `ErrorCode` value equals the string that the Rust `Error::code()` returns for the same failure. Three codes exist only in this SDK, because the failure cannot occur in the Rust SDK: `TIMEOUT` (`txTimeout`), `INVALID_HASH_ALGORITHM` (Rust uses an enum) and `MISSING_CHUNK` (only this SDK reassembles chunks). `INSUFFICIENT_AUTHORIZATION` comes only from the Rust `check_authorization_for_store`.
+Both SDKs use the same error codes, the same retryable set and the same recovery hints: an `ErrorCode` value equals the string that the Rust `Error::code()` returns for the same failure. Three codes exist only in this SDK, because the failure cannot occur in the Rust SDK: `TIMEOUT` (`txTimeout`), `INVALID_HASH_ALGORITHM` (Rust uses an enum) and `MISSING_CHUNK` (only this SDK reassembles chunks).
 
 A transaction pool rejection is `TRANSACTION_INVALID` in both SDKs. This SDK keeps PAPI's `InvalidTxError` as `cause`; the Rust SDK carries the custom validity code in `Error::TransactionInvalid { custom_code, .. }`.

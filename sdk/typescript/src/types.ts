@@ -391,7 +391,6 @@ export enum ErrorCode {
   CHUNKING_FAILED = "CHUNKING_FAILED",
   MISSING_CHUNK = "MISSING_CHUNK",
   AUTHORIZATION_NOT_FOUND = "AUTHORIZATION_NOT_FOUND",
-  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
   TRANSACTION_INVALID = "TRANSACTION_INVALID",
   TRANSACTION_FAILED = "TRANSACTION_FAILED",
   NETWORK_ERROR = "NETWORK_ERROR",
@@ -428,8 +427,6 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Ensure all chunks are present with contiguous indices starting from 0",
   [ErrorCode.AUTHORIZATION_NOT_FOUND]:
     "Authorize the account or the content hash first, then retry",
-  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
-    "Request additional authorization, then retry",
   [ErrorCode.TRANSACTION_INVALID]:
     "The transaction pool rejected the transaction; check the validity error before retrying",
   [ErrorCode.TRANSACTION_FAILED]:

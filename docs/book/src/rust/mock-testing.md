@@ -116,7 +116,7 @@ mod tests {
 
 ## Testing Authorization Logic
 
-Test authorization estimation and validation:
+Test authorization estimation:
 
 ```rust
 #[cfg(test)]
@@ -132,25 +132,6 @@ mod tests {
 
         assert!(txs > 0);
         assert!(bytes >= 10 * 1024 * 1024);
-    }
-
-    #[test]
-    fn test_authorization_check() {
-        let manager = AuthorizationManager::new();
-
-        let sufficient_auth = Authorization {
-            scope: AuthorizationScope::Account,
-            transactions: 10,
-            max_size: 10 * 1024 * 1024,
-            expires_at: None,
-        };
-
-        // Should pass — enough authorization
-        assert!(manager.check_authorization(&sufficient_auth, 1024, 1).is_ok());
-
-        // Should fail — not enough bytes
-        let result = manager.check_authorization(&sufficient_auth, 100 * 1024 * 1024, 1);
-        assert!(matches!(result, Err(Error::InsufficientAuthorization { .. })));
     }
 }
 ```
@@ -219,16 +200,6 @@ mod tests {
         let empty_err = Error::EmptyData;
         assert!(!empty_err.is_retryable());
     }
-
-    #[test]
-    fn test_insufficient_auth_error() {
-        let err = Error::InsufficientAuthorization {
-            need: 10_000_000,
-            available: 1_000_000,
-        };
-        assert_eq!(err.code(), "INSUFFICIENT_AUTHORIZATION");
-        assert!(!err.is_retryable());
-    }
 }
 ```
 
@@ -274,7 +245,7 @@ mod integration_tests {
 ## Best Practices
 
 1. **Use `BulletinClient` for unit tests** — no network needed, fast, deterministic
-2. **Test error paths** — verify your code handles `EmptyData`, `DataTooLarge`, `InsufficientAuthorization`, etc.
+2. **Test error paths** — verify your code handles `EmptyData`, `DataTooLarge`, `AuthorizationNotFound`, etc.
 3. **Test CID determinism** — same data with same options should always produce the same CID
 4. **Mark integration tests with `#[ignore]`** — they require a running node and should not run in CI by default
 5. **Test chunking edge cases** — files that don't divide evenly, single-chunk files, maximum file size

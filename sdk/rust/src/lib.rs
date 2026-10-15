@@ -186,7 +186,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Prelude module for convenient imports.
 pub mod prelude {
 	pub use crate::{
-		authorization::{Authorization, AuthorizationManager},
+		authorization::AuthorizationManager,
 		chunker::{Chunker, FixedSizeChunker},
 		cid::{
 			calculate_cid, calculate_cid_default, calculate_cid_with_config, cid_to_bytes, Cid,

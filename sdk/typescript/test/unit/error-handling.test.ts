@@ -222,7 +222,6 @@ describe("Error Handling", () => {
           "CHUNKING_FAILED",
           "MISSING_CHUNK",
           "AUTHORIZATION_NOT_FOUND",
-          "INSUFFICIENT_AUTHORIZATION",
           "TRANSACTION_INVALID",
           "TRANSACTION_FAILED",
           "NETWORK_ERROR",

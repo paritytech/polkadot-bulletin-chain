@@ -89,7 +89,7 @@ Key types available through the prelude:
 - **CID**: `calculate_cid`, `CidCodec`, `HashingAlgorithm`, `CidConfig`
 - **DAG**: `UnixFsDagBuilder`, `DagManifest`, `DagBuilder` trait
 - **Storage**: `StorageOperation`, `BatchStorageOperation`
-- **Authorization**: `Authorization`, `AuthorizationManager`
+- **Authorization**: `AuthorizationManager`
 - **Renewal**: `RenewalTracker`, `RenewalOperation`
 - **Types**: `StoreResult`, `StoreOptions`, `ChunkerConfig`, `Error`, `ProgressEvent`, etc.
 - **Transaction Receipts** (std only): `StoreReceipt`, `AuthorizationReceipt`, `RenewReceipt`

@@ -85,7 +85,6 @@ let client = TransactionClient::from_rpc_clients(vec![bulletin]).await?;
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `query_account_authorization(who)` | `Result<Option<(u32, u64)>>` | Remaining `(transactions, bytes)`; `None` if absent or expired; `Err(AuthorizationApiUnavailable)` on runtimes without the `BulletinTransactionStorageApi` runtime API |
-| `check_authorization_for_store(who, txs, bytes)` | `Result<()>` | Verify sufficient remaining authorization; passes on runtimes without the runtime API |
 
 **Renewal:**
 
@@ -461,26 +460,11 @@ impl AuthorizationManager {
     pub fn with_preimage_auth() -> Self;
     pub fn with_auto_refresh(self, enabled: bool) -> Self;
 
-    pub fn check_authorization(
-        &self, available: &Authorization, required_size: u64, num_transactions: u32,
-    ) -> Result<()>;
-
     pub fn calculate_requirements(
         &self, total_size: u64, num_chunks: usize, include_manifest: bool,
     ) -> (u32, u64);
 
     pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64);
-}
-```
-
-### Authorization
-
-```rust
-pub struct Authorization {
-    pub scope: AuthorizationScope,
-    pub transactions: u32,
-    pub max_size: u64,
-    pub expires_at: Option<u32>,
 }
 ```
 
@@ -653,7 +637,7 @@ pub enum AuthorizationScope {
 
 ### Error
 
-All 19 error variants with structured metadata. The codes are shared with the TypeScript SDK; see [Error Handling](./error-handling.md).
+All 18 error variants with structured metadata. The codes are shared with the TypeScript SDK; see [Error Handling](./error-handling.md).
 
 ```rust
 pub enum Error {
@@ -662,7 +646,6 @@ pub enum Error {
     EmptyData,
     InvalidCid(String),
     AuthorizationNotFound(String),
-    InsufficientAuthorization { need: u64, available: u64 },
     DagEncodingFailed(String),
     NetworkError(String),
     InvalidConfig(String),

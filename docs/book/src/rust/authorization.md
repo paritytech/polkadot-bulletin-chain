@@ -50,17 +50,17 @@ let receipt = client.authorize_preimage(
 
 ### Check Authorization
 
-`check_authorization_for_store` checks that the account has an unexpired
-authorization with enough transactions and bytes left for a store. The chain
-accepts a store beyond the allowance at lower priority (see
+`query_account_authorization` returns the remaining transactions and bytes of
+the account's unexpired authorization, or `None` without one. The chain accepts
+a store beyond the allowance at lower priority (see
 [Authorization](../concepts/authorization.md)), so `store` checks only that an
-unexpired authorization exists. Call `check_authorization_for_store` to decide
-whether to top up the authorization before an upload.
+unexpired authorization exists. Compare the remaining allowance with the upload
+to decide whether to top up the authorization first.
 
-Both checks read the finalized block, so authorize with `WaitFor::Finalized`
-before the first store. A client built with `with_wait_for(WaitFor::InBlock)`
-reads the best block instead, and an authorization included with
-`WaitFor::InBlock` then passes the checks right away.
+The query and the `store` check read the finalized block, so authorize with
+`WaitFor::Finalized` before the first store. A client built with
+`with_wait_for(WaitFor::InBlock)` reads the best block instead, and an
+authorization included with `WaitFor::InBlock` then passes the check right away.
 
 With `WaitFor::InBlock`, note that the transaction pool validates a new
 transaction against its view of the newest best block, and it builds that view a
@@ -71,20 +71,15 @@ again succeeds.
 ```rust
 let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
-match client.check_authorization_for_store(&account, 1, data.len() as u64).await {
-    Ok(()) => {
-        tracing::info!("Authorization sufficient");
+match client.query_account_authorization(&account).await? {
+    Some((transactions, bytes)) if transactions >= 1 && bytes >= data.len() as u64 => {
+        tracing::info!(transactions, bytes, "Store within the allowance");
     }
-    Err(Error::AuthorizationNotFound(_)) => {
+    Some((transactions, bytes)) => {
+        tracing::warn!(transactions, bytes, "Store beyond the allowance, at lower priority");
+    }
+    None => {
         tracing::error!("No authorization found — call authorize_account() first");
-    }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        // Transactions are checked first: `need`/`available` count transactions
-        // when the transaction quota is short, bytes otherwise.
-        tracing::error!(need, available, "Insufficient authorization");
-    }
-    Err(e) => {
-        tracing::error!(?e, "Authorization check failed");
     }
 }
 ```

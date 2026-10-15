@@ -103,9 +103,8 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | Variant | Code | Recovery Hint |
 |---|---|---|
 | `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | Authorize the account or the content hash first, then retry |
-| `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | Request additional authorization, then retry |
 
-`store` checks only that an unexpired authorization exists, because the chain accepts a store beyond the allowance at lower priority. `InsufficientAuthorization` comes only from `check_authorization_for_store` and `AuthorizationManager::check_authorization`. The runtime API that both `TransactionClient` checks query leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
+`store` checks only that an unexpired authorization exists, because the chain accepts a store beyond the allowance at lower priority. The runtime API that the check queries leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
 
 ### Transaction Errors
 
@@ -245,7 +244,7 @@ Both SDKs use the same error codes, the same retryable set and the same recovery
 - `INVALID_HASH_ALGORITHM`: `HashingAlgorithm` is a Rust enum, so an unknown algorithm does not compile.
 - `MISSING_CHUNK`: only the TypeScript chunker reassembles chunks.
 
-`INSUFFICIENT_AUTHORIZATION` comes only from `check_authorization_for_store`, which has no TypeScript counterpart. `store` and the TypeScript `.ensureAuthorized()` both check existence and expiry only, and both raise `AUTHORIZATION_NOT_FOUND`.
+`store` and the TypeScript `.ensureAuthorized()` both check only that an unexpired authorization exists, and both raise `AUTHORIZATION_NOT_FOUND`. `store` always runs the check; in TypeScript it is opt-in.
 
 Retryable codes: `TRANSACTION_FAILED`, `NETWORK_ERROR` and `STORE_STALLED`, plus `TIMEOUT` in TypeScript.
 
@@ -268,7 +267,7 @@ match client.store(data, &signer, WaitFor::InBlock).await {
 }
 ```
 
-`store` does not reject a store beyond the allowance. To detect one before you submit, call `check_authorization_for_store` (see [Authorization](./authorization.md#check-authorization)).
+`store` does not reject a store beyond the allowance. To read the remaining allowance before you submit, see [Check Authorization](./authorization.md#check-authorization).
 
 ### Retry with Backoff
 
