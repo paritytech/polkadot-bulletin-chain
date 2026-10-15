@@ -546,37 +546,44 @@ where
 	}
 }
 
+/// Transaction extensions for a transaction with this `nonce` and `tip`.
+pub fn tx_extension(nonce: Nonce, tip: Balance) -> TxExtension {
+	cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
+		frame_system::AuthorizeCall::<Runtime>::new(),
+		frame_system::CheckNonZeroSender::<Runtime>::new(),
+		frame_system::CheckSpecVersion::<Runtime>::new(),
+		frame_system::CheckTxVersion::<Runtime>::new(),
+		frame_system::CheckGenesis::<Runtime>::new(),
+		frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
+		pallet_bulletin_transaction_storage::extension::NonceCheckWithQueueBonus::<Runtime>::new(
+			nonce,
+		),
+		frame_system::CheckWeight::<Runtime>::new(),
+		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
+			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(tip),
+		),
+		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
+			Runtime,
+			storage::StorageCallInspector,
+			(
+				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+			),
+		>::default(),
+		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
+			Runtime,
+			pallet_bulletin_transaction_storage::extension::FlatBoost,
+		>::default(),
+		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+	))
+}
+
 impl<C> frame_system::offchain::CreateAuthorizedTransaction<C> for Runtime
 where
 	RuntimeCall: From<C>,
 {
 	fn create_extension() -> Self::Extension {
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::new((
-			frame_system::AuthorizeCall::<Runtime>::new(),
-			frame_system::CheckNonZeroSender::<Runtime>::new(),
-			frame_system::CheckSpecVersion::<Runtime>::new(),
-			frame_system::CheckTxVersion::<Runtime>::new(),
-			frame_system::CheckGenesis::<Runtime>::new(),
-			frame_system::CheckEra::<Runtime>::from(generic::Era::Immortal),
-			pallet_bulletin_transaction_storage::extension::NonceCheckWithQueueBonus::<Runtime>::new(0),
-			frame_system::CheckWeight::<Runtime>::new(),
-			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
-			),
-			pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
-				Runtime,
-				storage::StorageCallInspector,
-				(
-					pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
-					pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
-				),
-			>::default(),
-			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
-				Runtime,
-				pallet_bulletin_transaction_storage::extension::FlatBoost,
-			>::default(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-		))
+		tx_extension(0, 0)
 	}
 }
 
