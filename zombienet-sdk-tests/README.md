@@ -94,7 +94,7 @@ are resource-intensive.
 
 | Test | Sync mode | Pruning | Expected outcome |
 |---|---|---|---|
-| `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE |
+| `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE. Ignored: fast sync stalls at block #0 on polkadot-stable2609 (upstream `StorageChainBlockImport` bug) |
 | `parachain_fast_sync_with_pruning_test` | fast | yes | Sync fails (pruned blocks) |
 | `parachain_warp_sync_test` | warp | no | Sync completes, the node resolves `GapSyncBodyPolicy::All`, gap sync restores the indexed transactions and bitswap serves every item |
 | `parachain_warp_sync_with_pruning_test` | warp | yes (sync node) | Sync completes, the node resolves `GapSyncBodyPolicy::BodiesWithinWindow`, bitswap serves items inside the gap body window and returns DONT_HAVE below it |
