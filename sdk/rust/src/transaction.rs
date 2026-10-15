@@ -1055,6 +1055,62 @@ impl TransactionClient {
 		Ok(RenewReceipt { entry, block_hash: result.block_hash })
 	}
 
+	pub async fn enable_auto_renew(
+		&self,
+		content_hash: ContentHash,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<()> {
+		self.submit_auto_renew(compat::AutoRenewCall::Enable, content_hash, signer, wait_for)
+			.await
+	}
+
+	pub async fn disable_auto_renew(
+		&self,
+		content_hash: ContentHash,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<()> {
+		self.submit_auto_renew(compat::AutoRenewCall::Disable, content_hash, signer, wait_for)
+			.await
+	}
+
+	async fn submit_auto_renew(
+		&self,
+		call: compat::AutoRenewCall,
+		content_hash: ContentHash,
+		signer: &Keypair,
+		wait_for: WaitFor,
+	) -> Result<()> {
+		use compat::{AutoRenewAdapter, AutoRenewCall};
+
+		let make_error =
+			|e: String| Error::RenewalFailed(format!("{} failed: {e}", call.call_name()));
+		match (compat::auto_renew_adapter(&self.api.metadata(), call)?, call) {
+			(AutoRenewAdapter::DataRenewal, AutoRenewCall::Enable) => {
+				let tx = bulletin::tx().data_renewal().enable_auto_renew(content_hash);
+				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+			},
+			(AutoRenewAdapter::DataRenewal, AutoRenewCall::Disable) => {
+				let tx = bulletin::tx().data_renewal().disable_auto_renew(content_hash);
+				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+			},
+			(AutoRenewAdapter::TransactionStorage, AutoRenewCall::Enable) => {
+				let tx = compat::bulletin_v1000016::tx()
+					.transaction_storage()
+					.enable_auto_renew(content_hash);
+				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+			},
+			(AutoRenewAdapter::TransactionStorage, AutoRenewCall::Disable) => {
+				let tx = compat::bulletin_v1000016::tx()
+					.transaction_storage()
+					.disable_auto_renew(content_hash);
+				self.submit_and_watch(&tx, signer, wait_for, None, make_error).await?;
+			},
+		}
+		Ok(())
+	}
+
 	/// Refresh an account authorization (extends expiry).
 	///
 	/// Requires authorizer origin (typically sudo).

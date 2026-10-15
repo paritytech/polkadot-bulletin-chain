@@ -102,7 +102,7 @@ Only the on-chain guarantee expires: the CID stays valid, and validators may sti
 ## SDK Support
 
 Both SDKs provide renewal helpers:
-- **Rust SDK**: `TransactionClient::renew` / `force_renew`, plus the offline `prepare_renew()` and `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
+- **Rust SDK**: `TransactionClient::renew` / `force_renew` / `enable_auto_renew` / `disable_auto_renew`, plus the offline `prepare_renew()` and `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
 - **TypeScript SDK**: `client.renew()`, `forceRenew()`, `enableAutoRenew()`, `disableAutoRenew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
 
 ## Next Steps

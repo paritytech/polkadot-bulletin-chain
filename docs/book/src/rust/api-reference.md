@@ -93,6 +93,8 @@ let client = TransactionClient::from_rpc_clients(vec![bulletin]).await?;
 |--------|---------|-------------|
 | `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal at the retention boundary; `entry` is a `(block, index)` tuple or a `ContentHash` |
 | `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately |
+| `enable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Register recurring auto-renewal; the first cycle is prepaid |
+| `disable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Cancel a renewal registration; refused while its next cycle is prepaid |
 
 ---
 

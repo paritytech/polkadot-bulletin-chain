@@ -930,6 +930,59 @@ async fn store_precheck_authorization_confirmation() {
 		.expect("store rejected after the authorization was finalized");
 }
 
+const RENEWAL_ALREADY_ENABLED: &str = "Custom error: 11";
+const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: &str = "Custom error: 12";
+
+#[tokio::test]
+#[ignore]
+async fn auto_renew_registration() {
+	let client = TransactionClient::new(&ws()).await.expect("connection failure");
+	let alice = dev::alice();
+	let seed = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap()
+		.as_nanos();
+	let data = format!("auto-renew registration {seed}").into_bytes();
+	let content_hash =
+		calculate_cid_with_config(&data, CidCodec::Raw, HashingAlgorithm::Blake2b256)
+			.expect("CID calculation failure")
+			.content_hash;
+
+	client.store(data, &alice, WaitFor::Finalized).await.expect("store failure");
+	client
+		.enable_auto_renew(content_hash, &alice, WaitFor::Finalized)
+		.await
+		.expect("enable_auto_renew failure");
+
+	let renewals_address = subxt::dynamic::storage(
+		"DataRenewal",
+		"Renewals",
+		vec![subxt::dynamic::Value::from_bytes(content_hash)],
+	);
+	let registration = client
+		.api()
+		.storage()
+		.at_latest()
+		.await
+		.expect("finalized block unavailable")
+		.fetch(&renewals_address)
+		.await
+		.expect("Renewals read failure");
+	assert!(registration.is_some(), "Renewals entry missing after enable_auto_renew");
+
+	let error = client
+		.enable_auto_renew(content_hash, &alice, WaitFor::InBlock)
+		.await
+		.expect_err("second enable_auto_renew accepted");
+	assert!(error.to_string().contains(RENEWAL_ALREADY_ENABLED), "{error}");
+
+	let error = client
+		.disable_auto_renew(content_hash, &alice, WaitFor::InBlock)
+		.await
+		.expect_err("disable_auto_renew accepted before the prepaid cycle");
+	assert!(error.to_string().contains(CANNOT_DISABLE_PREPAID_AUTO_RENEWAL), "{error}");
+}
+
 /// Estimate dedup/skip-existing + duplicate-content submit. Builds `[a, b, a]`
 /// (item 2 duplicates item 0):
 /// - `estimate_upload` (dedup_input default) marks index 2 as DuplicateInput, excludes it from

@@ -4,7 +4,7 @@ Extending the retention of stored data with the Rust SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — call it via subxt (see [concepts](../concepts/renewal.md)).
+> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately, and `TransactionClient::enable_auto_renew(content_hash, ..)` renews every period.
 
 ## Two Clients
 
@@ -56,6 +56,22 @@ println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 ```
 
 `RenewReceipt` has `entry` (the `TransactionRef` that was renewed) and `block_hash`.
+
+## Recurring Auto-Renewal
+
+`enable_auto_renew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization, and the chain drops the registration with a `RenewalFailed` event once the quota runs out. Until the prepaid cycle has fired, the transaction pool rejects `disable_auto_renew` as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`).
+
+```rust
+let content_hash =
+    calculate_cid_with_config(&data, CidCodec::Raw, HashingAlgorithm::Blake2b256)?.content_hash;
+
+tx_client.enable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
+
+// Only succeeds after the prepaid cycle has fired.
+tx_client.disable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
+```
+
+A content hash carries at most one registration, so `renew` and `enable_auto_renew` exclude each other: the pool rejects the second call (custom error 11, `RENEWAL_ALREADY_ENABLED`).
 
 ## Storing and Tracking
 
@@ -179,7 +195,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal and `force_renew` with `RenewalFailed` before submitting:
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal, `force_renew` and the auto-renew calls with `RenewalFailed` before submitting:
 
 ```rust
 match client.prepare_renew(storage_ref) {

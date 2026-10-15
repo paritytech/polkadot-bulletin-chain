@@ -129,6 +129,82 @@ fn renew_registry() -> &'static HashMap<(&'static str, [u8; 32]), RenewAdapter> 
 	})
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AutoRenewCall {
+	Enable,
+	Disable,
+}
+
+impl AutoRenewCall {
+	pub fn call_name(self) -> &'static str {
+		match self {
+			Self::Enable => "enable_auto_renew",
+			Self::Disable => "disable_auto_renew",
+		}
+	}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AutoRenewAdapter {
+	DataRenewal,
+	TransactionStorage,
+}
+
+impl AutoRenewAdapter {
+	fn pallet_name(self) -> &'static str {
+		match self {
+			Self::DataRenewal => "DataRenewal",
+			Self::TransactionStorage => "TransactionStorage",
+		}
+	}
+}
+
+pub fn auto_renew_adapter(live: &subxt::Metadata, call: AutoRenewCall) -> Result<AutoRenewAdapter> {
+	let adapter = match renew_adapter(live)? {
+		RenewAdapter::DataRenewal => AutoRenewAdapter::DataRenewal,
+		RenewAdapter::TransactionRef | RenewAdapter::Positional =>
+			AutoRenewAdapter::TransactionStorage,
+	};
+	let pallet = adapter.pallet_name();
+	let live_hash = live_call_hash(live, pallet, call.call_name()).ok_or_else(|| {
+		Error::RenewalFailed(format!("{} is not supported by this runtime", call.call_name()))
+	})?;
+	if auto_renew_registry().get(&(adapter, call)) != Some(&live_hash) {
+		return Err(Error::RenewalFailed(format!(
+			"{pallet}.{} has an unsupported shape on this chain (item hash 0x{}); \
+			 a newer runtime may need an SDK upgrade",
+			call.call_name(),
+			hex32(&live_hash)
+		)));
+	}
+	Ok(adapter)
+}
+
+fn auto_renew_registry() -> &'static HashMap<(AutoRenewAdapter, AutoRenewCall), [u8; 32]> {
+	static REGISTRY: OnceLock<HashMap<(AutoRenewAdapter, AutoRenewCall), [u8; 32]>> =
+		OnceLock::new();
+	REGISTRY.get_or_init(|| {
+		let current: &[u8] = include_bytes!("../../metadata.scale");
+		let pre_split: &[u8] =
+			include_bytes!("../../metadata-compat/transaction-storage-v1000016.scale");
+		[AutoRenewCall::Enable, AutoRenewCall::Disable]
+			.into_iter()
+			.flat_map(|call| {
+				[
+					(
+						(AutoRenewAdapter::DataRenewal, call),
+						committed_call_hash(current, "DataRenewal", call.call_name()),
+					),
+					(
+						(AutoRenewAdapter::TransactionStorage, call),
+						committed_call_hash(pre_split, "TransactionStorage", call.call_name()),
+					),
+				]
+			})
+			.collect()
+	})
+}
+
 fn live_call_hash(metadata: &subxt::Metadata, pallet: &str, call: &str) -> Option<[u8; 32]> {
 	metadata.pallet_by_name(pallet).and_then(|p| p.call_hash(call))
 }
@@ -169,6 +245,31 @@ mod tests {
 		)
 		.unwrap();
 		assert_eq!(renew_adapter(&legacy).unwrap(), RenewAdapter::Positional);
+	}
+
+	#[test]
+	fn auto_renew_adapter_per_committed_snapshot() {
+		let current =
+			subxt::Metadata::decode(&mut &include_bytes!("../../metadata.scale")[..]).unwrap();
+		let pre_split = subxt::Metadata::decode(
+			&mut &include_bytes!("../../metadata-compat/transaction-storage-v1000016.scale")[..],
+		)
+		.unwrap();
+		let legacy = subxt::Metadata::decode(
+			&mut &include_bytes!("../../metadata-compat/transaction-storage-v1000011.scale")[..],
+		)
+		.unwrap();
+
+		for call in [AutoRenewCall::Enable, AutoRenewCall::Disable] {
+			assert_eq!(auto_renew_adapter(&current, call).unwrap(), AutoRenewAdapter::DataRenewal);
+			assert_eq!(
+				auto_renew_adapter(&pre_split, call).unwrap(),
+				AutoRenewAdapter::TransactionStorage
+			);
+			let error = auto_renew_adapter(&legacy, call).unwrap_err();
+			assert_eq!(error.code(), "RENEWAL_FAILED");
+			assert!(error.to_string().contains("not supported by this runtime"), "{error}");
+		}
 	}
 
 	/// Three rows, three distinct keys — a duplicate hash would silently
