@@ -298,6 +298,22 @@ function isAncientBirthBlockError(err: unknown): boolean {
   )
 }
 
+async function chainRead<T>(
+  description: string,
+  read: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await read()
+  } catch (error) {
+    if (error instanceof BulletinError) throw error
+    throw new BulletinError(
+      `${description}: ${error}`,
+      ErrorCode.NETWORK_ERROR,
+      error,
+    )
+  }
+}
+
 /**
  * Map a raw PAPI transaction status event to SDK progress events.
  *
@@ -415,7 +431,7 @@ export interface BulletinClientInterface {
  * Pre-flight: bulletin's `AllowanceBasedPriority` lowers priority on
  * exhausted allowance but doesn't reject, so `ensureAuthorized()` only
  * verifies that an `Authorizations` entry exists and isn't expired. Throws
- * `BulletinError(INSUFFICIENT_AUTHORIZATION)` so the caller can authorize
+ * `BulletinError(AUTHORIZATION_NOT_FOUND)` so the caller can authorize
  * and retry.
  */
 abstract class BaseUploadBuilder<TResult> {
@@ -807,7 +823,7 @@ export class BulletinClient implements BulletinClientInterface {
    * does not reject store calls when allowance is exhausted — it lowers
    * priority via `AllowanceBasedPriority` — so existence + expiry is the
    * only useful client-side check. Throws
-   * `BulletinError(INSUFFICIENT_AUTHORIZATION)` on failure so the caller
+   * `BulletinError(AUTHORIZATION_NOT_FOUND)` on failure so the caller
    * can authorize and retry.
    */
   private async ensureAuthorizedOnChain(): Promise<void> {
@@ -822,15 +838,17 @@ export class BulletinClient implements BulletinClientInterface {
     this.requireSigner("ensureAuthorized()")
     const address = ss58Address(this.signer!.publicKey)
     const at = this.readBlock()
-    const auth =
-      await this.api.query.TransactionStorage.Authorizations.getValue(
+    const query = this.api.query
+    const auth = await chainRead("Authorization query failed", () =>
+      query.TransactionStorage.Authorizations.getValue(
         { type: "Account", value: address },
         { at },
-      )
+      ),
+    )
     if (!auth) {
       throw new BulletinError(
         `Account ${address} is not authorized to store data on this chain`,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        ErrorCode.AUTHORIZATION_NOT_FOUND,
       )
     }
     // Compare expiration (block number) against the block the authorization was read at.
@@ -844,11 +862,13 @@ export class BulletinClient implements BulletinClientInterface {
       }
     ).System?.Number
     if (sysNumber && typeof auth.expiration === "number") {
-      const currentBlock = await sysNumber.getValue({ at })
+      const currentBlock = await chainRead("Block number query failed", () =>
+        sysNumber.getValue({ at }),
+      )
       if (auth.expiration <= currentBlock) {
         throw new BulletinError(
           `Authorization for ${address} expired at block ${auth.expiration} (current ${currentBlock})`,
-          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+          ErrorCode.AUTHORIZATION_NOT_FOUND,
         )
       }
     }
@@ -861,7 +881,7 @@ export class BulletinClient implements BulletinClientInterface {
    * the item's chosen hash algorithm (Blake2b-256 by default). Preimage
    * authorization is what the runtime checks for
    * an unsigned `store` extrinsic — without it the tx is rejected by
-   * `AuthorizeCall`. Throws `INSUFFICIENT_AUTHORIZATION` for the first
+   * `AuthorizeCall`. Throws `AUTHORIZATION_NOT_FOUND` for the first
    * missing/expired item so the caller can authorize and retry.
    */
   private async ensurePreimagesAuthorized(
@@ -884,7 +904,9 @@ export class BulletinClient implements BulletinClientInterface {
       }
     ).System?.Number
     const currentBlock = sysNumber
-      ? await sysNumber.getValue({ at })
+      ? await chainRead("Block number query failed", () =>
+          sysNumber.getValue({ at }),
+        )
       : undefined
 
     // The pallet keys preimage authorizations by the user's chosen hash
@@ -902,14 +924,16 @@ export class BulletinClient implements BulletinClientInterface {
 
     await Promise.all(
       uniqueHashes.map(async (hashHex) => {
-        const auth = await query.TransactionStorage.Authorizations.getValue(
-          { type: "Preimage", value: hashHex },
-          { at },
+        const auth = await chainRead("Authorization query failed", () =>
+          query.TransactionStorage.Authorizations.getValue(
+            { type: "Preimage", value: hashHex },
+            { at },
+          ),
         )
         if (!auth) {
           throw new BulletinError(
             `No preimage authorization on chain for content hash ${hashHex}`,
-            ErrorCode.INSUFFICIENT_AUTHORIZATION,
+            ErrorCode.AUTHORIZATION_NOT_FOUND,
           )
         }
         if (
@@ -919,7 +943,7 @@ export class BulletinClient implements BulletinClientInterface {
         ) {
           throw new BulletinError(
             `Preimage authorization for ${hashHex} expired at block ${auth.expiration} (current ${currentBlock})`,
-            ErrorCode.INSUFFICIENT_AUTHORIZATION,
+            ErrorCode.AUTHORIZATION_NOT_FOUND,
           )
         }
       }),
@@ -1200,7 +1224,11 @@ export class BulletinClient implements BulletinClientInterface {
       }
     } catch (error) {
       if (error instanceof BulletinError) throw error
-      throw new BulletinError(`${errorMessage}: ${error}`, errorCode, error)
+      const code =
+        error instanceof Error && error.name === "InvalidTxError"
+          ? ErrorCode.TRANSACTION_INVALID
+          : errorCode
+      throw new BulletinError(`${errorMessage}: ${error}`, code, error)
     }
   }
 
@@ -1570,7 +1598,7 @@ export class BulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to authorize account",
-        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.TRANSACTION_FAILED,
         options,
         signer,
       )
@@ -1636,7 +1664,7 @@ export class BulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to authorize preimage",
-        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.TRANSACTION_FAILED,
         options,
         signer,
       )
@@ -1786,9 +1814,12 @@ export class BulletinClient implements BulletinClientInterface {
       const resolved = (async () => {
         const metadataApis = this.papiClient.getUnsafeApi().apis.Metadata
         // OpaqueMetadata; v15 preferred, default version as fallback.
-        const opaque =
-          (await metadataApis.metadata_at_version(15)) ??
-          (await metadataApis.metadata())
+        const opaque = await chainRead(
+          "Metadata query failed",
+          async () =>
+            (await metadataApis.metadata_at_version(15)) ??
+            (await metadataApis.metadata()),
+        )
         // The unsafe api decodes OpaqueMetadata as plain bytes; accept a
         // Binary-like too in case that representation changes.
         const bytes: Uint8Array =
@@ -1822,7 +1853,7 @@ export class BulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to refresh account authorization",
-        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.TRANSACTION_FAILED,
         options,
         signer,
       )
@@ -1848,7 +1879,7 @@ export class BulletinClient implements BulletinClientInterface {
       return this.submitTx(
         this.maybeSudo(authTx, options?.sudo),
         "Failed to refresh preimage authorization",
-        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.TRANSACTION_FAILED,
         options,
         signer,
       )
@@ -2030,8 +2061,14 @@ export class BulletinClient implements BulletinClientInterface {
         ? Array.from(firstSeen.values())
         : itemCids.map((_, i) => i)
       const uniqueHashes = uniqueHashIndexes.map((i) => hashesHex[i] as string)
-      const entries = await Promise.all(
-        uniqueHashes.map((h) => readStoredAt(this.api, h, this.readBlock())),
+      const entries = await chainRead(
+        "TransactionByContentHash query failed",
+        () =>
+          Promise.all(
+            uniqueHashes.map((h) =>
+              readStoredAt(this.api, h, this.readBlock()),
+            ),
+          ),
       )
       const onChainHashes = new Set<string>()
       for (let k = 0; k < uniqueHashes.length; k++) {

@@ -52,7 +52,7 @@ export interface MockClientConfig extends ClientConfig {
   simulateAuthFailure?: boolean
   /** Simulate storage failures (for testing error paths) */
   simulateStorageFailure?: boolean
-  /** Simulate insufficient authorization (for testing pre-check error path) */
+  /** Simulate a failed `ensureAuthorized()` pre-check (no authorization on chain) */
   simulateInsufficientAuth?: boolean
 }
 
@@ -168,7 +168,7 @@ export class MockBulletinClient implements BulletinClientInterface {
       if (checkAuth && this.config.simulateInsufficientAuth) {
         throw new BulletinError(
           "Account is not authorized to store data on this chain",
-          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+          ErrorCode.AUTHORIZATION_NOT_FOUND,
         )
       }
       if (this.config.simulateStorageFailure) {
@@ -212,7 +212,7 @@ export class MockBulletinClient implements BulletinClientInterface {
     if (this.config.simulateAuthFailure) {
       throw new BulletinError(
         "Simulated authorization failure",
-        ErrorCode.AUTHORIZATION_FAILED,
+        ErrorCode.TRANSACTION_FAILED,
       )
     }
   }

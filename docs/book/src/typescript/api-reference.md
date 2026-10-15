@@ -193,7 +193,7 @@ class FixedSizeChunker {
 class BulletinError extends Error {
   readonly code: ErrorCode;
   readonly cause?: unknown;
-  get retryable(): boolean;     // true for TRANSACTION_FAILED, TIMEOUT, STORE_STALLED
+  get retryable(): boolean;     // true for TRANSACTION_FAILED, NETWORK_ERROR, TIMEOUT, STORE_STALLED
   get recoveryHint(): string;
 }
 ```

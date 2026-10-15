@@ -388,11 +388,13 @@ export enum ErrorCode {
   INVALID_HASH_ALGORITHM = "INVALID_HASH_ALGORITHM",
   CID_CALCULATION_FAILED = "CID_CALCULATION_FAILED",
   DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
-  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
-  AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
-  TRANSACTION_FAILED = "TRANSACTION_FAILED",
-  CHUNK_FAILED = "CHUNK_FAILED",
+  CHUNKING_FAILED = "CHUNKING_FAILED",
   MISSING_CHUNK = "MISSING_CHUNK",
+  AUTHORIZATION_NOT_FOUND = "AUTHORIZATION_NOT_FOUND",
+  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
+  TRANSACTION_INVALID = "TRANSACTION_INVALID",
+  TRANSACTION_FAILED = "TRANSACTION_FAILED",
+  NETWORK_ERROR = "NETWORK_ERROR",
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
   STORE_STALLED = "STORE_STALLED",
@@ -403,6 +405,7 @@ export enum ErrorCode {
 /** Error codes that are retryable */
 const RETRYABLE_CODES = new Set<ErrorCode>([
   ErrorCode.TRANSACTION_FAILED,
+  ErrorCode.NETWORK_ERROR,
   ErrorCode.TIMEOUT,
   ErrorCode.STORE_STALLED,
 ])
@@ -410,7 +413,7 @@ const RETRYABLE_CODES = new Set<ErrorCode>([
 /** Recovery hints per error code */
 const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
-  [ErrorCode.DATA_TOO_LARGE]: "Reduce data size or use chunked upload",
+  [ErrorCode.DATA_TOO_LARGE]: "Reduce the data size or use a chunked upload",
   [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
   [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
   [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",
@@ -419,25 +422,30 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Use blake2b-256, sha2-256, or keccak-256",
   [ErrorCode.CID_CALCULATION_FAILED]: "Verify data and hash algorithm",
   [ErrorCode.DAG_ENCODING_FAILED]: "Check chunk CIDs and data integrity",
-  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
-    "Request additional authorization via authorizeAccount()",
-  [ErrorCode.AUTHORIZATION_FAILED]:
-    "Check that the account has authorizer privileges",
-  [ErrorCode.TRANSACTION_FAILED]:
-    "Verify transaction parameters and account nonce",
-  [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
+  [ErrorCode.CHUNKING_FAILED]:
+    "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
+  [ErrorCode.AUTHORIZATION_NOT_FOUND]:
+    "Authorize the account or the content hash first, then retry",
+  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
+    "Request additional authorization, then retry",
+  [ErrorCode.TRANSACTION_INVALID]:
+    "The transaction pool rejected the transaction; check the validity error before retrying",
+  [ErrorCode.TRANSACTION_FAILED]:
+    "Verify transaction parameters and account nonce, then retry",
+  [ErrorCode.NETWORK_ERROR]:
+    "Check network connectivity to the RPC endpoint, then retry",
   [ErrorCode.TIMEOUT]:
     "Transaction was not finalized within the timeout window. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
-    "This operation is not supported in this context",
+    "This operation is not supported by this client or the connected runtime",
   [ErrorCode.STORE_STALLED]:
-    "Store received no chainHead events from the RPC; the connection may be unhealthy. Retry on a fresh client",
+    "The RPC connection sent no chainHead progress; retry on a fresh client",
   [ErrorCode.HIJACK_BUDGET_EXCEEDED]:
-    "An item's nonce slot was repeatedly hijacked by other transactions from the same signer. Check for concurrent transactions on this account.",
+    "Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account",
   [ErrorCode.UPLOAD_INCOMPLETE]:
-    "Some items exhausted their retry budget and were not stored (see ItemFailed events and `cause.failedIndices`). Re-run estimateUpload with skipExisting: true, then submit() to retry only the missing items.",
+    "Some items were not stored; re-run the estimate with skip-existing enabled, then submit to retry only the missing items",
 }
 
 /**

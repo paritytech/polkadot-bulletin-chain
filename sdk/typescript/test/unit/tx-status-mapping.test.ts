@@ -1,8 +1,9 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
+import { InvalidTxError } from "polkadot-api"
 import { describe, expect, it, vi } from "vitest"
-import { type ProgressEvent, TxStatus } from "../../src/types"
+import { ErrorCode, type ProgressEvent, TxStatus } from "../../src/types"
 
 interface Observer {
   next: (ev: unknown) => void
@@ -155,5 +156,43 @@ describe("default wait level of single-extrinsic calls", () => {
     const observer = await firstObserver()
     observer.next({ type: "inBestBlock", txHash: "0x01", block, events: [] })
     await expect(pending).resolves.toMatchObject({ blockHash: block.hash })
+  })
+})
+
+describe("submission failure codes", () => {
+  const firstObserver = () =>
+    vi.waitFor(() => {
+      const first = observers[0]
+      if (!first) throw new Error("no subscription yet")
+      return first
+    })
+
+  it("pool rejection as TRANSACTION_INVALID", async () => {
+    const { client } = await setup()
+    const pending = client.removeExpiredAccountAuthorization("5Grw").send()
+
+    const rejection = new InvalidTxError({
+      type: "Invalid",
+      value: { type: "Custom", value: 11 },
+    })
+    const observer = await firstObserver()
+    observer.error(rejection)
+
+    await expect(pending).rejects.toMatchObject({
+      code: ErrorCode.TRANSACTION_INVALID,
+      cause: rejection,
+    })
+  })
+
+  it("other failure as TRANSACTION_FAILED", async () => {
+    const { client } = await setup()
+    const pending = client.removeExpiredAccountAuthorization("5Grw").send()
+
+    const observer = await firstObserver()
+    observer.error(new Error("connection closed"))
+
+    await expect(pending).rejects.toMatchObject({
+      code: ErrorCode.TRANSACTION_FAILED,
+    })
   })
 })

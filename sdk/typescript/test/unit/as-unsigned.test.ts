@@ -276,7 +276,7 @@ describe("ensureAuthorized() + asUnsigned()", () => {
     expect((queried[0] as any).type).toBe("Preimage")
   })
 
-  it("throws INSUFFICIENT_AUTHORIZATION when preimage missing", async () => {
+  it("throws AUTHORIZATION_NOT_FOUND when preimage missing", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient({ withQuery: { auth: undefined } })
     await expect(
@@ -284,11 +284,11 @@ describe("ensureAuthorized() + asUnsigned()", () => {
         unsigned: true,
         ensureAuth: true,
       }),
-    ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
+    ).rejects.toMatchObject({ code: ErrorCode.AUTHORIZATION_NOT_FOUND })
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it("throws INSUFFICIENT_AUTHORIZATION when expired", async () => {
+  it("throws AUTHORIZATION_NOT_FOUND when expired", async () => {
     const spy = vi.spyOn(pipelineModule, "pipelineStore")
     const client = await makeClient({
       withQuery: {
@@ -302,7 +302,7 @@ describe("ensureAuthorized() + asUnsigned()", () => {
         ensureAuth: true,
       }),
     ).rejects.toMatchObject({
-      code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      code: ErrorCode.AUTHORIZATION_NOT_FOUND,
       message: expect.stringMatching(/expired/i),
     })
     expect(spy).not.toHaveBeenCalled()

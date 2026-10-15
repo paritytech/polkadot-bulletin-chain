@@ -66,7 +66,7 @@ A content hash carries at most one registration, so `renew` and `enableAutoRenew
 | `disableAutoRenew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
 | `disableAutoRenew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
 
-`send()` then rejects with a `BulletinError` (`TRANSACTION_FAILED`) whose `cause` is PAPI's `InvalidTxError`; its `error` field holds `{ type: "Invalid", value: { type: "Custom", value: <code> } }`.
+`send()` then rejects with a `BulletinError` (`TRANSACTION_INVALID`) whose `cause` is PAPI's `InvalidTxError`; its `error` field holds `{ type: "Invalid", value: { type: "Custom", value: <code> } }`.
 
 ## Querying the Retention Period
 

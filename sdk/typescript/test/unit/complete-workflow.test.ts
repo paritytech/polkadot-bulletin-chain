@@ -172,11 +172,11 @@ describe("Complete workflow (MockBulletinClient)", () => {
 
     await expect(
       client.refreshAccountAuthorization(bobAddress).send(),
-    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" })
 
     await expect(
       client.refreshPreimageAuthorization(new Uint8Array(32)).send(),
-    ).rejects.toMatchObject({ code: "AUTHORIZATION_FAILED" })
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAILED" })
   })
 
   it("should record renew and forceRenew operations with TransactionRef entries", async () => {

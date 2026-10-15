@@ -27,36 +27,45 @@ try {
 | Code | Description | Recovery Hint |
 |---|---|---|
 | `EMPTY_DATA` | Data is empty | Provide non-empty data |
-| `DATA_TOO_LARGE` | Exceeds 64 MiB (`FixedSizeChunker` / `prepareStoreChunked`) or `chunkingThreshold` (`BulletinPreparer.prepareStore`); never thrown by `estimateUpload` / `submit` | Reduce data size or use chunked upload |
-| `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB | Use a chunk size ≤ 2 MiB |
-| `INVALID_CHUNK_SIZE` | Chunk size is zero or negative | Use 1 byte – 2 MiB |
-| `INVALID_CONFIG` | Invalid config (e.g. duplicate content hashes in one submit) | Check the inputs |
-| `INVALID_CID` | Malformed CID | Verify the CID |
-| `INVALID_HASH_ALGORITHM` | Unsupported hash algorithm | Use Blake2b-256, SHA2-256, or Keccak-256 |
+| `DATA_TOO_LARGE` | Exceeds 64 MiB (`FixedSizeChunker` / `prepareStoreChunked`) or `chunkingThreshold` (`BulletinPreparer.prepareStore`); never thrown by `estimateUpload` / `submit` | Reduce the data size or use a chunked upload |
+| `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB | Reduce chunk size to 2 MiB or less |
+| `INVALID_CHUNK_SIZE` | Chunk size is zero or negative | Use a chunk size between 1 byte and 2 MiB |
+| `INVALID_CONFIG` | Invalid config (e.g. duplicate content hashes in one submit) | Check configuration parameters |
+| `INVALID_CID` | Malformed CID | Verify CID format |
+| `INVALID_HASH_ALGORITHM` | Unsupported hash algorithm | Use blake2b-256, sha2-256, or keccak-256 |
 | `CID_CALCULATION_FAILED` | CID calculation failed | Verify data and hash algorithm |
-| `DAG_ENCODING_FAILED` | DAG-PB encoding failed | Check chunk CIDs and data |
+| `DAG_ENCODING_FAILED` | DAG-PB encoding failed | Check chunk CIDs and data integrity |
+| `CHUNKING_FAILED` | A chunk failed to prepare | Verify data integrity and chunker configuration |
+| `MISSING_CHUNK` | A chunk was missing during reassembly | Ensure all chunks are present with contiguous indices starting from 0 |
 
 ### Authorization (non-retryable)
 
 | Code | Description | Recovery Hint |
 |---|---|---|
-| `INSUFFICIENT_AUTHORIZATION` | No authorization entry, or it expired (checked only by `.ensureAuthorized()`) | Authorize via `authorizeAccount()` |
-| `AUTHORIZATION_FAILED` | An `authorize*` / `refresh*` call failed | Check the account has authorizer privileges |
-| `UNSUPPORTED_OPERATION` | Called a signed path on a signer-less client, or a call the runtime doesn't have | This operation is not supported in this context |
+| `AUTHORIZATION_NOT_FOUND` | No unexpired authorization entry (checked only by `.ensureAuthorized()`) | Authorize the account or the content hash first, then retry |
+| `INSUFFICIENT_AUTHORIZATION` | Raised only by the Rust SDK's capacity check; this SDK's pre-flight checks existence and expiry only | Request additional authorization, then retry |
+
+### Capability (non-retryable)
+
+| Code | Description | Recovery Hint |
+|---|---|---|
+| `UNSUPPORTED_OPERATION` | Called a signed path on a signer-less client, or a call the runtime doesn't have | This operation is not supported by this client or the connected runtime |
 
 ### Transaction & Upload
 
 | Code | Retryable | Description |
 |---|---|---|
-| `TRANSACTION_FAILED` | Yes | On-chain transaction failed |
+| `TRANSACTION_INVALID` | No | The transaction pool rejected the transaction; `cause` is PAPI's `InvalidTxError`, whose `error` field holds the validity error |
+| `TRANSACTION_FAILED` | Yes | A submitted transaction failed: dispatch error, dropped, or the subscription ended before inclusion |
+| `NETWORK_ERROR` | Yes | A chain read of the SDK failed (`.ensureAuthorized()` queries, `skipExisting` lookups, renewal metadata) |
 | `TIMEOUT` | Yes | Not included within the timeout window |
 | `STORE_STALLED` | Yes | Submission stalled (pool saturation / reorg); the signed path retries internally |
-| `CHUNK_FAILED` | No | A chunk failed to prepare |
-| `MISSING_CHUNK` | No | A chunk was missing during reassembly |
 | `HIJACK_BUDGET_EXCEEDED` | No | Too many nonce reassignments under concurrent same-account submission |
 | `UPLOAD_INCOMPLETE` | No | Some items failed permanently and are not on chain; `cause.failedIndices` lists them |
 
-`error.retryable` is true for `TRANSACTION_FAILED`, `TIMEOUT`, and `STORE_STALLED`. Note that a signed `submit()` already retries stalls internally (up to 3 times) before surfacing one; `.asUnsigned()` does not.
+Every call builder (`authorize*`, `refresh*`, `removeExpired*`, `renew`, `forceRenew`, `enableAutoRenew`, `disableAutoRenew`) reports a failed transaction as `TRANSACTION_INVALID` or `TRANSACTION_FAILED`, and the message names the call.
+
+`error.retryable` is true for `TRANSACTION_FAILED`, `NETWORK_ERROR`, `TIMEOUT`, and `STORE_STALLED`. Note that a signed `submit()` already retries stalls internally (up to 3 times) before surfacing one; `.asUnsigned()` does not.
 
 ```typescript
 try {
@@ -116,26 +125,25 @@ try {
   await client.submit(await client.estimateUpload(src), src).ensureAuthorized().send()
 } catch (error) {
   if (!(error instanceof BulletinError)) throw error
-  if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
+  if (error.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
     console.error('Need authorization:', error.recoveryHint)
   } else {
     console.error(error.code, error.message)
   }
 }
 
-// AUTHORIZATION_FAILED comes from the authorization calls themselves
 try {
   await client.authorizeAccount(address, 10, 10_000_000n).send()
 } catch (error) {
-  if (error instanceof BulletinError && error.code === ErrorCode.AUTHORIZATION_FAILED) {
-    console.error('Authorization call failed:', error.message)
+  if (error instanceof BulletinError && error.code === ErrorCode.TRANSACTION_INVALID) {
+    console.error('Rejected by the transaction pool:', error.cause)
   } else {
     throw error
   }
 }
 ```
 
-`.ensureAuthorized()` on the builder fails fast with `INSUFFICIENT_AUTHORIZATION` before any bytes are submitted; without it, the SDK does not check authorization before submitting.
+`.ensureAuthorized()` on the builder fails fast with `AUTHORIZATION_NOT_FOUND` before any bytes are submitted; without it, the SDK does not check authorization before submitting. The authorization calls report failures like every other call: the transaction pool rejects a signer outside the authorizer set as an invalid transaction (`BadSigner`), so the error is `TRANSACTION_INVALID`.
 
 ## Wrapping External Errors
 
@@ -149,4 +157,6 @@ try {
 
 ## Cross-SDK Consistency
 
-Codes are aligned with the Rust SDK where they overlap (`EMPTY_DATA`, `TRANSACTION_FAILED`, `INSUFFICIENT_AUTHORIZATION`, …). Each SDK also has codes specific to its implementation.
+Both SDKs use the same error codes, the same retryable set and the same recovery hints: an `ErrorCode` value equals the string that the Rust `Error::code()` returns for the same failure. Three codes exist only in this SDK, because the failure cannot occur in the Rust SDK: `TIMEOUT` (`txTimeout`), `INVALID_HASH_ALGORITHM` (Rust uses an enum) and `MISSING_CHUNK` (only this SDK reassembles chunks). `INSUFFICIENT_AUTHORIZATION` comes only from the Rust capacity check.
+
+A transaction pool rejection is `TRANSACTION_INVALID` in both SDKs. This SDK keeps PAPI's `InvalidTxError` as `cause`; the Rust SDK carries the custom validity code in `Error::TransactionInvalid { custom_code, .. }`.

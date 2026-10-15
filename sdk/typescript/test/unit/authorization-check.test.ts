@@ -36,7 +36,7 @@ describe("ensureAuthorized() pre-flight", () => {
   describe("MockBulletinClient", () => {
     const hello = () => blobFromBytes(new TextEncoder().encode("hello"))
 
-    it("throws INSUFFICIENT_AUTHORIZATION when simulateInsufficientAuth + ensureAuthorized()", async () => {
+    it("throws AUTHORIZATION_NOT_FOUND when simulateInsufficientAuth + ensureAuthorized()", async () => {
       const client = new MockBulletinClient({
         simulateInsufficientAuth: true,
       })
@@ -47,7 +47,7 @@ describe("ensureAuthorized() pre-flight", () => {
           .ensureAuthorized()
           .send(),
       ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        code: ErrorCode.AUTHORIZATION_NOT_FOUND,
       })
     })
 
@@ -131,7 +131,7 @@ describe("ensureAuthorized() pre-flight", () => {
     it("best-block authorization with the default wait level", async () => {
       await expect(
         callEnsureAuthorized(bestBlockOnlyAuthorization, 100),
-      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
+      ).rejects.toMatchObject({ code: ErrorCode.AUTHORIZATION_NOT_FOUND })
     })
 
     it("best-block authorization with waitFor in_block", async () => {
@@ -166,7 +166,25 @@ describe("ensureAuthorized() pre-flight", () => {
         callEnsureAuthorized(expiringAtBest, undefined, {
           waitFor: "in_block",
         }),
-      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
+      ).rejects.toMatchObject({ code: ErrorCode.AUTHORIZATION_NOT_FOUND })
+    })
+
+    it("query failure as NETWORK_ERROR", async () => {
+      const rpcFailure = new Error("connection closed")
+      await expect(
+        callEnsureAuthorized({
+          TransactionStorage: {
+            Authorizations: {
+              getValue: async () => {
+                throw rpcFailure
+              },
+            },
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.NETWORK_ERROR,
+        cause: rpcFailure,
+      })
     })
 
     it("throws UNSUPPORTED_OPERATION when api.query is unavailable", async () => {
@@ -175,7 +193,7 @@ describe("ensureAuthorized() pre-flight", () => {
       })
     })
 
-    it("throws INSUFFICIENT_AUTHORIZATION when no Authorizations entry exists", async () => {
+    it("throws AUTHORIZATION_NOT_FOUND when no Authorizations entry exists", async () => {
       await expect(
         callEnsureAuthorized({
           TransactionStorage: {
@@ -183,11 +201,11 @@ describe("ensureAuthorized() pre-flight", () => {
           },
         }),
       ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        code: ErrorCode.AUTHORIZATION_NOT_FOUND,
       })
     })
 
-    it("throws INSUFFICIENT_AUTHORIZATION when authorization has expired", async () => {
+    it("throws AUTHORIZATION_NOT_FOUND when authorization has expired", async () => {
       await expect(
         callEnsureAuthorized(
           {
@@ -203,7 +221,7 @@ describe("ensureAuthorized() pre-flight", () => {
           200, // current block > expiration
         ),
       ).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+        code: ErrorCode.AUTHORIZATION_NOT_FOUND,
         message: expect.stringMatching(/expired/i),
       })
     })
@@ -254,10 +272,10 @@ describe("ensureAuthorized() pre-flight", () => {
       } catch (error) {
         expect(error).toBeInstanceOf(BulletinError)
         expect((error as BulletinError).code).toBe(
-          ErrorCode.INSUFFICIENT_AUTHORIZATION,
+          ErrorCode.AUTHORIZATION_NOT_FOUND,
         )
         expect((error as BulletinError).recoveryHint).toContain(
-          "authorizeAccount()",
+          "Authorize the account",
         )
       }
     })

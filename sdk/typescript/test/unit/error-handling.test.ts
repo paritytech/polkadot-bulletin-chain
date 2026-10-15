@@ -207,26 +207,32 @@ describe("Error Handling", () => {
   })
 
   describe("ErrorCode enum", () => {
-    it("should have all expected codes as string values", () => {
-      // ErrorCode values equal their key names (string enum)
-      expect(ErrorCode.EMPTY_DATA).toBe("EMPTY_DATA")
-      expect(ErrorCode.DATA_TOO_LARGE).toBe("DATA_TOO_LARGE")
-      expect(ErrorCode.CHUNK_TOO_LARGE).toBe("CHUNK_TOO_LARGE")
-      expect(ErrorCode.INVALID_CHUNK_SIZE).toBe("INVALID_CHUNK_SIZE")
-      expect(ErrorCode.INVALID_CONFIG).toBe("INVALID_CONFIG")
-      expect(ErrorCode.INVALID_CID).toBe("INVALID_CID")
-      expect(ErrorCode.INVALID_HASH_ALGORITHM).toBe("INVALID_HASH_ALGORITHM")
-      expect(ErrorCode.CID_CALCULATION_FAILED).toBe("CID_CALCULATION_FAILED")
-      expect(ErrorCode.DAG_ENCODING_FAILED).toBe("DAG_ENCODING_FAILED")
-      expect(ErrorCode.INSUFFICIENT_AUTHORIZATION).toBe(
-        "INSUFFICIENT_AUTHORIZATION",
+    it("should have the code set shared with the Rust SDK", () => {
+      expect(Object.values(ErrorCode).sort()).toEqual(
+        [
+          "EMPTY_DATA",
+          "DATA_TOO_LARGE",
+          "CHUNK_TOO_LARGE",
+          "INVALID_CHUNK_SIZE",
+          "INVALID_CONFIG",
+          "INVALID_CID",
+          "INVALID_HASH_ALGORITHM",
+          "CID_CALCULATION_FAILED",
+          "DAG_ENCODING_FAILED",
+          "CHUNKING_FAILED",
+          "MISSING_CHUNK",
+          "AUTHORIZATION_NOT_FOUND",
+          "INSUFFICIENT_AUTHORIZATION",
+          "TRANSACTION_INVALID",
+          "TRANSACTION_FAILED",
+          "NETWORK_ERROR",
+          "TIMEOUT",
+          "UNSUPPORTED_OPERATION",
+          "STORE_STALLED",
+          "HIJACK_BUDGET_EXCEEDED",
+          "UPLOAD_INCOMPLETE",
+        ].sort(),
       )
-      expect(ErrorCode.AUTHORIZATION_FAILED).toBe("AUTHORIZATION_FAILED")
-      expect(ErrorCode.TRANSACTION_FAILED).toBe("TRANSACTION_FAILED")
-      expect(ErrorCode.CHUNK_FAILED).toBe("CHUNK_FAILED")
-      expect(ErrorCode.MISSING_CHUNK).toBe("MISSING_CHUNK")
-      expect(ErrorCode.TIMEOUT).toBe("TIMEOUT")
-      expect(ErrorCode.UNSUPPORTED_OPERATION).toBe("UNSUPPORTED_OPERATION")
     })
 
     it("should be usable with BulletinError", () => {
@@ -242,35 +248,17 @@ describe("Error Handling", () => {
   })
 
   describe("BulletinError retryable getter", () => {
-    it("should return true for retryable error codes", () => {
-      const retryableCodes = [ErrorCode.TRANSACTION_FAILED, ErrorCode.TIMEOUT]
-
-      for (const code of retryableCodes) {
-        const error = new BulletinError("test", code)
-        expect(error.retryable).toBe(true)
-      }
-    })
-
-    it("should return false for non-retryable error codes", () => {
-      const nonRetryableCodes = [
-        ErrorCode.EMPTY_DATA,
-        ErrorCode.DATA_TOO_LARGE,
-        ErrorCode.CHUNK_TOO_LARGE,
-        ErrorCode.INVALID_CHUNK_SIZE,
-        ErrorCode.INVALID_CONFIG,
-        ErrorCode.INVALID_CID,
-        ErrorCode.CID_CALCULATION_FAILED,
-        ErrorCode.DAG_ENCODING_FAILED,
-        ErrorCode.INSUFFICIENT_AUTHORIZATION,
-        ErrorCode.AUTHORIZATION_FAILED,
-        ErrorCode.CHUNK_FAILED,
-        ErrorCode.MISSING_CHUNK,
-        ErrorCode.UNSUPPORTED_OPERATION,
-      ]
-
-      for (const code of nonRetryableCodes) {
-        const error = new BulletinError("test", code)
-        expect(error.retryable).toBe(false)
+    it("retryable codes shared with the Rust SDK", () => {
+      const retryableCodes = new Set<ErrorCode>([
+        ErrorCode.TRANSACTION_FAILED,
+        ErrorCode.NETWORK_ERROR,
+        ErrorCode.TIMEOUT,
+        ErrorCode.STORE_STALLED,
+      ])
+      for (const code of Object.values(ErrorCode)) {
+        expect(new BulletinError("test", code).retryable).toBe(
+          retryableCodes.has(code),
+        )
       }
     })
   })

@@ -84,11 +84,11 @@ Pass `{ skipExisting: true }` to also query the chain and drop items already sto
 import { BulletinError, ErrorCode } from '@parity/bulletin-sdk';
 
 try {
-  // INSUFFICIENT_AUTHORIZATION comes from the `.ensureAuthorized()` pre-flight
+  // AUTHORIZATION_NOT_FOUND comes from the `.ensureAuthorized()` pre-flight
   await client.submit(await client.estimateUpload(src), src).ensureAuthorized().send();
 } catch (error) {
   if (error instanceof BulletinError) {
-    if (error.code === ErrorCode.INSUFFICIENT_AUTHORIZATION) {
+    if (error.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
       console.error('Authorize the account first:', error.recoveryHint);
     } else if (error.retryable) {
       console.error('Transient — retry may help:', error.message);

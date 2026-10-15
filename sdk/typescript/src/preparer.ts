@@ -114,7 +114,7 @@ export class BulletinPreparer {
         }
         throw new BulletinError(
           `Chunk ${chunk.index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          ErrorCode.CHUNK_FAILED,
+          ErrorCode.CHUNKING_FAILED,
           error,
         )
       }
@@ -162,7 +162,7 @@ export class BulletinPreparer {
       } catch (error) {
         throw new BulletinError(
           `Chunk ${index} processing failed: ${error instanceof Error ? error.message : String(error)}`,
-          ErrorCode.CHUNK_FAILED,
+          ErrorCode.CHUNKING_FAILED,
           error,
         )
       }
