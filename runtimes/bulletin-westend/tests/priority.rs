@@ -18,7 +18,7 @@ use sp_core::{Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
 	generic::SignedPayload,
-	traits::TransactionExtension,
+	traits::{TransactionExtension, TransactionExtensionMetadata},
 	transaction_validity::{
 		InvalidTransaction, TransactionPriority, TransactionSource, TransactionValidityError,
 	},
@@ -36,6 +36,8 @@ const TIP: Balance = 1_000_000_000;
 const BACKLOG_LENGTH: Nonce = 50;
 const PAST_TRANSACTIONS: Nonce = 5;
 const DEEP_QUEUE_POSITION: Nonce = 1000;
+/// Far past `MAX_QUEUE_BONUS / QUEUE_BONUS_STEP`, so the queue bonus is `0`.
+const QUEUE_BONUS_EXHAUSTED_POSITION: Nonce = Nonce::MAX / 2;
 
 fn externalities() -> sp_io::TestExternalities {
 	let mut genesis = RuntimeGenesisConfig::default();
@@ -375,7 +377,7 @@ fn levels_without_overlap_at_any_queue_position() {
 			TransactionSource::Local,
 		);
 
-		for depth in [DEEP_QUEUE_POSITION, Nonce::MAX / 2] {
+		for depth in [DEEP_QUEUE_POSITION, QUEUE_BONUS_EXHAUSTED_POSITION] {
 			assert!(
 				authorize(depth) > in_budget_store(0),
 				"an authorization call at queue position {depth} must rank above the first in-budget store"
@@ -523,7 +525,12 @@ fn store_after_allowance_exhaustion_below_in_budget_store() {
 
 		assert!(
 			queued_priority(exhausted, store_call(SMALL_STORE_BYTES, 3), 0, 0) <
-				queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 3), Nonce::MAX / 2, 0)
+				queued_priority(
+					in_budget,
+					store_call(SMALL_STORE_BYTES, 3),
+					QUEUE_BONUS_EXHAUSTED_POSITION,
+					0
+				)
 		);
 	});
 }
@@ -589,6 +596,20 @@ fn check_nonce_wire_format_compatibility() {
 	assert_eq!(
 		scale_info::meta_type::<NonceCheckWithQueueBonus<Runtime>>(),
 		scale_info::meta_type::<frame_system::CheckNonce<Runtime>>(),
+	);
+	let metadata_fields = |entries: Vec<TransactionExtensionMetadata>| {
+		entries
+			.into_iter()
+			.map(|entry| (entry.identifier, entry.ty, entry.implicit))
+			.collect::<Vec<_>>()
+	};
+	assert_eq!(
+		metadata_fields(
+			<NonceCheckWithQueueBonus<Runtime> as TransactionExtension<RuntimeCall>>::metadata()
+		),
+		metadata_fields(
+			<frame_system::CheckNonce<Runtime> as TransactionExtension<RuntimeCall>>::metadata()
+		),
 	);
 }
 
