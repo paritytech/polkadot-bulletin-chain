@@ -76,7 +76,8 @@ Extends `expiration` by another `AuthorizationPeriod` and leaves all consumed co
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - `check_authorization` saturates `bytes` and `transactions` upward and never rejects.
-- The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. All renew flavours and preimage-scoped stores get `0`.
+- The boost applies to **signed account-scoped `store` / `store_with_cid_config`**. Preimage-scoped stores get `0`.
+- Account-scoped `renew` / `force_renew` / `enable_auto_renew` always get `ALLOWANCE_PRIORITY_BOOST`, added by the renewal validator in `pallet-bulletin-data-renewal`: the hard cap rejects an over-quota renew, so every renew in the pool is in-budget. Preimage-scoped `force_renew` and `disable_auto_renew` get `0`.
 - The strategy is fed the **post-this-tx** extent so the decision is "would this leave the holder in-budget on both axes?".
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
