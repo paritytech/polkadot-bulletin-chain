@@ -10,7 +10,7 @@ use bulletin_westend_runtime::{
 use frame_support::{assert_ok, pallet_prelude::Hooks, traits::fungible::Mutate};
 use pallet_bulletin_data_renewal::Call as DataRenewalCall;
 use pallet_bulletin_transaction_storage::{
-	extension::{NonceCheckWithQueueBonus, MAX_QUEUE_BONUS},
+	extension::{NonceCheckWithQueueBonus, QUEUE_BONUS_STEP},
 	Call as TxStorageCall, Config as TxStorageConfig, TransactionRef,
 };
 use parachains_common::{Balance, Hash, Nonce};
@@ -35,6 +35,7 @@ const TRANSFER_VALUE: Balance = 10_000_000_000;
 const TIP: Balance = 1_000_000_000;
 const BACKLOG_LENGTH: Nonce = 50;
 const PAST_TRANSACTIONS: Nonce = 5;
+const DEEP_QUEUE_POSITION: Nonce = 1000;
 
 fn externalities() -> sp_io::TestExternalities {
 	let mut genesis = RuntimeGenesisConfig::default();
@@ -225,15 +226,10 @@ fn priority_ladder_across_call_types() {
 		);
 		assert!(in_budget_store > transfer, "fee-paying calls must rank below in-budget stores");
 		assert!(
-			transfer.abs_diff(over_budget_store) < MAX_QUEUE_BONUS,
-			"fee-paying calls and over-budget stores must share a level"
+			transfer.abs_diff(over_budget_store) < QUEUE_BONUS_STEP,
+			"an untipped fee-paying call and an over-budget store at the same queue position must differ by less than one queue step"
 		);
 		assert!(over_budget_store > promotion, "HOP promotion must rank lowest");
-		assert!(
-			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 4), BACKLOG_LENGTH, 0) >
-				promotion,
-			"HOP promotion must rank below queued over-budget stores too"
-		);
 		assert!(transfer > promotion, "HOP promotion must rank lowest");
 	});
 }
@@ -339,19 +335,81 @@ fn preimage_store_level_with_in_budget_store() {
 }
 
 #[test]
-fn in_budget_store_above_over_budget_store_at_any_queue_position() {
+fn levels_without_overlap_at_any_queue_position() {
 	externalities().execute_with(|| {
+		let authorizer = Sr25519Keyring::BobStash;
 		let in_budget = Sr25519Keyring::Eve;
 		let over_budget = Sr25519Keyring::Ferdie;
-		account_authorization(in_budget, LARGE_ALLOWANCE_BYTES);
+		let payer = Sr25519Keyring::Bob;
+		let submitter = Sr25519Keyring::Charlie;
+		for account in [in_budget, submitter] {
+			account_authorization(account, LARGE_ALLOWANCE_BYTES);
+		}
 		account_authorization(over_budget, SMALL_ALLOWANCE_BYTES);
+		funding(payer);
+		let authorize = |queue_position| {
+			queued_priority(
+				authorizer,
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::authorize_account {
+					who: Sr25519Keyring::Two.to_account_id(),
+					transactions: 1,
+					bytes: SMALL_ALLOWANCE_BYTES,
+				}),
+				queue_position,
+				0,
+			)
+		};
+		let in_budget_store = |queue_position| {
+			queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 0), queue_position, 0)
+		};
+		let over_budget_store = |queue_position| {
+			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 0), queue_position, 0)
+		};
+		let transfer = |queue_position| queued_priority(payer, transfer_call(), queue_position, 0);
+		let promotion = pool_priority(
+			general_extrinsic(promotion_call(submitter, vec![5u8; SMALL_STORE_BYTES])),
+			TransactionSource::Local,
+		);
 
-		let in_budget_far_back =
-			queued_priority(in_budget, store_call(SMALL_STORE_BYTES, 0), Nonce::MAX / 2, 0);
-		let over_budget_first =
-			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 0), 0, 0);
+		for depth in [DEEP_QUEUE_POSITION, Nonce::MAX / 2] {
+			assert!(
+				authorize(depth) > in_budget_store(0),
+				"an authorization call at queue position {depth} must rank above the first in-budget store"
+			);
+			assert!(
+				in_budget_store(depth) > over_budget_store(0),
+				"an in-budget store at queue position {depth} must rank above the first over-budget store"
+			);
+			assert!(
+				in_budget_store(depth) > transfer(0),
+				"an in-budget store at queue position {depth} must rank above the first fee-paying call"
+			);
+			assert!(
+				over_budget_store(depth) > promotion,
+				"an over-budget store at queue position {depth} must rank above HOP promotion"
+			);
+			assert!(
+				transfer(depth) > promotion,
+				"a fee-paying call at queue position {depth} must rank above HOP promotion"
+			);
+		}
+	});
+}
 
-		assert!(in_budget_far_back > over_budget_first);
+#[test]
+fn queue_position_order_between_fee_paying_call_and_over_budget_store() {
+	externalities().execute_with(|| {
+		let payer = Sr25519Keyring::Bob;
+		let over_budget = Sr25519Keyring::Ferdie;
+		funding(payer);
+		account_authorization(over_budget, SMALL_ALLOWANCE_BYTES);
+		let transfer = |queue_position| queued_priority(payer, transfer_call(), queue_position, 0);
+		let over_budget_store = |queue_position| {
+			queued_priority(over_budget, store_call(SMALL_STORE_BYTES, 0), queue_position, 0)
+		};
+
+		assert!(over_budget_store(0) > transfer(1));
+		assert!(transfer(0) > over_budget_store(1));
 	});
 }
 

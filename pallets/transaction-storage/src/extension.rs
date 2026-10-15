@@ -522,13 +522,16 @@ where
 }
 
 /// Priority bonus for a signer's next transaction. Each transaction of the signer ahead of it in
-/// the pool lowers the bonus by one.
-pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
+/// the pool lowers the bonus by [`QUEUE_BONUS_STEP`].
+pub const MAX_QUEUE_BONUS: TransactionPriority = 1_000_000_000_000;
+/// Larger than the payment priority of an untipped call, so queue position decides between
+/// fee-paying calls and over-budget stores.
+pub const QUEUE_BONUS_STEP: TransactionPriority = 1_000_000;
 
-/// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus the number of the
-/// signer's transactions ahead of this one in the pool. Each signer's next transaction ranks first,
-/// so the pool alternates between signers. Bare transactions get the full bonus; unsigned general
-/// transactions get none.
+/// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus
+/// [`QUEUE_BONUS_STEP`] for each of the signer's transactions ahead of this one in the pool. Each
+/// signer's next transaction ranks first, so the pool alternates between signers. Bare transactions
+/// get the full bonus; unsigned general transactions get none.
 ///
 /// Uses the identifier, encoding and metadata type of `CheckNonce`, so the transaction format stays
 /// the same. Skips the bonus for `TransactionSource::InBlock`, where the runtime ignores priority,
@@ -551,7 +554,7 @@ impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
 			let queued_transactions: u64 = transaction_nonce
 				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
 				.unique_saturated_into();
-			MAX_QUEUE_BONUS.saturating_sub(queued_transactions)
+			MAX_QUEUE_BONUS.saturating_sub(queued_transactions.saturating_mul(QUEUE_BONUS_STEP))
 		})
 	}
 }
