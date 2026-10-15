@@ -18,7 +18,7 @@ Three renewal operations, with different behaviour:
 Schedules a **single** renewal that fires when the data reaches its retention boundary. The registration is then removed.
 
 - Emits `RenewalEnabled { content_hash, who, recurring: false }` — not `Renewed`, since nothing is renewed at dispatch time.
-- Rejects with `RenewalAlreadyEnabled` if a renewal is already registered for this content hash.
+- The transaction pool rejects it as an invalid transaction (custom error 11, `RENEWAL_ALREADY_ENABLED`) if a renewal is already registered for this content hash.
 
 ### `force_renew(entry)` — immediate synchronous renewal
 
@@ -35,7 +35,7 @@ Registers the data — by content hash, not a `TransactionRef` — for **recurri
 - Emits `DataRenewed { index, content_hash, account }` at each cycle.
 - Emits `RenewalFailed { content_hash, account }` when a cycle cannot be charged; the registration is dropped and the data expires.
 
-Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid it is refused with `CannotDisablePrepaidAutoRenewal` — disabling becomes possible after the first cycle has fired.
+Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid, the transaction pool rejects it as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`); disabling becomes possible after the first cycle has fired.
 
 ## Retention Period
 

@@ -59,7 +59,7 @@ println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 
 ## Recurring Auto-Renewal
 
-`enable_auto_renew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization, and the chain drops the registration with a `RenewalFailed` event once the quota runs out. Until the prepaid cycle has fired, the transaction pool rejects `disable_auto_renew` as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`).
+`enable_auto_renew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization, and the chain drops the registration with a `RenewalFailed` event once the quota runs out.
 
 ```rust
 let content_hash =
@@ -71,7 +71,16 @@ tx_client.enable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
 tx_client.disable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
 ```
 
-A content hash carries at most one registration, so `renew` and `enable_auto_renew` exclude each other: the pool rejects the second call (custom error 11, `RENEWAL_ALREADY_ENABLED`).
+A content hash carries at most one registration, so `renew` and `enable_auto_renew` exclude each other. The transaction pool rejects these calls as invalid transactions before they reach a block:
+
+| Call | Rejected when | Pool error |
+|------|---------------|------------|
+| `renew`, `enable_auto_renew` | a renewal is already registered for the content hash | custom 11, `RENEWAL_ALREADY_ENABLED` |
+| `disable_auto_renew` | no renewal is registered for the content hash | custom 9, `AUTO_RENEWAL_NOT_ENABLED` |
+| `disable_auto_renew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
+| `disable_auto_renew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
+
+The call then returns `Error::RenewalFailed`, whose message carries the RPC error `1010 Invalid Transaction` with data `Custom error: <code>`.
 
 ## Storing and Tracking
 
@@ -113,7 +122,7 @@ Alternatively, renew by content hash, which does not change across renewals.
 
 ## Using RenewalTracker
 
-For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — submitting again before the boundary rejects with `RenewalAlreadyEnabled`:
+For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — the pool rejects a second submission before the boundary (custom error 11, `RENEWAL_ALREADY_ENABLED`):
 
 ```rust
 let mut tracker = RenewalTracker::new();
@@ -195,7 +204,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal, `force_renew` and the auto-renew calls with `RenewalFailed` before submitting:
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`. Submission errors surface the same variant, including the pool's invalid-transaction rejections such as custom error 11 (`RENEWAL_ALREADY_ENABLED`, a renewal is already scheduled for the content hash). Two exceptions: a chain without any `renew` call returns `Error::RenewalUnavailable` (code `UNSUPPORTED_OPERATION`), and legacy runtimes that take only `(block, index)` reject content-hash renewal, `force_renew` and the auto-renew calls with `RenewalFailed` before submitting:
 
 ```rust
 match client.prepare_renew(storage_ref) {

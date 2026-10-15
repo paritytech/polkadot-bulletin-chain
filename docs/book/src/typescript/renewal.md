@@ -57,7 +57,16 @@ await client.enableAutoRenew(contentHash).send();
 await client.disableAutoRenew(contentHash).send();
 ```
 
-A content hash carries at most one registration, so `renew` and `enableAutoRenew` are mutually exclusive — the second call rejects with `RenewalAlreadyEnabled`.
+A content hash carries at most one registration, so `renew` and `enableAutoRenew` are mutually exclusive. The transaction pool rejects these calls as invalid transactions before they reach a block:
+
+| Call | Rejected when | Pool error |
+|------|---------------|------------|
+| `renew`, `enableAutoRenew` | a renewal is already registered for the content hash | custom 11, `RENEWAL_ALREADY_ENABLED` |
+| `disableAutoRenew` | no renewal is registered for the content hash | custom 9, `AUTO_RENEWAL_NOT_ENABLED` |
+| `disableAutoRenew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
+| `disableAutoRenew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
+
+`send()` then rejects with a `BulletinError` (`TRANSACTION_FAILED`) whose `cause` is PAPI's `InvalidTxError`; its `error` field holds `{ type: "Invalid", value: { type: "Custom", value: <code> } }`.
 
 ## Querying the Retention Period
 
@@ -80,7 +89,7 @@ console.log(`Data expires at block ${expiresAtBlock} (${blocksRemaining} blocks 
 
 ## Building a Renewal Tracker
 
-For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `RenewalAlreadyEnabled`, so drop entries once scheduled:
+For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — the pool rejects a second call before it fires (custom error 11, `RENEWAL_ALREADY_ENABLED`), so drop entries once scheduled:
 
 ```typescript
 interface StoredItem {
@@ -137,7 +146,7 @@ api.tx.DataRenewal.enable_auto_renew({ content_hash: contentHashHex });
 
 Pre-split runtimes host these calls on `api.tx.TransactionStorage`; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
 
-`disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.
+While the registration is still prepaid, the pool rejects `disable_auto_renew` as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`); it only succeeds after the first cycle has consumed the prepayment.
 
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
 
