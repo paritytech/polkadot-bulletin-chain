@@ -140,9 +140,9 @@ pub fn build_parachain_network_config_three_relay_validators(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
-				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
+				.with_validator(|node| node.with_name("alice").with_args(relay_args))
+				.with_validator(|node| node.with_name("bob").with_args(relay_args2))
+				.with_validator(|node| node.with_name("charlie").with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain
@@ -191,9 +191,9 @@ pub fn build_parachain_network_config_three_collators(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
-				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
+				.with_validator(|node| node.with_name("alice").with_args(relay_args))
+				.with_validator(|node| node.with_name("bob").with_args(relay_args2))
+				.with_validator(|node| node.with_name("charlie").with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain

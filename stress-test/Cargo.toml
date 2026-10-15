@@ -23,9 +23,9 @@ clap = { workspace = true, features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 futures = { workspace = true }
 
-# Subxt (must match zombienet-sdk 0.3.13)
-subxt = { version = "0.43", default-features = false, features = ["jsonrpsee", "native"] }
-subxt-signer = { version = "0.43", features = ["sr25519"] }
+# Subxt (must match zombienet-sdk's version)
+subxt = { version = "0.44", default-features = false, features = ["jsonrpsee", "native"] }
+subxt-signer = { version = "0.44", features = ["sr25519"] }
 scale-info = { workspace = true }
 jsonrpsee = { workspace = true, features = ["ws-client"] }
 
@@ -63,5 +63,5 @@ rand = "0.8"
 prost-build = "0.13"
 
 [dev-dependencies]
-zombienet-sdk = "0.3.13"
-zombienet-orchestrator = "0.3.13"
+zombienet-sdk = "0.6.0"
+zombienet-orchestrator = "0.6.0"
