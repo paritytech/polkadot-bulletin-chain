@@ -42,6 +42,7 @@ pub mod events;
 pub mod hop_rpc;
 pub mod ldb;
 pub mod network;
+pub mod sdk;
 pub mod sync;
 pub mod tx;
 
@@ -53,5 +54,6 @@ pub use events::*;
 pub use hop_rpc::*;
 pub use ldb::*;
 pub use network::*;
+pub use sdk::*;
 pub use sync::*;
 pub use tx::*;

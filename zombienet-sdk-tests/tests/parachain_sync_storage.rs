@@ -1029,7 +1029,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// Get client and fetch initial nonce for Alice
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
 
 	// Set short retention period for fast testing
 	// NOTE: LDB test uses finalized transactions for database consistency
@@ -1038,7 +1038,6 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		LDB_TEST_RETENTION_PERIOD
 	);
 	set_retention_period_finalized(&collator1_client, LDB_TEST_RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
 	// Get database path for the collator
 	let base_dir = network
@@ -1066,9 +1065,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// === Step 2: First store - verify refcount = 1 and content hash matches ===
 	test_log!(TEST, "=== Step 2: First store - expecting refcount = 1 ===");
-	let (first_store_block, next_nonce) =
-		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
-	nonce = next_nonce;
+	let first_store_block = authorize_and_store_data_finalized(collator1, &test_data).await?;
 	tracing::info!("First store completed at block {}", first_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER first store")?;
@@ -1101,8 +1098,7 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 
 	// === Step 3: Second store (same data) - verify refcount = 2, still 2 keys ===
 	test_log!(TEST, "=== Step 3: Second store - expecting refcount = 2, still 2 keys ===");
-	let (second_store_block, _) =
-		authorize_and_store_data_finalized(collator1, &test_data, nonce).await?;
+	let second_store_block = authorize_and_store_data_finalized(collator1, &test_data).await?;
 	tracing::info!("Second store completed at block {}", second_store_block);
 
 	let dump = verify_col11(&collator_db_path, "col11 AFTER second store")?;

@@ -14,7 +14,7 @@ use crate::{
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
 		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
 		initialize_network, override_alice_authorization, resolve_canonical_store_block,
-		set_retention_period, set_retention_period_finalized, submit_force_renew,
+		sdk_client, set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
 		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
@@ -277,23 +277,17 @@ async fn parachain_auto_renew_test() -> Result<()> {
 	tracing::info!("Test data: {} bytes, hash={}, CID={}", data.len(), hash_hex, cid);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
-	top_up_alice_authorization(
-		client,
-		TOPUP_TX_COUNT,
-		data.len() as u64 * TOPUP_BYTES_MULTIPLIER,
-		nonce,
-	)
-	.await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	top_up_alice_authorization(&sdk, TOPUP_TX_COUNT, data.len() as u64 * TOPUP_BYTES_MULTIPLIER)
+		.await?;
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(client, &content_hash, nonce).await?;
-	nonce += 1;
+	enable_auto_renew(&sdk, &content_hash).await?;
 	tracing::info!("Auto-renewal enabled for content_hash {}", hash_hex);
 
 	// Re-anchor `store_block` against the finalized chain — `authorize_and_store_data` reads
@@ -357,7 +351,7 @@ async fn parachain_auto_renew_test() -> Result<()> {
 
 	// Shared-harness cleanup: stop renewing this item so it doesn't keep consuming Alice's
 	// authorization for the rest of the harness lifetime.
-	disable_auto_renew(client, &content_hash, nonce).await?;
+	disable_auto_renew(&sdk, &content_hash).await?;
 	tracing::info!("✓ Disabled auto-renew for content_hash — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Test ({} cycles) PASSED ===", NUM_RENEWAL_CYCLES);
@@ -473,12 +467,11 @@ async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	nonce += 1;
 
 	let data = generate_test_data(TEST_DATA_SIZE, PARACHAIN_TEST_DATA_PATTERN);
-	let (store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	nonce = next_nonce;
+	let (store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at block {}", store_block);
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(&client, &content_hash, nonce).await?;
+	enable_auto_renew(&sdk_client(collator1).await?, &content_hash).await?;
 	tracing::info!("Auto-renewal enabled");
 
 	let last_healthy_block = store_block + RETENTION_PERIOD_FOR_PRUNING_HALT as u64 - 1;
@@ -534,27 +527,22 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 	let client_owned = collator1.wait_client().await?;
 	let client = &client_owned;
 
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
 
 	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_RENEW_TWICE_");
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
-	nonce = next_nonce;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	// `validate_signed` tags renewals with `(who, content_hash)`, so two renews from the
 	// same signer would conflict in the pool — use Bob as a second signer. Bob has no prior
 	// authorization, and the pool reads `Authorizations` from finalized state, so the
 	// authorize must be finalized before Bob's renew can validate.
+	let sdk = sdk_client(collator1).await?;
 	let bob_pk = subxt_signer::sr25519::dev::bob().public_key().0;
-	authorize_account_via_sudo_finalized(client, &bob_pk, 1, data.len() as u64, nonce).await?;
-	nonce += 1;
-	let bob_nonce = client
-		.tx()
-		.account_nonce(&subxt_signer::sr25519::dev::bob().public_key().to_account_id())
-		.await?;
+	authorize_account_via_sudo_finalized(&sdk, &bob_pk, 1, data.len() as u64).await?;
 
 	let content_hash = blake2_256(&data);
 	// Re-anchor against the finalized chain (Bob's authorize_via_sudo_finalized already
@@ -570,7 +558,7 @@ async fn parachain_renew_twice_within_block_with_pruning_test() -> Result<()> {
 		);
 	}
 	let (renew_block_a, renew_block_b) =
-		submit_renew_pair(client, store_block as u32, 0, &content_hash, nonce, bob_nonce).await?;
+		submit_renew_pair(&sdk, store_block as u32, 0, &content_hash).await?;
 	if renew_block_a != renew_block_b {
 		tracing::warn!(
 			"Renews landed in different blocks ({} and {}) instead of one — test still valid \
@@ -659,14 +647,14 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
 	// The one-shot prepays 1 tx slot + `data.len()` permanent bytes at registration.
-	top_up_alice_authorization(client, TOPUP_TX_COUNT, 2 * data.len() as u64, nonce).await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	top_up_alice_authorization(&sdk, TOPUP_TX_COUNT, 2 * data.len() as u64).await?;
 
 	let content_hash = blake2_256(&data);
 	// Re-anchor against the finalized chain before the renew: the pool validates renewals
@@ -684,7 +672,7 @@ async fn parachain_renew_one_shot_lifecycle_test() -> Result<()> {
 		);
 	}
 
-	submit_renew_one_shot(client, &content_hash, nonce).await?;
+	submit_renew_one_shot(&sdk, &content_hash).await?;
 	tracing::info!("One-shot renew registered for content_hash {}", hash_hex);
 
 	// The prepaid renewal fires at the retention boundary, same cadence as auto-renew.
@@ -811,14 +799,14 @@ async fn parachain_force_renew_lifecycle_test() -> Result<()> {
 	let (hash_hex, _) = content_hash_and_cid(&data);
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
-	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (post-store)").await?;
 
 	// `force_renew` charges 1 tx slot + `data.len()` permanent bytes at dispatch.
-	top_up_alice_authorization(client, TOPUP_TX_COUNT, 2 * data.len() as u64, nonce).await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	top_up_alice_authorization(&sdk, TOPUP_TX_COUNT, 2 * data.len() as u64).await?;
 
 	let content_hash = blake2_256(&data);
 	// The retention sweep follows BEST-chain height (`Transactions[store]` is taken at
@@ -827,7 +815,7 @@ async fn parachain_force_renew_lifecycle_test() -> Result<()> {
 	// races the sweep and the entry can be gone before the renew validates. Canonical
 	// block numbers are resolved after the renew is in.
 	wait_for_block_height(collator1, best_store_block + 4, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
-	let renew_block_best = submit_force_renew(client, &content_hash, nonce).await?;
+	let renew_block_best = submit_force_renew(&sdk, &content_hash).await?;
 
 	// Re-anchor against finality: `TransactionByContentHash` at a finalized block names
 	// the canonical renew block even if the best-block inclusion got reorged.
@@ -934,23 +922,21 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	let client_owned = collator1.wait_client().await?;
 	let client = &client_owned;
 
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
 
 	let data1 = generate_test_data(TEST_DATA_SIZE, b"DATA1_CONCURRENT_STORE_");
 	let data2 = generate_test_data(TEST_DATA_SIZE, b"DATA2_CONCURRENT_STORE_");
 	tracing::info!("data1 hash={}", content_hash_and_cid(&data1).0);
 	tracing::info!("data2 hash={}", content_hash_and_cid(&data2).0);
 
-	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data1, nonce).await?;
-	nonce = next_nonce;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data1, nonce).await?;
 	tracing::info!("data1 stored at best-chain block {}", best_store_block);
 
-	top_up_alice_authorization(client, 5, 4 * data1.len() as u64, nonce).await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	top_up_alice_authorization(&sdk, 5, 4 * data1.len() as u64).await?;
 
 	let content_hash_data1 = blake2_256(&data1);
-	enable_auto_renew(client, &content_hash_data1, nonce).await?;
-	nonce += 1;
+	enable_auto_renew(&sdk, &content_hash_data1).await?;
 	tracing::info!("Auto-renewal enabled for data1");
 
 	// Re-anchor store_block on the finalized chain so the renewal_block computation below
@@ -986,7 +972,7 @@ async fn parachain_auto_renew_with_concurrent_store_test() -> Result<()> {
 	);
 	wait_for_block_height(collator1, wait_until_pre_renewal, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	let data2_block = submit_store_signed(client, &data2, nonce).await?;
+	let data2_block = submit_store_signed(&sdk, &data2).await?;
 	if data2_block == renewal_block {
 		tracing::info!(
 			"✓ data2 store and auto-renewal inherent coexist in block {}",
@@ -1073,26 +1059,23 @@ async fn parachain_auto_renew_vs_no_renew_eviction_test() -> Result<()> {
 	let client_owned = collator1.wait_client().await?;
 	let client = &client_owned;
 
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
 
 	let data_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_RENEWED_");
 	let data_not_renewed = generate_test_data(TEST_DATA_SIZE, b"DATA_VS_NO_RENEW_NOT_RENEWED_");
 
-	let (best_store_block, next_nonce) =
-		authorize_and_store_data(collator1, &data_renewed, nonce).await?;
-	nonce = next_nonce;
+	let (best_store_block, _) = authorize_and_store_data(collator1, &data_renewed, nonce).await?;
 	tracing::info!("data_renewed stored at best-chain block {}", best_store_block);
 
-	top_up_alice_authorization(client, 5, 4 * data_renewed.len() as u64, nonce).await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	top_up_alice_authorization(&sdk, 5, 4 * data_renewed.len() as u64).await?;
 
-	let best_data_not_renewed_block = submit_store_signed(client, &data_not_renewed, nonce).await?;
-	nonce += 1;
+	let best_data_not_renewed_block = submit_store_signed(&sdk, &data_not_renewed).await?;
 	tracing::info!("data_not_renewed stored at best-chain block {}", best_data_not_renewed_block);
 
 	let content_hash_renewed = blake2_256(&data_renewed);
 	let content_hash_not_renewed = blake2_256(&data_not_renewed);
-	enable_auto_renew(client, &content_hash_renewed, nonce).await?;
+	enable_auto_renew(&sdk, &content_hash_renewed).await?;
 	tracing::info!("Auto-renewal enabled for data_renewed");
 
 	verify_node_bitswap(
@@ -2526,11 +2509,10 @@ async fn parachain_on_initialize_cleanup_test() -> Result<()> {
 	let bytes_per_item = TEST_DATA_SIZE as u64;
 	let total_items = ON_INIT_CLEANUP_ITEMS_PER_SET * 2;
 	authorize_account_via_sudo(
-		&client,
+		&sdk_client(collator1).await?,
 		&dev::alice().public_key().0,
 		total_items * 4,
 		bytes_per_item * (total_items as u64) * 4,
-		nonce,
 	)
 	.await?;
 	nonce += 1;
@@ -2890,11 +2872,10 @@ async fn parachain_on_initialize_no_renewals_weight_test() -> Result<()> {
 	nonce += 1;
 	let bytes_per_item = TEST_DATA_SIZE as u64;
 	authorize_account_via_sudo(
-		&client,
+		&sdk_client(collator1).await?,
 		&dev::alice().public_key().0,
 		ON_INIT_NO_RENEWALS_ITEMS * 2,
 		bytes_per_item * (ON_INIT_NO_RENEWALS_ITEMS as u64) * 2,
-		nonce,
 	)
 	.await?;
 	nonce += 1;
@@ -3171,11 +3152,10 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 
 	let bytes_per_op = TEST_DATA_SIZE as u64;
 	authorize_account_via_sudo(
-		&client,
+		&sdk_client(collator1).await?,
 		&dev::alice().public_key().0,
 		SOAK_AUTH_TX_SLOTS,
 		bytes_per_op * SOAK_AUTH_TX_SLOTS as u64,
-		nonce,
 	)
 	.await?;
 	nonce += 1;
@@ -3609,7 +3589,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "post-store").await?;
 
 	// Alice's genesis authorization is ~10 MiB and `authorize_account` is additive — overwrite
@@ -3628,7 +3608,6 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 		nonce,
 	)
 	.await?;
-	nonce += 1;
 	tracing::info!(
 		"Data stored at best-chain block {}; authorization pinned to bytes_allowance = 2 × {}",
 		best_store_block,
@@ -3636,7 +3615,7 @@ async fn parachain_auto_renew_quota_exhaustion_test() -> Result<()> {
 	);
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(client, &content_hash, nonce).await?;
+	enable_auto_renew(&sdk_client(collator1).await?, &content_hash).await?;
 	tracing::info!("Auto-renewal enabled for {}", hash_hex);
 
 	// Re-anchor against the finalized chain so cycle math + `assert_proof_checked_at` reads
@@ -3810,7 +3789,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	tracing::info!("Test data: {} bytes, hash={}", data.len(), hash_hex);
 
 	let nonce = get_alice_nonce(collator1).await?;
-	let (best_store_block, mut nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
+	let (best_store_block, nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
 	tracing::info!("Data stored at best-chain block {}", best_store_block);
 
 	let cadence = RETENTION_PERIOD as u64 + 1;
@@ -3847,11 +3826,9 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 		nonce,
 	)
 	.await?;
-	nonce += 1;
 
 	let content_hash = blake2_256(&data);
-	enable_auto_renew(client, &content_hash, nonce).await?;
-	nonce += 1;
+	enable_auto_renew(&sdk_client(collator1).await?, &content_hash).await?;
 	tracing::info!("Auto-renewal enabled");
 
 	wait_for_finalized_height(collator1, est_r1 + 1, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
@@ -3927,15 +3904,8 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	// Expired-but-present: the pallet zeroes counters and installs a fresh expiration.
 	let alice_pk = subxt_signer::sr25519::dev::alice().public_key().0;
-	authorize_account_via_sudo(
-		client,
-		&alice_pk,
-		/* transactions */ 10,
-		/* bytes */ 4 * l,
-		nonce,
-	)
-	.await?;
-	nonce += 1;
+	let sdk = sdk_client(collator1).await?;
+	authorize_account_via_sudo(&sdk, &alice_pk, /* transactions */ 10, /* bytes */ 4 * l).await?;
 	tracing::info!("Re-authorized Alice — expects expired-reset branch to zero counters");
 
 	// End-to-end proof the reset took: a fresh store + auto-renew cycle must succeed; if
@@ -3947,8 +3917,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	};
 	let (hash2_hex, _) = content_hash_and_cid(&data2);
 
-	let best_store2_block = submit_store_signed(client, &data2, nonce).await?;
-	nonce += 1;
+	let best_store2_block = submit_store_signed(&sdk, &data2).await?;
 	tracing::info!(
 		"Stored second item at best-chain block {} (hash={})",
 		best_store2_block,
@@ -3956,7 +3925,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 	);
 
 	let content_hash2 = blake2_256(&data2);
-	enable_auto_renew(client, &content_hash2, nonce).await?;
+	enable_auto_renew(&sdk, &content_hash2).await?;
 	tracing::info!("Auto-renewal enabled for second item");
 
 	let est_r1_after = best_store2_block + cadence;
@@ -3997,8 +3966,7 @@ async fn parachain_auto_renew_authorization_expires_mid_cycle_test() -> Result<(
 
 	// Shared-harness cleanup: `data` was removed by the cycle-2 failure path; disable `data2`
 	// explicitly so it doesn't keep renewing for the rest of the harness lifetime.
-	let nonce_after_enable = nonce + 1;
-	disable_auto_renew(client, &content_hash2, nonce_after_enable).await?;
+	disable_auto_renew(&sdk, &content_hash2).await?;
 	tracing::info!("✓ Disabled auto-renew for data2 — chain idle for the next test");
 
 	test_log!(TEST, "=== Parachain Auto-Renewal Authorization Expires Mid-Cycle Test PASSED ===");

@@ -1,18 +1,25 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Subxt transaction helpers: nonce management, storage operations, retention period.
+//! Transaction helpers: nonce management, storage operations, retention period.
 
-use super::{config::*, crypto::*};
+use super::{config::*, crypto::*, sdk::*};
 use anyhow::{anyhow, Result};
+use bulletin_sdk_rust::{AuthorizeAccountEntry, TransactionClient, WaitFor};
 use std::time::Duration;
 use subxt::{
 	config::substrate::{SubstrateConfig, SubstrateExtrinsicParamsBuilder},
 	dynamic::{tx, Value},
-	ext::scale_value::value,
 	OnlineClient,
 };
 use subxt_signer::sr25519::dev;
+
+fn transaction_timeout(wait_for: WaitFor) -> Duration {
+	Duration::from_secs(match wait_for {
+		WaitFor::InBlock => TRANSACTION_TIMEOUT_SECS,
+		WaitFor::Finalized => FINALIZED_TRANSACTION_TIMEOUT_SECS,
+	})
+}
 
 pub async fn wait_for_in_best_block(
 	mut progress: subxt::tx::TxProgress<SubstrateConfig, OnlineClient<SubstrateConfig>>,
@@ -148,9 +155,8 @@ pub async fn authorize_and_store_items(
 	node: &zombienet_sdk::NetworkNode,
 	base_pattern: &[u8],
 	item_sizes: &[usize],
-	mut nonce: u64,
+	nonce: u64,
 ) -> Result<(Vec<StoredItem>, u64)> {
-	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
 	let signer = dev::alice();
 
 	// Generate distinct data for each item by appending an index suffix to the pattern
@@ -168,37 +174,10 @@ pub async fn authorize_and_store_items(
 	let total_bytes: u64 = items_data.iter().map(|d| d.len() as u64).sum::<u64>() * 2;
 	let total_transactions = items_data.len() as u32 + 5; // extra margin
 
-	let authorize_call = subxt::tx::dynamic(
-		"Sudo",
-		"sudo",
-		vec![value! {
-			TransactionStorage(authorize_account {
-				who: Value::from_bytes(signer.public_key().0),
-				transactions: total_transactions,
-				bytes: total_bytes
-			})
-		}],
-	);
-
-	tracing::info!(
-		"Authorizing {} items ({} bytes total, nonce={})",
-		items_data.len(),
-		total_bytes,
-		nonce
-	);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-	nonce += 1;
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress =
-			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
-	.await
-	.map_err(|_| anyhow!("authorization transaction timed out"))??;
-
-	tracing::info!("Authorization for all items included in block");
+	tracing::info!("Authorizing {} items", items_data.len());
+	let sdk = sdk_client(node).await?;
+	authorize_account_via_sudo(&sdk, &signer.public_key().0, total_transactions, total_bytes)
+		.await?;
 
 	// Store each item
 	let mut stored_items = Vec::new();
@@ -206,27 +185,22 @@ pub async fn authorize_and_store_items(
 		let (hash_hex, cid) = content_hash_and_cid(&data);
 		tracing::info!("Storing item {} ({} bytes): hash={}, CID={}", i, data.len(), hash_hex, cid);
 
-		let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
-		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-		nonce += 1;
+		let receipt = tokio::time::timeout(
+			transaction_timeout(WaitFor::InBlock),
+			sdk.store(data.clone(), &signer, WaitFor::InBlock),
+		)
+		.await
+		.map_err(|_| anyhow!("store transaction for item {} timed out", i))??;
 
-		let (block_hash, _events) =
-			tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-				let progress =
-					client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
-				wait_for_in_best_block(progress).await
-			})
-			.await
-			.map_err(|_| anyhow!("store transaction for item {} timed out", i))??;
-
-		let block = client.blocks().at(block_hash).await?;
-		let block_number = block.number() as u64;
+		let block_hash = receipt_block_hash(&receipt.block_hash)?;
+		let block_number = sdk.api().blocks().at(block_hash).await?.number() as u64;
 		tracing::info!("Item {} stored at block {}", i, block_number);
 
 		stored_items.push(StoredItem { data, block_number });
 	}
 
-	Ok((stored_items, nonce))
+	let next_nonce = nonce + 1 + stored_items.len() as u64;
+	Ok((stored_items, next_nonce))
 }
 
 /// Returns (block_number, next_nonce). Waits for best block.
@@ -239,193 +213,82 @@ pub async fn authorize_and_store_items(
 pub async fn authorize_and_store_data(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
-	mut nonce: u64,
+	nonce: u64,
 ) -> Result<(u64, u64)> {
-	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
-	let signer = dev::alice();
-	let bytes_to_authorize = (data.len() as u64) * 2;
-
-	let authorize_call = subxt::tx::dynamic(
-		"Sudo",
-		"sudo",
-		vec![value! {
-			TransactionStorage(authorize_account {
-				who: Value::from_bytes(signer.public_key().0),
-				transactions: 10u32,
-				bytes: bytes_to_authorize
-			})
-		}],
-	);
-
-	tracing::info!("Submitting authorization transaction (nonce={})...", nonce);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-	nonce += 1;
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress =
-			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
-	.await
-	.map_err(|_| anyhow!("authorization transaction timed out"))??;
-
-	tracing::info!("Authorization transaction included in block");
-
-	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
-
-	tracing::info!("Submitting store transaction (nonce={})...", nonce);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-	nonce += 1;
-
-	let (block_hash, _events) =
-		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-			let progress =
-				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
-			wait_for_in_best_block(progress).await
-		})
-		.await
-		.map_err(|_| anyhow!("store transaction timed out"))??;
-
-	// subxt's `tx_in_block.block_hash()` can name a block whose number is one ahead of the
-	// canonical `Transactions[N]` key — see `canonical_store_block`.
-	let content_hash = blake2_256(data);
-	let block_number = canonical_store_block(&client, block_hash, &content_hash).await?;
-
-	tracing::info!("Store transaction included at canonical block {}", block_number);
-	Ok((block_number, nonce))
+	let sdk = sdk_client(node).await?;
+	top_up_alice_authorization(&sdk, 10, (data.len() as u64) * 2).await?;
+	let block_number = submit_store_signed(&sdk, data).await?;
+	Ok((block_number, nonce + 2))
 }
 
-/// Returns (block_number, next_nonce). Waits for finalization (for LDB / sync tests where
-/// the captured block number must be on the canonical chain *before* the test proceeds).
+/// Returns the block number. Waits for finalization (for LDB / sync tests where the captured
+/// block number must be on the canonical chain *before* the test proceeds).
 pub async fn authorize_and_store_data_finalized(
 	node: &zombienet_sdk::NetworkNode,
 	data: &[u8],
-	mut nonce: u64,
-) -> Result<(u64, u64)> {
-	let client: OnlineClient<SubstrateConfig> = node.wait_client().await?;
+) -> Result<u64> {
 	let signer = dev::alice();
-	let bytes_to_authorize = (data.len() as u64) * 2;
+	let sdk = sdk_client(node).await?;
+	authorize_account_via_sudo_finalized(&sdk, &signer.public_key().0, 10, (data.len() as u64) * 2)
+		.await?;
 
-	let authorize_call = subxt::tx::dynamic(
-		"Sudo",
-		"sudo",
-		vec![value! {
-			TransactionStorage(authorize_account {
-				who: Value::from_bytes(signer.public_key().0),
-				transactions: 10u32,
-				bytes: bytes_to_authorize
-			})
-		}],
-	);
-
-	tracing::info!("Submitting authorization transaction (finalized, nonce={})...", nonce);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-	nonce += 1;
-
-	tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
-		let progress =
-			client.tx().sign_and_submit_then_watch(&authorize_call, &signer, params).await?;
-		wait_for_finalized(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
+	tracing::info!("Submitting store transaction (finalized)...");
+	let receipt = tokio::time::timeout(
+		transaction_timeout(WaitFor::Finalized),
+		sdk.store(data.to_vec(), &signer, WaitFor::Finalized),
+	)
 	.await
-	.map_err(|_| anyhow!("authorization transaction timed out"))??;
+	.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	tracing::info!("Authorization transaction finalized");
-
-	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
-
-	tracing::info!("Submitting store transaction (finalized, nonce={})...", nonce);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-	nonce += 1;
-
-	let (block_hash, _events) =
-		tokio::time::timeout(Duration::from_secs(FINALIZED_TRANSACTION_TIMEOUT_SECS), async {
-			let progress =
-				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
-			wait_for_finalized(progress).await
-		})
-		.await
-		.map_err(|_| anyhow!("store transaction timed out"))??;
-
-	let block = client.blocks().at(block_hash).await?;
-	let block_number = block.number() as u64;
+	let block_hash = receipt_block_hash(&receipt.block_hash)?;
+	let block_number = sdk.api().blocks().at(block_hash).await?.number() as u64;
 
 	tracing::info!("Store transaction finalized at block {}", block_number);
-	Ok((block_number, nonce))
+	Ok(block_number)
 }
 
 /// Sudo'd `TransactionStorage::authorize_account` for `who`. Additive on the unexpired path.
 pub async fn authorize_account_via_sudo(
-	client: &OnlineClient<SubstrateConfig>,
+	sdk: &TransactionClient,
 	who: &[u8; 32],
 	transactions: u32,
 	bytes: u64,
-	nonce: u64,
 ) -> Result<()> {
-	authorize_account_via_sudo_inner(client, who, transactions, bytes, nonce, false).await
+	authorize_account_via_sudo_inner(sdk, who, transactions, bytes, WaitFor::InBlock).await
 }
 
 /// Like [`authorize_account_via_sudo`] but waits for finality — required when `who`'s next
 /// step is its first signed extrinsic, since the pool's `validate_signed` reads finalized
 /// state.
 pub async fn authorize_account_via_sudo_finalized(
-	client: &OnlineClient<SubstrateConfig>,
+	sdk: &TransactionClient,
 	who: &[u8; 32],
 	transactions: u32,
 	bytes: u64,
-	nonce: u64,
 ) -> Result<()> {
-	authorize_account_via_sudo_inner(client, who, transactions, bytes, nonce, true).await
+	authorize_account_via_sudo_inner(sdk, who, transactions, bytes, WaitFor::Finalized).await
 }
 
 async fn authorize_account_via_sudo_inner(
-	client: &OnlineClient<SubstrateConfig>,
+	sdk: &TransactionClient,
 	who: &[u8; 32],
 	transactions: u32,
 	bytes: u64,
-	nonce: u64,
-	wait_for_finality: bool,
+	wait_for: WaitFor,
 ) -> Result<()> {
-	let alice = dev::alice();
-	let authorize_call = subxt::tx::dynamic(
-		"Sudo",
-		"sudo",
-		vec![value! {
-			TransactionStorage(authorize_account {
-				who: Value::from_bytes(*who),
-				transactions: transactions,
-				bytes: bytes
-			})
-		}],
-	);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-
 	tracing::info!(
-		"Authorizing 0x{}.. (+{} tx, +{} bytes, alice nonce={}, wait_for_finality={})",
+		"Authorizing 0x{}.. (+{} tx, +{} bytes, {:?})",
 		hex::encode(&who[..4]),
 		transactions,
 		bytes,
-		nonce,
-		wait_for_finality,
+		wait_for,
 	);
 
-	let timeout = if wait_for_finality {
-		FINALIZED_TRANSACTION_TIMEOUT_SECS
-	} else {
-		TRANSACTION_TIMEOUT_SECS
-	};
-	tokio::time::timeout(Duration::from_secs(timeout), async {
-		let progress =
-			client.tx().sign_and_submit_then_watch(&authorize_call, &alice, params).await?;
-		if wait_for_finality {
-			wait_for_finalized(progress).await?;
-		} else {
-			wait_for_in_best_block(progress).await?;
-		}
-		Ok::<_, anyhow::Error>(())
-	})
+	let entry = AuthorizeAccountEntry { who: (*who).into(), transactions, bytes };
+	tokio::time::timeout(
+		transaction_timeout(wait_for),
+		sdk.authorize_accounts(vec![entry], true, &dev::alice(), wait_for),
+	)
 	.await
 	.map_err(|_| anyhow!("authorize_account via sudo timed out"))??;
 
@@ -434,40 +297,29 @@ async fn authorize_account_via_sudo_inner(
 }
 
 pub async fn top_up_alice_authorization(
-	client: &OnlineClient<SubstrateConfig>,
+	sdk: &TransactionClient,
 	transactions: u32,
 	bytes: u64,
-	nonce: u64,
 ) -> Result<()> {
 	let alice_pk = dev::alice().public_key().0;
-	authorize_account_via_sudo(client, &alice_pk, transactions, bytes, nonce).await
+	authorize_account_via_sudo(sdk, &alice_pk, transactions, bytes).await
 }
 
 /// Signed `store(data)` from Alice; caller ensures Alice is authorized. Returns the
 /// canonical inclusion block number (see [`canonical_store_block`]). Waits for best-only
 /// inclusion; callers accept the rare-reorg risk on later finalized-state reads.
-pub async fn submit_store_signed(
-	client: &OnlineClient<SubstrateConfig>,
-	data: &[u8],
-	nonce: u64,
-) -> Result<u64> {
-	let signer = dev::alice();
-	let store_call = tx("TransactionStorage", "store", vec![Value::from_bytes(data)]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+pub async fn submit_store_signed(sdk: &TransactionClient, data: &[u8]) -> Result<u64> {
+	tracing::info!("Submitting store ({} bytes)...", data.len());
 
-	tracing::info!("Submitting store (nonce={}, {} bytes)...", nonce, data.len());
+	let receipt = tokio::time::timeout(
+		transaction_timeout(WaitFor::InBlock),
+		sdk.store(data.to_vec(), &dev::alice(), WaitFor::InBlock),
+	)
+	.await
+	.map_err(|_| anyhow!("store transaction timed out"))??;
 
-	let (block_hash, _events) =
-		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-			let progress =
-				client.tx().sign_and_submit_then_watch(&store_call, &signer, params).await?;
-			wait_for_in_best_block(progress).await
-		})
-		.await
-		.map_err(|_| anyhow!("store transaction timed out"))??;
-
-	let content_hash = blake2_256(data);
-	let block_number = canonical_store_block(client, block_hash, &content_hash).await?;
+	let block_hash = receipt_block_hash(&receipt.block_hash)?;
+	let block_number = canonical_store_block(sdk.api(), block_hash, &blake2_256(data)).await?;
 	tracing::info!("Store transaction included at canonical block {}", block_number);
 	Ok(block_number)
 }
@@ -523,8 +375,10 @@ pub async fn resolve_canonical_store_block(
 /// `block.number()` is one ahead of the canonical `Transactions[N]` key the pallet uses to
 /// schedule auto-renewal; reading at the inclusion-block state returns the authoritative
 /// number.
-pub async fn canonical_store_block(
-	client: &OnlineClient<SubstrateConfig>,
+pub async fn canonical_store_block<
+	C: subxt::Config<Hasher: subxt::config::Hasher<Output = subxt::utils::H256>>,
+>(
+	client: &OnlineClient<C>,
 	at_block_hash: subxt::utils::H256,
 	content_hash: &[u8; 32],
 ) -> Result<u64> {
@@ -563,56 +417,32 @@ pub async fn canonical_store_block(
 /// renewals (each emits `Renewed`). `validate_signed` tags renewals with
 /// `(who, content_hash)`, so two from the same signer would conflict in the pool.
 pub async fn submit_renew_pair(
-	client: &OnlineClient<SubstrateConfig>,
+	sdk: &TransactionClient,
 	block: u32,
 	index: u32,
 	content_hash: &[u8; 32],
-	alice_nonce: u64,
-	bob_nonce: u64,
 ) -> Result<(u64, u64)> {
-	let alice = dev::alice();
-	let bob = dev::bob();
-	let entry = Value::named_variant(
-		"Position",
-		[
-			("block".to_string(), Value::u128(block as u128)),
-			("index".to_string(), Value::u128(index as u128)),
-		],
-	);
-	let renew_call = tx("DataRenewal", "force_renew", vec![entry]);
-	let alice_params = SubstrateExtrinsicParamsBuilder::new().nonce(alice_nonce).build();
-	let bob_params = SubstrateExtrinsicParamsBuilder::new().nonce(bob_nonce).build();
-
+	let (alice, bob) = (dev::alice(), dev::bob());
 	tracing::info!(
-		"Submitting two force_renew(block={}, index={}) calls (alice nonce={}, bob nonce={})",
+		"Submitting two force_renew(block={}, index={}) calls (alice, bob)",
 		block,
-		index,
-		alice_nonce,
-		bob_nonce
+		index
 	);
 
-	let alice_progress = client
-		.tx()
-		.sign_and_submit_then_watch(&renew_call, &alice, alice_params)
-		.await?;
-	let bob_progress =
-		client.tx().sign_and_submit_then_watch(&renew_call, &bob, bob_params).await?;
+	let (receipt_alice, receipt_bob) =
+		tokio::time::timeout(transaction_timeout(WaitFor::InBlock), async {
+			futures::try_join!(
+				sdk.force_renew((block, index), &alice, WaitFor::InBlock),
+				sdk.force_renew((block, index), &bob, WaitFor::InBlock),
+			)
+		})
+		.await
+		.map_err(|_| anyhow!("force_renew pair timed out"))??;
 
-	let (hash_alice, _) = tokio::time::timeout(
-		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
-		wait_for_in_best_block(alice_progress),
-	)
-	.await
-	.map_err(|_| anyhow!("alice renew timed out"))??;
-	let (hash_bob, _) = tokio::time::timeout(
-		Duration::from_secs(TRANSACTION_TIMEOUT_SECS),
-		wait_for_in_best_block(bob_progress),
-	)
-	.await
-	.map_err(|_| anyhow!("bob renew timed out"))??;
-
-	let block_alice = canonical_store_block(client, hash_alice, content_hash).await?;
-	let block_bob = canonical_store_block(client, hash_bob, content_hash).await?;
+	let hash_alice = receipt_block_hash(&receipt_alice.block_hash)?;
+	let hash_bob = receipt_block_hash(&receipt_bob.block_hash)?;
+	let block_alice = canonical_store_block(sdk.api(), hash_alice, content_hash).await?;
+	let block_bob = canonical_store_block(sdk.api(), hash_bob, content_hash).await?;
 	tracing::info!(
 		"force_renew(block={}, idx={}) canonical inclusions: alice={}, bob={}",
 		block,
@@ -625,23 +455,13 @@ pub async fn submit_renew_pair(
 
 /// Signed one-shot `renew(ContentHash)` from Alice: schedules a single prepaid renewal
 /// that fires at the `RetentionPeriod` boundary, then unregisters.
-pub async fn submit_renew_one_shot(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-	nonce: u64,
-) -> Result<()> {
-	let signer = dev::alice();
-	let entry = Value::unnamed_variant("ContentHash", [Value::from_bytes(content_hash.as_slice())]);
-	let call = tx("DataRenewal", "renew", vec![entry]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+pub async fn submit_renew_one_shot(sdk: &TransactionClient, content_hash: &[u8; 32]) -> Result<()> {
+	tracing::info!("Submitting one-shot renew...");
 
-	tracing::info!("Submitting one-shot renew (nonce={})...", nonce);
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
+	tokio::time::timeout(
+		transaction_timeout(WaitFor::InBlock),
+		sdk.renew(*content_hash, &dev::alice(), WaitFor::InBlock),
+	)
 	.await
 	.map_err(|_| anyhow!("renew transaction timed out"))??;
 
@@ -652,49 +472,30 @@ pub async fn submit_renew_one_shot(
 /// Signed `force_renew(ContentHash)` from Alice — synchronous renewal at dispatch. Returns
 /// the inclusion block read from `TransactionByContentHash` at the best-block hash (see
 /// [`canonical_store_block`]); callers re-anchor against finality for cycle math.
-pub async fn submit_force_renew(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-	nonce: u64,
-) -> Result<u64> {
-	let signer = dev::alice();
-	let entry = Value::unnamed_variant("ContentHash", [Value::from_bytes(content_hash.as_slice())]);
-	let call = tx("DataRenewal", "force_renew", vec![entry]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+pub async fn submit_force_renew(sdk: &TransactionClient, content_hash: &[u8; 32]) -> Result<u64> {
+	tracing::info!("Submitting force_renew...");
 
-	tracing::info!("Submitting force_renew (nonce={})...", nonce);
+	let receipt = tokio::time::timeout(
+		transaction_timeout(WaitFor::InBlock),
+		sdk.force_renew(*content_hash, &dev::alice(), WaitFor::InBlock),
+	)
+	.await
+	.map_err(|_| anyhow!("force_renew transaction timed out"))??;
 
-	let (block_hash, _events) =
-		tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-			let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
-			wait_for_in_best_block(progress).await
-		})
-		.await
-		.map_err(|_| anyhow!("force_renew transaction timed out"))??;
-
-	let block_number = canonical_store_block(client, block_hash, content_hash).await?;
+	let block_hash = receipt_block_hash(&receipt.block_hash)?;
+	let block_number = canonical_store_block(sdk.api(), block_hash, content_hash).await?;
 	tracing::info!("force_renew included at block {}", block_number);
 	Ok(block_number)
 }
 
 /// Signed `enable_auto_renew(content_hash)` from Alice.
-pub async fn enable_auto_renew(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-	nonce: u64,
-) -> Result<()> {
-	let signer = dev::alice();
-	let call =
-		tx("DataRenewal", "enable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+pub async fn enable_auto_renew(sdk: &TransactionClient, content_hash: &[u8; 32]) -> Result<()> {
+	tracing::info!("Submitting enable_auto_renew...");
 
-	tracing::info!("Submitting enable_auto_renew (nonce={})...", nonce);
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
+	tokio::time::timeout(
+		transaction_timeout(WaitFor::InBlock),
+		sdk.enable_auto_renew(*content_hash, &dev::alice(), WaitFor::InBlock),
+	)
 	.await
 	.map_err(|_| anyhow!("enable_auto_renew transaction timed out"))??;
 
@@ -704,23 +505,13 @@ pub async fn enable_auto_renew(
 
 /// Signed `disable_auto_renew(content_hash)` from Alice. Required at the end of
 /// shared-harness tests to avoid renewals consuming Alice's authorization indefinitely.
-pub async fn disable_auto_renew(
-	client: &OnlineClient<SubstrateConfig>,
-	content_hash: &[u8; 32],
-	nonce: u64,
-) -> Result<()> {
-	let signer = dev::alice();
-	let call =
-		tx("DataRenewal", "disable_auto_renew", vec![Value::from_bytes(content_hash.as_slice())]);
-	let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+pub async fn disable_auto_renew(sdk: &TransactionClient, content_hash: &[u8; 32]) -> Result<()> {
+	tracing::info!("Submitting disable_auto_renew...");
 
-	tracing::info!("Submitting disable_auto_renew (nonce={})...", nonce);
-
-	tokio::time::timeout(Duration::from_secs(TRANSACTION_TIMEOUT_SECS), async {
-		let progress = client.tx().sign_and_submit_then_watch(&call, &signer, params).await?;
-		wait_for_in_best_block(progress).await?;
-		Ok::<_, anyhow::Error>(())
-	})
+	tokio::time::timeout(
+		transaction_timeout(WaitFor::InBlock),
+		sdk.disable_auto_renew(*content_hash, &dev::alice(), WaitFor::InBlock),
+	)
 	.await
 	.map_err(|_| anyhow!("disable_auto_renew transaction timed out"))??;
 

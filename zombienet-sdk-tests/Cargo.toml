@@ -29,7 +29,9 @@ twox-hash = "2"
 zombienet-sdk = "0.6.0"
 zombienet-orchestrator = "0.6.0"
 
-# Subxt for transaction submission (must match zombienet-sdk's version)
+bulletin-sdk-rust = { workspace = true, features = ["std"] }
+
+# Subxt for transaction submission (must match the version of zombienet-sdk and bulletin-sdk-rust)
 subxt = { version = "0.44", default-features = false, features = ["jsonrpsee", "native"] }
 subxt-signer = { version = "0.44", features = ["sr25519"] }
 

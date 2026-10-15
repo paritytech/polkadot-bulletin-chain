@@ -1998,6 +1998,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake2",
+ "bulletin-sdk-rust",
  "bytes",
  "cid",
  "futures",
