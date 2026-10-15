@@ -520,13 +520,23 @@ where
 	}
 }
 
+/// Priority bonus for a signer's next transaction. Each transaction of the signer ahead of it in
+/// the pool lowers the bonus by one.
 pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
 const _: () = assert!(MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST);
 
+/// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus the number of the
+/// signer's transactions ahead of this one in the pool. Each signer's next transaction ranks first,
+/// so the pool alternates between signers. Unsigned transactions get the full bonus.
+///
+/// Uses the identifier, encoding and metadata type of `CheckNonce`, so the transaction format stays
+/// the same. Skips the bonus for `TransactionSource::InBlock`, where the runtime ignores priority,
+/// so the weight equals the `CheckNonce` weight.
 #[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking)]
 pub struct NonceCheckWithQueueBonus<T: frame_system::Config>(pub frame_system::CheckNonce<T>);
 
 impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
+	/// Creates the extension for a transaction with `nonce`.
 	pub fn new(nonce: T::Nonce) -> Self {
 		Self(frame_system::CheckNonce::from(nonce))
 	}
