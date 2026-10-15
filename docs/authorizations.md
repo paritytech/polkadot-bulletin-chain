@@ -38,7 +38,7 @@ The renew-family extrinsics:
 - `force_renew(entry: TransactionRef)` — synchronous renewal. `TransactionRef::Position { block, index }` or `TransactionRef::ContentHash(_)`.
 - `renew(entry: TransactionRef)` — one-shot scheduler. Pre-pays the renewal at registration (same charge as `force_renew`); cycle delivers without re-charging.
 - `enable_auto_renew(content_hash)` — recurring scheduler. Pre-pays the first cycle at registration (same charge as `force_renew`); cycle 1 delivers without re-charging, cycle 2 onward charges per cycle.
-- `disable_auto_renew(content_hash)` — cancels the registration. Signed callers are rejected with `CannotDisablePrepaidAutoRenewal` while the registration is in its prepaid window (`paid: true`); they must wait for the first cycle to consume the prepayment. Root can disable regardless (governance/cleanup), but the prepayment is forfeit.
+- `disable_auto_renew(content_hash)` — cancels the registration. While the registration is in its prepaid window (`paid: true`), the `RenewalLeaves` transaction extension rejects a signed caller's call as an invalid transaction (`InvalidTransaction::Custom(12)`, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`), so it never reaches a block; the dispatchable repeats the check as `CannotDisablePrepaidAutoRenewal`. Signed callers must wait for the first cycle to consume the prepayment. Root can disable regardless (governance/cleanup), but the prepayment is forfeit.
 
 `store`, `store_with_cid_config`, `force_renew`, `renew`, `enable_auto_renew`, and `disable_auto_renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
