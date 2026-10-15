@@ -128,18 +128,18 @@ describe("ensureAuthorized() pre-flight", () => {
       },
     }
 
-    it("best-block authorization with the default confirmation", async () => {
+    it("best-block authorization with the default wait level", async () => {
       await expect(
         callEnsureAuthorized(bestBlockOnlyAuthorization, 100),
-      ).resolves.toBeUndefined()
+      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
     })
 
-    it("best-block authorization with finalized confirmation", async () => {
+    it("best-block authorization with waitFor in_block", async () => {
       await expect(
         callEnsureAuthorized(bestBlockOnlyAuthorization, 100, {
-          authorizationConfirmation: "finalized",
+          waitFor: "in_block",
         }),
-      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
+      ).resolves.toBeUndefined()
     })
 
     it("expiry compared at the block of the authorization read", async () => {
@@ -159,14 +159,14 @@ describe("ensureAuthorized() pre-flight", () => {
           },
         },
       }
-      await expect(callEnsureAuthorized(expiringAtBest)).rejects.toMatchObject({
-        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
-      })
+      await expect(
+        callEnsureAuthorized(expiringAtBest),
+      ).resolves.toBeUndefined()
       await expect(
         callEnsureAuthorized(expiringAtBest, undefined, {
-          authorizationConfirmation: "finalized",
+          waitFor: "in_block",
         }),
-      ).resolves.toBeUndefined()
+      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
     })
 
     it("throws UNSUPPORTED_OPERATION when api.query is unavailable", async () => {

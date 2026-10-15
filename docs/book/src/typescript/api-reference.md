@@ -69,7 +69,7 @@ interface ClientConfig {
   authorizerSigner?: SignerTxCreator;
   blockLimits?: BlockLimits;          // chain block weight/length caps
   submissionStrategy?: "nonce-tracking"; // the only strategy
-  authorizationConfirmation?: WaitFor; // block that ensureAuthorized() reads: 'in_block' = best (default), 'finalized'
+  waitFor?: WaitFor;                  // default 'finalized': wait level of every builder without withWaitFor, and the block the SDK's own reads use ('in_block' = best block)
 }
 ```
 
@@ -81,7 +81,7 @@ Returned by `submit()`.
 
 ```typescript
 class SubmitBuilder {
-  withWaitFor(waitFor: WaitFor): this;     // 'in_block' | 'finalized' (default)
+  withWaitFor(waitFor: WaitFor): this;     // 'in_block' | 'finalized'; default: ClientConfig.waitFor
   withCallback(cb: UploadCallback): this;  // per-item UploadEvent
   ensureAuthorized(): this;                // pre-flight authorization check
   asUnsigned(): this;                      // preimage-authorized, no signer
@@ -95,7 +95,7 @@ Returned by the renewal and `removeExpired*` methods.
 
 ```typescript
 class CallBuilder {
-  withWaitFor(waitFor: WaitFor): this;
+  withWaitFor(waitFor: WaitFor): this;     // default: ClientConfig.waitFor
   withCallback(cb: ProgressCallback): this;
   send(): Promise<TransactionReceipt>;
 }
@@ -107,7 +107,7 @@ Returned by the authorization methods. A separate class with the same methods as
 
 ```typescript
 class AuthCallBuilder {
-  withWaitFor(waitFor: WaitFor): this;
+  withWaitFor(waitFor: WaitFor): this;     // default: ClientConfig.waitFor
   withCallback(cb: ProgressCallback): this;
   withSudo(): this; // wrap the call in Sudo.sudo
   send(): Promise<TransactionReceipt>;

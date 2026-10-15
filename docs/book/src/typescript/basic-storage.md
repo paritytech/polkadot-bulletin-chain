@@ -53,14 +53,14 @@ const { cids } = await client
 ```typescript
 const { cids } = await client
   .submit(estimate, src)
-  .withWaitFor('finalized')        // 'in_block' | 'finalized' (default)
+  .withWaitFor('finalized')        // 'in_block' | 'finalized'; default: ClientConfig.waitFor
   .ensureAuthorized()              // pre-flight: fail fast if not authorized
   .withCallback((ev) => console.log(ev.type, ev.index))
   .send();
 ```
 
 - `.asUnsigned()` — submit preimage-authorized bare extrinsics (no signer). See [Authorization](./authorization.md).
-- `.ensureAuthorized()` — verifies an `Authorizations` entry exists and isn't expired before submitting. It reads the best block, so an authorization sent with `'in_block'` passes right away; set `authorizationConfirmation: 'finalized'` on the client to read the finalized block instead.
+- `.ensureAuthorized()` — verifies an `Authorizations` entry exists and isn't expired before submitting. It reads the finalized block, so authorize with `'finalized'` before the first upload. With `waitFor: 'in_block'` on the client it reads the best block instead, and an authorization sent with `'in_block'` passes right away.
 
 ## Result
 

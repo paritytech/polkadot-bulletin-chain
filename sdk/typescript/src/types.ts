@@ -90,7 +90,7 @@ export interface StoreOptions {
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**
-   * What to wait for before returning (default: "in_block")
+   * What to wait for before returning (default: "finalized")
    * - "in_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
@@ -103,7 +103,7 @@ export interface StoreOptions {
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitFor: "in_block",
+  waitFor: "finalized",
 }
 
 /**
@@ -553,7 +553,7 @@ export interface ClientConfig {
    * without changing this shape.
    */
   submissionStrategy?: "nonce-tracking"
-  authorizationConfirmation?: WaitFor
+  waitFor?: WaitFor
 }
 
 /**
@@ -579,7 +579,7 @@ export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
   blockLimits: DEFAULT_BLOCK_LIMITS,
   submissionStrategy: "nonce-tracking",
-  authorizationConfirmation: "in_block",
+  waitFor: "finalized",
   // `providers` (factory) and `authorizerSigner` are intentionally
   // not defaulted — see ResolvedClientConfig.
 }

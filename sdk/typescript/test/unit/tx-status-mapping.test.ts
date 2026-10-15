@@ -42,7 +42,7 @@ const block = { hash: "0xbe57", number: 10, index: 0 }
 
 // Single-extrinsic calls (authorize, renew, remove-expired) report progress
 // through the PAPI event stream; uploads use the pipeline's UploadStatus.
-async function setup() {
+async function setup(config: Record<string, unknown> = {}) {
   observers.length = 0
   const { BulletinClient } = await import("../../src/client")
   const client = new BulletinClient({
@@ -51,6 +51,7 @@ async function setup() {
     providers: () => [{} as any],
     // biome-ignore lint/suspicious/noExplicitAny: signer stub
     uploadSigner: { publicKey: new Uint8Array(32) } as any,
+    ...config,
   })
   const statuses: string[] = []
   const onProgress = (ev: ProgressEvent) => {
@@ -117,5 +118,42 @@ describe("PAPI tx event to progress mapping", () => {
       TxStatus.Broadcasted,
       TxStatus.InBlock,
     ])
+  })
+})
+
+describe("default wait level of single-extrinsic calls", () => {
+  const firstObserver = () =>
+    vi.waitFor(() => {
+      const first = observers[0]
+      if (!first) throw new Error("no subscription yet")
+      return first
+    })
+
+  it("finalized without a client waitFor", async () => {
+    const { client } = await setup()
+    let settled = false
+    const pending = client
+      .removeExpiredAccountAuthorization("5Grw")
+      .send()
+      .finally(() => {
+        settled = true
+      })
+
+    const observer = await firstObserver()
+    observer.next({ type: "inBestBlock", txHash: "0x01", block, events: [] })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(settled).toBe(false)
+
+    observer.next({ type: "finalized", txHash: "0x01", block, events: [] })
+    await expect(pending).resolves.toMatchObject({ blockHash: block.hash })
+  })
+
+  it("in-block with client waitFor in_block", async () => {
+    const { client } = await setup({ waitFor: "in_block" })
+    const pending = client.removeExpiredAccountAuthorization("5Grw").send()
+
+    const observer = await firstObserver()
+    observer.next({ type: "inBestBlock", txHash: "0x01", block, events: [] })
+    await expect(pending).resolves.toMatchObject({ blockHash: block.hash })
   })
 })

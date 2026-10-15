@@ -253,7 +253,7 @@ export interface TransactionReceipt {
 export interface CallOptions {
   /** Callback to receive transaction status events */
   onProgress?: ProgressCallback
-  /** What to wait for before returning (default: "in_block") */
+  /** What to wait for before returning (default: the client's `waitFor`) */
   waitFor?: WaitFor
 }
 
@@ -420,7 +420,7 @@ export interface BulletinClientInterface {
  */
 abstract class BaseUploadBuilder<TResult> {
   protected callback?: UploadCallback
-  protected waitFor: WaitFor = "finalized"
+  protected waitFor?: WaitFor
   protected checkAuth = false
   protected unsigned = false
 
@@ -470,7 +470,7 @@ abstract class BaseUploadBuilder<TResult> {
 
 /** Dispatch callback for the `submit(estimate, source)` execution path. */
 type SubmitDispatch = (
-  waitFor: WaitFor,
+  waitFor: WaitFor | undefined,
   onEvent: UploadCallback | undefined,
   checkAuth: boolean,
   unsigned: boolean,
@@ -764,7 +764,7 @@ export class BulletinClient implements BulletinClientInterface {
       chunkingThreshold: options.chunkingThreshold,
       createManifest: options.createManifest,
       submissionStrategy: options.submissionStrategy,
-      authorizationConfirmation: options.authorizationConfirmation,
+      waitFor: options.waitFor,
     })
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
@@ -797,10 +797,8 @@ export class BulletinClient implements BulletinClientInterface {
     }
   }
 
-  private authorizationBlock(): "best" | "finalized" {
-    return this.config.authorizationConfirmation === "finalized"
-      ? "finalized"
-      : "best"
+  private readBlock(): "best" | "finalized" {
+    return this.config.waitFor === "in_block" ? "best" : "finalized"
   }
 
   /**
@@ -823,7 +821,7 @@ export class BulletinClient implements BulletinClientInterface {
     }
     this.requireSigner("ensureAuthorized()")
     const address = ss58Address(this.signer!.publicKey)
-    const at = this.authorizationBlock()
+    const at = this.readBlock()
     const auth =
       await this.api.query.TransactionStorage.Authorizations.getValue(
         { type: "Account", value: address },
@@ -877,7 +875,7 @@ export class BulletinClient implements BulletinClientInterface {
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
-    const at = this.authorizationBlock()
+    const at = this.readBlock()
     const sysNumber = (
       query as {
         System?: {
@@ -1186,7 +1184,7 @@ export class BulletinClient implements BulletinClientInterface {
     signerOverride?: SignerTxCreator,
   ): Promise<TransactionReceipt> {
     try {
-      const waitFor = options?.waitFor ?? "in_block"
+      const waitFor = options?.waitFor ?? this.config.waitFor
       const result = await this.signAndSubmitWithProgress(
         tx,
         options?.onProgress,
@@ -1218,7 +1216,14 @@ export class BulletinClient implements BulletinClientInterface {
    */
   submit(estimate: StreamEstimate, source: SeekableSource): SubmitBuilder {
     return new SubmitBuilder((wf, oe, ca, un) =>
-      this.submitEstimateImpl(estimate, source, wf, oe, ca, un),
+      this.submitEstimateImpl(
+        estimate,
+        source,
+        wf ?? this.config.waitFor,
+        oe,
+        ca,
+        un,
+      ),
     )
   }
 
@@ -2026,7 +2031,7 @@ export class BulletinClient implements BulletinClientInterface {
         : itemCids.map((_, i) => i)
       const uniqueHashes = uniqueHashIndexes.map((i) => hashesHex[i] as string)
       const entries = await Promise.all(
-        uniqueHashes.map((h) => readStoredAt(this.api, h)),
+        uniqueHashes.map((h) => readStoredAt(this.api, h, this.readBlock())),
       )
       const onChainHashes = new Set<string>()
       for (let k = 0; k < uniqueHashes.length; k++) {
