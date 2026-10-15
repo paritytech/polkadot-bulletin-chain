@@ -1255,12 +1255,8 @@ fn build_unsigned(
 	Ok(unsigned.into_encoded())
 }
 
-/// Lowercase `0x`-prefixed hex of an H256, for event block-hash strings.
-fn h256_hex(h: H256) -> String {
-	let mut s = String::with_capacity(66);
-	s.push_str("0x");
-	for b in h.0.iter() {
-		s.push_str(&format!("{b:02x}"));
-	}
-	s
+/// Full lowercase `0x`-prefixed hex of an H256. `Display` prints an
+/// abbreviated `0x1234…abcd` form that cannot be parsed back into a hash.
+pub(crate) fn h256_hex(hash: H256) -> String {
+	format!("{hash:#x}")
 }

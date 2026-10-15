@@ -39,6 +39,19 @@ fn ws2() -> String {
 	std::env::var("BULLETIN_RPC_URL_2").unwrap_or_else(|_| "ws://localhost:12346".to_string())
 }
 
+/// Receipts must carry the full block hash, so callers can look up the inclusion block.
+async fn receipt_block_number(client: &TransactionClient, block_hash: &str) -> u32 {
+	use std::str::FromStr;
+	let hash = subxt::utils::H256::from_str(block_hash).expect("receipt block hash is full hex");
+	client
+		.api()
+		.blocks()
+		.at(hash)
+		.await
+		.expect("receipt block hash resolves")
+		.number()
+}
+
 /// Upload in-memory items through the single `estimate_upload` → `submit`
 /// primitive: plan the items (no manifest), then submit against a
 /// `blob_from_items` source. Mirrors how the TS SDK uploads items.
@@ -851,6 +864,7 @@ async fn authorize_accounts_batched() {
 		receipts[0].block_hash, receipts[1].block_hash,
 		"single batched tx → both in one block"
 	);
+	receipt_block_number(&client, &receipts[0].block_hash).await;
 	assert!(
 		client.query_account_authorization(&bob).await.expect("query bob").is_some(),
 		"bob authorized"
@@ -1004,7 +1018,8 @@ async fn renew_roundtrip_via_registry() {
 		.renew((block, index), &alice, WaitFor::Finalized)
 		.await
 		.expect("renew via registry dispatch");
-	assert!(!receipt.block_hash.is_empty(), "renew included");
+	let renew_block = receipt_block_number(&client, &receipt.block_hash).await;
+	assert!(renew_block > block, "renew included after the store block");
 	println!("renew OK: slot ({block}, {index}) renewed in block {}", receipt.block_hash);
 }
 

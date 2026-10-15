@@ -13,7 +13,7 @@ use crate::{
 	},
 	cid::{calculate_cid_with_config, cid_to_bytes, CidCodec, ContentHash, HashingAlgorithm},
 	compat,
-	pipeline::{run_resolved, ResolvedItem, UploadConfig, UploadResult},
+	pipeline::{h256_hex, run_resolved, ResolvedItem, UploadConfig, UploadResult},
 	types::{AuthorizationScope, Error, ProgressCallback, ProgressEvent, Result, WaitFor},
 };
 use bulletin_transaction_storage_primitives::TransactionRef;
@@ -550,8 +550,8 @@ impl TransactionClient {
 								cb(ProgressEvent::tx_broadcasted());
 							},
 						TxStatus::InBestBlock(in_block) => {
-							let block_hash = in_block.block_hash().to_string();
-							let extrinsic_hash = in_block.extrinsic_hash().to_string();
+							let block_hash = h256_hex(in_block.block_hash());
+							let extrinsic_hash = h256_hex(in_block.extrinsic_hash());
 
 							if let Some(ref cb) = progress_callback {
 								let block_number =
@@ -574,8 +574,8 @@ impl TransactionClient {
 							}
 						},
 						TxStatus::InFinalizedBlock(in_block) => {
-							let block_hash = in_block.block_hash().to_string();
-							let extrinsic_hash = in_block.extrinsic_hash().to_string();
+							let block_hash = h256_hex(in_block.block_hash());
+							let extrinsic_hash = h256_hex(in_block.extrinsic_hash());
 
 							if let Some(ref cb) = progress_callback {
 								let block_number =
