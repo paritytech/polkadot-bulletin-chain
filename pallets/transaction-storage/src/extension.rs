@@ -28,7 +28,7 @@ use polkadot_sdk_frame::{
 	prelude::*,
 	traits::{
 		AsSystemOriginSigner, Dispatchable, Implication, OriginTrait, PostDispatchInfoOf,
-		UniqueSaturatedInto,
+		TransactionExtensionMetadata, UniqueSaturatedInto,
 	},
 };
 
@@ -584,6 +584,10 @@ where
 		<frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Implicit;
 	type Val = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Val;
 	type Pre = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Pre;
+
+	fn metadata() -> Vec<TransactionExtensionMetadata> {
+		frame_system::CheckNonce::<T>::metadata()
+	}
 
 	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
 		self.0.implicit()
