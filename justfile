@@ -140,7 +140,7 @@ test-zombienet-auto-renew runtime="westend" group="all":
         --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
         -- --test-threads=1 --nocapture "${filter_args[@]}"
 
-# Zombienet HOP-promotion suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
+# Zombienet HOP suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
 test-zombienet-hop runtime="westend" filter="parachain_hop":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -155,14 +155,15 @@ test-zombienet-hop runtime="westend" filter="parachain_hop":
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
     # A filter matching zero tests exits 0; fail loudly instead (e.g. a newly added
     # test whose name falls outside the filter would otherwise go silently green).
-    matched=$(cargo test --release -p bulletin-chain-zombienet-sdk-tests \
+    test_list=$(cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-hop-tests \
-        -- --list "{{filter}}" | grep -c ': test$' || true)
-    if [ "$matched" -eq 0 ]; then
+        -- --list "{{filter}}")
+    match_count=$(grep -c ': test$' <<< "$test_list" || true)
+    if [ "$match_count" -eq 0 ]; then
         echo "filter '{{filter}}' matched no tests" >&2
         exit 1
     fi
-    echo "running $matched HOP test(s) matching '{{filter}}'"
+    echo "running $match_count HOP test(s) matching '{{filter}}'"
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-hop-tests \
         "{{filter}}" \

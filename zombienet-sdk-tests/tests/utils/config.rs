@@ -15,7 +15,7 @@ pub const IDLE_VALUE: f64 = 0.0;
 
 // HOP (`sc-hop`) Prometheus metrics. The zombienet metrics parser indexes every series
 // both with and without the `chain` label, so labelled series are addressed by their
-// remaining labels alone — in the order `sc-hop` declares them.
+// remaining labels alone, in alphabetical order.
 pub const HOP_POOL_ENTRIES_METRIC: &str = "substrate_hop_pool_entries";
 pub const HOP_POOL_BYTES_METRIC: &str = "substrate_hop_pool_bytes";
 pub const HOP_POOL_MAX_BYTES_METRIC: &str = "substrate_hop_pool_max_bytes";
@@ -28,26 +28,12 @@ pub const HOP_REMOVED_EXPIRED_PROMOTED_METRIC: &str =
 	"substrate_hop_pool_removed_total{reason=\"expired_promoted\"}";
 pub const HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC: &str =
 	"substrate_hop_pool_removed_total{reason=\"expired_unpromoted\"}";
-pub const HOP_SUBMIT_NOT_AUTHORIZED_METRIC: &str =
-	"substrate_hop_rpc_errors_total{method=\"hop_submit\",reason=\"not_authorized\"}";
-// `claim`/`ack` map `NotRecipient` to `NotFound` so callers cannot probe whether a hash
-// exists, so `not_found` is the reason for both an unknown hash and a wrong signer.
-pub const HOP_CLAIM_NOT_FOUND_METRIC: &str =
-	"substrate_hop_rpc_errors_total{method=\"hop_claim\",reason=\"not_found\"}";
-pub const HOP_ACK_NOT_FOUND_METRIC: &str =
-	"substrate_hop_rpc_errors_total{method=\"hop_ack\",reason=\"not_found\"}";
 pub const HOP_REMOVED_CORRUPT_METRIC: &str = "substrate_hop_pool_removed_total{reason=\"corrupt\"}";
 pub const HOP_REMOVED_STARTUP_DROPPED_METRIC: &str =
 	"substrate_hop_pool_removed_total{reason=\"startup_dropped\"}";
 
-/// `substrate_hop_rpc_errors_total{method="hop_submit",reason="<reason>"}`.
-pub fn hop_submit_error_metric(reason: &str) -> String {
-	format!("substrate_hop_rpc_errors_total{{method=\"hop_submit\",reason=\"{reason}\"}}")
-}
-
-/// `substrate_hop_rpc_errors_total{method="hop_claim",reason="<reason>"}`.
-pub fn hop_claim_error_metric(reason: &str) -> String {
-	format!("substrate_hop_rpc_errors_total{{method=\"hop_claim\",reason=\"{reason}\"}}")
+pub fn hop_rpc_error_metric(method: &str, reason: &str) -> String {
+	format!("substrate_hop_rpc_errors_total{{method=\"{method}\",reason=\"{reason}\"}}")
 }
 
 // Environment variables

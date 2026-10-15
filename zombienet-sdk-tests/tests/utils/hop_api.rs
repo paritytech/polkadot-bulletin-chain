@@ -8,11 +8,12 @@
 //! changed argument list, fails here instead of silently mis-encoding positional bytes.
 
 use super::hop_rpc::submit_signing_payload;
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use subxt::{
 	config::substrate::SubstrateConfig,
 	dynamic::Value,
 	ext::{codec::Decode, scale_value::Composite},
+	utils::H256,
 	OnlineClient,
 };
 use subxt_signer::sr25519::Keypair;
@@ -26,18 +27,18 @@ fn sr25519_variant(bytes: &[u8]) -> Value {
 
 async fn call(
 	client: &OnlineClient<SubstrateConfig>,
+	block_hash: Option<H256>,
 	method: &str,
 	args: Vec<Value>,
 ) -> Result<subxt::dynamic::DecodedValueThunk> {
-	let payload = subxt::dynamic::runtime_api_call(HOP_API, method, args);
-	client
-		.runtime_api()
-		.at_latest()
+	let runtime_api = match block_hash {
+		Some(block_hash) => client.runtime_api().at(block_hash),
+		None => client.runtime_api().at_latest().await.context("runtime_api at_latest")?,
+	};
+	runtime_api
+		.call(subxt::dynamic::runtime_api_call(HOP_API, method, args))
 		.await
-		.map_err(|e| anyhow!("runtime_api at_latest: {e}"))?
-		.call(payload)
-		.await
-		.map_err(|e| anyhow!("{HOP_API}_{method}: {e}"))
+		.with_context(|| format!("{HOP_API}_{method}"))
 }
 
 /// `HopRuntimeApi::can_account_promote`. `data_len` is accepted but ignored by the
@@ -48,29 +49,30 @@ pub async fn can_account_promote(
 	data_len: u32,
 ) -> Result<bool> {
 	let args = vec![Value::from_bytes(account), Value::u128(data_len as u128)];
-	call(client, "can_account_promote", args)
+	call(client, None, "can_account_promote", args)
 		.await?
 		.as_type::<bool>()
-		.map_err(|e| anyhow!("decode can_account_promote: {e}"))
+		.context("decode can_account_promote")
 }
 
 /// `HopRuntimeApi::max_promotion_size`.
 pub async fn max_promotion_size(client: &OnlineClient<SubstrateConfig>) -> Result<u32> {
-	call(client, "max_promotion_size", vec![])
+	call(client, None, "max_promotion_size", vec![])
 		.await?
 		.as_type::<u32>()
-		.map_err(|e| anyhow!("decode max_promotion_size: {e}"))
+		.context("decode max_promotion_size")
 }
 
 /// `HopRuntimeApi::is_promoted_on_chain`.
 pub async fn is_promoted_on_chain(
 	client: &OnlineClient<SubstrateConfig>,
+	block_hash: H256,
 	content_hash: &[u8; 32],
 ) -> Result<bool> {
-	call(client, "is_promoted_on_chain", vec![Value::from_bytes(content_hash)])
+	call(client, Some(block_hash), "is_promoted_on_chain", vec![Value::from_bytes(content_hash)])
 		.await?
 		.as_type::<bool>()
-		.map_err(|e| anyhow!("decode is_promoted_on_chain: {e}"))
+		.context("decode is_promoted_on_chain")
 }
 
 /// `HopRuntimeApi::create_promotion_extrinsic`, returning the encoded extrinsic.
@@ -93,7 +95,6 @@ pub async fn create_promotion_extrinsic(
 		Value::u128(submit_timestamp_ms as u128),
 	];
 
-	let thunk = call(client, "create_promotion_extrinsic", args).await?;
-	Vec::<u8>::decode(&mut thunk.encoded())
-		.map_err(|e| anyhow!("decode create_promotion_extrinsic: {e}"))
+	let thunk = call(client, None, "create_promotion_extrinsic", args).await?;
+	Vec::<u8>::decode(&mut thunk.encoded()).context("decode create_promotion_extrinsic")
 }

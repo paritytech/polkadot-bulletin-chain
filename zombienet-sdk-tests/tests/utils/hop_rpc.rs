@@ -7,10 +7,13 @@
 //! it in.
 
 use super::crypto::blake2_256;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use subxt::{
 	backend::rpc::RpcClient,
-	ext::subxt_rpcs::client::{rpc_params, RpcParams},
+	ext::subxt_rpcs::{
+		client::{rpc_params, RpcParams},
+		Error as RpcError,
+	},
 };
 use subxt_signer::sr25519::Keypair;
 
@@ -20,6 +23,10 @@ const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
 const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
 /// Must remain byte-identical to `sc_hop::types::HOP_ACK_CONTEXT`.
 const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
+
+pub const HOP_POOL_FULL_ERROR_CODE: i32 = 1002;
+pub const HOP_USER_QUOTA_ERROR_CODE: i32 = 1011;
+pub const HOP_RATE_LIMIT_ERROR_CODE: i32 = 1020;
 
 /// `blake2_256(HOP_SUBMIT_CONTEXT || blake2_256(data) || submit_timestamp_ms.to_le_bytes())` —
 /// must remain byte-identical to the pallet's reconstruction.
@@ -54,8 +61,15 @@ fn hex0x(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(what: &str, hex: &str) -> Result<Vec<u8>> {
-	let stripped = hex.strip_prefix("0x").unwrap_or(hex);
-	hex::decode(stripped).map_err(|e| anyhow!("{what} returned non-hex payload: {e}"))
+	let hex_digits = hex.strip_prefix("0x").unwrap_or(hex);
+	hex::decode(hex_digits).with_context(|| format!("{what} returned non-hex payload"))
+}
+
+pub fn hop_rpc_error_code(error: &anyhow::Error) -> Option<i32> {
+	match error.downcast_ref::<RpcError>()? {
+		RpcError::User(user_error) => Some(user_error.code),
+		_ => None,
+	}
 }
 
 /// Submit `data` to a collator's HOP data pool via the `hop_submit` JSON-RPC. Returns
@@ -79,10 +93,8 @@ pub async fn hop_submit(
 	}
 	params.push(submit_timestamp_ms).map_err(|e| anyhow!("encode ts param: {e}"))?;
 
-	let value: serde_json::Value = rpc
-		.request("hop_submit", params)
-		.await
-		.map_err(|e| anyhow!("hop_submit RPC: {e}"))?;
+	let value: serde_json::Value =
+		rpc.request("hop_submit", params).await.context("hop_submit RPC")?;
 	value
 		.get("poolStatus")
 		.and_then(|p| p.get("entryCount"))
@@ -103,12 +115,12 @@ pub async fn hop_pool_status(rpc: &RpcClient) -> Result<HopPoolStatus> {
 	let value: serde_json::Value = rpc
 		.request("hop_poolStatus", rpc_params![])
 		.await
-		.map_err(|e| anyhow!("hop_poolStatus RPC: {e}"))?;
+		.context("hop_poolStatus RPC")?;
 
 	let field = |name: &str| {
 		value
 			.get(name)
-			.and_then(|n| n.as_u64())
+			.and_then(serde_json::Value::as_u64)
 			.ok_or_else(|| anyhow!("hop_poolStatus response missing {name}: {value}"))
 	};
 	Ok(HopPoolStatus {
@@ -131,7 +143,7 @@ pub async fn hop_claim(
 	let hex: String = rpc
 		.request("hop_claim", rpc_params![hex0x(content_hash), hex0x(&signature_scale)])
 		.await
-		.map_err(|e| anyhow!("hop_claim RPC: {e}"))?;
+		.context("hop_claim RPC")?;
 	decode_hex("hop_claim", &hex)
 }
 
@@ -141,7 +153,7 @@ pub async fn hop_claim_raw(rpc: &RpcClient, raw_hash: &[u8]) -> Result<Vec<u8>> 
 	let hex: String = rpc
 		.request("hop_claim", rpc_params![hex0x(raw_hash), hex0x(&sr25519_scale(&[0u8; 64]))])
 		.await
-		.map_err(|e| anyhow!("hop_claim RPC: {e}"))?;
+		.context("hop_claim RPC")?;
 	decode_hex("hop_claim", &hex)
 }
 
@@ -156,7 +168,7 @@ pub async fn hop_ack(rpc: &RpcClient, recipient: &Keypair, content_hash: &[u8; 3
 		rpc_params![hex0x(content_hash), hex0x(&signature_scale)],
 	)
 	.await
-	.map_err(|e| anyhow!("hop_ack RPC: {e}"))?;
+	.context("hop_ack RPC")?;
 	Ok(())
 }
 

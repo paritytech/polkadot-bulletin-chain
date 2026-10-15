@@ -74,7 +74,7 @@ just test-zombienet-auto-renew
 # Single auto-renew test:
 just test-zombienet-auto-renew westend parachain_auto_renew_quota_exhaustion_test
 
-# HOP promotion suite:
+# HOP suite:
 just test-zombienet-hop
 ```
 
@@ -103,7 +103,9 @@ are resource-intensive.
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
 | `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
 | `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
-| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. |
+| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. Also asserts the `substrate_hop_*` metrics and `HopRuntimeApi`. |
+| `parachain_hop_unpromoted_expiry_test` | - | no | A pooled blob whose account authorization expires before the promotion window ages out unpromoted and is counted in `substrate_hop_pool_removed_total{reason="expired_unpromoted"}`. |
+| `parachain_hop_pool_integrity_test` | - | no | `substrate_hop_*` counts malformed, duplicate, already-claimed, rate-limited and over-capacity requests, a corrupt blob file and an orphan `.meta` file under their reason labels. |
 
 ## Environment variables
 

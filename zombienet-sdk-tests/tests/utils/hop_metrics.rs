@@ -4,8 +4,7 @@
 //! Readers and assertions for `sc-hop`'s `substrate_hop_*` Prometheus metrics.
 //!
 //! Metrics are per-node: the maintenance task that promotes a blob runs on the node
-//! that received the submit, so every read must target that node. A sibling collator
-//! reports all zeros.
+//! that received the submit, so every read must target that node.
 //!
 //! `NetworkNode::reports` resolves a missing series to `0.0` rather than erroring, so
 //! an unregistered registry is indistinguishable from an idle one on any single read.
@@ -17,10 +16,7 @@ use zombienet_sdk::NetworkNode;
 
 /// Read one `substrate_hop_*` series as `u64`. Absent series read as `0`.
 pub async fn hop_metric(node: &NetworkNode, name: &str) -> Result<u64> {
-	let value = node
-		.reports(name.to_string())
-		.await
-		.map_err(|e| anyhow::anyhow!("read {name}: {e}"))?;
+	let value = node.reports(name.to_string()).await.with_context(|| format!("read {name}"))?;
 	Ok(value as u64)
 }
 
@@ -28,13 +24,17 @@ pub async fn hop_metric(node: &NetworkNode, name: &str) -> Result<u64> {
 pub async fn wait_hop_metric(
 	node: &NetworkNode,
 	name: &str,
-	predicate: impl Fn(u64) -> bool + Copy,
+	predicate: impl Fn(u64) -> bool,
 	timeout_secs: u64,
 	what: &str,
 ) -> Result<()> {
-	node.wait_metric_with_timeout(name.to_string(), move |v| predicate(v as u64), timeout_secs)
-		.await
-		.with_context(|| format!("{what}: {name} did not satisfy the predicate"))
+	node.wait_metric_with_timeout(
+		name.to_string(),
+		move |value| predicate(value as u64),
+		timeout_secs,
+	)
+	.await
+	.with_context(|| format!("{what}: {name} did not satisfy the predicate"))
 }
 
 /// Confirm the HOP metrics registry is actually wired before asserting on any value.
