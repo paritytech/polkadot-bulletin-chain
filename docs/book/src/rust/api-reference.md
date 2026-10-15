@@ -30,9 +30,9 @@ impl TransactionClient {
     // Create from a single existing RpcClient
     pub async fn from_rpc_client(rpc_client: RpcClient) -> Result<Self>;
 
-    // Block that the authorization queries and the `store` pre-check read:
-    // WaitFor::InBlock (default) = best block, WaitFor::Finalized = finalized block
-    pub fn with_authorization_confirmation(self, confirmation: WaitFor) -> Self;
+    // Block that the SDK's own chain reads use (authorization queries, the `store`
+    // pre-check, `skip_existing`): WaitFor::Finalized (default) or WaitFor::InBlock (best block)
+    pub fn with_wait_for(self, wait_for: WaitFor) -> Self;
 
     // Access the underlying subxt client
     pub fn api(&self) -> &OnlineClient<PolkadotConfig>;
@@ -359,7 +359,7 @@ impl BatchStorageOperation {
 pub struct StoreOptions {
     pub cid_codec: CidCodec,                // default: CidCodec::Raw
     pub hash_algorithm: HashingAlgorithm,    // default: HashingAlgorithm::Blake2b256
-    pub wait_for: WaitFor,                   // default: WaitFor::InBlock
+    pub wait_for: WaitFor,                   // default: WaitFor::Finalized
 }
 ```
 
@@ -617,7 +617,7 @@ pub enum WaitFor {
 }
 ```
 
-Default: `WaitFor::InBlock`
+Default: `WaitFor::Finalized`. Every submission method takes its `wait_for` explicitly; `TransactionClient::with_wait_for` sets the block that the SDK's own chain reads use.
 
 ### CidCodec
 

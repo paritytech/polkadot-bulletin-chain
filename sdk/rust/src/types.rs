@@ -339,10 +339,10 @@ pub struct RenewalResult {
 pub enum WaitFor {
 	/// Return when the transaction is in a best block.
 	/// Faster but the block may be reorganized.
-	#[default]
 	InBlock,
 	/// Return when the transaction is finalized.
 	/// Slower but guarantees the transaction is permanent.
+	#[default]
 	Finalized,
 }
 
@@ -353,7 +353,7 @@ pub struct StoreOptions {
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
 	pub hash_algorithm: HashingAlgorithm,
-	/// What to wait for before returning (default: best block inclusion).
+	/// What to wait for before returning (default: finalized).
 	pub wait_for: WaitFor,
 }
 

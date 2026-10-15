@@ -27,7 +27,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         10,                   // transactions
         10 * 1024 * 1024,     // bytes
         &authorizer,          // a registered authorizer (//Eve in the dev preset)
-        WaitFor::InBlock,
+        WaitFor::Finalized,
     ).await?;
 
     info!("Authorization granted in block: {}", receipt.block_hash);
@@ -51,15 +51,16 @@ let receipt = client.authorize_preimage(
 ### Check Authorization
 
 Query the current authorization status before submitting a store transaction.
-The check reads the best block, so an authorization included with
-`WaitFor::InBlock` passes it right away. To read the finalized block instead,
-build the client with `with_authorization_confirmation(WaitFor::Finalized)`.
-`store` runs the same check before it submits.
+`store` runs the same check before it submits. The check reads the finalized
+block, so authorize with `WaitFor::Finalized` before the first store. A client
+built with `with_wait_for(WaitFor::InBlock)` reads the best block instead, and an
+authorization included with `WaitFor::InBlock` then passes the check right away.
 
-The transaction pool validates a new transaction against its view of the newest
-best block, and it builds that view a moment after the block's `InBlock` events
-fire. A store sent by a newly authorized account in that moment can fail as an
-invalid transaction; sending it again succeeds.
+With `WaitFor::InBlock`, note that the transaction pool validates a new
+transaction against its view of the newest best block, and it builds that view a
+moment after the block's `InBlock` events fire. A store sent by a newly
+authorized account in that moment can fail as an invalid transaction; sending it
+again succeeds.
 
 ```rust
 let account = subxt::utils::AccountId32::from(signer.public_key().0);

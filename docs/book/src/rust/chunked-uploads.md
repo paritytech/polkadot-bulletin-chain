@@ -126,7 +126,7 @@ match client.check_authorization_for_store(&account, transactions, bytes).await 
     Ok(()) => tracing::info!("Authorization sufficient, proceeding with upload"),
     Err(Error::InsufficientAuthorization { .. } | Error::AuthorizationNotFound(_)) => {
         // `authorizer` must be a registered authorizer
-        client.authorize_account(account, transactions, bytes, &authorizer, WaitFor::InBlock).await?;
+        client.authorize_account(account, transactions, bytes, &authorizer, WaitFor::Finalized).await?;
     }
     Err(e) => return Err(e.into()),
 }

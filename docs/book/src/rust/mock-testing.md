@@ -256,7 +256,7 @@ mod integration_tests {
         let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
         // Authorize
-        client.authorize_account(account, 10, 10 * 1024 * 1024, &signer, WaitFor::InBlock)
+        client.authorize_account(account, 10, 10 * 1024 * 1024, &signer, WaitFor::Finalized)
             .await
             .expect("Authorization failed");
 

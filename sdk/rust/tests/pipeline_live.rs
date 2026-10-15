@@ -885,12 +885,12 @@ async fn authorize_accounts_batched() {
 
 #[tokio::test]
 #[ignore]
-async fn store_precheck_authorization_confirmation() {
+async fn store_precheck_wait_for() {
 	let client = TransactionClient::new(&ws()).await.expect("connection failure");
-	let finalized_client = TransactionClient::new(&ws())
+	let best_block_client = TransactionClient::new(&ws())
 		.await
 		.expect("connection failure")
-		.with_authorization_confirmation(WaitFor::Finalized);
+		.with_wait_for(WaitFor::InBlock);
 	let seed = std::time::SystemTime::now()
 		.duration_since(std::time::UNIX_EPOCH)
 		.unwrap()
@@ -911,20 +911,20 @@ async fn store_precheck_authorization_confirmation() {
 		.await
 		.expect("authorization failure");
 
-	let error = finalized_client
+	let error = client
 		.store(first_data.clone(), &uploader, WaitFor::InBlock)
 		.await
 		.expect_err("store accepted before the authorization was finalized");
 	assert_eq!(error.code(), "AUTHORIZATION_NOT_FOUND");
 
-	let receipt = client
+	let receipt = best_block_client
 		.store(first_data.clone(), &uploader, WaitFor::Finalized)
 		.await
 		.expect("store rejected right after an in-block authorization");
 	receipt_block_number(&client, &receipt.block_hash).await;
 	assert_eq!(receipt.data_size, first_data.len() as u64);
 
-	finalized_client
+	client
 		.store(second_data, &uploader, WaitFor::InBlock)
 		.await
 		.expect("store rejected after the authorization was finalized");

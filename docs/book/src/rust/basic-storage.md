@@ -35,7 +35,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         10,                    // 10 transactions
         10 * 1024 * 1024,      // 10 MiB
         &authorizer,
-        WaitFor::InBlock,
+        WaitFor::Finalized,
     ).await?;
     info!("Account authorized in block: {}", auth_receipt.block_hash);
 

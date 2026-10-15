@@ -87,7 +87,7 @@ pub struct TransactionClient {
 	/// pipeline fans `author_submitExtrinsic` out to all of them, so a single
 	/// dead provider can't stall a wave.
 	submit_rpcs: Vec<LegacyRpcMethods<PolkadotConfig>>,
-	authorization_confirmation: WaitFor,
+	wait_for: WaitFor,
 }
 
 impl TransactionClient {
@@ -132,7 +132,7 @@ impl TransactionClient {
 			.map_err(|e| Error::NetworkError(format!("Failed to connect: {e:?}")))?;
 		let submit_rpcs =
 			clients.into_iter().map(LegacyRpcMethods::<PolkadotConfig>::new).collect();
-		Ok(Self { api, rpc, submit_rpcs, authorization_confirmation: WaitFor::InBlock })
+		Ok(Self { api, rpc, submit_rpcs, wait_for: WaitFor::default() })
 	}
 
 	/// Create a transaction client from a single existing RPC client.
@@ -140,9 +140,25 @@ impl TransactionClient {
 		Self::from_rpc_clients(vec![rpc_client]).await
 	}
 
-	pub fn with_authorization_confirmation(mut self, confirmation: WaitFor) -> Self {
-		self.authorization_confirmation = confirmation;
+	pub fn with_wait_for(mut self, wait_for: WaitFor) -> Self {
+		self.wait_for = wait_for;
 		self
+	}
+
+	async fn read_block_hash(&self) -> Result<subxt::utils::H256> {
+		match self.wait_for {
+			WaitFor::InBlock => self
+				.rpc
+				.chain_get_block_hash(None)
+				.await
+				.map_err(|e| {
+					Error::NetworkError(format!("failed to get the best block hash: {e:?}"))
+				})?
+				.ok_or_else(|| Error::NetworkError("best block hash unavailable".into())),
+			WaitFor::Finalized => self.rpc.chain_get_finalized_head().await.map_err(|e| {
+				Error::NetworkError(format!("failed to get the finalized block hash: {e:?}"))
+			}),
+		}
 	}
 
 	/// Get the underlying subxt client.
@@ -265,12 +281,7 @@ impl TransactionClient {
 			} else {
 				(0..hashes.len()).collect()
 			};
-			let finalized = self
-				.rpc
-				.chain_get_finalized_head()
-				.await
-				.map_err(|e| Error::NetworkError(format!("finalized head: {e:?}")))?;
-			let storage = self.api.storage().at(finalized);
+			let storage = self.api.storage().at(self.read_block_hash().await?);
 			let mut on_chain: HashSet<ContentHash> = HashSet::new();
 			for i in query {
 				let addr = bulletin::storage()
@@ -669,20 +680,7 @@ impl TransactionClient {
 			.bulletin_transaction_storage_api()
 			.account_authorization(who.clone());
 
-		let block_hash = match self.authorization_confirmation {
-			WaitFor::InBlock => self
-				.rpc
-				.chain_get_block_hash(None)
-				.await
-				.map_err(|e| {
-					Error::NetworkError(format!("failed to get the best block hash: {e:?}"))
-				})?
-				.ok_or_else(|| Error::NetworkError("best block hash unavailable".into()))?,
-			WaitFor::Finalized => self.rpc.chain_get_finalized_head().await.map_err(|e| {
-				Error::NetworkError(format!("failed to get the finalized block hash: {e:?}"))
-			})?,
-		};
-
+		let block_hash = self.read_block_hash().await?;
 		let maybe_auth =
 			self.api.runtime_api().at(block_hash).call(call).await.map_err(|e| {
 				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
