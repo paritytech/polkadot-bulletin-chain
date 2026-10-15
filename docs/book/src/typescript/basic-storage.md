@@ -60,7 +60,7 @@ const { cids } = await client
 ```
 
 - `.asUnsigned()` — submit preimage-authorized bare extrinsics (no signer). See [Authorization](./authorization.md).
-- `.ensureAuthorized()` — verifies an `Authorizations` entry exists and isn't expired before submitting.
+- `.ensureAuthorized()` — verifies an `Authorizations` entry exists and isn't expired before submitting. It reads the best block, so an authorization sent with `'in_block'` passes right away; set `authorizationConfirmation: 'finalized'` on the client to read the finalized block instead.
 
 ## Result
 

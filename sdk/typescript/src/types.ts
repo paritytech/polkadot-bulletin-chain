@@ -553,6 +553,7 @@ export interface ClientConfig {
    * without changing this shape.
    */
   submissionStrategy?: "nonce-tracking"
+  authorizationConfirmation?: WaitFor
 }
 
 /**
@@ -578,6 +579,7 @@ export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
   blockLimits: DEFAULT_BLOCK_LIMITS,
   submissionStrategy: "nonce-tracking",
+  authorizationConfirmation: "in_block",
   // `providers` (factory) and `authorizerSigner` are intentionally
   // not defaulted — see ResolvedClientConfig.
 }

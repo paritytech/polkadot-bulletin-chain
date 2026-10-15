@@ -80,6 +80,7 @@ describe("ensureAuthorized() pre-flight", () => {
     async function callEnsureAuthorized(
       query: unknown,
       systemNumber?: number,
+      config: Record<string, unknown> = {},
     ): Promise<void> {
       const { BulletinClient } = await import("../../src/client")
 
@@ -107,10 +108,66 @@ describe("ensureAuthorized() pre-flight", () => {
         providers: () => [{} as any],
         // biome-ignore lint/suspicious/noExplicitAny: signer stub
         uploadSigner: signer as any,
+        ...config,
       })
       // biome-ignore lint/suspicious/noExplicitAny: invoking private method by name
       await (client as any).ensureAuthorizedOnChain()
     }
+
+    const bestBlockOnlyAuthorization = {
+      TransactionStorage: {
+        Authorizations: {
+          getValue: async (_scope: unknown, opts?: { at?: string }) =>
+            opts?.at === "best"
+              ? {
+                  extent: { transactions: 0, bytes: 0n },
+                  expiration: 1_000_000,
+                }
+              : undefined,
+        },
+      },
+    }
+
+    it("best-block authorization with the default confirmation", async () => {
+      await expect(
+        callEnsureAuthorized(bestBlockOnlyAuthorization, 100),
+      ).resolves.toBeUndefined()
+    })
+
+    it("best-block authorization with finalized confirmation", async () => {
+      await expect(
+        callEnsureAuthorized(bestBlockOnlyAuthorization, 100, {
+          authorizationConfirmation: "finalized",
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.INSUFFICIENT_AUTHORIZATION })
+    })
+
+    it("expiry compared at the block of the authorization read", async () => {
+      const expiringAtBest = {
+        TransactionStorage: {
+          Authorizations: {
+            getValue: async () => ({
+              extent: { transactions: 0, bytes: 0n },
+              expiration: 100,
+            }),
+          },
+        },
+        System: {
+          Number: {
+            getValue: async (opts?: { at?: string }) =>
+              opts?.at === "best" ? 200 : 50,
+          },
+        },
+      }
+      await expect(callEnsureAuthorized(expiringAtBest)).rejects.toMatchObject({
+        code: ErrorCode.INSUFFICIENT_AUTHORIZATION,
+      })
+      await expect(
+        callEnsureAuthorized(expiringAtBest, undefined, {
+          authorizationConfirmation: "finalized",
+        }),
+      ).resolves.toBeUndefined()
+    })
 
     it("throws UNSUPPORTED_OPERATION when api.query is unavailable", async () => {
       await expect(callEnsureAuthorized(null)).rejects.toMatchObject({

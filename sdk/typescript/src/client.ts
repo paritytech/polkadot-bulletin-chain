@@ -764,6 +764,7 @@ export class BulletinClient implements BulletinClientInterface {
       chunkingThreshold: options.chunkingThreshold,
       createManifest: options.createManifest,
       submissionStrategy: options.submissionStrategy,
+      authorizationConfirmation: options.authorizationConfirmation,
     })
     this.preparer = new BulletinPreparer({
       defaultChunkSize: this.config.defaultChunkSize,
@@ -796,6 +797,12 @@ export class BulletinClient implements BulletinClientInterface {
     }
   }
 
+  private authorizationBlock(): "best" | "finalized" {
+    return this.config.authorizationConfirmation === "finalized"
+      ? "finalized"
+      : "best"
+  }
+
   /**
    * Opt-in pre-flight (via the builder's `ensureAuthorized()`): verify that
    * the signer has a non-expired `Authorizations` entry on chain. The chain
@@ -816,27 +823,30 @@ export class BulletinClient implements BulletinClientInterface {
     }
     this.requireSigner("ensureAuthorized()")
     const address = ss58Address(this.signer!.publicKey)
+    const at = this.authorizationBlock()
     const auth =
-      await this.api.query.TransactionStorage.Authorizations.getValue({
-        type: "Account",
-        value: address,
-      })
+      await this.api.query.TransactionStorage.Authorizations.getValue(
+        { type: "Account", value: address },
+        { at },
+      )
     if (!auth) {
       throw new BulletinError(
         `Account ${address} is not authorized to store data on this chain`,
         ErrorCode.INSUFFICIENT_AUTHORIZATION,
       )
     }
-    // Compare expiration (block number) against the current best block.
+    // Compare expiration (block number) against the block the authorization was read at.
     // If api.query.System.Number isn't exposed we skip — the chain rejects
     // expired auths at submission time anyway.
     const sysNumber = (
       this.api.query as {
-        System?: { Number?: { getValue(): Promise<number> } }
+        System?: {
+          Number?: { getValue(opts?: { at?: string }): Promise<number> }
+        }
       }
     ).System?.Number
     if (sysNumber && typeof auth.expiration === "number") {
-      const currentBlock = await sysNumber.getValue()
+      const currentBlock = await sysNumber.getValue({ at })
       if (auth.expiration <= currentBlock) {
         throw new BulletinError(
           `Authorization for ${address} expired at block ${auth.expiration} (current ${currentBlock})`,
@@ -867,10 +877,17 @@ export class BulletinClient implements BulletinClientInterface {
         ErrorCode.UNSUPPORTED_OPERATION,
       )
     }
+    const at = this.authorizationBlock()
     const sysNumber = (
-      query as { System?: { Number?: { getValue(): Promise<number> } } }
+      query as {
+        System?: {
+          Number?: { getValue(opts?: { at?: string }): Promise<number> }
+        }
+      }
     ).System?.Number
-    const currentBlock = sysNumber ? await sysNumber.getValue() : undefined
+    const currentBlock = sysNumber
+      ? await sysNumber.getValue({ at })
+      : undefined
 
     // The pallet keys preimage authorizations by the user's chosen hash
     // algo's digest, which is exactly the CID's `multihash.digest`. Reuse
@@ -887,10 +904,10 @@ export class BulletinClient implements BulletinClientInterface {
 
     await Promise.all(
       uniqueHashes.map(async (hashHex) => {
-        const auth = await query.TransactionStorage.Authorizations.getValue({
-          type: "Preimage",
-          value: hashHex,
-        })
+        const auth = await query.TransactionStorage.Authorizations.getValue(
+          { type: "Preimage", value: hashHex },
+          { at },
+        )
         if (!auth) {
           throw new BulletinError(
             `No preimage authorization on chain for content hash ${hashHex}`,

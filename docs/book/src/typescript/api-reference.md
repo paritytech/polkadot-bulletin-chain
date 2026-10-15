@@ -69,6 +69,7 @@ interface ClientConfig {
   authorizerSigner?: SignerTxCreator;
   blockLimits?: BlockLimits;          // chain block weight/length caps
   submissionStrategy?: "nonce-tracking"; // the only strategy
+  authorizationConfirmation?: WaitFor; // block that ensureAuthorized() reads: 'in_block' = best (default), 'finalized'
 }
 ```
 
