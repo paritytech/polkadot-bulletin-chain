@@ -94,7 +94,9 @@ Preimage stores (signed or unsigned) always get `ALLOWANCE_PRIORITY_BOOST`, adde
 | 5 | Over-budget store, fee-paying calls | `1`; fee-paying calls add their payment priority (tip-based) |
 | 6 | HOP promotion | `0` |
 
-Within a level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` minus the number of txs the signer has queued ahead in the pool (tx nonce − account nonce). Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Bare txs get the full bonus; unsigned general txs (HOP promotion) get none. `MAX_QUEUE_BONUS` is far below the gap between levels, so the level always decides first.
+Within a level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` (1e12) minus `QUEUE_BONUS_STEP` (1e6) for each tx the signer has queued ahead in the pool (tx nonce − account nonce). Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Bare txs get the full bonus; unsigned general txs (HOP promotion) get none.
+
+The step is larger than the payment priority of an untipped call (`max txs per block`), so queue position decides between over-budget stores and fee-paying calls; a tip lifts a call once `tip × max txs per block` exceeds a step. The largest possible penalty (`u32` nonce × step ≈ 4.3e15) is far below the gap between levels (`MAX / 8`), so queue position never moves a tx to another level.
 
 [ext]: ../pallets/transaction-storage/src/extension.rs
 
