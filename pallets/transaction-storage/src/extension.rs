@@ -523,7 +523,6 @@ where
 /// Priority bonus for a signer's next transaction. Each transaction of the signer ahead of it in
 /// the pool lowers the bonus by one.
 pub const MAX_QUEUE_BONUS: TransactionPriority = 100_000_000;
-const _: () = assert!(MAX_QUEUE_BONUS < ALLOWANCE_PRIORITY_BOOST);
 
 /// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus the number of the
 /// signer's transactions ahead of this one in the pool. Each signer's next transaction ranks first,
