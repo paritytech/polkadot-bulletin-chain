@@ -85,7 +85,7 @@ describe("Error Handling", () => {
     it("should preserve error type through Promise.allSettled", async () => {
       const promises = [
         Promise.resolve(1),
-        Promise.reject(new BulletinError("Error", ErrorCode.CHUNK_FAILED)),
+        Promise.reject(new BulletinError("Error", ErrorCode.CHUNKING_FAILED)),
         Promise.resolve(3),
       ]
 
@@ -98,7 +98,7 @@ describe("Error Handling", () => {
       if (results[1].status === "rejected") {
         expect(results[1].reason).toBeInstanceOf(BulletinError)
         expect((results[1].reason as BulletinError).code).toBe(
-          ErrorCode.CHUNK_FAILED,
+          ErrorCode.CHUNKING_FAILED,
         )
       }
     })
@@ -197,7 +197,7 @@ describe("Error Handling", () => {
       const originalError = new TypeError("Cannot read property of undefined")
       const wrappedError = new BulletinError(
         "Operation failed",
-        ErrorCode.CHUNK_FAILED,
+        ErrorCode.CHUNKING_FAILED,
         originalError,
       )
 
