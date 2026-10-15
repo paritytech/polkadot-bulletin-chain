@@ -7,13 +7,13 @@
 use crate::{
 	test_log,
 	utils::{
-		assert_proof_checked_at, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
-		authorize_and_store_data, blake2_256, block_hash_at,
+		arg_value, assert_proof_checked_at, authorize_account_via_sudo,
+		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
 		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
 		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization,
+		initialize_network, omni_node_exit_and_log, override_alice_authorization,
 		parachain_network_config_with_retention_period, resolve_canonical_store_block,
 		set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
@@ -3349,19 +3349,6 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
 const PRUNE_RESTART_RETENTION_PERIOD: u32 = 10;
 
-fn extract_arg_value(args: &[String], name: &str) -> Option<String> {
-	let prefix_eq = format!("{}=", name);
-	for (i, a) in args.iter().enumerate() {
-		if a == name {
-			return args.get(i + 1).cloned();
-		}
-		if let Some(rest) = a.strip_prefix(&prefix_eq) {
-			return Some(rest.to_string());
-		}
-	}
-	None
-}
-
 fn find_pid_by_base_path(base_path: &str) -> Option<u32> {
 	let output = std::process::Command::new("ps").args(["-ef"]).output().ok()?;
 	let stdout = String::from_utf8_lossy(&output.stdout);
@@ -3430,58 +3417,6 @@ fn build_respawn_args(orig: &[String], new_pruning: Option<u32>) -> Vec<String> 
 	out
 }
 
-async fn spawn_omni_node_capture(
-	binary: &str,
-	args: &[String],
-	duration: std::time::Duration,
-) -> Result<(Option<i32>, String)> {
-	use std::process::Stdio;
-	use tokio::{io::AsyncReadExt, process::Command};
-
-	let mut cmd = Command::new(binary);
-	for a in args {
-		cmd.arg(a);
-	}
-	cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-	let mut child = cmd.spawn().context("spawn omni-node")?;
-
-	let stdout = child.stdout.take().unwrap();
-	let stderr = child.stderr.take().unwrap();
-	let combined = std::sync::Arc::new(tokio::sync::Mutex::new(String::new()));
-	let combined_o = combined.clone();
-	let combined_e = combined.clone();
-	let so = tokio::spawn(async move {
-		let mut buf = Vec::new();
-		let mut r = tokio::io::BufReader::new(stdout);
-		let _ = r.read_to_end(&mut buf).await;
-		let mut g = combined_o.lock().await;
-		g.push_str(&String::from_utf8_lossy(&buf));
-	});
-	let se = tokio::spawn(async move {
-		let mut buf = Vec::new();
-		let mut r = tokio::io::BufReader::new(stderr);
-		let _ = r.read_to_end(&mut buf).await;
-		let mut g = combined_e.lock().await;
-		g.push_str(&String::from_utf8_lossy(&buf));
-	});
-
-	let exit_code = match tokio::time::timeout(duration, child.wait()).await {
-		Ok(Ok(status)) => status.code(),
-		Ok(Err(_)) => None,
-		Err(_) => {
-			let _ = child.kill().await;
-			let _ = child.wait().await;
-			None
-		},
-	};
-
-	let _ = so.await;
-	let _ = se.await;
-	let log = combined.lock().await.clone();
-	Ok((exit_code, log))
-}
-
 fn pruning_related_lines(log: &str) -> String {
 	log.lines()
 		.filter(|line| {
@@ -3533,7 +3468,7 @@ async fn run_pruning_restart_scenario(
 	.await?;
 
 	let orig_args: Vec<String> = collator1.args().iter().map(|s| s.to_string()).collect();
-	let base_path = extract_arg_value(&orig_args, "--base-path")
+	let base_path = arg_value(&orig_args, "--base-path")
 		.ok_or_else(|| anyhow::anyhow!("collator-1 args do not contain --base-path"))?;
 	tracing::info!("[{}] collator-1 base_path = {}", scenario, base_path);
 
@@ -3549,7 +3484,7 @@ async fn run_pruning_restart_scenario(
 	let binary = std::env::var("POLKADOT_PARACHAIN_BINARY_PATH")
 		.unwrap_or_else(|_| "polkadot-omni-node".to_string());
 	let (exit, log) =
-		spawn_omni_node_capture(&binary, &respawn_args, std::time::Duration::from_secs(15)).await?;
+		omni_node_exit_and_log(&binary, &respawn_args, std::time::Duration::from_secs(15)).await?;
 
 	let relevant = pruning_related_lines(&log);
 	let last_30: Vec<&str> = log.lines().rev().take(30).collect();

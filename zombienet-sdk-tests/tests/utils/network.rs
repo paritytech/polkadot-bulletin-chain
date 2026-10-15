@@ -5,8 +5,50 @@
 
 use super::config::*;
 use anyhow::{anyhow, Context, Result};
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Stdio, time::Duration};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use zombienet_sdk::{LocalFileSystem, Network, NetworkConfig, NetworkConfigBuilder};
+
+pub fn arg_value(args: &[String], name: &str) -> Option<String> {
+	let name_with_equals = format!("{name}=");
+	args.iter().enumerate().find_map(|(index, arg)| {
+		if arg == name {
+			args.get(index + 1).cloned()
+		} else {
+			arg.strip_prefix(&name_with_equals).map(str::to_string)
+		}
+	})
+}
+
+pub async fn omni_node_exit_and_log(
+	binary: &str,
+	args: &[String],
+	timeout: Duration,
+) -> Result<(Option<i32>, String)> {
+	let mut child = tokio::process::Command::new(binary)
+		.args(args)
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.kill_on_drop(true)
+		.spawn()
+		.with_context(|| format!("failed to spawn {binary}"))?;
+	let stdout_text = tokio::spawn(pipe_text(child.stdout.take().context("missing child stdout")?));
+	let stderr_text = tokio::spawn(pipe_text(child.stderr.take().context("missing child stderr")?));
+	let exit_code = match tokio::time::timeout(timeout, child.wait()).await {
+		Ok(exit_status) => exit_status.context("failed to wait for the node process")?.code(),
+		Err(_) => {
+			let _ = child.kill().await;
+			None
+		},
+	};
+	Ok((exit_code, stdout_text.await?? + &stderr_text.await??))
+}
+
+async fn pipe_text(mut pipe: impl AsyncRead + Unpin) -> std::io::Result<String> {
+	let mut bytes = Vec::new();
+	pipe.read_to_end(&mut bytes).await?;
+	Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
 
 pub async fn initialize_network(
 	config: NetworkConfig,
