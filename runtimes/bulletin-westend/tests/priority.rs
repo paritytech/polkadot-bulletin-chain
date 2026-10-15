@@ -4,8 +4,8 @@
 #![cfg(test)]
 
 use bulletin_westend_runtime::{
-	Balances, Executive, Runtime, RuntimeCall, RuntimeGenesisConfig, RuntimeOrigin, System,
-	TransactionStorage, TxExtension, UncheckedExtrinsic,
+	tx_extension, Balances, Executive, Runtime, RuntimeCall, RuntimeGenesisConfig, RuntimeOrigin,
+	System, TransactionStorage, UncheckedExtrinsic,
 };
 use frame_support::{assert_ok, pallet_prelude::Hooks, traits::fungible::Mutate};
 use pallet_bulletin_data_renewal::Call as DataRenewalCall;
@@ -17,7 +17,7 @@ use parachains_common::{Balance, Hash, Nonce};
 use sp_core::{Encode, Pair};
 use sp_keyring::Sr25519Keyring;
 use sp_runtime::{
-	generic::{Era, SignedPayload},
+	generic::SignedPayload,
 	traits::TransactionExtension,
 	transaction_validity::{
 		InvalidTransaction, TransactionPriority, TransactionSource, TransactionValidityError,
@@ -68,33 +68,6 @@ fn account_authorization(account: Sr25519Keyring, bytes: u64) {
 
 fn funding(account: Sr25519Keyring) {
 	assert_ok!(Balances::mint_into(&account.to_account_id(), FUNDS));
-}
-
-fn tx_extension(nonce: Nonce, tip: Balance) -> TxExtension {
-	cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from((
-		frame_system::AuthorizeCall::<Runtime>::new(),
-		frame_system::CheckNonZeroSender::<Runtime>::new(),
-		frame_system::CheckSpecVersion::<Runtime>::new(),
-		frame_system::CheckTxVersion::<Runtime>::new(),
-		frame_system::CheckGenesis::<Runtime>::new(),
-		frame_system::CheckEra::<Runtime>::from(Era::immortal()),
-		NonceCheckWithQueueBonus::<Runtime>::new(nonce),
-		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(tip),
-		),
-		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
-			Runtime,
-			bulletin_westend_runtime::storage::StorageCallInspector,
-			(
-				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
-				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
-			),
-		>::default(),
-		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
-		),
-		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-	))
 }
 
 fn signed_extrinsic(

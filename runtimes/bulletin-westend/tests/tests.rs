@@ -8,7 +8,7 @@ use bulletin_westend_runtime as runtime;
 use bulletin_westend_runtime::{
 	xcm_config::{GovernanceLocation, LocationToAccountId},
 	AllPalletsWithoutSystem, Balances, Block, Runtime, RuntimeCall, RuntimeEvent,
-	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage, TxExtension,
+	RuntimeGenesisConfig, RuntimeOrigin, SessionKeys, System, TransactionStorage,
 	UncheckedExtrinsic,
 };
 use frame_support::{
@@ -16,7 +16,7 @@ use frame_support::{
 };
 use pallet_bulletin_data_renewal::{Call as DataRenewalCall, WeightInfo as _};
 use pallet_bulletin_transaction_storage::{
-	extension::{AllowanceBasedPriority, NonceCheckWithQueueBonus, ALLOWANCE_PRIORITY_BOOST},
+	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
 	Origin as TxStorageOrigin, TransactionRef,
 };
@@ -60,37 +60,13 @@ fn construct_extrinsic(
 ) -> Result<UncheckedExtrinsic, transaction_validity::TransactionValidityError> {
 	// provide a known block hash for the immortal era check
 	frame_system::BlockHash::<Runtime>::insert(0, PcHash::default());
-	let inner = (
-		frame_system::AuthorizeCall::<Runtime>::new(),
-		frame_system::CheckNonZeroSender::<Runtime>::new(),
-		frame_system::CheckSpecVersion::<Runtime>::new(),
-		frame_system::CheckTxVersion::<Runtime>::new(),
-		frame_system::CheckGenesis::<Runtime>::new(),
-		frame_system::CheckEra::<Runtime>::from(sp_runtime::generic::Era::immortal()),
-		NonceCheckWithQueueBonus::<Runtime>::new(if let Some(s) = sender.as_ref() {
-			let account_id = AccountId::from(s.public());
-			frame_system::Pallet::<Runtime>::account(&account_id).nonce
-		} else {
-			0
-		}),
-		frame_system::CheckWeight::<Runtime>::new(),
-		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
-			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
-		),
-		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
-			Runtime,
-			bulletin_westend_runtime::storage::StorageCallInspector,
-			(
-				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
-				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
-			),
-		>::default(),
-		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
-		),
-		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
-	);
-	let tx_ext: TxExtension =
-		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
+	let nonce = if let Some(s) = sender.as_ref() {
+		let account_id = AccountId::from(s.public());
+		frame_system::Pallet::<Runtime>::account(&account_id).nonce
+	} else {
+		0
+	};
+	let tx_ext = runtime::tx_extension(nonce, 0);
 
 	if let Some(s) = sender.as_ref() {
 		// Signed call.
