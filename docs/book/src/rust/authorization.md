@@ -50,11 +50,17 @@ let receipt = client.authorize_preimage(
 
 ### Check Authorization
 
-Query the current authorization status before submitting a store transaction.
-`store` runs the same check before it submits. The check reads the finalized
-block, so authorize with `WaitFor::Finalized` before the first store. A client
-built with `with_wait_for(WaitFor::InBlock)` reads the best block instead, and an
-authorization included with `WaitFor::InBlock` then passes the check right away.
+`check_authorization_for_store` checks that the account has an unexpired
+authorization with enough transactions and bytes left for a store. The chain
+accepts a store beyond the allowance at lower priority (see
+[Authorization](../concepts/authorization.md)), so `store` checks only that an
+unexpired authorization exists. Call `check_authorization_for_store` to decide
+whether to top up the authorization before an upload.
+
+Both checks read the finalized block, so authorize with `WaitFor::Finalized`
+before the first store. A client built with `with_wait_for(WaitFor::InBlock)`
+reads the best block instead, and an authorization included with
+`WaitFor::InBlock` then passes the checks right away.
 
 With `WaitFor::InBlock`, note that the transaction pool validates a new
 transaction against its view of the newest best block, and it builds that view a
@@ -127,15 +133,12 @@ tracing::info!(
 
 ## Automatic Pre-Store Check
 
-`TransactionClient.store()` automatically checks authorization before submitting a transaction. If the account lacks sufficient authorization, it returns an `InsufficientAuthorization` or `AuthorizationNotFound` error immediately, without submitting a transaction. On runtimes without the `BulletinTransactionStorageApi` runtime API the check is skipped.
+`TransactionClient.store()` checks that the account has an unexpired authorization before it submits a transaction. Without one, it returns `AuthorizationNotFound` and does not submit. Like the chain and the TypeScript `.ensureAuthorized()`, it does not reject a store beyond the allowance. On runtimes without the `BulletinTransactionStorageApi` runtime API the check is skipped.
 
 ```rust
 match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         tracing::info!("Stored in block: {}", receipt.block_hash);
-    }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        tracing::error!(need, available, "Need more authorization");
     }
     Err(Error::AuthorizationNotFound(_)) => {
         tracing::error!("No authorization — call authorize_account() first");

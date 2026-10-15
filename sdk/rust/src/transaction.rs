@@ -742,8 +742,7 @@ impl TransactionClient {
 	///
 	/// A runtime without the `BulletinTransactionStorageApi` runtime API is the one exception:
 	/// there is nothing to preflight against, and a soft check must not block a `store` the chain
-	/// would accept, so the check passes. Matches the TypeScript SDK, which also proceeds when it
-	/// cannot read the authorization.
+	/// would accept, so the check passes.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,
@@ -788,9 +787,10 @@ impl TransactionClient {
 	/// Submits a `TransactionStorage.store` extrinsic and emits progress
 	/// events as the transaction moves through the network.
 	///
-	/// Before submitting, checks the account's on-chain authorization.
-	/// Returns an error immediately if authorization is missing, expired,
-	/// or insufficient (avoiding a wasted transaction submission).
+	/// Before submitting, checks that the account has an unexpired authorization and
+	/// returns [`Error::AuthorizationNotFound`] otherwise. It does not reject a store beyond
+	/// the allowance, because the chain accepts one without the priority boost. Use
+	/// [`Self::check_authorization_for_store`] to detect one.
 	///
 	/// Progress events emitted:
 	/// - `TransactionStatusEvent::Validated` - Transaction validated in pool
@@ -806,9 +806,12 @@ impl TransactionClient {
 	) -> Result<StoreReceipt> {
 		let data_size = data.len() as u64;
 
-		// Authorization check before submission
 		let account = AccountId32::from(signer.public_key().0);
-		self.check_authorization_for_store(&account, 1, data_size).await?;
+		match self.query_account_authorization(&account).await {
+			Ok(Some(_)) | Err(Error::AuthorizationApiUnavailable) => {},
+			Ok(None) => return Err(Error::AuthorizationNotFound(format!("{account}"))),
+			Err(error) => return Err(error),
+		}
 
 		let tx = bulletin::tx().transaction_storage().store(data);
 		let result =

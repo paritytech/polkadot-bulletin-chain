@@ -14,9 +14,8 @@ match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         info!(block_hash = %receipt.block_hash, "Stored successfully");
     }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        // Transactions or bytes, whichever is short
-        error!(need, available, "Need more authorization");
+    Err(Error::AuthorizationNotFound(_)) => {
+        error!("Missing or expired authorization");
     }
     Err(e) if e.is_retryable() => {
         error!(?e, hint = e.recovery_hint(), "Retryable error");
@@ -106,7 +105,7 @@ if let Err(e) = client.store(data, &signer, WaitFor::InBlock).await {
 | `AuthorizationNotFound(msg)` | `AUTHORIZATION_NOT_FOUND` | Authorize the account or the content hash first, then retry |
 | `InsufficientAuthorization { need, available }` | `INSUFFICIENT_AUTHORIZATION` | Request additional authorization, then retry |
 
-The runtime API that the pre-store check queries leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
+`store` checks only that an unexpired authorization exists, because the chain accepts a store beyond the allowance at lower priority. `InsufficientAuthorization` comes only from `check_authorization_for_store` and `AuthorizationManager::check_authorization`. The runtime API that both `TransactionClient` checks query leaves out expired authorizations, so an expired authorization surfaces as `AuthorizationNotFound`.
 
 ### Transaction Errors
 
@@ -246,7 +245,7 @@ Both SDKs use the same error codes, the same retryable set and the same recovery
 - `INVALID_HASH_ALGORITHM`: `HashingAlgorithm` is a Rust enum, so an unknown algorithm does not compile.
 - `MISSING_CHUNK`: only the TypeScript chunker reassembles chunks.
 
-`INSUFFICIENT_AUTHORIZATION` comes only from this SDK's capacity check; the TypeScript pre-flight checks existence and expiry only.
+`INSUFFICIENT_AUTHORIZATION` comes only from `check_authorization_for_store`, which has no TypeScript counterpart. `store` and the TypeScript `.ensureAuthorized()` both check existence and expiry only, and both raise `AUTHORIZATION_NOT_FOUND`.
 
 Retryable codes: `TRANSACTION_FAILED`, `NETWORK_ERROR` and `STORE_STALLED`, plus `TIMEOUT` in TypeScript.
 
@@ -262,15 +261,14 @@ match client.store(data, &signer, WaitFor::InBlock).await {
         // Missing or expired authorization
         tracing::error!("No authorization found. Call authorize_account() or refresh it.");
     }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        tracing::error!(need, available, "Insufficient authorization");
-    }
     Ok(result) => {
         tracing::info!("Success!");
     }
     Err(e) => return Err(e.into()),
 }
 ```
+
+`store` does not reject a store beyond the allowance. To detect one before you submit, call `check_authorization_for_store` (see [Authorization](./authorization.md#check-authorization)).
 
 ### Retry with Backoff
 

@@ -930,6 +930,41 @@ async fn store_precheck_wait_for() {
 		.expect("store rejected after the authorization was finalized");
 }
 
+#[tokio::test]
+#[ignore]
+async fn store_over_allowance() {
+	let client = TransactionClient::new(&ws()).await.expect("connection failure");
+	let seed = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.unwrap()
+		.as_nanos();
+	let uploader_uri =
+		format!("//store-over-allowance-{seed}").parse().expect("invalid secret URI");
+	let uploader = Keypair::from_uri(&uploader_uri).expect("invalid keypair URI");
+	let over_bytes = format!("store over the byte allowance {seed}").into_bytes();
+	let over_transactions = format!("store over the transaction allowance {seed}").into_bytes();
+
+	client
+		.authorize_account(
+			AccountId32::from(uploader.public_key().0),
+			1,
+			8,
+			&dev::eve(),
+			WaitFor::Finalized,
+		)
+		.await
+		.expect("authorization failure");
+
+	client
+		.store(over_bytes, &uploader, WaitFor::Finalized)
+		.await
+		.expect("store over the byte allowance rejected");
+	client
+		.store(over_transactions, &uploader, WaitFor::InBlock)
+		.await
+		.expect("store over the transaction allowance rejected");
+}
+
 const RENEWAL_ALREADY_ENABLED: u8 = 11;
 const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: u8 = 12;
 

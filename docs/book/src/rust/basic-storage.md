@@ -107,9 +107,8 @@ match client.store(data, &signer, WaitFor::InBlock).await {
     Ok(receipt) => {
         tracing::info!("Stored in block: {}", receipt.block_hash);
     }
-    Err(Error::InsufficientAuthorization { need, available }) => {
-        // Transactions or bytes, whichever is short
-        tracing::error!(need, available, "Insufficient authorization - authorize your account first");
+    Err(Error::AuthorizationNotFound(_)) => {
+        tracing::error!("Missing or expired authorization - authorize your account first");
     }
     Err(e) if e.is_retryable() => {
         tracing::warn!(
