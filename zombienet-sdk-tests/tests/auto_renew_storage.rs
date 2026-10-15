@@ -3351,6 +3351,7 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 // collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
+const PRUNE_RESTART_INITIAL_BLOCKS_TIMEOUT_SECS: u64 = 600;
 const PRUNE_RESTART_RETENTION_PERIOD: u32 = 10;
 
 fn find_pid_by_base_path(base_path: &str) -> Option<u32> {
@@ -3467,7 +3468,7 @@ async fn run_pruning_restart_scenario(
 	wait_for_block_height(
 		collator1,
 		PRUNE_RESTART_INITIAL_BLOCKS_TARGET,
-		BLOCK_PRODUCTION_TIMEOUT_SECS,
+		PRUNE_RESTART_INITIAL_BLOCKS_TIMEOUT_SECS,
 	)
 	.await?;
 
