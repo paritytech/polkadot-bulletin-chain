@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Spinner } from "@/components/ui/Spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs";
 import { CidInput } from "@/components/CidInput";
+import { CidInfoCard } from "@/components/CidInfoCard";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ import { fetchFromBitswapRpc } from "@/lib/bitswap-rpc";
 import { useNetwork, useBlockNumber, useApi, useClient, useConnectionStatus, useConnectedEndpoint, type Network } from "@/state/chain.state";
 import { useStorageHistory } from "@/state/history.state";
 import { lookupCidOnChain, type OnChainTransaction } from "@/lib/cid-lookup";
+import { codecLabel, runtimeHashName } from "@/lib/cid-labels";
 
 interface FetchResult {
   cid: string;
@@ -107,20 +109,29 @@ function OnChainStatusContent({
   return (
     <div className="space-y-3 text-sm">
       <div className="flex justify-between">
-        <span className="text-muted-foreground">Stored at block</span>
+        <span className="text-muted-foreground">Last entry at block</span>
         <span className="font-mono">{formatBlockNumber(cidLookup.blockNumber)} (idx {cidLookup.index})</span>
       </div>
       <div className="flex justify-between">
-        <span className="text-muted-foreground">Upload date</span>
+        <span className="text-muted-foreground">Last entry date</span>
         <span>{estimateBlockDate(cidLookup.blockNumber, currentBlock).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
       </div>
+      {cidLookup.kind && (
+        <div className="flex justify-between items-center">
+          <span className="text-muted-foreground">Entry</span>
+          <Badge variant="secondary">{cidLookup.kind}</Badge>
+        </div>
+      )}
       {cidLookup.hashing && (
         <div className="flex justify-between">
-          <span className="text-muted-foreground">Hashing / Codec</span>
-          <span className="font-mono text-xs">
-            {cidLookup.hashing}
-            {cidLookup.cidCodec !== undefined ? ` / 0x${cidLookup.cidCodec.toString(16)}` : ""}
-          </span>
+          <span className="text-muted-foreground">Hashing</span>
+          <span className="font-mono text-xs">{runtimeHashName(cidLookup.hashing)}</span>
+        </div>
+      )}
+      {cidLookup.cidCodec !== undefined && (
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Codec</span>
+          <span className="font-mono text-xs">{codecLabel(cidLookup.cidCodec)}</span>
         </div>
       )}
       <div className="flex justify-between">
@@ -1151,50 +1162,7 @@ export function Download() {
             </CardContent>
           </Card>
 
-          {/* CID Info */}
-          <Card>
-            <CardHeader>
-              <CardTitle>CID Info</CardTitle>
-              <CardDescription>Parsed CID details</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {parsedCid ? (
-                <div className="space-y-3 text-sm">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">CID</span>
-                      <button
-                        onClick={() => copyToClipboard(parsedCid.toString())}
-                        className="text-muted-foreground hover:text-foreground transition-colors"
-                        title="Copy CID"
-                      >
-                        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                    <p className="font-mono text-xs mt-1 break-all">{parsedCid.toString()}</p>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Version</span>
-                    <Badge variant="secondary">CIDv{parsedCid.version}</Badge>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Codec</span>
-                    <span className="font-mono">0x{parsedCid.code.toString(16)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Hash</span>
-                    <span className="font-mono">0x{parsedCid.multihash.code.toString(16)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Digest Size</span>
-                    <span>{parsedCid.multihash.size} bytes</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Enter a valid CID to see details</p>
-              )}
-            </CardContent>
-          </Card>
+          <CidInfoCard cid={parsedCid} />
 
           {/* On-chain Status */}
           <Card>
@@ -1203,7 +1171,7 @@ export function Download() {
                 <Search className="h-5 w-5" />
                 On-chain Status
               </CardTitle>
-              <CardDescription>Storage and retention info from the chain</CardDescription>
+              <CardDescription>Latest on-chain entry for this CID (upload or renewal)</CardDescription>
             </CardHeader>
             <CardContent>
               <OnChainStatusContent

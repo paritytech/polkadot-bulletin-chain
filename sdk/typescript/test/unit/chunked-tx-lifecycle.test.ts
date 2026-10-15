@@ -33,7 +33,7 @@ describe("chunked upload tx subscription lifecycle", () => {
     const observers: Observer[] = []
     const unsubscribed: boolean[] = []
     const makeTx = () => ({
-      signSubmitAndWatch: () => ({
+      createSubmitAndWatch: () => ({
         subscribe: (obs: Observer) => {
           const i = observers.length
           observers.push(obs)
@@ -47,7 +47,6 @@ describe("chunked upload tx subscription lifecycle", () => {
       }),
       getBareTx: async () => new Uint8Array(),
       decodedCall: {},
-      signAndSubmit: async () => ({ txHash: "0x01" }),
     })
     const api = {
       tx: {
@@ -76,8 +75,7 @@ describe("chunked upload tx subscription lifecycle", () => {
     const inBlock = (i: number) =>
       observers[i].next({
         txHash: `0x0${i}`,
-        type: "txBestBlocksState",
-        found: true,
+        type: "inBestBlock",
         block: { hash: "0xbe57", number: 10 + i, index: 0 },
       })
     const finalized = (i: number) =>
@@ -112,7 +110,7 @@ describe("chunked upload tx subscription lifecycle", () => {
   it("tolerates unsubscribe failing after the transport is gone", async () => {
     const observers: Observer[] = []
     const makeTx = () => ({
-      signSubmitAndWatch: () => ({
+      createSubmitAndWatch: () => ({
         subscribe: (obs: Observer) => {
           observers.push(obs)
           return {
@@ -125,7 +123,6 @@ describe("chunked upload tx subscription lifecycle", () => {
       }),
       getBareTx: async () => new Uint8Array(),
       decodedCall: {},
-      signAndSubmit: async () => ({ txHash: "0x01" }),
     })
     const api = {
       tx: { TransactionStorage: { store: makeTx } },
@@ -145,8 +142,7 @@ describe("chunked upload tx subscription lifecycle", () => {
     await vi.waitFor(() => expect(observers).toHaveLength(1))
     observers[0].next({
       txHash: "0x00",
-      type: "txBestBlocksState",
-      found: true,
+      type: "inBestBlock",
       block: { hash: "0xbe57", number: 10, index: 0 },
     })
     await expect(pending).resolves.toBeDefined()
