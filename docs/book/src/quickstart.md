@@ -89,7 +89,7 @@ await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).send();
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
+bulletin-sdk-rust = "1.0"
 subxt = "0.44"
 subxt-signer = { version = "0.44", features = ["sr25519"] }
 tokio = { version = "1", features = ["full"] }

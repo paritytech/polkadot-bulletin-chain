@@ -10,7 +10,7 @@ Disable default features in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain", default-features = false }
+bulletin-sdk-rust = { version = "1.0", default-features = false }
 ```
 
 ## Limitations in `no_std`

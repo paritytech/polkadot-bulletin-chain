@@ -163,14 +163,14 @@ println!("CID: {:?}", cid_to_bytes(&operation.calculate_cid()?)?);
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust" }
+bulletin-sdk-rust = "1.0"
 ```
 
 For `no_std` (core CID/chunking/DAG only, no client):
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { path = "sdk/rust", default-features = false }
+bulletin-sdk-rust = { version = "1.0", default-features = false }
 ```
 
 ## Build & Test
