@@ -4,7 +4,7 @@ This tutorial walks you through storing your first data on Bulletin Chain in und
 
 ## Prerequisites
 
-- Node.js 18+ or Rust toolchain
+- Node.js 22+ or Rust toolchain
 - A Polkadot-compatible wallet (Polkadot.js extension, Talisman, PolkaGate, etc.)
 
 ## Option 1: Use the Console UI (Easiest)
@@ -14,7 +14,7 @@ The fastest way to try Bulletin Chain is through the web console:
 1. **Open the Console**: Visit the deployed console or run locally (see below)
 2. **Connect Wallet**: Click "Connect Wallet" and select your wallet
 3. **Select Network**: Choose "Paseo" or "Westend" testnet
-4. **Get Authorization**: Go to Dashboard → Click "Faucet" to get free authorization
+4. **Get Authorization**: Open "Faucet" in the menu and submit the form to get free authorization
 5. **Upload Data**: Go to Upload → Select a file or enter text → Click "Upload"
 6. **Done!** You'll receive a CID (Content Identifier) for your data
 
@@ -41,33 +41,31 @@ Open http://localhost:5173
 ### Step 1: Install
 
 ```bash
-npm install @parity/bulletin-sdk polkadot-api
+npm install @parity/bulletin-sdk polkadot-api multiformats
 ```
 
 ### Step 2: Store Data
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-import { createClient, Binary } from "polkadot-api";
+import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors"; // Generate with papi
 
 async function main() {
-  // 1. Connect to testnet
-  const papiClient = createClient(
-    getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")
-  );
-  const api = papiClient.getTypedApi(bulletin);
+  // 1. Create the client — it owns its PAPI connection.
+  const client = new BulletinClient({
+    providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
+    uploadSigner: signer,
+    descriptor: bulletin, // optional; omit to use getUnsafeApi()
+  });
 
-  // 2. Create SDK client with PAPI client, signer, and submit function
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+  // 2. Estimate (lets a UI preview cost), then submit. Requires
+  //    authorization — use the Faucet first!
+  const src = blobFromBytes(new TextEncoder().encode("Hello, Bulletin Chain!"));
+  const { cids } = await client.submit(await client.estimateUpload(src), src).send();
 
-  // 3. Store data (requires authorization - use Faucet first!)
-  const data = Binary.fromText("Hello, Bulletin Chain!");
-  const result = await client.store(data).send();
-
-  console.log("CID:", result.cid.toString());
-  console.log("Stored in block:", result.blockNumber);
+  // Last CID is the retrieval id: the manifest root, or the lone chunk's CID.
+  console.log("CID:", cids[cids.length - 1].toString());
 }
 
 main();
@@ -75,11 +73,12 @@ main();
 
 ### Step 3: Get Authorization (Required)
 
-Before storing, you need authorization. On testnets, use the Faucet in the Console UI, or if you have sudo access:
+Before storing, you need authorization. On testnets, use the Faucet in the Console UI. If your account is a registered authorizer (in the chain's `AllowedAuthorizers` set), grant it yourself:
 
 ```typescript
-// Only works if you have sudo/root access
-await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).withSudo().send();
+// Pass the authorizer as `authorizerSigner` when constructing the client.
+// Holding only the sudo key? Add `.withSudo()` before `.send()`.
+await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).send();
 ```
 
 ---
@@ -90,8 +89,9 @@ await client.authorizeAccount(yourAddress, 10, BigInt(1024 * 1024)).withSudo().s
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = "0.1"
+bulletin-sdk-rust = "1.0"
 subxt = "0.44"
+subxt-signer = { version = "0.44", features = ["sr25519"] }
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -103,7 +103,7 @@ use subxt_signer::sr25519::Keypair;
 use std::str::FromStr;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // 1. Connect to Bulletin Chain
     let client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
 
@@ -130,28 +130,26 @@ Now that you've stored your first data:
 2. **[TypeScript SDK](./typescript/README.md)** - Full TypeScript documentation
 3. **[Rust SDK](./rust/README.md)** - Full Rust documentation
 4. **[Authorization](./concepts/authorization.md)** - Learn about authorization management
-5. **[Chunked Uploads](./typescript/chunked-uploads.md)** - Store files up to 64 MiB with automatic chunking
+5. **[Chunked Uploads](./typescript/chunked-uploads.md)** - Store large files with streamed, automatic chunking
 
 ## Testnet Faucet
 
 To get authorization on testnets:
 
 1. Open the Console UI
-2. Connect your wallet
-3. Go to **Dashboard**
-4. Click the **Faucet** button
-5. Wait for the transaction to confirm
+2. Open **Faucet** in the menu
+3. Enter your account and submit
+4. Wait for the transaction to confirm
 
-You'll receive authorization to store up to 1 MiB of data.
+The faucet signs with its own authorizer key, so no wallet confirmation is needed. Its form defaults to 100 transactions and 10 MB (editable).
 
 ## Troubleshooting
 
 | Error | Solution |
 |-------|----------|
-| "Unauthorized" | Get authorization via Faucet first |
-| "InsufficientBalance" | Get testnet tokens from a faucet |
+| `Invalid: Payment` or `AUTHORIZATION_NOT_FOUND` (Rust `store()`, TypeScript `.ensureAuthorized()`) | No active authorization: get one via the Faucet |
 | "Connection refused" | Check the RPC endpoint is correct |
-| "Transaction failed" | Check you have enough authorization bytes |
+| Stores take long to be included | The allowance is used up: stores beyond it still go through, at lower priority. Top up via the Faucet |
 
 ## Networks
 

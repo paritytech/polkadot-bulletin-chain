@@ -6,6 +6,7 @@
  */
 
 import type { CID } from "multiformats/cid"
+import type { SignerTxCreator } from "polkadot-api/tx-creator"
 
 /**
  * CID codec types supported by Bulletin Chain.
@@ -38,7 +39,7 @@ export enum HashAlgorithm {
  * Configuration for chunking large data
  */
 export interface ChunkerConfig {
-  /** Size of each chunk in bytes (default: 1 MiB) */
+  /** Size of each chunk in bytes (default: 2 MiB) */
   chunkSize: number
   /** Whether to create a DAG-PB manifest (default: true) */
   createManifest: boolean
@@ -47,11 +48,11 @@ export interface ChunkerConfig {
 /**
  * Default chunker configuration
  *
- * Uses 1 MiB chunk size by default (safe and efficient for most use cases).
- * Maximum allowed is 2 MiB (MAX_CHUNK_SIZE, Bitswap limit for IPFS compatibility).
+ * Uses 2 MiB chunks (MAX_CHUNK_SIZE): the chain's `MaxTransactionSize` and the
+ * Bitswap block-size limit for IPFS compatibility.
  */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
-  chunkSize: 1024 * 1024, // 1 MiB (default)
+  chunkSize: 2 * 1024 * 1024,
   createManifest: true,
 }
 
@@ -89,7 +90,7 @@ export interface StoreOptions {
   /** Hashing algorithm to use (default: blake2b-256) */
   hashingAlgorithm?: HashAlgorithm
   /**
-   * What to wait for before returning (default: "in_block")
+   * What to wait for before returning (default: "finalized")
    * - "in_block": Return when tx is in a best block (faster, may reorg)
    * - "finalized": Return when tx is finalized (safer, slower)
    */
@@ -102,7 +103,7 @@ export interface StoreOptions {
 export const DEFAULT_STORE_OPTIONS: StoreOptions = {
   cidCodec: CidCodec.Raw,
   hashingAlgorithm: HashAlgorithm.Blake2b256,
-  waitFor: "in_block",
+  waitFor: "finalized",
 }
 
 /**
@@ -139,7 +140,7 @@ export interface StoreResult {
   /** Extrinsic index within the block (required for renew operations)
    * This value comes from the `Stored` event's `index` field
    */
-  extrinsicIndex?: number
+  transactionIndex?: number
   /** Chunk details (only present for chunked uploads) */
   chunks?: ChunkDetails
 }
@@ -169,32 +170,161 @@ export enum AuthorizationScope {
 }
 
 /**
- * Chunk progress event types
+ * One byte payload to upload as a single `store` extrinsic. The SDK computes
+ * the CID upfront from `(data, codec, hashAlgo)` and uses it as the item's
+ * identifier on every event.
  */
-export enum ChunkStatus {
-  ChunkStarted = "chunk_started",
-  ChunkCompleted = "chunk_completed",
-  ChunkFailed = "chunk_failed",
-  ManifestStarted = "manifest_started",
-  ManifestCreated = "manifest_created",
-  Completed = "completed",
+export interface UploadItem {
+  data: Uint8Array
+  /** CID codec (default Raw = 0x55). DagPb is used for UnixFS manifests. */
+  codec?: CidCodec
+  /** Multihash algorithm (default Blake2b-256). */
+  hashAlgo?: HashAlgorithm
+}
+
+/** Final result returned by `upload()`. `cids[i]` matches `items[i]`. */
+export interface UploadResult {
+  cids: CID[]
 }
 
 /**
- * Progress event types for chunked uploads
+ * Per-item entry in {@link UploadEstimate.items}. `skipReason` is set when
+ * the item won't be submitted (either it duplicates an earlier item in the
+ * input, or it's already on chain and the caller opted into `skipExisting`).
  */
-export type ChunkProgressEvent =
-  | { type: ChunkStatus.ChunkStarted; index: number; total: number }
-  | { type: ChunkStatus.ChunkCompleted; index: number; total: number; cid: CID }
+export interface UploadEstimateItem {
+  index: number
+  cid: CID
+  bytes: number
+  skipReason?: "duplicate_input" | "already_on_chain"
+}
+
+/**
+ * Result of {@link BulletinClient.estimateUpload}: a per-item dispatch plan
+ * plus the aggregated `transactions` / `bytes` the chain will charge to the
+ * caller's authorization. Use it to size `authorizeAccount` capacity or to
+ * preview an upload in a UI before paying.
+ */
+export interface UploadEstimate {
+  /** Items in the input (= items.length). */
+  total: number
+  /** Per-item disposition, parallel to the input array. */
+  items: UploadEstimateItem[]
+  /** Number of `store` extrinsics that would be submitted (= `toUpload.length`). */
+  transactions: number
+  /** Total bytes consumed by the submitted txs (sum of toUpload items' sizes). */
+  bytes: bigint
+  /** Indices duplicating an earlier item by content_hash. Always populated. */
+  duplicateIndices: number[]
+  /** Indices already in the chain's TBCH at estimate time. Populated only if
+   * `skipExisting=true`. */
+  alreadyStored: number[]
+  /** Indices that would be submitted. */
+  toUpload: number[]
+}
+
+/** Options for {@link BulletinClient.estimateUpload}. */
+export interface UploadEstimateOptions {
+  /**
+   * Query the chain's `TransactionByContentHash` for each unique
+   * content_hash and exclude items already present. Requires one RPC per
+   * unique content. Default: `false`.
+   */
+  skipExisting?: boolean
+  /**
+   * Collapse repeated content_hashes within the input to a single upload
+   * (first occurrence wins; subsequent indices land in `duplicateIndices`).
+   * Default: `true` — the chain dedupes by content_hash anyway, so charging
+   * the caller for the duplicates is wasteful.
+   */
+  dedupInput?: boolean
+}
+
+/**
+ * Cheap (CID+size only) plan produced by streaming a {@link BlobSource} once.
+ * Holds ~36 bytes per chunk — so a multi-GiB file's plan is small even though
+ * the data never lived in memory. Bridges estimation/dedup and submission:
+ * {@link BulletinClient.estimateUpload}(source) returns one, and it can be
+ * reused to avoid re-hashing.
+ */
+export interface ChunkPlan {
+  /** Per-unit content CIDs, in source order. Chunks (Raw) for a file plan;
+   *  one entry per item for an items-as-is plan. */
+  chunkCids: CID[]
+  /** Per-unit byte sizes (last chunk may be shorter). */
+  chunkSizes: number[]
+  /** Per-unit byte offset into the source (cumulative `chunkSizes`). Lets a
+   *  {@link SeekableSource} fetch unit `i` lazily via `read(offsets[i], sizes[i])`. */
+  offsets: number[]
+  /** Per-unit CID codec. Omitted → all Raw (the file-chunk case); set per unit
+   *  by the items-as-is plan. */
+  codecs?: CidCodec[]
+  /** Per-unit multihash algorithm. Omitted → all Blake2b-256. */
+  hashAlgos?: HashAlgorithm[]
+  /** Sum of chunkSizes. */
+  totalSize: number
+  /** Chunk size the plan was built with (0 for an items-as-is plan). */
+  chunkSize: number
+  /** UnixFS DAG-PB manifest root — the retrieval id. Undefined if manifestless. */
+  rootCid?: CID
+  /** Encoded manifest bytes (the manifest `store` extrinsic). */
+  manifestData?: Uint8Array
+}
+
+/** {@link UploadEstimate} plus the {@link ChunkPlan} that produced it. */
+export interface StreamEstimate extends UploadEstimate {
+  plan: ChunkPlan
+}
+
+/**
+ * Lifecycle events for an upload. The same set fires whether the upload is
+ * a single item or many — single-item uploads just have `total: 1`. Every
+ * event carries the item's CID; callers use that to correlate with their
+ * own bookkeeping.
+ */
+export enum UploadStatus {
+  ItemStarted = "item_started",
+  ItemInBlock = "item_in_block",
+  ItemFinalized = "item_finalized",
+  ItemFailed = "item_failed",
+}
+
+export type UploadEvent =
   | {
-      type: ChunkStatus.ChunkFailed
+      type: UploadStatus.ItemStarted
       index: number
       total: number
+      cid: CID
+    }
+  | {
+      type: UploadStatus.ItemInBlock
+      index: number
+      total: number
+      cid: CID
+      blockHash: string
+      blockNumber: number
+      /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
+      transactionIndex?: number
+    }
+  | {
+      type: UploadStatus.ItemFinalized
+      index: number
+      total: number
+      cid: CID
+      blockHash: string
+      blockNumber: number
+      /** Pallet `Stored.index` — the storage slot used by `renew(blockNumber, index)`. */
+      transactionIndex?: number
+    }
+  | {
+      type: UploadStatus.ItemFailed
+      index: number
+      total: number
+      cid: CID
       error: Error
     }
-  | { type: ChunkStatus.ManifestStarted }
-  | { type: ChunkStatus.ManifestCreated; cid: CID }
-  | { type: ChunkStatus.Completed; manifestCid?: CID }
+
+export type UploadCallback = (event: UploadEvent) => void
 
 /**
  * Transaction status event types
@@ -236,7 +366,7 @@ export type TransactionStatusEvent =
 /**
  * Combined progress event types
  */
-export type ProgressEvent = ChunkProgressEvent | TransactionStatusEvent
+export type ProgressEvent = TransactionStatusEvent
 
 /**
  * Progress callback type
@@ -258,25 +388,31 @@ export enum ErrorCode {
   INVALID_HASH_ALGORITHM = "INVALID_HASH_ALGORITHM",
   CID_CALCULATION_FAILED = "CID_CALCULATION_FAILED",
   DAG_ENCODING_FAILED = "DAG_ENCODING_FAILED",
-  INSUFFICIENT_AUTHORIZATION = "INSUFFICIENT_AUTHORIZATION",
-  AUTHORIZATION_FAILED = "AUTHORIZATION_FAILED",
-  TRANSACTION_FAILED = "TRANSACTION_FAILED",
-  CHUNK_FAILED = "CHUNK_FAILED",
+  CHUNKING_FAILED = "CHUNKING_FAILED",
   MISSING_CHUNK = "MISSING_CHUNK",
+  AUTHORIZATION_NOT_FOUND = "AUTHORIZATION_NOT_FOUND",
+  TRANSACTION_INVALID = "TRANSACTION_INVALID",
+  TRANSACTION_FAILED = "TRANSACTION_FAILED",
+  NETWORK_ERROR = "NETWORK_ERROR",
   TIMEOUT = "TIMEOUT",
   UNSUPPORTED_OPERATION = "UNSUPPORTED_OPERATION",
+  STORE_STALLED = "STORE_STALLED",
+  HIJACK_BUDGET_EXCEEDED = "HIJACK_BUDGET_EXCEEDED",
+  UPLOAD_INCOMPLETE = "UPLOAD_INCOMPLETE",
 }
 
 /** Error codes that are retryable */
 const RETRYABLE_CODES = new Set<ErrorCode>([
   ErrorCode.TRANSACTION_FAILED,
+  ErrorCode.NETWORK_ERROR,
   ErrorCode.TIMEOUT,
+  ErrorCode.STORE_STALLED,
 ])
 
 /** Recovery hints per error code */
 const RECOVERY_HINTS: Record<ErrorCode, string> = {
   [ErrorCode.EMPTY_DATA]: "Provide non-empty data",
-  [ErrorCode.DATA_TOO_LARGE]: "Reduce data size or use chunked upload",
+  [ErrorCode.DATA_TOO_LARGE]: "Reduce the data size or use a chunked upload",
   [ErrorCode.CHUNK_TOO_LARGE]: "Reduce chunk size to 2 MiB or less",
   [ErrorCode.INVALID_CHUNK_SIZE]: "Use a chunk size between 1 byte and 2 MiB",
   [ErrorCode.INVALID_CONFIG]: "Check configuration parameters",
@@ -285,19 +421,28 @@ const RECOVERY_HINTS: Record<ErrorCode, string> = {
     "Use blake2b-256, sha2-256, or keccak-256",
   [ErrorCode.CID_CALCULATION_FAILED]: "Verify data and hash algorithm",
   [ErrorCode.DAG_ENCODING_FAILED]: "Check chunk CIDs and data integrity",
-  [ErrorCode.INSUFFICIENT_AUTHORIZATION]:
-    "Request additional authorization via authorizeAccount()",
-  [ErrorCode.AUTHORIZATION_FAILED]:
-    "Check that the account has authorizer privileges",
-  [ErrorCode.TRANSACTION_FAILED]:
-    "Verify transaction parameters and account nonce",
-  [ErrorCode.CHUNK_FAILED]: "Verify data integrity and chunker configuration",
+  [ErrorCode.CHUNKING_FAILED]:
+    "Verify data integrity and chunker configuration",
   [ErrorCode.MISSING_CHUNK]:
     "Ensure all chunks are present with contiguous indices starting from 0",
+  [ErrorCode.AUTHORIZATION_NOT_FOUND]:
+    "Authorize the account or the content hash first, then retry",
+  [ErrorCode.TRANSACTION_INVALID]:
+    "The transaction pool rejected the transaction; check the validity error before retrying",
+  [ErrorCode.TRANSACTION_FAILED]:
+    "Verify transaction parameters and account nonce, then retry",
+  [ErrorCode.NETWORK_ERROR]:
+    "Check network connectivity to the RPC endpoint, then retry",
   [ErrorCode.TIMEOUT]:
     "Transaction was not finalized within the timeout window. Retry the transaction",
   [ErrorCode.UNSUPPORTED_OPERATION]:
-    "This operation is not supported in this context",
+    "This operation is not supported by this client or the connected runtime",
+  [ErrorCode.STORE_STALLED]:
+    "The RPC connection sent no chainHead progress; retry on a fresh client",
+  [ErrorCode.HIJACK_BUDGET_EXCEEDED]:
+    "Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account",
+  [ErrorCode.UPLOAD_INCOMPLETE]:
+    "Some items were not stored; re-run the estimate with skip-existing enabled, then submit to retry only the missing items",
 }
 
 /**
@@ -325,39 +470,129 @@ export class BulletinError extends Error {
 }
 
 /**
+ * Per-chain block-capacity constants used by the pipelineStore batch sizer.
+ *
+ * Determined offline from the chain's runtime constants and pallet benchmarks.
+ * Defined here (rather than next to `pipelineStore`) so `ClientConfig` can carry
+ * it without a circular import.
+ */
+export interface BlockLimits {
+  /** Max normal-class weight budget (ref_time) per block. */
+  maxNormalWeight: bigint
+  /** Max normal-class block length in bytes. */
+  normalBlockLength: number
+  /** Hard per-block limit on store extrinsics (`TransactionStorage::MaxBlockTransactions`). */
+  maxBlockTransactions: number
+  /** Base weight of a `store` extrinsic (constant part). */
+  storeWeightBase: bigint
+  /** Per-byte weight slope of a `store` extrinsic. */
+  storeWeightPerByte: bigint
+  /** Encoding overhead per extrinsic (signature + address + extensions), ~110 bytes. */
+  extrinsicOverhead: number
+}
+
+/**
+ * Reasonable defaults for bulletin-westend / bulletin-paseo runtimes.
+ * Derived from runtime constants + pallet benchmarks at the time of writing.
+ */
+export const DEFAULT_BLOCK_LIMITS: BlockLimits = {
+  maxNormalWeight: 1_500_000_000_000n, // 75% of 2s weight budget
+  normalBlockLength: 9_437_184, // 90% of 10 MiB MAX_BLOCK_LENGTH
+  maxBlockTransactions: 512, // TransactionStorage::MaxBlockTransactions
+  storeWeightBase: 35_489_000n,
+  storeWeightPerByte: 6_912n,
+  extrinsicOverhead: 110,
+}
+
+/**
  * Client configuration
  */
 export interface ClientConfig {
-  /** Default chunk size for large files (default: 1 MiB) */
+  /** Default chunk size for large files (default: 2 MiB) */
   defaultChunkSize?: number
   /** Whether to create manifests for chunked uploads (default: true) */
   createManifest?: boolean
-  /** Threshold for automatic chunking (default: 2 MiB).
-   * Data larger than this will be automatically chunked by `store()`. */
+  /** Largest data `BulletinPreparer.prepareStore` accepts for one transaction
+   * (default: 2 MiB, the chain's `MaxTransactionSize`). */
   chunkingThreshold?: number
   /** Defensive timeout in milliseconds per transaction (default: 420_000).
    * PAPI handles reconnects and mortality, so this should rarely fire.
    * Set above PAPI's default mortality window (64 blocks ~ 6.4 min at 6s blocks). */
   txTimeout?: number
+  /**
+   * Factory that returns the JsonRpcProvider instances the SDK should use
+   * for the upload pipeline. Called twice per `pipelineStore()` invocation
+   * (broadcast clients + a dedicated monitor instance) — including on each
+   * outer retry — so dead WS connections from a failed attempt get replaced
+   * with fresh ones. `providers[0]` is used for the chainHead monitor;
+   * every provider is used as a broadcast target (pass multiple for ws-RPC
+   * redundancy across endpoints).
+   *
+   * - ws-RPC, single node: `() => [getWsProvider(url)]`
+   * - ws-RPC, multi-node:  `() => urls.map(getWsProvider)`
+   * - smoldot light client: `() => [getSmProvider(() => chainHandle)]`
+   *   (sm-provider takes a *function* returning Chain, not the Chain itself —
+   *   passing the Chain directly silently hangs all PAPI requests)
+   * - custom transport:    `() => [myJsonRpcProvider]`
+   *
+   * REQUIRED for any signed/unsigned upload — the upload paths throw
+   * UNSUPPORTED_OPERATION when this isn't set.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: PAPI's JsonRpcProvider type lives in @polkadot-api/json-rpc-provider; avoid a hard import dep here
+  providers?: () => any[]
+  /** Per-chain block limits used by pipelineStore. Defaults to
+   * {@link DEFAULT_BLOCK_LIMITS} (bulletin-westend / paseo values). */
+  blockLimits?: BlockLimits
+  /**
+   * Signer for authorization-class extrinsics (`authorizeAccount`,
+   * `authorizePreimage`, `refreshAccountAuthorization`,
+   * `refreshPreimageAuthorization`). REQUIRED to call any of those
+   * methods — the client will throw `UNSUPPORTED_OPERATION` otherwise.
+   * Deliberately separate from the upload signer so an Authorizer key
+   * is never used by accident for uploads (and vice-versa).
+   */
+  authorizerSigner?: SignerTxCreator
+  /**
+   * Wire-level submission strategy. Today only `"nonce-tracking"` is
+   * implemented; the field exists so additional strategies can be added
+   * without changing this shape.
+   */
+  submissionStrategy?: "nonce-tracking"
+  waitFor?: WaitFor
 }
 
 /**
  * Default client configuration values.
  *
- * Used by AsyncBulletinClient, MockBulletinClient, and BulletinPreparer
+ * Used by BulletinClient, MockBulletinClient, and BulletinPreparer
  * so that defaults are defined in one place.
  */
-export const DEFAULT_CLIENT_CONFIG: Required<ClientConfig> = {
-  defaultChunkSize: 1024 * 1024, // 1 MiB
+/**
+ * Resolved client config — everything from `ClientConfig` is required
+ * except `providers` and `authorizerSigner`, which stay optional; the
+ * paths that need them throw `UNSUPPORTED_OPERATION` when unset.
+ */
+export type ResolvedClientConfig = Required<
+  Omit<ClientConfig, "providers" | "authorizerSigner">
+> &
+  Pick<ClientConfig, "providers" | "authorizerSigner">
+
+export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
+  defaultChunkSize: DEFAULT_CHUNKER_CONFIG.chunkSize,
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
+  blockLimits: DEFAULT_BLOCK_LIMITS,
+  submissionStrategy: "nonce-tracking",
+  waitFor: "finalized",
+  // `providers` (factory) and `authorizerSigner` are intentionally
+  // not defaulted — see ResolvedClientConfig.
 }
 
 /** Merge caller-supplied config with defaults, ignoring undefined values. */
 export function resolveClientConfig(
   config?: Partial<ClientConfig>,
-): Required<ClientConfig> {
+): ResolvedClientConfig {
   if (!config) return { ...DEFAULT_CLIENT_CONFIG }
   const result = { ...DEFAULT_CLIENT_CONFIG }
   for (const key of Object.keys(config) as (keyof ClientConfig)[]) {

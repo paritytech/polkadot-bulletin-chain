@@ -11,7 +11,7 @@ use scale_info::TypeInfo;
 /// Result type for SDK operations.
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// SDK error types.
+/// SDK error types. The codes from [`Error::code`] are shared with the TypeScript SDK.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 pub enum Error {
@@ -22,12 +22,8 @@ pub enum Error {
 	)]
 	ChunkTooLarge(u64),
 
-	/// File size exceeds maximum allowed (64 MiB).
-	#[cfg_attr(
-		feature = "std",
-		error("File size {0} exceeds maximum allowed size of 67108864 bytes (64 MiB)")
-	)]
-	FileTooLarge(u64),
+	#[cfg_attr(feature = "std", error("Data too large: {0}"))]
+	DataTooLarge(String),
 
 	/// Data is empty.
 	#[cfg_attr(feature = "std", error("Data cannot be empty"))]
@@ -37,27 +33,9 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("Invalid CID: {0}"))]
 	InvalidCid(String),
 
-	/// Authorization not found for account.
+	/// No unexpired authorization for the account or content hash.
 	#[cfg_attr(feature = "std", error("Authorization not found for account: {0}"))]
 	AuthorizationNotFound(String),
-
-	/// Insufficient authorization.
-	#[cfg_attr(
-		feature = "std",
-		error("Insufficient authorization: need {need} bytes, have {available} bytes")
-	)]
-	InsufficientAuthorization { need: u64, available: u64 },
-
-	/// Authorization has expired.
-	#[cfg_attr(
-		feature = "std",
-		error("Authorization expired at block {expired_at} (current block: {current_block})")
-	)]
-	AuthorizationExpired { expired_at: u32, current_block: u32 },
-
-	/// Storage operation failed.
-	#[cfg_attr(feature = "std", error("Storage operation failed: {0}"))]
-	StorageFailed(String),
 
 	/// DAG-PB encoding failed.
 	#[cfg_attr(feature = "std", error("DAG-PB encoding failed: {0}"))]
@@ -75,39 +53,42 @@ pub enum Error {
 	#[cfg_attr(feature = "std", error("Chunking failed: {0}"))]
 	ChunkingFailed(String),
 
-	/// Retrieval failed.
-	#[cfg_attr(feature = "std", error("Retrieval failed: {0}"))]
-	RetrievalFailed(String),
-
-	/// Renewal target not found.
-	#[cfg_attr(feature = "std", error("Renewal target not found: block {block}, index {index}"))]
-	RenewalNotFound { block: u32, index: u32 },
-
-	/// Renewal failed.
-	#[cfg_attr(feature = "std", error("Renewal failed: {0}"))]
-	RenewalFailed(String),
-
 	/// CID calculation failed.
 	#[cfg_attr(feature = "std", error("CID calculation failed: {0}"))]
 	CidCalculationFailed(String),
 
-	/// On-chain transaction failed (e.g., invalid, dropped, or error).
+	/// A submitted transaction failed: dispatch error, dropped, or the status stream ended.
 	#[cfg_attr(feature = "std", error("Transaction failed: {0}"))]
 	TransactionFailed(String),
+
+	#[cfg_attr(feature = "std", error("Transaction invalid: {message}"))]
+	TransactionInvalid { custom_code: Option<u8>, message: String },
 
 	/// Invalid chunk size.
 	#[cfg_attr(feature = "std", error("Invalid chunk size: {0}"))]
 	InvalidChunkSize(String),
 
-	// This enum derives `Encode`/`Decode`, so inserting one in the
-	// middle silently renumbers every variant after it.
-	/// The connected chain ships without `pallet-bulletin-data-renewal`.
-	#[cfg_attr(feature = "std", error("Renewal is not available on this chain"))]
-	RenewalUnavailable,
+	#[cfg_attr(feature = "std", error("Unsupported operation: {0}"))]
+	UnsupportedOperation(String),
 
 	/// The connected chain's runtime predates `BulletinTransactionStorageApi`.
 	#[cfg_attr(feature = "std", error("Authorization runtime API is not available on this chain"))]
 	AuthorizationApiUnavailable,
+
+	/// Upload pipeline received no chainHead progress within the stall window
+	/// (the RPC connection is likely unhealthy).
+	#[cfg_attr(feature = "std", error("Store stalled: {0}"))]
+	StoreStalled(String),
+
+	/// An item's nonce slot was repeatedly taken by other transactions from the
+	/// same signer; the per-item retry budget was exhausted.
+	#[cfg_attr(feature = "std", error("Hijack budget exceeded: {0}"))]
+	HijackBudgetExceeded(String),
+
+	/// The upload run completed, but some items exhausted their retry budget
+	/// and were NOT stored (their `ItemFailed` events carry the per-item cause).
+	#[cfg_attr(feature = "std", error("Upload incomplete: {0}"))]
+	UploadIncomplete(String),
 }
 
 impl Error {
@@ -115,26 +96,23 @@ impl Error {
 	pub fn code(&self) -> &'static str {
 		match self {
 			Error::ChunkTooLarge(_) => "CHUNK_TOO_LARGE",
-			Error::FileTooLarge(_) => "FILE_TOO_LARGE",
+			Error::DataTooLarge(_) => "DATA_TOO_LARGE",
 			Error::EmptyData => "EMPTY_DATA",
 			Error::InvalidCid(_) => "INVALID_CID",
 			Error::AuthorizationNotFound(_) => "AUTHORIZATION_NOT_FOUND",
-			Error::InsufficientAuthorization { .. } => "INSUFFICIENT_AUTHORIZATION",
-			Error::AuthorizationExpired { .. } => "AUTHORIZATION_EXPIRED",
-			Error::StorageFailed(_) => "STORAGE_FAILED",
 			Error::DagEncodingFailed(_) => "DAG_ENCODING_FAILED",
 			Error::NetworkError(_) => "NETWORK_ERROR",
 			Error::InvalidConfig(_) => "INVALID_CONFIG",
 			Error::ChunkingFailed(_) => "CHUNKING_FAILED",
-			Error::RetrievalFailed(_) => "RETRIEVAL_FAILED",
-			Error::RenewalNotFound { .. } => "RENEWAL_NOT_FOUND",
-			Error::RenewalFailed(_) => "RENEWAL_FAILED",
-			// Mirrors the TypeScript SDK's `UNSUPPORTED_OPERATION`.
-			Error::RenewalUnavailable | Error::AuthorizationApiUnavailable =>
-				"UNSUPPORTED_OPERATION",
 			Error::CidCalculationFailed(_) => "CID_CALCULATION_FAILED",
 			Error::TransactionFailed(_) => "TRANSACTION_FAILED",
+			Error::TransactionInvalid { .. } => "TRANSACTION_INVALID",
 			Error::InvalidChunkSize(_) => "INVALID_CHUNK_SIZE",
+			Error::UnsupportedOperation(_) | Error::AuthorizationApiUnavailable =>
+				"UNSUPPORTED_OPERATION",
+			Error::StoreStalled(_) => "STORE_STALLED",
+			Error::HijackBudgetExceeded(_) => "HIJACK_BUDGET_EXCEEDED",
+			Error::UploadIncomplete(_) => "UPLOAD_INCOMPLETE",
 		}
 	}
 
@@ -142,12 +120,7 @@ impl Error {
 	pub fn is_retryable(&self) -> bool {
 		matches!(
 			self,
-			Error::AuthorizationExpired { .. } |
-				Error::NetworkError(_) |
-				Error::StorageFailed(_) |
-				Error::TransactionFailed(_) |
-				Error::RetrievalFailed(_) |
-				Error::RenewalFailed(_)
+			Error::NetworkError(_) | Error::TransactionFailed(_) | Error::StoreStalled(_)
 		)
 	}
 
@@ -155,30 +128,29 @@ impl Error {
 	pub fn recovery_hint(&self) -> &'static str {
 		match self {
 			Error::ChunkTooLarge(_) => "Reduce chunk size to 2 MiB or less",
-			Error::FileTooLarge(_) => "Reduce file size or use chunked upload",
+			Error::DataTooLarge(_) => "Reduce the data size or use a chunked upload",
 			Error::EmptyData => "Provide non-empty data",
 			Error::InvalidCid(_) => "Verify CID format",
 			Error::AuthorizationNotFound(_) =>
-				"Call authorizeAccount() or authorizePreimage() first",
-			Error::InsufficientAuthorization { .. } =>
-				"Request additional authorization via authorize_account()",
-			Error::AuthorizationExpired { .. } =>
-				"Call refreshAccountAuthorization() to extend expiry",
-			Error::StorageFailed(_) => "Check node connectivity and try again",
+				"Authorize the account or the content hash first, then retry",
 			Error::DagEncodingFailed(_) => "Check chunk CIDs and data integrity",
-			Error::NetworkError(_) => "Check network connectivity to the RPC endpoint",
+			Error::NetworkError(_) => "Check network connectivity to the RPC endpoint, then retry",
 			Error::InvalidConfig(_) => "Check configuration parameters",
 			Error::ChunkingFailed(_) => "Verify data integrity and chunker configuration",
-			Error::RetrievalFailed(_) => "The data may not be available yet; try again",
-			Error::RenewalNotFound { .. } => "Verify the block number and extrinsic index",
-			Error::RenewalFailed(_) => "Check that storage hasn't expired, then retry",
-			Error::RenewalUnavailable =>
-				"This chain has no renewal pallet; data expires at the retention period",
-			Error::AuthorizationApiUnavailable =>
-				"Upgrade the chain's runtime, or skip the authorization preflight",
 			Error::CidCalculationFailed(_) => "Verify data and hash algorithm",
-			Error::TransactionFailed(_) => "Verify transaction parameters and account nonce",
+			Error::TransactionFailed(_) =>
+				"Verify transaction parameters and account nonce, then retry",
+			Error::TransactionInvalid { .. } =>
+				"The transaction pool rejected the transaction; check the validity error before retrying",
 			Error::InvalidChunkSize(_) => "Use a chunk size between 1 byte and 2 MiB",
+			Error::UnsupportedOperation(_) | Error::AuthorizationApiUnavailable =>
+				"This operation is not supported by this client or the connected runtime",
+			Error::StoreStalled(_) =>
+				"The RPC connection sent no chainHead progress; retry on a fresh client",
+			Error::HijackBudgetExceeded(_) =>
+				"Another transaction from this signer keeps taking the nonce; avoid concurrent submissions on this account",
+			Error::UploadIncomplete(_) =>
+				"Some items were not stored; re-run the estimate with skip-existing enabled, then submit to retry only the missing items",
 		}
 	}
 }
@@ -186,7 +158,7 @@ impl Error {
 /// Configuration for chunking large data.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct ChunkerConfig {
-	/// Size of each chunk in bytes (default: 1 MiB).
+	/// Size of each chunk in bytes (default: 2 MiB).
 	pub chunk_size: u32,
 	/// Maximum number of parallel uploads (default: 8).
 	pub max_parallel: u32,
@@ -197,7 +169,7 @@ pub struct ChunkerConfig {
 impl Default for ChunkerConfig {
 	fn default() -> Self {
 		Self {
-			chunk_size: 1024 * 1024, // 1 MiB
+			chunk_size: crate::chunker::DEFAULT_CHUNK_SIZE as u32,
 			max_parallel: 8,
 			create_manifest: true,
 		}
@@ -209,6 +181,9 @@ impl Default for ChunkerConfig {
 pub struct Chunk {
 	/// The chunk data.
 	pub data: Vec<u8>,
+	/// CID of this chunk as bytes (computed after encoding); `None` until set.
+	/// Mirrors the TypeScript SDK's optional `Chunk.cid`.
+	pub cid: Option<Vec<u8>>,
 	/// Index of this chunk in the sequence.
 	pub index: u32,
 	/// Total number of chunks.
@@ -218,7 +193,7 @@ pub struct Chunk {
 impl Chunk {
 	/// Create a new chunk.
 	pub fn new(data: Vec<u8>, index: u32, total_chunks: u32) -> Self {
-		Self { data, index, total_chunks }
+		Self { data, cid: None, index, total_chunks }
 	}
 
 	/// Get the size of this chunk.
@@ -242,6 +217,10 @@ pub struct StoreResult {
 	pub size: u64,
 	/// Block number where data was stored (or last chunk was stored).
 	pub block_number: Option<u32>,
+	/// Transaction index from the `Stored` event — the storage slot among the
+	/// block's stored transactions that `renew(block_number, transaction_index)`
+	/// targets. This is NOT the extrinsic index in the block body.
+	pub transaction_index: Option<u32>,
 	/// Chunk details (only present for chunked uploads).
 	pub chunks: Option<ChunkDetails>,
 }
@@ -306,10 +285,10 @@ pub struct RenewalResult {
 pub enum WaitFor {
 	/// Return when the transaction is in a best block.
 	/// Faster but the block may be reorganized.
-	#[default]
 	InBlock,
 	/// Return when the transaction is finalized.
 	/// Slower but guarantees the transaction is permanent.
+	#[default]
 	Finalized,
 }
 
@@ -320,7 +299,7 @@ pub struct StoreOptions {
 	pub cid_codec: CidCodec,
 	/// Hashing algorithm to use (default: blake2b-256).
 	pub hash_algorithm: HashingAlgorithm,
-	/// What to wait for before returning (default: best block inclusion).
+	/// What to wait for before returning (default: finalized).
 	pub wait_for: WaitFor,
 }
 
@@ -360,33 +339,54 @@ pub enum ChunkProgressEvent {
 	Completed { manifest_cid: Option<Vec<u8>> },
 }
 
-/// Transaction status event types (mirrors subxt's TxStatus).
+/// Transaction status event types.
+///
+/// Mirrors the TypeScript SDK's `TxStatus` / `TransactionStatusEvent` union
+/// name-for-name. `chunk_index` is an optional trace id correlating an event to
+/// a chunk in a multi-item upload; `tx_index` is the `Stored`-event transaction
+/// index (the `renew` slot), NOT the extrinsic index in the block body. (TS
+/// marks `blockNumber` required; here it stays optional because the client
+/// fetches it fallibly.)
 #[derive(Debug, Clone)]
 pub enum TransactionStatusEvent {
+	/// Transaction has been signed.
+	Signed { tx_hash: String, chunk_index: Option<u32> },
 	/// Transaction has been validated and added to the transaction pool.
-	Validated,
+	Validated { chunk_index: Option<u32> },
 	/// Transaction has been broadcast to peers.
-	Broadcasted,
+	Broadcasted { chunk_index: Option<u32> },
 	/// Transaction is now in a best block.
-	InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
+	InBlock {
+		block_hash: String,
+		block_number: Option<u32>,
+		tx_index: Option<u32>,
+		chunk_index: Option<u32>,
+	},
 	/// Transaction has been finalized.
-	Finalized { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
+	Finalized {
+		block_hash: String,
+		block_number: Option<u32>,
+		tx_index: Option<u32>,
+		chunk_index: Option<u32>,
+	},
 	/// Transaction was in a block that got reorganized.
-	NoLongerInBestBlock,
+	NoLongerInBlock { chunk_index: Option<u32> },
 	/// Transaction is not valid anymore (e.g., nonce too low).
-	Invalid { error: String },
+	Invalid { error: String, chunk_index: Option<u32> },
 	/// Transaction was dropped from the pool.
-	Dropped { error: String },
+	Dropped { error: String, chunk_index: Option<u32> },
 }
 
 impl TransactionStatusEvent {
 	/// Returns a human-readable description of this transaction status event.
 	pub fn description(&self) -> String {
 		match self {
-			TransactionStatusEvent::Validated =>
+			TransactionStatusEvent::Signed { tx_hash, .. } =>
+				alloc::format!("Transaction signed ({tx_hash})"),
+			TransactionStatusEvent::Validated { .. } =>
 				"Transaction validated and added to the pool".into(),
-			TransactionStatusEvent::Broadcasted => "Transaction broadcast to peers".into(),
-			TransactionStatusEvent::InBestBlock { block_hash, block_number, .. } =>
+			TransactionStatusEvent::Broadcasted { .. } => "Transaction broadcast to peers".into(),
+			TransactionStatusEvent::InBlock { block_hash, block_number, .. } =>
 				match block_number {
 					Some(n) => alloc::format!("Transaction in best block #{n} ({block_hash})"),
 					None => alloc::format!("Transaction in best block ({block_hash})"),
@@ -396,11 +396,11 @@ impl TransactionStatusEvent {
 					Some(n) => alloc::format!("Transaction finalized in block #{n} ({block_hash})"),
 					None => alloc::format!("Transaction finalized in block ({block_hash})"),
 				},
-			TransactionStatusEvent::NoLongerInBestBlock =>
+			TransactionStatusEvent::NoLongerInBlock { .. } =>
 				"Transaction no longer in best block (reorg occurred)".into(),
-			TransactionStatusEvent::Invalid { error } =>
+			TransactionStatusEvent::Invalid { error, .. } =>
 				alloc::format!("Transaction invalid: {error}"),
-			TransactionStatusEvent::Dropped { error } =>
+			TransactionStatusEvent::Dropped { error, .. } =>
 				alloc::format!("Transaction dropped from pool: {error}"),
 		}
 	}
@@ -449,24 +449,25 @@ impl ProgressEvent {
 
 	/// Create a Validated transaction event.
 	pub fn tx_validated() -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Validated)
+		ProgressEvent::Transaction(TransactionStatusEvent::Validated { chunk_index: None })
 	}
 
 	/// Create a Broadcasted transaction event.
 	pub fn tx_broadcasted() -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted)
+		ProgressEvent::Transaction(TransactionStatusEvent::Broadcasted { chunk_index: None })
 	}
 
-	/// Create an InBestBlock transaction event.
-	pub fn tx_in_best_block(
+	/// Create an InBlock transaction event.
+	pub fn tx_in_block(
 		block_hash: String,
 		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
+		tx_index: Option<u32>,
 	) -> Self {
-		ProgressEvent::Transaction(TransactionStatusEvent::InBestBlock {
+		ProgressEvent::Transaction(TransactionStatusEvent::InBlock {
 			block_hash,
 			block_number,
-			extrinsic_index,
+			tx_index,
+			chunk_index: None,
 		})
 	}
 
@@ -474,12 +475,13 @@ impl ProgressEvent {
 	pub fn tx_finalized(
 		block_hash: String,
 		block_number: Option<u32>,
-		extrinsic_index: Option<u32>,
+		tx_index: Option<u32>,
 	) -> Self {
 		ProgressEvent::Transaction(TransactionStatusEvent::Finalized {
 			block_hash,
 			block_number,
-			extrinsic_index,
+			tx_index,
+			chunk_index: None,
 		})
 	}
 }
@@ -511,25 +513,23 @@ mod tests {
 	fn all_errors() -> Vec<Error> {
 		vec![
 			Error::ChunkTooLarge(100),
-			Error::FileTooLarge(200),
+			Error::DataTooLarge("200 bytes".into()),
 			Error::EmptyData,
 			Error::InvalidCid("bad".into()),
 			Error::AuthorizationNotFound("acct".into()),
-			Error::InsufficientAuthorization { need: 10, available: 5 },
-			Error::AuthorizationExpired { expired_at: 1, current_block: 2 },
-			Error::StorageFailed("fail".into()),
 			Error::DagEncodingFailed("bad dag".into()),
 			Error::NetworkError("timeout".into()),
 			Error::InvalidConfig("bad config".into()),
 			Error::ChunkingFailed("chunk err".into()),
-			Error::RetrievalFailed("not found".into()),
-			Error::RenewalNotFound { block: 1, index: 0 },
-			Error::RenewalFailed("renew err".into()),
 			Error::CidCalculationFailed("calc fail".into()),
 			Error::TransactionFailed("tx fail".into()),
+			Error::TransactionInvalid { custom_code: Some(11), message: "Custom error: 11".into() },
 			Error::InvalidChunkSize("zero".into()),
-			Error::RenewalUnavailable,
+			Error::UnsupportedOperation("renew".into()),
 			Error::AuthorizationApiUnavailable,
+			Error::StoreStalled("no events".into()),
+			Error::HijackBudgetExceeded("slot taken".into()),
+			Error::UploadIncomplete("1 of 3 items failed".into()),
 		]
 	}
 
@@ -537,25 +537,23 @@ mod tests {
 	fn test_error_code_returns_screaming_snake_case() {
 		let expected = vec![
 			"CHUNK_TOO_LARGE",
-			"FILE_TOO_LARGE",
+			"DATA_TOO_LARGE",
 			"EMPTY_DATA",
 			"INVALID_CID",
 			"AUTHORIZATION_NOT_FOUND",
-			"INSUFFICIENT_AUTHORIZATION",
-			"AUTHORIZATION_EXPIRED",
-			"STORAGE_FAILED",
 			"DAG_ENCODING_FAILED",
 			"NETWORK_ERROR",
 			"INVALID_CONFIG",
 			"CHUNKING_FAILED",
-			"RETRIEVAL_FAILED",
-			"RENEWAL_NOT_FOUND",
-			"RENEWAL_FAILED",
 			"CID_CALCULATION_FAILED",
 			"TRANSACTION_FAILED",
+			"TRANSACTION_INVALID",
 			"INVALID_CHUNK_SIZE",
 			"UNSUPPORTED_OPERATION",
 			"UNSUPPORTED_OPERATION",
+			"STORE_STALLED",
+			"HIJACK_BUDGET_EXCEEDED",
+			"UPLOAD_INCOMPLETE",
 		];
 		assert_eq!(all_errors().len(), expected.len(), "expected[] out of sync with all_errors()");
 		for (error, expected_code) in all_errors().iter().zip(expected.iter()) {
@@ -565,14 +563,7 @@ mod tests {
 
 	#[test]
 	fn test_is_retryable() {
-		let retryable_codes = [
-			"AUTHORIZATION_EXPIRED",
-			"NETWORK_ERROR",
-			"STORAGE_FAILED",
-			"TRANSACTION_FAILED",
-			"RETRIEVAL_FAILED",
-			"RENEWAL_FAILED",
-		];
+		let retryable_codes = ["NETWORK_ERROR", "TRANSACTION_FAILED", "STORE_STALLED"];
 
 		for error in all_errors() {
 			let expected = retryable_codes.contains(&error.code());
@@ -597,13 +588,14 @@ mod tests {
 	#[test]
 	fn test_transaction_status_event_description() {
 		let events = vec![
-			(TransactionStatusEvent::Validated, "validated"),
-			(TransactionStatusEvent::Broadcasted, "broadcast"),
+			(TransactionStatusEvent::Validated { chunk_index: None }, "validated"),
+			(TransactionStatusEvent::Broadcasted { chunk_index: None }, "broadcast"),
 			(
-				TransactionStatusEvent::InBestBlock {
+				TransactionStatusEvent::InBlock {
 					block_hash: "0xabc".into(),
 					block_number: Some(42),
-					extrinsic_index: None,
+					tx_index: None,
+					chunk_index: None,
 				},
 				"#42",
 			),
@@ -611,13 +603,17 @@ mod tests {
 				TransactionStatusEvent::Finalized {
 					block_hash: "0xdef".into(),
 					block_number: Some(100),
-					extrinsic_index: None,
+					tx_index: None,
+					chunk_index: None,
 				},
 				"#100",
 			),
-			(TransactionStatusEvent::NoLongerInBestBlock, "no longer"),
-			(TransactionStatusEvent::Invalid { error: "nonce".into() }, "nonce"),
-			(TransactionStatusEvent::Dropped { error: "pool full".into() }, "pool full"),
+			(TransactionStatusEvent::NoLongerInBlock { chunk_index: None }, "no longer"),
+			(TransactionStatusEvent::Invalid { error: "nonce".into(), chunk_index: None }, "nonce"),
+			(
+				TransactionStatusEvent::Dropped { error: "pool full".into(), chunk_index: None },
+				"pool full",
+			),
 		];
 
 		for (event, expected_substring) in events {
@@ -631,10 +627,11 @@ mod tests {
 
 	#[test]
 	fn test_transaction_status_event_description_without_block_number() {
-		let event = TransactionStatusEvent::InBestBlock {
+		let event = TransactionStatusEvent::InBlock {
 			block_hash: "0xabc".into(),
 			block_number: None,
-			extrinsic_index: None,
+			tx_index: None,
+			chunk_index: None,
 		};
 		let desc = event.description();
 		assert!(desc.contains("0xabc"));
@@ -643,7 +640,8 @@ mod tests {
 		let event = TransactionStatusEvent::Finalized {
 			block_hash: "0xdef".into(),
 			block_number: None,
-			extrinsic_index: None,
+			tx_index: None,
+			chunk_index: None,
 		};
 		let desc = event.description();
 		assert!(desc.contains("0xdef"));

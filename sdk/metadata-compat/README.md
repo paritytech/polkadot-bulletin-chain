@@ -1,0 +1,72 @@
+# Partial compat metadata
+
+`sdk/metadata.scale` tracks the workspace runtime and is the canonical codegen
+input for the Rust SDK. Live chains lag it; when an item the SDK uses changes
+shape incompatibly, add a partial snapshot here scoped to the affected pallet,
+generated from the oldest supported chain with that shape:
+
+```bash
+subxt metadata --url wss://<chain-rpc> --pallets <Pallet> -f bytes \
+    > sdk/metadata-compat/<pallet>-v<spec_version>.scale
+```
+
+Then in `sdk/rust/src/compat.rs`: add a `#[subxt::subxt]` module for the
+snapshot, a registry row (the key is derived from the file itself — see
+`renew_registry()`), and a match arm at the call site. Dispatch hashes the
+connected chain's item (subxt's per-item type-tree hash) and looks it up;
+unknown shapes fail closed — deliberately strict: even a wire-compatible
+evolution of the item's type tree needs a new row.
+
+The TypeScript SDK (`sdk/typescript/src/compat.ts`) mirrors the registry with
+PAPI's per-item checksums: pin the snapshot's checksum as a registry row and
+add the encoder arm; at runtime the connected chain's metadata is checksummed
+and looked up. Unit tests on both sides re-derive every key/checksum from the
+committed files here, so a snapshot cannot drift from its registry rows.
+
+Rules:
+
+- Trimmed snapshots are safe only for **pallet-local** items: per-item
+  validation hashes cover just the item's own type tree. Never encode
+  `RuntimeCall`-embedding calls (`Sudo.sudo`, `Utility.batch_all`) from one —
+  the reduced call enum cannot hash-match a live chain.
+- After regenerating any `.scale`, run `cargo clean -p bulletin-sdk-rust`:
+  cargo does not track the subxt macro's file input, so a stale expansion
+  survives an ordinary rebuild.
+- Delete a snapshot (and its module + dispatch arm) once no supported chain
+  needs it.
+- Registry keys pair the hosting **pallet** with the item hash/checksum: the
+  per-item hash covers only the item's own type tree, so a call moved across
+  pallets unchanged (the renewal split) keeps its hash and the pallet is the
+  only discriminator.
+
+## Regenerating `sdk/metadata.scale`
+
+Extract the metadata from the workspace runtime wasm with the papi CLI
+(installed by `npm ci` in `examples/`). Run `papi add` in an empty directory:
+it writes a `.papi/` folder there.
+
+```bash
+repo=$(git rev-parse --show-toplevel)
+cargo build --release -p bulletin-westend-runtime
+
+cd "$(mktemp -d)"
+"$repo/examples/node_modules/.bin/papi" add bulletin --skip-codegen \
+    --wasm "$repo/target/release/wbuild/bulletin-westend-runtime/bulletin_westend_runtime.compact.wasm"
+cp .papi/metadata/bulletin.scale "$repo/sdk/metadata.scale"
+
+cd "$repo"
+cargo clean -p bulletin-sdk-rust
+cargo test -p bulletin-sdk-rust --lib
+(cd sdk/typescript && npm run test:unit)
+```
+
+The output is V16 `RuntimeMetadataPrefixed`, the format subxt reads. The
+compat unit tests fail if a renewal call changed shape; add the registry rows
+described above.
+
+## Snapshots
+
+| File | Source chain (fetched) | Covers |
+|---|---|---|
+| `transaction-storage-v1000011.scale` | bulletin-westend v1000011, `wss://westend-bulletin-rpc.polkadot.io` (2026-07-08) | positional `renew(block, index)` |
+| `transaction-storage-v1000016.scale` | bulletin-westend v1000016, trimmed from the pre-split workspace `sdk/metadata.scale` (2026-08-07) | `renew(entry: TransactionRef)` / `force_renew` (Rust + TypeScript) and `enable_auto_renew` / `disable_auto_renew` (TypeScript) in `TransactionStorage` (pre renewal split) |

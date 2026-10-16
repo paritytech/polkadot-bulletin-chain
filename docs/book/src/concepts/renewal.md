@@ -18,7 +18,7 @@ Three renewal operations, with different behaviour:
 Schedules a **single** renewal that fires when the data reaches its retention boundary. The registration is then removed.
 
 - Emits `RenewalEnabled { content_hash, who, recurring: false }` — not `Renewed`, since nothing is renewed at dispatch time.
-- Rejects with `RenewalAlreadyEnabled` if a renewal is already registered for this content hash.
+- The transaction pool rejects it as an invalid transaction (custom error 11, `RENEWAL_ALREADY_ENABLED`) if a renewal is already registered for this content hash.
 
 ### `force_renew(entry)` — immediate synchronous renewal
 
@@ -29,12 +29,13 @@ Renews the data **immediately** at dispatch time, extending its retention from t
 
 ### `enable_auto_renew(content_hash)` — continuous renewal
 
-Registers the data — by content hash, not a `TransactionRef` — for **recurring** renewal at each retention cycle until disabled.
+Registers the data — by content hash, not a `TransactionRef` — for **recurring** renewal at each retention cycle until disabled, or until a cycle cannot be charged to the owner's authorization.
 
 - Emits `RenewalEnabled { content_hash, who, recurring: true }`.
 - Emits `DataRenewed { index, content_hash, account }` at each cycle.
+- Emits `RenewalFailed { content_hash, account }` when a cycle cannot be charged; the registration is dropped and the data expires.
 
-Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid it is refused with `CannotDisablePrepaidAutoRenewal` — disabling becomes possible after the first cycle has fired.
+Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid, the transaction pool rejects it as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`); disabling becomes possible after the first cycle has fired.
 
 ## Retention Period
 
@@ -65,25 +66,25 @@ Block 50000: force_renew((1000,5)) → Renewed { index: 2 } → save (50000, 2)
 Block 100000: force_renew((50000,2)) → Renewed { index: 0 } → save (100000, 0)
 ```
 
-With `enable_auto_renew` the chain tracks this for you and re-registers the data each cycle; you only need the original reference and can stop it with `disable_auto_renew`.
+With `enable_auto_renew` the chain tracks this for you and re-registers the data each cycle; you only need the content hash and can stop it with `disable_auto_renew`.
 
 ## Raw Runtime Call
 
-`renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
+The renewal calls live in the `DataRenewal` pallet (pre-split runtimes host them on `TransactionStorage`; the SDKs resolve the pallet for you). `renew` and `force_renew` take an `entry: TransactionRef` (a tagged enum). `enable_auto_renew` / `disable_auto_renew` instead take the `content_hash` directly. A raw runtime call (e.g. via PAPI):
 
 ```typescript
-api.tx.TransactionStorage.renew({
+api.tx.DataRenewal.renew({
   entry: { type: "Position", value: { block, index } }
 });
 
 // force_renew takes the same `entry`; fixed-size hashes are passed as
 // 0x-prefixed hex (PAPI SizedHex):
-api.tx.TransactionStorage.force_renew({
+api.tx.DataRenewal.force_renew({
   entry: { type: "ContentHash", value: contentHashHex }
 });
 
 // enable_auto_renew / disable_auto_renew take a content hash, not an `entry`:
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+api.tx.DataRenewal.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
 ## When to Renew
@@ -92,7 +93,7 @@ Renew if you need on-chain availability — and validator storage proofs — bey
 
 ## Authorization
 
-Like `store`, renewal consumes **authorization** based on the data size, so pre-authorize enough capacity for the renewals you plan.
+Renewal consumes **authorization**: one transaction plus the data size. Unlike `store`, where going over the allowance only lowers priority, a renewal is rejected when it would push the account's renewed bytes past its `bytes_allowance`, or the chain's total renewed bytes past `MaxPermanentStorageSize`. Pre-authorize enough capacity for the renewals you plan.
 
 ## Data Availability After Expiration
 
@@ -100,9 +101,9 @@ Only the on-chain guarantee expires: the CID stays valid, and validators may sti
 
 ## SDK Support
 
-Both SDKs provide a `renew` helper:
-- **Rust SDK**: `prepare_renew()`, `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
-- **TypeScript SDK**: `client.renew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
+Both SDKs provide renewal helpers:
+- **Rust SDK**: `TransactionClient::renew` / `force_renew` / `enable_auto_renew` / `disable_auto_renew`, plus the offline `prepare_renew()` and `RenewalTracker` — See [Rust SDK: Renewal](../rust/renewal.md)
+- **TypeScript SDK**: `client.renew()`, `forceRenew()`, `enableAutoRenew()`, `disableAutoRenew()` — See [TypeScript SDK: Renewal](../typescript/renewal.md)
 
 ## Next Steps
 

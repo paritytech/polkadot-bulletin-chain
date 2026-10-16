@@ -8,135 +8,94 @@
 //!
 //! ## Storage Operations (Supported)
 //!
-//! - **Automatic Chunking**: Split large files into optimal chunks (default 1 MiB)
+//! - **Automatic Chunking**: Split large files into chunks (default 2 MiB)
 //! - **DAG-PB Manifests**: Manifest generation for chunked data
 //! - **Authorization Management**: Helper functions for account and preimage authorization
 //! - **Progress Tracking**: Callback-based progress events for uploads
 //! - **no_std Compatible**: Core functionality works in no_std environments
 //!
-//! ## Data Retrieval (Not Yet Supported)
+//! ## Data Retrieval (Not Supported)
 //!
-//! **Important**: This SDK currently does NOT provide data retrieval functionality.
-//!
-//! ### Deprecated: IPFS Gateway Retrieval
-//!
-//! Retrieving data via public IPFS gateways (e.g., `https://ipfs.io/ipfs/{cid}`) is
-//! **deprecated** and not recommended. Public gateways are centralized infrastructure
-//! that goes against the decentralization goals of the Bulletin Chain.
-//!
-//! ### Future: Smoldot Light Client Retrieval
-//!
-//! Data retrieval will be supported via the smoldot light client's `bitswap_block` RPC.
-//! This approach allows fully decentralized data retrieval directly from Bulletin
-//! validator nodes without relying on centralized gateways.
-//!
-//! See: <https://github.com/paritytech/polkadot-bulletin-chain/pull/264>
-//!
-//! ### Current Workaround: Direct P2P via libp2p
-//!
-//! For applications that need retrieval now, connect directly to Bulletin validator
-//! nodes using libp2p with their P2P multiaddrs. This is decentralized but requires
-//! additional dependencies. See the console-ui implementation for reference.
+//! This SDK does not provide data retrieval. Bulletin nodes and smoldot serve
+//! stored blocks through the `bitswap_v1_get` JSON-RPC method (raw blocks, no DAG
+//! assembly); call it through your own RPC client. Public IPFS gateways (e.g.
+//! `https://ipfs.io/ipfs/{cid}`) are centralized and not recommended.
 //!
 //! ## Usage
 //!
-//! ### Using TransactionClient (Recommended)
+//! Uploads go through one primitive: [`estimate_upload`] → [`submit`]. The
+//! estimate plans the upload and sizes the authorization (with `skip_existing`,
+//! leaving out units already on chain); `submit` drives the items to finality through a
+//! wave-batched, reconcile-driven pipeline with exactly-once guarantees, fetching each unit's
+//! bytes lazily from the source.
 //!
-//! The SDK provides `TransactionClient` for direct transaction submission:
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::prelude::*;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Connect to the chain
-//!     let client = TransactionClient::new("ws://localhost:9944").await?;
-//!
-//!     // Store data
-//!     let receipt = client.store(b"Hello, Bulletin!".to_vec(), &signer).await?;
-//!     println!("Stored in block: {}", receipt.block_hash);
-//!
-//!     Ok(())
-//! }
-//! ```
-//!
-//! ### Low-Level: Prepare and Submit Separately
-//!
-//! For more control, prepare operations with `BulletinClient` and submit manually:
-//!
-//! ### Step 1: Prepare the Operation
-//!
-//! ```ignore
-//! use bulletin_sdk_rust::{BulletinClient, StoreOptions};
-//!
-//! let client = BulletinClient::new();
-//! let data = b"Hello, Bulletin!".to_vec();
-//! let options = StoreOptions::default();
-//!
-//! // This only prepares the data and calculates the CID - no network calls yet
-//! let operation = client.prepare_store(data, options)?;
-//! println!("Will store {} bytes", operation.size());
-//! ```
-//!
-//! ### Step 2: Submit via Subxt
-//!
-//! ```ignore
-//! use subxt::{OnlineClient, PolkadotConfig};
-//!
-//! // Connect to the chain
-//! let api = OnlineClient::<PolkadotConfig>::from_url("ws://localhost:9944").await?;
-//!
-//! // Build and submit the transaction
-//! // (exact call depends on your runtime's metadata)
-//! let tx = bulletin::tx().transaction_storage().store(
-//!     operation.data,
-//!     Some(operation.cid_config),
-//! );
-//! let result = tx.sign_and_submit_then_watch_default(&api, &signer).await?;
-//! ```
-//!
-//! ### Chunked Store (Large Files)
-//!
-//! For files larger than 2 MiB, use chunked storage:
+//! [`estimate_upload`]: crate::TransactionClient::estimate_upload
+//! [`submit`]: crate::TransactionClient::submit
 //!
 //! ```ignore
 //! use bulletin_sdk_rust::prelude::*;
 //! use std::sync::Arc;
 //!
-//! let client = BulletinClient::new();
-//! let large_data = vec![0u8; 100_000_000]; // 100 MB
+//! #[tokio::main]
+//! async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
+//!     // Connect (use `from_endpoints` for multi-provider broadcast).
+//!     let client = TransactionClient::new("ws://localhost:10000").await?;
+//!     let signer = subxt_signer::sr25519::dev::alice();
 //!
-//! let config = ChunkerConfig {
-//!     chunk_size: 1024 * 1024, // 1 MiB chunks
-//!     max_parallel: 8,
-//!     create_manifest: true,
-//! };
-//!
-//! // Progress callback (must be Arc<dyn Fn> for thread safety)
-//! let progress = Arc::new(|event: ProgressEvent| {
-//!     println!("Progress: {:?}", event);
-//! });
-//!
-//! let (batch, manifest) = client.prepare_store_chunked(
-//!     &large_data,
-//!     Some(config),
-//!     StoreOptions::default(),
-//!     Some(progress),
-//! )?;
-//!
-//! println!("Prepared {} chunks", batch.len());
-//! if let Some(ref m) = manifest {
-//!     println!("Manifest size: {} bytes", m.len());
+//!     // Upload in-memory items: plan, then submit.
+//!     let items = vec![UploadItem::new(b"hello".to_vec())];
+//!     let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
+//!     let estimate = client
+//!         .estimate_upload(UploadInput::Items(items), UploadEstimateOptions::default())
+//!         .await?;
+//!     let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(datas));
+//!     let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
+//!     println!("stored CIDs: {:?}", result.cids);
+//!     Ok(())
 //! }
+//! ```
 //!
-//! // Submit each operation in batch.operations via subxt
-//! // Then submit the manifest if present
+//! ### Streaming a large file
+//!
+//! For files, pass a [`SeekableSource`] — chunked (with a DAG-PB manifest when it
+//! spans more than one chunk), streamed once for the estimate, then range-read
+//! lazily during submission so resident memory tracks the in-flight window, not
+//! the whole file.
+//!
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//! use std::sync::Arc;
+//!
+//! let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(file_bytes));
+//! let estimate = client
+//!     .estimate_upload(UploadInput::Source(source.clone()), UploadEstimateOptions::default())
+//!     .await?;
+//! let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
+//! // With a manifest, `result.cids` ends with its root CID.
+//! ```
+//!
+//! Use [`submit_unsigned`] for the preimage-authorized (no-signer) path.
+//!
+//! [`submit_unsigned`]: crate::TransactionClient::submit_unsigned
+//! [`SeekableSource`]: crate::SeekableSource
+//!
+//! ### Offline preparation
+//!
+//! For custom submission, [`BulletinClient`] prepares operations (CID,
+//! chunking, DAG building) without network access; submit them via your own
+//! subxt client.
+//!
+//! ```ignore
+//! use bulletin_sdk_rust::prelude::*;
+//!
+//! let client = BulletinClient::new();
+//! let operation = client.prepare_store(b"Hello, Bulletin!".to_vec(), StoreOptions::default())?;
+//! println!("CID: {:?}", cid_to_bytes(&operation.calculate_cid()?)?);
 //! ```
 //!
 //! ## Feature Flags
 //!
 //! - `std` (default): Enable standard library support and subxt helpers
-//! - `serde-support`: Enable serialization support for DAG structures
 //!
 //! ## no_std Support
 //!
@@ -144,7 +103,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! bulletin-sdk-rust = { version = "0.1", default-features = false }
+//! bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain", default-features = false }
 //! ```
 
 #![cfg_attr(not(feature = "std"), no_std)]
@@ -165,6 +124,20 @@ pub(crate) mod types;
 #[cfg(feature = "std")]
 pub(crate) mod transaction;
 
+// Wave-batched upload pipeline (std-only)
+#[cfg(feature = "std")]
+pub(crate) mod pipeline;
+
+// Re-openable byte sources + streaming plan/estimate (std-only)
+#[cfg(feature = "std")]
+pub(crate) mod blob_source;
+
+// Partial metadata for incompatibly-changed items on supported chains, and
+// the shape registry that dispatches between them (std-only). Public so
+// integration tests and diagnostics can probe which shape a chain speaks.
+#[cfg(feature = "std")]
+pub mod compat;
+
 // Re-export commonly used types
 pub use client::{BulletinClient, ClientConfig};
 pub use renewal::{RenewalOperation, RenewalTracker, TrackedEntry};
@@ -180,6 +153,29 @@ pub use cid::{calculate_cid, Cid, CidCodec, CidConfig, CidData, ContentHash, Has
 // Re-export the renewal entry reference from the pallet primitives
 pub use bulletin_transaction_storage_primitives::TransactionRef;
 
+// Re-export pipeline upload types (std-only)
+#[cfg(feature = "std")]
+pub use pipeline::{
+	BlockLimits, BroadcastArgs, ItemBroadcastResult, NonceTrackingStrategy, SubmissionStrategy,
+	SubmissionStrategyKind, UploadCallback, UploadConfig, UploadEvent, UploadItem, UploadResult,
+	UploadStatus, WaveResult, DEFAULT_BLOCK_LIMITS,
+};
+
+// Re-export streaming source + plan/estimate types (std-only)
+#[cfg(feature = "std")]
+pub use blob_source::{
+	blob_from_bytes, blob_from_factory, blob_from_items, collect_blob, plan_stream, BlobSource,
+	ChunkPlan, SeekableSource, SkipReason, StreamEstimate, UploadEstimate, UploadEstimateItem,
+	UploadEstimateOptions,
+};
+
+// Re-export the transaction client + receipts (std-only)
+#[cfg(feature = "std")]
+pub use transaction::{
+	AuthorizationReceipt, AuthorizeAccountEntry, PreimageAuthorizationReceipt, RenewReceipt,
+	StoreReceipt, TransactionClient, UploadInput,
+};
+
 // Re-export key traits
 pub use chunker::Chunker;
 pub use dag::DagBuilder;
@@ -190,7 +186,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Prelude module for convenient imports.
 pub mod prelude {
 	pub use crate::{
-		authorization::{Authorization, AuthorizationManager},
+		authorization::AuthorizationManager,
 		chunker::{Chunker, FixedSizeChunker},
 		cid::{
 			calculate_cid, calculate_cid_default, calculate_cid_with_config, cid_to_bytes, Cid,
@@ -206,8 +202,22 @@ pub mod prelude {
 
 	#[cfg(feature = "std")]
 	pub use crate::transaction::{
-		AuthorizationReceipt, PreimageAuthorizationReceipt, RenewReceipt, StoreReceipt,
-		TransactionClient,
+		AuthorizationReceipt, AuthorizeAccountEntry, PreimageAuthorizationReceipt, RenewReceipt,
+		StoreReceipt, TransactionClient, UploadInput,
+	};
+
+	#[cfg(feature = "std")]
+	pub use crate::pipeline::{
+		BlockLimits, BroadcastArgs, ItemBroadcastResult, NonceTrackingStrategy, SubmissionStrategy,
+		SubmissionStrategyKind, UploadCallback, UploadConfig, UploadEvent, UploadItem,
+		UploadResult, UploadStatus, WaveResult, DEFAULT_BLOCK_LIMITS,
+	};
+
+	#[cfg(feature = "std")]
+	pub use crate::blob_source::{
+		blob_from_bytes, blob_from_factory, blob_from_items, collect_blob, plan_stream, BlobSource,
+		ChunkPlan, SeekableSource, SkipReason, StreamEstimate, UploadEstimate, UploadEstimateItem,
+		UploadEstimateOptions,
 	};
 }
 

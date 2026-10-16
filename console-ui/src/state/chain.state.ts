@@ -7,6 +7,7 @@ import { getWsProvider, WsEvent } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
 import { BehaviorSubject, map, shareReplay, combineLatest } from "rxjs";
+import { useEffect, useMemo, useRef } from "react";
 import { bind } from "@react-rxjs/core";
 import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import {
@@ -14,7 +15,7 @@ import {
   DEFAULT_NETWORK,
   type Network,
 } from "../config/networks";
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
+import { BulletinClient } from "@parity/bulletin-sdk";
 
 export type NetworkId = string;
 
@@ -355,7 +356,7 @@ export const [useClient] = bind(clientSubject, undefined);
 export const [useSudoKey] = bind(sudoKeySubject, undefined);
 
 /**
- * Hook that returns a factory for creating AsyncBulletinClient instances.
+ * Hook that returns a factory for creating BulletinClient instances.
  * Returns undefined if not connected. Call with a signer to get a client.
  *
  * @example
@@ -365,11 +366,60 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
  * const bulletinClient = createBulletinClient?.(signer);
  * ```
  */
-export function useCreateBulletinClient(): ((signer: SignerTxCreator) => AsyncBulletinClient) | undefined {
+export function useCreateBulletinClient(): ((signer?: SignerTxCreator) => BulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
-  if (!api || !client) return undefined;
-  return (signer: SignerTxCreator) => new AsyncBulletinClient(api, signer, client.submit);
+  const network = useNetwork();
+  // Each BulletinClient owns a PAPI ws connection; keep them in a real Map (not
+  // a WeakMap) so the effect below can iterate and `destroy()` them. Keyed by
+  // signer — one client per signer. The ref keeps the Map stable across renders.
+  const cacheRef = useRef<Map<object, BulletinClient>>(new Map());
+  // Tear down SDK-owned clients when the connection target changes or the
+  // component unmounts — a WeakMap would let them be GC'd eventually but never
+  // calls destroy(), leaking ws sockets. `.clear()` (not reassign) keeps the
+  // Map identity the memoized factory below captured.
+  useEffect(() => {
+    const cache = cacheRef.current;
+    return () => {
+      for (const c of cache.values()) void c.destroy();
+      cache.clear();
+    };
+  }, [api, client, network]);
+  // Memoize so the per-instance pipelineBootstrap cache (metadata + offline
+  // API) survives renders. Without this every upload would re-bootstrap.
+  return useMemo(() => {
+    if (!api || !client) return undefined;
+    // pipelineStore (signed uploads) needs JsonRpcProvider instances.
+    // Light-client setups have no ws endpoint — for those, upload paths
+    // can't be used until the SDK exposes a smoldot-native provider here.
+    const endpoints = network?.lightClient ? [] : network?.endpoints ?? [];
+    const providers =
+      endpoints.length > 0
+        ? () => endpoints.map((url) => getWsProvider(url))
+        : undefined;
+    // The SDK creates its own internal PAPI client; pick the same
+    // descriptor the rest of the app uses for this network.
+    const descriptor = network?.descriptor ?? bulletin_paseo_next_v2;
+    const cache = cacheRef.current;
+    const NO_SIGNER = {} as object;
+    return (signer?: SignerTxCreator) => {
+      const key = (signer as unknown as object | undefined) ?? NO_SIGNER;
+      let bulletin = cache.get(key);
+      if (!bulletin && providers) {
+        // The dev console drives both upload and authorize flows from the
+        // same connected account, so reuse `signer` for both SDK roles —
+        // see runtime genesis `allowed_authorizers` vs `account_authorizations`.
+        bulletin = new BulletinClient({
+          descriptor,
+          providers,
+          uploadSigner: signer,
+          authorizerSigner: signer,
+        });
+        cache.set(key, bulletin);
+      }
+      return bulletin as BulletinClient;
+    };
+  }, [api, client, network]);
 }
 
 // Direct access to subjects for non-React code

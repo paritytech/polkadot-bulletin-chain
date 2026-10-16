@@ -12,40 +12,23 @@ Multi-language client SDKs for Polkadot Bulletin Chain.
 
 ## Available SDKs
 
-- **[Rust](rust/)** - no_std compatible, works in native apps and ink! smart contracts
+- **[Rust](rust/)** - native apps; the core (CID, chunking, DAG-PB) is no_std compatible
 - **[TypeScript](typescript/)** - Browser and Node.js compatible
 
 Both SDKs provide CID calculation, automatic chunking, authorization management, and DAG-PB manifest generation.
 
-## Architecture: Bring Your Own Client
+## Architecture: Bring Your Own Transport
 
-Both SDKs follow a **BYOC (Bring Your Own Client)** pattern - you provide the blockchain client and signer:
+Both SDKs own their chain client. You supply the transport and the signer:
 
-```
-┌─────────────────────────────────────────┐
-│           Your Application              │
-├─────────────────────────────────────────┤
-│  Bulletin SDK  │  Your Other Code       │
-│       │        │       │                │
-│       └────────┴───────┘                │
-│               │                         │
-│      ┌────────▼────────┐                │
-│      │  Shared Client  │ ◄── You create │
-│      │  (PAPI/subxt)   │                │
-│      └────────┬────────┘                │
-└───────────────┼─────────────────────────┘
-                ▼
-    ┌───────────────────────┐
-    │  RPC / Light Client   │ ◄── Your choice!
-    └───────────────────────┘
-```
+- **TypeScript**: a `providers` factory (WebSocket or smoldot providers) and an `uploadSigner`. The SDK builds the PAPI client and exposes it as `client.api`.
+- **Rust**: an endpoint URL (`TransactionClient::new`) or pre-built subxt `RpcClient`s (`TransactionClient::from_rpc_clients`, WebSocket or smoldot). The SDK builds the subxt client and exposes it as `client.api()`.
 
 **This enables:**
 - ✅ **Light client support** - Use smoldot instead of RPC endpoints
-- ✅ **Connection reuse** - Share one client across your entire app
+- ✅ **Multi-provider broadcast** - Transactions go to every configured provider
 - ✅ **Browser wallets** - TypeScript SDK works with Talisman, SubWallet, PolkaGate, etc.
-- ✅ **Custom transports** - HTTP, WebSocket, or any compatible provider
-- ✅ **No hidden connections** - You control all network access
+- ✅ **Custom transports** - Any PAPI `JsonRpcProvider` or subxt `RpcClient`
 
 ## Quick Build & Test
 
@@ -72,7 +55,7 @@ cd sdk/rust
 cargo test --lib --all-features
 
 # TypeScript unit tests
-cd sdk/typescript
+cd ../typescript
 npm run test:unit
 
 # Integration tests (requires running node at ws://localhost:9944)
@@ -81,8 +64,10 @@ npm run test:unit
 # $(just binaries-polkadot)/polkadot-omni-node --chain ./zombienet/bulletin-westend-spec.json --dev
 
 # TypeScript integration tests:
-cd sdk/typescript && npm run test:integration
+npm run test:integration
 ```
+
+For the Rust live tests, see [rust/README.md](rust/README.md#build--test).
 
 ## Documentation
 
@@ -98,19 +83,19 @@ The SDK book contains comprehensive guides including:
 
 Both SDKs provide:
 
-- ✅ **Authorization operations** (authorizeAccount, authorizePreimage, renew)
-- ✅ **Store transaction submission**
-- ✅ **Automatic chunking** with configurable chunk size (default 1 MiB)
+- ✅ **Store submission** through an exactly-once upload pipeline (estimate, then submit)
+- ✅ **Authorization operations** (authorize account/preimage, refresh, remove expired)
+- ✅ **Renewal** (`renew`, force renew; recurring auto-renew in TypeScript)
+- ✅ **Automatic chunking** with configurable chunk size (default 2 MiB)
 - ✅ **DAG-PB manifests** (IPFS-compatible)
-- ✅ **Authorization management** (account and preimage)
 - ✅ **Progress tracking** via callbacks
 - ✅ **Comprehensive examples** and tests
 
 ## Examples
 
-**Rust**: See [`examples/rust/authorize-and-store/`](../examples/rust/authorize-and-store/) for a working SDK-based example, and the [SDK book documentation](../docs/book/) for more.
+**Rust**: See [`examples/rust/authorize-and-store/`](../examples/rust/authorize-and-store/) for a runnable example that authorizes an account and stores data, including a chunked upload.
 
-**TypeScript**: See [`examples/typescript/`](../examples/typescript/) for working integration examples that use the SDK's chunker, CID calculation, and DAG-PB manifest generation with PAPI for transaction submission.
+**TypeScript**: See [`examples/typescript/`](../examples/typescript/) for an integration example that stores via `client.submit(await client.estimateUpload(src), src).send()`.
 
 ## Quick Start
 
@@ -119,14 +104,8 @@ Both SDKs provide:
 ```rust
 use bulletin_sdk_rust::prelude::*;
 
-// Prepare locally (chunking, CID, manifest) - no network calls
-let client = BulletinClient::new();
-let data = b"Hello, Bulletin!".to_vec();
-let operation = client.prepare_store(data, StoreOptions::default())?;
-
-// Submit via the transaction client
-let tx_client = TransactionClient::new("wss://paseo-bulletin-next-rpc.polkadot.io").await?;
-let receipt = tx_client.store(operation.data, &signer, WaitFor::InBlock).await?;
+let client = TransactionClient::new("ws://localhost:10000").await?;
+let receipt = client.store(data, &signer, WaitFor::InBlock).await?;
 ```
 
 See [rust/README.md](rust/README.md) for details.
@@ -134,20 +113,22 @@ See [rust/README.md](rust/README.md) for details.
 ### TypeScript
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
+import { BulletinClient, blobFromBytes } from '@parity/bulletin-sdk';
+import { getWsProvider } from 'polkadot-api/ws';
 
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
-const data = new TextEncoder().encode("Hello, Bulletin!");
-const result = await client.store(data).send();
+const client = new BulletinClient({
+  providers: () => [getWsProvider('ws://localhost:9944')],
+  uploadSigner: signer,
+});
+const src = blobFromBytes(data);
+const { cids } = await client.submit(await client.estimateUpload(src), src).send();
 ```
 
 See [typescript/README.md](typescript/README.md) for details.
 
 ## Release & Publishing
 
-📦 **Release automation**: [`.github/workflows/release-sdk.yml`](../.github/workflows/release-sdk.yml)
-
-Automated pipeline for publishing the SDKs.
+Pushing an `sdk-v*` tag runs [`.github/workflows/release-sdk.yml`](../.github/workflows/release-sdk.yml), which creates a GitHub Release and publishes `@parity/bulletin-sdk` to npm. The Rust SDK is not published (`publish = false`).
 
 ## Contributing
 

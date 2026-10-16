@@ -10,28 +10,38 @@ Extending the retention of stored data with the TypeScript SDK.
 
 ## Using the SDK Client
 
-`AsyncBulletinClient` wraps PAPI and returns builders you finish with `.send()`.
+The `ItemFinalized` upload event carries the `(blockNumber, transactionIndex)` reference that `renew` takes.
 
 ```typescript
-import { AsyncBulletinClient } from "@parity/bulletin-sdk";
-import { createClient } from "polkadot-api";
+import { BulletinClient, blobFromBytes, UploadStatus } from "@parity/bulletin-sdk";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
 
-const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
-const api = papiClient.getTypedApi(bulletin);
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+const client = new BulletinClient({
+  providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
+  uploadSigner: signer,
+  descriptor: bulletin,
+});
 
-// 1. STORE - returns a StoreResult with the reference you need to renew
-const result = await client.store(myData).send();
-const blockNumber = result.blockNumber;   // block the store landed in
-const index = result.extrinsicIndex;      // from the Stored event
+// 1. STORE - capture the reference from the ItemFinalized event
+let blockNumber: number | undefined;
+let index: number | undefined;
+const src = blobFromBytes(myData);
+const { cids } = await client
+  .submit(await client.estimateUpload(src), src)
+  .withWaitFor("finalized")
+  .withCallback((ev) => {
+    if (ev.type === UploadStatus.ItemFinalized) {
+      blockNumber = ev.blockNumber;
+      index = ev.transactionIndex;
+    }
+  })
+  .send();
 
 // 2. RENEW (later) - before the retention period expires
-await client.renew({ block: blockNumber, index }).send();
+await client.renew({ block: blockNumber!, index: index! }).send();
 ```
 
-`store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
 `renew(ref).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
 
 ## Recurring Auto-Renewal
@@ -39,7 +49,7 @@ await client.renew({ block: blockNumber, index }).send();
 `enableAutoRenew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization and the registration is dropped with a `RenewalFailed` event once the quota runs out.
 
 ```typescript
-const contentHash = result.cid.multihash.digest; // Uint8Array
+const contentHash = cids[0].multihash.digest; // Uint8Array
 
 await client.enableAutoRenew(contentHash).send();
 
@@ -47,13 +57,26 @@ await client.enableAutoRenew(contentHash).send();
 await client.disableAutoRenew(contentHash).send();
 ```
 
-A content hash carries at most one registration, so `renew` and `enableAutoRenew` are mutually exclusive — the second call rejects with `RenewalAlreadyEnabled`.
+A content hash carries at most one registration, so `renew` and `enableAutoRenew` are mutually exclusive. The transaction pool rejects these calls as invalid transactions before they reach a block:
+
+| Call | Rejected when | Pool error |
+|------|---------------|------------|
+| `renew`, `enableAutoRenew` | a renewal is already registered for the content hash | custom 11, `RENEWAL_ALREADY_ENABLED` |
+| `disableAutoRenew` | no renewal is registered for the content hash | custom 9, `AUTO_RENEWAL_NOT_ENABLED` |
+| `disableAutoRenew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
+| `disableAutoRenew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
+
+`send()` then rejects with a `BulletinError` (`TRANSACTION_INVALID`) whose `cause` is PAPI's `InvalidTxError`; its `error` field holds `{ type: "Invalid", value: { type: "Custom", value: <code> } }`.
 
 ## Querying the Retention Period
 
-`RetentionPeriod` is an on-chain storage value (default 201,600 blocks, ~14 days at 6s/block), not a constant — read it from storage:
+`RetentionPeriod` is an on-chain storage value (default 201,600 blocks, ~14 days at 6s/block), not a constant — read it from storage. `client.api` is statically typed as the SDK's minimal `BulletinTypedApi`; when the client was built with your descriptor, cast it to the full typed API:
 
 ```typescript
+import type { TypedApi } from "polkadot-api";
+import { bulletin } from "@polkadot-api/descriptors";
+
+const api = client.api as unknown as TypedApi<typeof bulletin>;
 const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
 const currentBlock = await api.query.System.Number.getValue();
 
@@ -66,7 +89,7 @@ console.log(`Data expires at block ${expiresAtBlock} (${blocksRemaining} blocks 
 
 ## Building a Renewal Tracker
 
-For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — a second call before it fires rejects with `RenewalAlreadyEnabled`, so drop entries once scheduled:
+For applications managing multiple stored items, track them and renew before expiry. `renew` registers at most one scheduled renewal per content hash — the pool rejects a second call before it fires (custom error 11, `RENEWAL_ALREADY_ENABLED`), so drop entries once scheduled:
 
 ```typescript
 interface StoredItem {
@@ -82,7 +105,7 @@ class RenewalTracker {
     this.items.set(cid, { cid, blockNumber, index });
   }
 
-  async getItemsNeedingRenewal(api: TypedApi, bufferBlocks = 100) {
+  async getItemsNeedingRenewal(api: TypedApi<typeof bulletin>, bufferBlocks = 100) {
     const currentBlock = await api.query.System.Number.getValue();
     const retentionPeriod = await api.query.TransactionStorage.RetentionPeriod.getValue();
 
@@ -94,7 +117,7 @@ class RenewalTracker {
 
 // Usage
 const tracker = new RenewalTracker();
-tracker.add(result.cid.toString(), result.blockNumber, result.extrinsicIndex);
+tracker.add(cids[0].toString(), blockNumber!, index!);
 
 for (const item of await tracker.getItemsNeedingRenewal(api)) {
   await client.renew({ block: item.blockNumber, index: item.index }).send();
@@ -107,26 +130,23 @@ Against the **current** runtime, bypassing the SDK client: `renew` / `force_rene
 
 ```typescript
 // One-shot scheduled renewal
-api.tx.TransactionStorage.renew({
+api.tx.DataRenewal.renew({
   entry: { type: "Position", value: { block, index } },
 });
 
 // Immediate renewal (emits Renewed with a new index)
-api.tx.TransactionStorage.force_renew({
+api.tx.DataRenewal.force_renew({
   entry: { type: "Position", value: { block, index } },
 });
 
 // Recurring auto-renewal (takes the content hash directly, not an `entry`;
 // fixed-size hashes are passed as 0x-prefixed hex)
-api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+api.tx.DataRenewal.enable_auto_renew({ content_hash: contentHashHex });
 ```
 
-On current runtimes these calls live on `api.tx.DataRenewal` instead; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
+Pre-split runtimes host these calls on `api.tx.TransactionStorage`; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
 
-```typescript
-```
-
-`disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.
+While the registration is still prepaid, the pool rejects `disable_auto_renew` as an invalid transaction (custom error 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`); it only succeeds after the first cycle has consumed the prepayment.
 
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
 
@@ -134,27 +154,27 @@ The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for
 api.tx.TransactionStorage.store({ data: myData });
 
 api.tx.TransactionStorage.store_with_cid_config({
-  cid: { codec: 0x55n, hashing: { type: "Blake2b256" } },
+  cid: { codec: 0x55n, hashing: { type: "Blake2b256", value: undefined } },
   data: myData,
 });
 ```
 
 ## Authorization for Renewal
 
-Renewal is accounted differently from storing. Going over budget on a store only lowers its priority; a renewal charges the data size against `bytes_permanent` (the account's renew quota) plus one transaction unit, and against the chain-wide permanent-storage **hard cap**. Exceeding either limit **rejects** the renewal (see [Authorization](./authorization.md)).
+Renewal is accounted differently from storing. Going over budget on a store only lowers its priority; a renewal charges one transaction unit and adds the data size to the account's `bytes_permanent` counter, which may not exceed its `bytes_allowance`, and to the chain-wide `PermanentStorageUsed`, which may not exceed `MaxPermanentStorageSize`. Exceeding either limit **rejects** the renewal (see [Authorization](./authorization.md)).
 
 ## Error Handling
 
+`client.renew(...).send()` throws a `BulletinError`; inspect `error.code` / `error.message` for the on-chain reason (data pruned, renewal already scheduled, insufficient authorization).
+
 ```typescript
+import { BulletinError } from "@parity/bulletin-sdk";
+
 try {
   await client.renew({ block: blockNumber, index }).send();
 } catch (error) {
-  if (error.message.includes("RenewedNotFound")) {
-    console.log("Data not found - may have been pruned");
-  } else if (error.message.includes("RenewalAlreadyEnabled")) {
-    console.log("A renewal is already scheduled for this data");
-  } else if (error.message.includes("AuthorizationNotFound")) {
-    console.log("Insufficient authorization - request more via Faucet");
+  if (error instanceof BulletinError) {
+    console.error(error.code, error.message);
   } else {
     throw error;
   }

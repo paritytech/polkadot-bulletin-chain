@@ -13,7 +13,7 @@ use crate::{
 		assert_proof_checked_at, authorize_account_via_sudo_finalized, blake2_256,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
 		content_hash_and_cid, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		hop_submit, initialize_network, now_ms, set_retention_period_finalized,
+		hop_submit, initialize_network, now_ms, sdk_client, set_retention_period_finalized,
 		verify_bitswap_fetch, verify_parachain_binaries, wait_for_session_change_on_node,
 		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
@@ -108,20 +108,18 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
 
 	// Small `RetentionPeriod` so the proof block lands within the test window.
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
 	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
 
 	// `can_account_promote` only requires Alice's authorization to exist + be unexpired —
 	// the per-extent counters aren't debited by HOP, but `authorize_account` won't write a
 	// zero-extent entry, so pass a generous amount.
 	let alice = dev::alice();
 	authorize_account_via_sudo_finalized(
-		&client,
+		&sdk_client(collator1).await?,
 		&alice.public_key().0,
 		10,
 		(TEST_DATA_SIZE as u64) * 8,
-		nonce,
 	)
 	.await?;
 

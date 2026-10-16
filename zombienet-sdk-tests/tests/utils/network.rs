@@ -116,6 +116,21 @@ pub fn verify_parachain_binaries() -> Result<()> {
 pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {
+	three_relay_validator_network_config(para_node_args, true)
+}
+
+/// The same network without zombienet's crash teardown, for tests that stop a node and start it
+/// again outside zombienet.
+pub fn parachain_network_config_without_crash_teardown(
+	para_node_args: Vec<String>,
+) -> Result<NetworkConfig> {
+	three_relay_validator_network_config(para_node_args, false)
+}
+
+fn three_relay_validator_network_config(
+	para_node_args: Vec<String>,
+	tear_down_on_failure: bool,
+) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
@@ -140,9 +155,9 @@ pub fn build_parachain_network_config_three_relay_validators(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
-				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
+				.with_validator(|node| node.with_name("alice").with_args(relay_args))
+				.with_validator(|node| node.with_name("bob").with_args(relay_args2))
+				.with_validator(|node| node.with_name("charlie").with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain
@@ -156,9 +171,12 @@ pub fn build_parachain_network_config_three_relay_validators(
 						.with_args(para_args)
 				})
 		})
-		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-			Ok(val) => gs.with_base_dir(val),
-			_ => gs,
+		.with_global_settings(|gs| {
+			let gs = gs.with_tear_down_on_failure(tear_down_on_failure);
+			match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
+				Ok(val) => gs.with_base_dir(val),
+				_ => gs,
+			}
 		})
 		.build()
 		.map_err(|errs| {
@@ -191,9 +209,9 @@ pub fn build_parachain_network_config_three_collators(
 			relaychain
 				.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
-				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
+				.with_validator(|node| node.with_name("alice").with_args(relay_args))
+				.with_validator(|node| node.with_name("bob").with_args(relay_args2))
+				.with_validator(|node| node.with_name("charlie").with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
 			parachain

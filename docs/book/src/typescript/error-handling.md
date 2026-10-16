@@ -1,275 +1,161 @@
 # Error Handling
 
-The SDK provides structured error handling through `BulletinError` and the `ErrorCode` enum, with built-in support for retry logic and recovery hints.
-
-## BulletinError
-
-All SDK errors are instances of `BulletinError`, which extends the standard `Error` class:
+The SDK throws `BulletinError`, a subclass of `Error` carrying a typed `ErrorCode`, a `retryable` flag, and a `recoveryHint`.
 
 ```typescript
 import { BulletinError, ErrorCode } from '@parity/bulletin-sdk'
 
 try {
-  const result = await client.store(data).send()
+  await client.submit(await client.estimateUpload(src), src).send()
 } catch (error) {
   if (error instanceof BulletinError) {
-    console.error('Code:', error.code)        // e.g. "EMPTY_DATA"
-    console.error('Message:', error.message)   // Human-readable description
-    console.error('Retryable:', error.retryable) // Whether retrying may help
-    console.error('Hint:', error.recoveryHint)   // Actionable suggestion
-    console.error('Cause:', error.cause)         // Original error (if wrapped)
+    console.error('Code:', error.code)            // e.g. "EMPTY_DATA"
+    console.error('Message:', error.message)
+    console.error('Retryable:', error.retryable)  // whether retrying may help
+    console.error('Hint:', error.recoveryHint)    // actionable suggestion
+    console.error('Cause:', error.cause)          // wrapped original error, if any
   }
 }
 ```
+
+`ErrorCode` is a string enum, so `error.code === ErrorCode.EMPTY_DATA` and `error.code === 'EMPTY_DATA'` are equivalent; prefer the enum for autocomplete.
 
 ## Error Code Reference
 
-The `ErrorCode` enum provides all error codes as typed constants. Using `ErrorCode.*` instead of string literals gives you IDE autocomplete and compile-time checking.
+### Data & CID (non-retryable)
 
-Since `ErrorCode` values are string enums, they remain backward-compatible with string comparisons:
-
-```typescript
-// Both work identically
-error.code === ErrorCode.EMPTY_DATA  // preferred
-error.code === 'EMPTY_DATA'          // still works
-```
-
-### Data Validation Errors (Non-Retryable)
-
-| Error Code | Description | Recovery Hint |
+| Code | Description | Recovery Hint |
 |---|---|---|
 | `EMPTY_DATA` | Data is empty | Provide non-empty data |
-| `DATA_TOO_LARGE` | Data exceeds 64 MiB limit | Reduce data size or use chunked upload |
-| `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB limit | Reduce chunk size to 2 MiB or less |
+| `DATA_TOO_LARGE` | Exceeds 64 MiB (`FixedSizeChunker` / `prepareStoreChunked`) or `chunkingThreshold` (`BulletinPreparer.prepareStore`); never thrown by `estimateUpload` / `submit` | Reduce the data size or use a chunked upload |
+| `CHUNK_TOO_LARGE` | Chunk exceeds 2 MiB | Reduce chunk size to 2 MiB or less |
 | `INVALID_CHUNK_SIZE` | Chunk size is zero or negative | Use a chunk size between 1 byte and 2 MiB |
-| `INVALID_CONFIG` | Configuration is invalid | Check configuration parameters |
-
-### CID & Encoding Errors (Non-Retryable)
-
-| Error Code | Description | Recovery Hint |
-|---|---|---|
-| `INVALID_CID` | CID format is invalid | Verify CID format |
-| `INVALID_HASH_ALGORITHM` | Hash algorithm not supported | Use blake2b-256, sha2-256, or keccak-256 |
+| `INVALID_CONFIG` | Invalid config (e.g. duplicate content hashes in one submit) | Check configuration parameters |
+| `INVALID_CID` | Malformed CID | Verify CID format |
+| `INVALID_HASH_ALGORITHM` | Unsupported hash algorithm | Use blake2b-256, sha2-256, or keccak-256 |
 | `CID_CALCULATION_FAILED` | CID calculation failed | Verify data and hash algorithm |
 | `DAG_ENCODING_FAILED` | DAG-PB encoding failed | Check chunk CIDs and data integrity |
+| `CHUNKING_FAILED` | A chunk failed to prepare | Verify data integrity and chunker configuration |
+| `MISSING_CHUNK` | A chunk was missing during reassembly | Ensure all chunks are present with contiguous indices starting from 0 |
 
-### Authorization Errors (Non-Retryable)
+### Authorization (non-retryable)
 
-| Error Code | Description | Recovery Hint |
+| Code | Description | Recovery Hint |
 |---|---|---|
-| `INSUFFICIENT_AUTHORIZATION` | Authorized quota insufficient. Not thrown by `store()` — an exhausted boost budget only warns and stores at lower priority | Request additional authorization via authorizeAccount() |
-| `AUTHORIZATION_FAILED` | Authorization call failed | Check that the account has authorizer privileges |
+| `AUTHORIZATION_NOT_FOUND` | No unexpired authorization entry (checked only by `.ensureAuthorized()`) | Authorize the account or the content hash first, then retry |
 
-### Transaction & Upload Errors
+### Capability (non-retryable)
 
-| Error Code | Retryable | Description | Recovery Hint |
-|---|---|---|---|
-| `TRANSACTION_FAILED` | Yes | On-chain transaction failed | Verify transaction parameters and account nonce |
-| `TIMEOUT` | Yes | Transaction not included in a block (best or finalized) within timeout window | Retry the transaction |
-| `CHUNK_FAILED` | No | Individual chunk upload failed | Verify data integrity and chunker configuration |
-| `MISSING_CHUNK` | No | Chunk missing during reassembly | Ensure all chunks are present with contiguous indices starting from 0 |
-| `UNSUPPORTED_OPERATION` | No | Operation not supported | This operation is not supported in this context |
+| Code | Description | Recovery Hint |
+|---|---|---|
+| `UNSUPPORTED_OPERATION` | Called a signed path on a signer-less client, or a call the runtime doesn't have | This operation is not supported by this client or the connected runtime |
 
-## Retryable Errors
+### Transaction & Upload
 
-The `retryable` getter indicates whether an error is likely transient and retrying may succeed:
+| Code | Retryable | Description |
+|---|---|---|
+| `TRANSACTION_INVALID` | No | The transaction pool rejected the transaction; `cause` is PAPI's `InvalidTxError`, whose `error` field holds the validity error |
+| `TRANSACTION_FAILED` | Yes | A submitted transaction failed: dispatch error, dropped, or the subscription ended before inclusion |
+| `NETWORK_ERROR` | Yes | A chain read of the SDK failed (`.ensureAuthorized()` queries, `skipExisting` lookups, renewal metadata) |
+| `TIMEOUT` | Yes | Not included within the timeout window |
+| `STORE_STALLED` | Yes | Submission stalled (pool saturation / reorg); the signed path retries internally |
+| `HIJACK_BUDGET_EXCEEDED` | No | Too many nonce reassignments under concurrent same-account submission |
+| `UPLOAD_INCOMPLETE` | No | Some items failed permanently and are not on chain; `cause.failedIndices` lists them |
+
+Every call builder (`authorize*`, `refresh*`, `removeExpired*`, `renew`, `forceRenew`, `enableAutoRenew`, `disableAutoRenew`) reports a failed transaction as `TRANSACTION_INVALID` or `TRANSACTION_FAILED`, and the message names the call.
+
+`error.retryable` is true for `TRANSACTION_FAILED`, `NETWORK_ERROR`, `TIMEOUT`, and `STORE_STALLED`. Note that a signed `submit()` already retries stalls internally (up to 3 times) before surfacing one; `.asUnsigned()` does not.
 
 ```typescript
 try {
-  await client.store(data).send()
+  await client.submit(estimate, src).send()
 } catch (error) {
   if (error instanceof BulletinError && error.retryable) {
-    console.log('Transient error, retrying...')
-    // Implement your retry logic
-    await client.store(data).send()
+    await client.submit(estimate, src).send() // estimate is reusable
   } else {
-    throw error // Non-retryable, propagate
-  }
-}
-```
-
-Only `TRANSACTION_FAILED` and `TIMEOUT` are retryable. All other errors indicate issues that must be fixed before retrying.
-
-## Recovery Hints
-
-The `recoveryHint` getter returns an actionable suggestion for resolving the error:
-
-```typescript
-try {
-  await client.store(data).send()
-} catch (error) {
-  if (error instanceof BulletinError) {
-    console.error(`Error: ${error.message}`)
-    console.error(`Suggestion: ${error.recoveryHint}`)
-    // e.g. "Suggestion: Provide non-empty data"
-    // e.g. "Suggestion: Verify transaction parameters and account nonce"
+    throw error
   }
 }
 ```
 
 ## Progress Events
 
-When using progress callbacks, you receive two types of events: **transaction status events** and **chunk progress events**.
-
-### Transaction Status Events (`TxStatus`)
-
-Track the lifecycle of a submitted transaction:
+`withCallback` receives an `UploadEvent` per stored unit. `index` is the unit's position in the source (chunks first, manifest last) and `total` is the unit count.
 
 ```typescript
-import { TxStatus } from '@parity/bulletin-sdk'
+import { UploadStatus } from '@parity/bulletin-sdk'
 
-const result = await client
-  .store(data)
-  .withCallback((event) => {
-    switch (event.type) {
-      case TxStatus.Created:
-        console.log(`Transaction created: ${event.txHash}`)
+await client
+  .submit(estimate, src)
+  .withCallback((ev) => {
+    switch (ev.type) {
+      case UploadStatus.ItemStarted:
+        console.log(`[${ev.index + 1}/${ev.total}] started`)
         break
-      case TxStatus.Broadcasted:
-        console.log('Transaction broadcast to peers')
+      case UploadStatus.ItemInBlock:
+        console.log(`[${ev.index + 1}/${ev.total}] in block #${ev.blockNumber}`)
         break
-      case TxStatus.InBlock:
-        console.log(`In best block #${event.blockNumber} (${event.blockHash})`)
+      case UploadStatus.ItemFinalized:
+        console.log(`[${ev.index + 1}/${ev.total}] finalized #${ev.blockNumber}, cid ${ev.cid}`)
         break
-      case TxStatus.Finalized:
-        console.log(`Finalized in block #${event.blockNumber}`)
-        break
-      case TxStatus.NoLongerInBlock:
-        console.log('Block reorganization occurred')
-        break
-      case TxStatus.Invalid:
-        console.error(`Transaction invalid: ${event.error}`)
-        break
-      case TxStatus.Dropped:
-        console.error(`Transaction dropped: ${event.error}`)
+      case UploadStatus.ItemFailed:
+        console.error(`[${ev.index + 1}/${ev.total}] failed:`, ev.error.message)
         break
     }
   })
   .send()
 ```
 
-| Event | Value | Fields | Description |
-|---|---|---|---|
-| `Created` | `"created"` | `txHash`, `chunkIndex?` | Transaction created and ready |
-| `Broadcasted` | `"broadcasted"` | `chunkIndex?` | Broadcast to network peers |
-| `InBlock` | `"in_block"` | `blockHash`, `blockNumber`, `txIndex?`, `chunkIndex?` | Included in a best block |
-| `Finalized` | `"finalized"` | `blockHash`, `blockNumber`, `txIndex?`, `chunkIndex?` | Finalized (irreversible) |
-| `NoLongerInBlock` | `"no_longer_in_block"` | `chunkIndex?` | Removed from best block (reorg) |
-| `Invalid` | `"invalid"` | `error`, `chunkIndex?` | Transaction is invalid |
-| `Dropped` | `"dropped"` | `error`, `chunkIndex?` | Dropped from the transaction pool |
+| Event | Value | Fields |
+|---|---|---|
+| `ItemStarted` | `"item_started"` | `index`, `total`, `cid` |
+| `ItemInBlock` | `"item_in_block"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `transactionIndex?` |
+| `ItemFinalized` | `"item_finalized"` | `index`, `total`, `cid`, `blockHash`, `blockNumber`, `transactionIndex?` |
+| `ItemFailed` | `"item_failed"` | `index`, `total`, `cid`, `error` |
 
-> **Note**: All events include an optional `chunkIndex` field to identify which chunk the event relates to during chunked uploads.
+`ItemFinalized` carries the `blockNumber` and `transactionIndex` you need to [renew](./renewal.md) the item later.
 
-### Chunk Progress Events (`ChunkStatus`)
-
-Track progress of chunked uploads:
-
-```typescript
-import { ChunkStatus } from '@parity/bulletin-sdk'
-
-const result = await client
-  .store(largeData)
-  .withCallback((event) => {
-    switch (event.type) {
-      case ChunkStatus.ChunkStarted:
-        console.log(`Starting chunk ${event.index + 1}/${event.total}`)
-        break
-      case ChunkStatus.ChunkCompleted:
-        console.log(`Chunk ${event.index + 1}/${event.total} done: ${event.cid}`)
-        break
-      case ChunkStatus.ChunkFailed:
-        console.error(`Chunk ${event.index + 1}/${event.total} failed: ${event.error}`)
-        break
-      case ChunkStatus.ManifestStarted:
-        console.log('Creating manifest...')
-        break
-      case ChunkStatus.ManifestCreated:
-        console.log(`Manifest created: ${event.cid}`)
-        break
-      case ChunkStatus.Completed:
-        console.log('All uploads complete!')
-        break
-    }
-  })
-  .send()
-```
-
-| Event | Value | Fields | Description |
-|---|---|---|---|
-| `ChunkStarted` | `"chunk_started"` | `index`, `total` | A chunk upload has started |
-| `ChunkCompleted` | `"chunk_completed"` | `index`, `total`, `cid` | A chunk uploaded successfully |
-| `ChunkFailed` | `"chunk_failed"` | `index`, `total`, `error` | A chunk upload failed |
-| `ManifestStarted` | `"manifest_started"` | -- | Manifest creation started |
-| `ManifestCreated` | `"manifest_created"` | `cid` | Manifest created and stored |
-| `Completed` | `"completed"` | `manifestCid?` | All uploads completed |
-
-## Common Error Patterns
-
-### Authorization Flow
+## Authorization Flow
 
 ```typescript
 import { BulletinError, ErrorCode } from '@parity/bulletin-sdk'
 
 try {
-  const result = await client.store(data).send()
-  console.log('Stored:', result.cid.toString())
+  await client.submit(await client.estimateUpload(src), src).ensureAuthorized().send()
 } catch (error) {
   if (!(error instanceof BulletinError)) throw error
+  if (error.code === ErrorCode.AUTHORIZATION_NOT_FOUND) {
+    console.error('Need authorization:', error.recoveryHint)
+  } else {
+    console.error(error.code, error.message)
+  }
+}
 
-  switch (error.code) {
-    case ErrorCode.AUTHORIZATION_FAILED:
-      // Authorization call itself failed
-      console.error('Authorization failed:', error.message)
-      break
-    default:
-      console.error(error.message)
+try {
+  await client.authorizeAccount(address, 10, 10_000_000n).send()
+} catch (error) {
+  if (error instanceof BulletinError && error.code === ErrorCode.TRANSACTION_INVALID) {
+    console.error('Rejected by the transaction pool:', error.cause)
+  } else {
+    throw error
   }
 }
 ```
 
-### Chunked Upload Error Handling
+`.ensureAuthorized()` on the builder fails fast with `AUTHORIZATION_NOT_FOUND` before any bytes are submitted; without it, the SDK does not check authorization before submitting. The authorization calls report failures like every other call: the transaction pool rejects a signer outside the authorizer set as an invalid transaction (`BadSigner`), so the error is `TRANSACTION_INVALID`.
 
-Chunked uploads are **not atomic**. If a chunk fails mid-upload, previously submitted chunks remain on-chain. The error contains details about which chunk failed.
-
-```typescript
-const result = await client
-  .store(largeData)
-  .withCallback((event) => {
-    if (event.type === ChunkStatus.ChunkFailed) {
-      console.error(`Chunk ${event.index + 1}/${event.total} failed:`, event.error)
-    }
-  })
-  .send()
-```
-
-### Wrapping External Errors
-
-When integrating with other libraries, wrap errors to preserve context:
+## Wrapping External Errors
 
 ```typescript
 try {
-  // Some external operation
+  // some external operation
 } catch (cause) {
-  throw new BulletinError(
-    'Failed to process data',
-    ErrorCode.TRANSACTION_FAILED,
-    cause  // Preserved as error.cause
-  )
+  throw new BulletinError('Failed to process data', ErrorCode.TRANSACTION_FAILED, cause)
 }
 ```
 
 ## Cross-SDK Consistency
 
-Error codes are consistent between the Rust and TypeScript SDKs where applicable:
+Both SDKs use the same error codes, the same retryable set and the same recovery hints: an `ErrorCode` value equals the string that the Rust `Error::code()` returns for the same failure. Three codes exist only in this SDK, because the failure cannot occur in the Rust SDK: `TIMEOUT` (`txTimeout`), `INVALID_HASH_ALGORITHM` (Rust uses an enum) and `MISSING_CHUNK` (only this SDK reassembles chunks).
 
-| TypeScript | Rust | Code String |
-|---|---|---|
-| `ErrorCode.EMPTY_DATA` | `Error::EmptyData` | `"EMPTY_DATA"` |
-| `ErrorCode.TRANSACTION_FAILED` | `Error::TransactionFailed(_)` | `"TRANSACTION_FAILED"` |
-| `ErrorCode.INSUFFICIENT_AUTHORIZATION` | `Error::InsufficientAuthorization { .. }` | `"INSUFFICIENT_AUTHORIZATION"` |
-
-Some codes exist only in one SDK:
-- **Rust-only**: `NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `RENEWAL_NOT_FOUND`, `AUTHORIZATION_NOT_FOUND`, `AUTHORIZATION_EXPIRED`, `CHUNKING_FAILED`, `FILE_TOO_LARGE`, `DAG_DECODING_FAILED`, `RETRY_EXHAUSTED`
-- **TypeScript-only**: `MISSING_CHUNK`, `DATA_TOO_LARGE`
-
-The `retryable` sets also differ: Rust includes more network-related codes (`NETWORK_ERROR`, `STORAGE_FAILED`, `RETRIEVAL_FAILED`, `RENEWAL_FAILED`, `AUTHORIZATION_EXPIRED`), while TypeScript covers `TRANSACTION_FAILED` and `TIMEOUT`.
+A transaction pool rejection is `TRANSACTION_INVALID` in both SDKs. This SDK keeps PAPI's `InvalidTxError` as `cause`; the Rust SDK carries the custom validity code in `Error::TransactionInvalid { custom_code, .. }`.

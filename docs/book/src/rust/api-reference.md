@@ -1,6 +1,6 @@
 # API Reference
 
-Complete reference for the `bulletin-sdk-rust` crate. All public items are available via the `prelude` module:
+Complete reference for the `bulletin-sdk-rust` crate. All public items except `VERSION` (crate root) and the `compat` module are available via the `prelude` module:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -14,29 +14,66 @@ High-level async client that handles chain connection, transaction submission, a
 
 ```rust
 impl TransactionClient {
-    // Connect to a Bulletin Chain node
+    // Connect to a single Bulletin Chain node (WS)
     pub async fn new(endpoint: &str) -> Result<Self>;
 
-    // Create from an existing subxt client
-    pub fn from_client(api: OnlineClient<PolkadotConfig>) -> Self;
+    // Connect over multiple WS endpoints — the first is the monitor; every
+    // endpoint is a broadcast target (one dead endpoint can't stall a run)
+    pub async fn from_endpoints(endpoints: &[&str]) -> Result<Self>;
+
+    // The provider abstraction: build the client from pre-made RpcClients.
+    // Each RpcClient is a "provider" — WS (`RpcClient::from_url`) OR a smoldot
+    // light client (`lc.parachain(spec)?.into()`). The SDK is agnostic to which.
+    // First = monitor; all = broadcast targets. Mirrors PAPI's `providers`.
+    pub async fn from_rpc_clients(clients: Vec<RpcClient>) -> Result<Self>;
+
+    // Create from a single existing RpcClient
+    pub async fn from_rpc_client(rpc_client: RpcClient) -> Result<Self>;
+
+    // Block that the SDK's own chain reads use (authorization queries, the `store`
+    // pre-check, `skip_existing`): WaitFor::Finalized (default) or WaitFor::InBlock (best block)
+    pub fn with_wait_for(self, wait_for: WaitFor) -> Self;
 
     // Access the underlying subxt client
     pub fn api(&self) -> &OnlineClient<PolkadotConfig>;
 }
 ```
 
-**Store Operations:**
+**Light client (smoldot).** The SDK doesn't depend on smoldot or know whether a
+provider is a node connection or a light client — it just takes `RpcClient`s.
+To use a light client, enable `subxt`'s `unstable-light-client` feature in *your*
+crate, build the provider, and pass it to `from_rpc_clients` (keep the
+`LightClient` alive for the connection's lifetime):
+
+```rust
+use subxt::lightclient::LightClient;
+let (lc, _relay) = LightClient::relay_chain(RELAY_CHAIN_SPEC)?;   // Bulletin is a parachain
+let bulletin: subxt::backend::rpc::RpcClient = lc.parachain(BULLETIN_SPEC)?.into();
+let client = TransactionClient::from_rpc_clients(vec![bulletin]).await?;
+// hold `lc` for as long as `client` is used
+```
+
+**Upload (the primary path — `estimate_upload` → `submit`):**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store data in a single `store` extrinsic (no chunking; use `BulletinClient::prepare_store_chunked` for large files) |
-| `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store with progress tracking |
+| `estimate_upload(input, options)` | `Result<StreamEstimate>` | Plan an upload (`UploadInput::Items` or `::Source`) and size authorization; collapses repeated content in the input, and leaves out units already on chain when `skip_existing` is set |
+| `submit(signer, estimate, source, config)` | `Result<UploadResult>` | Upload to finality; bytes fetched lazily from `source` (`blob_from_items(..)` for items, `blob_from_bytes` for a file; buffer a `blob_from_factory` stream with `collect_blob` first). Exactly-once |
+| `submit_unsigned(estimate, source, config)` | `Result<UploadResult>` | As above via the unsigned (preimage-authorized) path — no signer |
+
+**Single-item store (convenience):**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `store(data, signer, wait_for)` | `Result<StoreReceipt>` | Store one payload |
+| `store_with_progress(data, signer, wait_for, callback)` | `Result<StoreReceipt>` | Store one payload with progress tracking |
 
 **Authorization:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `authorize_account(who, transactions, bytes, signer, wait_for)` | `Result<AuthorizationReceipt>` | Authorize an account (requires sudo) |
+| `authorize_account(who, transactions, bytes, signer, wait_for)` | `Result<AuthorizationReceipt>` | Authorize an account (signer must be a registered authorizer) |
+| `authorize_accounts(entries, sudo, signer, wait_for)` | `Result<Vec<AuthorizationReceipt>>` | Authorize many accounts atomically (`Utility.batch_all`); `sudo: true` wraps in `Sudo.sudo` |
 | `authorize_preimage(content_hash, max_size, signer, wait_for)` | `Result<PreimageAuthorizationReceipt>` | Authorize a content hash |
 | `refresh_account_authorization(who, signer, wait_for)` | `Result<()>` | Refresh account authorization expiry |
 | `refresh_preimage_authorization(content_hash, signer, wait_for)` | `Result<()>` | Refresh preimage authorization expiry |
@@ -47,15 +84,16 @@ impl TransactionClient {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `query_account_authorization(who)` | `Result<Option<(u32, u64)>>` | Query authorization (transactions, bytes) |
-| `check_authorization_for_store(who, txs, bytes)` | `Result<()>` | Verify sufficient authorization |
+| `query_account_authorization(who)` | `Result<Option<(u32, u64)>>` | Remaining `(transactions, bytes)`; `None` if absent or expired; `Err(AuthorizationApiUnavailable)` on runtimes without the `BulletinTransactionStorageApi` runtime API |
 
 **Renewal:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal (fires at the retention boundary); `entry` is `impl Into<TransactionRef<u32>>` — a `(block, index)` tuple or a `ContentHash` |
-| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately at dispatch time (same `entry` conversions) |
+| `renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Schedule a one-shot renewal at the retention boundary; `entry` is a `(block, index)` tuple or a `ContentHash` |
+| `force_renew(entry, signer, wait_for)` | `Result<RenewReceipt>` | Renew immediately |
+| `enable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Register recurring auto-renewal; the first cycle is prepaid |
+| `disable_auto_renew(content_hash, signer, wait_for)` | `Result<()>` | Cancel a renewal registration; refused while its next cycle is prepaid |
 
 ---
 
@@ -87,11 +125,189 @@ impl BulletinClient {
 
 ```rust
 pub struct ClientConfig {
-    pub default_chunk_size: u32,    // default: 1 MiB
+    pub default_chunk_size: u32,    // default: 2 MiB
     pub max_parallel: u32,          // default: 8
     pub create_manifest: bool,      // default: true
 }
 ```
+
+---
+
+## Upload Pipeline <small>(std only)</small>
+
+### UploadInput
+
+```rust
+pub enum UploadInput {
+    Items(Vec<UploadItem>),           // each item is one unit, no manifest
+    Source(Arc<dyn SeekableSource>),  // chunked; DAG-PB manifest when more than one chunk
+}
+```
+
+### UploadItem
+
+```rust
+pub struct UploadItem {
+    pub data: Vec<u8>,
+    pub codec: Option<CidCodec>,             // default: CidCodec::Raw
+    pub hash_algo: Option<HashingAlgorithm>, // default: HashingAlgorithm::Blake2b256
+}
+
+impl UploadItem {
+    pub fn new(data: Vec<u8>) -> Self;
+}
+```
+
+### UploadEstimateOptions
+
+```rust
+pub struct UploadEstimateOptions {
+    pub skip_existing: bool,     // default: false; true leaves out units already on chain
+    pub dedup_input: bool,       // default: true; collapses repeated content in the input
+    pub chunker: ChunkerConfig,  // Source input only
+    pub store: StoreOptions,     // Source input only (hash algorithm)
+}
+```
+
+### StreamEstimate
+
+```rust
+pub struct StreamEstimate {
+    pub base: UploadEstimate,
+    pub plan: ChunkPlan, // pass to `submit` unchanged
+}
+
+pub struct UploadEstimate {
+    pub total: usize,                    // units in the plan (chunks + manifest)
+    pub items: Vec<UploadEstimateItem>,
+    pub transactions: u32,               // store transactions to submit
+    pub bytes: u64,                      // bytes those transactions store
+    pub duplicate_indices: Vec<usize>,
+    pub already_stored: Vec<usize>,      // only with skip_existing
+    pub to_upload: Vec<usize>,
+}
+
+pub struct UploadEstimateItem {
+    pub index: usize,
+    pub cid: Vec<u8>,
+    pub bytes: u64,
+    pub skip_reason: Option<SkipReason>, // None if the unit is submitted
+}
+
+pub enum SkipReason {
+    DuplicateInput,
+    AlreadyOnChain,
+}
+
+pub struct ChunkPlan {
+    pub chunk_cids: Vec<CidData>,
+    pub chunk_sizes: Vec<u64>,
+    pub offsets: Vec<u64>,
+    pub codecs: Vec<CidCodec>,
+    pub hash_algos: Vec<HashingAlgorithm>,
+    pub total_size: u64,
+    pub root_cid: Option<CidData>,      // manifest root; None without a manifest
+    pub manifest_data: Option<Vec<u8>>,
+}
+```
+
+### UploadConfig
+
+```rust
+pub struct UploadConfig {
+    pub complete_on: WaitFor,                        // default: WaitFor::Finalized
+    pub block_limits: BlockLimits,                   // default: DEFAULT_BLOCK_LIMITS
+    pub on_event: Option<UploadCallback>,            // default: None
+    pub submission_strategy: SubmissionStrategyKind, // default (and only variant): NonceTracking
+}
+
+pub type UploadCallback = Arc<dyn Fn(UploadEvent) + Send + Sync>;
+```
+
+### UploadEvent
+
+```rust
+pub enum UploadEvent {
+    ItemStarted { index: usize, total: usize, cid: Vec<u8> },
+    // Fires again if a reorg moves the item to another block
+    ItemInBlock {
+        index: usize, total: usize, cid: Vec<u8>,
+        block_hash: String, block_number: Option<u32>, transaction_index: Option<u32>,
+    },
+    ItemFinalized {
+        index: usize, total: usize, cid: Vec<u8>,
+        block_hash: String, block_number: Option<u32>, transaction_index: Option<u32>,
+    },
+    ItemFailed { index: usize, total: usize, cid: Vec<u8>, error: String },
+}
+```
+
+`UploadStatus` (`ItemStarted`, `ItemInBlock`, `ItemFinalized`, `ItemFailed`) names the same stages without data.
+
+### UploadResult
+
+```rust
+pub struct UploadResult {
+    pub cids: Vec<Vec<u8>>, // one per plan unit, manifest root last
+}
+```
+
+### BlockLimits
+
+```rust
+pub struct BlockLimits {
+    pub max_normal_weight: u64,
+    pub normal_block_length: u32,
+    pub max_block_transactions: u32,
+    pub store_weight_base: u64,
+    pub store_weight_per_byte: u64,
+    pub extrinsic_overhead: u32,
+}
+```
+
+### Byte Sources
+
+```rust
+pub trait BlobSource: Send + Sync {
+    fn size_hint(&self) -> Option<u64>;
+    fn open(&self) -> BoxStream<'_, Result<Vec<u8>>>; // re-openable forward read
+}
+
+pub trait SeekableSource: BlobSource {
+    fn total_size(&self) -> u64;
+    fn read(&self, offset: u64, length: u64) -> BoxFuture<'_, Result<Arc<[u8]>>>;
+}
+
+pub fn blob_from_bytes(data: Vec<u8>) -> impl SeekableSource;
+pub fn blob_from_items(items: Vec<Vec<u8>>) -> impl SeekableSource;
+pub fn blob_from_factory<F, S>(open: F, size: Option<u64>) -> impl BlobSource; // forward-only
+pub async fn collect_blob(source: &dyn BlobSource) -> Result<Vec<u8>>;
+pub async fn plan_stream<S: BlobSource + ?Sized>(
+    source: &S, config: &ChunkerConfig, options: &StoreOptions,
+) -> Result<ChunkPlan>;
+```
+
+`submit` takes a `SeekableSource`. A `blob_from_factory` source is forward-only: buffer it with `collect_blob` and pass the bytes to `blob_from_bytes`, or implement `SeekableSource` for your file type. `plan_stream` holds about one chunk in memory only when `open()` yields bounded parts; `blob_from_bytes` yields the whole buffer as one part.
+
+### Submission Strategy Types
+
+`SubmissionStrategy`, `NonceTrackingStrategy`, `BroadcastArgs`, `ItemBroadcastResult`, and `WaveResult` describe how signed extrinsics reach the chain. `UploadConfig` selects a strategy only through `SubmissionStrategyKind`.
+
+### compat Module
+
+Resolves which renewal call shape the connected chain uses:
+
+```rust
+pub fn renew_adapter(live: &subxt::Metadata) -> Result<RenewAdapter>;
+
+pub enum RenewAdapter {
+    DataRenewal,    // DataRenewal.renew(entry): current runtimes
+    TransactionRef, // TransactionStorage.renew(entry): before the renewal split
+    Positional,     // TransactionStorage.renew(block, index): legacy runtimes
+}
+```
+
+`renew_adapter` returns `UnsupportedOperation` when the chain has no `renew` call or the call shape is unknown.
 
 ---
 
@@ -142,17 +358,20 @@ impl BatchStorageOperation {
 pub struct StoreOptions {
     pub cid_codec: CidCodec,                // default: CidCodec::Raw
     pub hash_algorithm: HashingAlgorithm,    // default: HashingAlgorithm::Blake2b256
-    pub wait_for: WaitFor,                   // default: WaitFor::InBlock
+    pub wait_for: WaitFor,                   // default: WaitFor::Finalized
 }
 ```
 
 ### StoreResult
+
+No SDK method returns `StoreResult`; the type is exported for applications that record upload results.
 
 ```rust
 pub struct StoreResult {
     pub cid: Vec<u8>,
     pub size: u64,
     pub block_number: Option<u32>,
+    pub transaction_index: Option<u32>, // `Stored` event index, the `renew` slot
     pub chunks: Option<ChunkDetails>,
 }
 ```
@@ -241,26 +460,11 @@ impl AuthorizationManager {
     pub fn with_preimage_auth() -> Self;
     pub fn with_auto_refresh(self, enabled: bool) -> Self;
 
-    pub fn check_authorization(
-        &self, available: &Authorization, required_size: u64, num_transactions: u32,
-    ) -> Result<()>;
-
     pub fn calculate_requirements(
         &self, total_size: u64, num_chunks: usize, include_manifest: bool,
     ) -> (u32, u64);
 
     pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64);
-}
-```
-
-### Authorization
-
-```rust
-pub struct Authorization {
-    pub scope: AuthorizationScope,
-    pub transactions: u32,
-    pub max_size: u64,
-    pub expires_at: Option<u32>,
 }
 ```
 
@@ -294,7 +498,7 @@ pub trait Chunker {
 
 ```rust
 pub struct ChunkerConfig {
-    pub chunk_size: u32,          // default: 1 MiB
+    pub chunk_size: u32,          // default: 2 MiB
     pub max_parallel: u32,        // default: 8
     pub create_manifest: bool,    // default: true
 }
@@ -305,6 +509,7 @@ pub struct ChunkerConfig {
 ```rust
 pub struct Chunk {
     pub data: Vec<u8>,
+    pub cid: Option<Vec<u8>>,
     pub index: u32,
     pub total_chunks: u32,
 }
@@ -326,6 +531,11 @@ Builds DAG-PB (UnixFS) manifests from chunks.
 ```rust
 impl UnixFsDagBuilder {
     pub fn new() -> Self;
+
+    // Build a manifest from chunk CIDs and sizes, without the chunk data
+    pub fn build_from_parts(
+        &self, chunk_cids: &[CidData], chunk_sizes: &[u64], hash_algo: HashingAlgorithm,
+    ) -> Result<DagManifest>;
 }
 ```
 
@@ -370,16 +580,10 @@ pub fn cid_to_bytes(cid_data: &CidData) -> Result<Cid>;
 **Re-exported from `bulletin_transaction_storage_primitives`:**
 
 ```rust
-pub use bulletin_transaction_storage_primitives::{
-    cids::{calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm},
-    ContentHash, TransactionRef,
+pub use bulletin_transaction_storage_primitives::cids::{
+    calculate_cid, Cid, CidConfig, CidData, HashingAlgorithm,
 };
-
-// TransactionRef identifies a stored entry for the renewal extrinsics:
-pub enum TransactionRef<BlockNumber> {
-    Position { block: BlockNumber, index: u32 },
-    ContentHash(ContentHash),
-}
+pub use bulletin_transaction_storage_primitives::{ContentHash, TransactionRef};
 ```
 
 ---
@@ -397,7 +601,7 @@ pub enum WaitFor {
 }
 ```
 
-Default: `WaitFor::InBlock`
+Default: `WaitFor::Finalized`. Every submission method takes its `wait_for` explicitly; `TransactionClient::with_wait_for` sets the block that the SDK's own chain reads use.
 
 ### CidCodec
 
@@ -433,28 +637,28 @@ pub enum AuthorizationScope {
 
 ### Error
 
-All 18 error variants with structured metadata.
+All 18 error variants with structured metadata. The codes are shared with the TypeScript SDK; see [Error Handling](./error-handling.md).
 
 ```rust
 pub enum Error {
     ChunkTooLarge(u64),
-    FileTooLarge(u64),
+    DataTooLarge(String),
     EmptyData,
     InvalidCid(String),
     AuthorizationNotFound(String),
-    InsufficientAuthorization { need: u64, available: u64 },
-    AuthorizationExpired { expired_at: u32, current_block: u32 },
-    StorageFailed(String),
     DagEncodingFailed(String),
     NetworkError(String),
     InvalidConfig(String),
     ChunkingFailed(String),
-    RetrievalFailed(String),
-    RenewalNotFound { block: u32, index: u32 },
-    RenewalFailed(String),
     CidCalculationFailed(String),
     TransactionFailed(String),
+    TransactionInvalid { custom_code: Option<u8>, message: String },
     InvalidChunkSize(String),
+    UnsupportedOperation(String),
+    AuthorizationApiUnavailable,
+    StoreStalled(String),
+    HijackBudgetExceeded(String),
+    UploadIncomplete(String),
 }
 
 impl Error {
@@ -473,7 +677,7 @@ pub enum ProgressEvent {
 }
 ```
 
-**Convenience constructors:** `chunk_started`, `chunk_completed`, `chunk_failed`, `manifest_started`, `manifest_created`, `completed`, `tx_validated`, `tx_broadcasted`, `tx_in_best_block`, `tx_finalized`.
+**Convenience constructors:** `chunk_started`, `chunk_completed`, `chunk_failed`, `manifest_started`, `manifest_created`, `completed`, `tx_validated`, `tx_broadcasted`, `tx_in_block`, `tx_finalized`.
 
 ### ChunkProgressEvent
 
@@ -492,13 +696,14 @@ pub enum ChunkProgressEvent {
 
 ```rust
 pub enum TransactionStatusEvent {
-    Validated,
-    Broadcasted,
-    InBestBlock { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
-    Finalized { block_hash: String, block_number: Option<u32>, extrinsic_index: Option<u32> },
-    NoLongerInBestBlock,
-    Invalid { error: String },
-    Dropped { error: String },
+    Signed { tx_hash: String, chunk_index: Option<u32> },
+    Validated { chunk_index: Option<u32> },
+    Broadcasted { chunk_index: Option<u32> },
+    InBlock { block_hash: String, block_number: Option<u32>, tx_index: Option<u32>, chunk_index: Option<u32> },
+    Finalized { block_hash: String, block_number: Option<u32>, tx_index: Option<u32>, chunk_index: Option<u32> },
+    NoLongerInBlock { chunk_index: Option<u32> },
+    Invalid { error: String, chunk_index: Option<u32> },
+    Dropped { error: String, chunk_index: Option<u32> },
 }
 
 impl TransactionStatusEvent {
@@ -545,7 +750,7 @@ pub struct PreimageAuthorizationReceipt {
 
 ```rust
 pub struct RenewReceipt {
-    pub entry: TransactionRef<u32>,
+    pub entry: TransactionRef<u32>, // the renewed position or content hash
     pub block_hash: String,
 }
 ```
@@ -565,4 +770,7 @@ pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `VERSION` | `env!("CARGO_PKG_VERSION")` | Crate version string |
+| `VERSION` (crate root) | `env!("CARGO_PKG_VERSION")` | Crate version string |
+| `DEFAULT_BLOCK_LIMITS` | `BlockLimits { .. }` | Block capacity of bulletin-westend / bulletin-paseo runtimes, used to size upload waves |
+
+`FixedSizeChunker` (and `prepare_store_chunked`) enforce a chunk size between 1 byte and 2 MiB and a total size of at most 64 MiB; these limits are not exported as constants. The default chunk size is 2 MiB.

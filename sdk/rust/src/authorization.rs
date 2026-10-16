@@ -7,22 +7,9 @@
 //! 1. **Account-based**: Authorize an account to store N transactions with max total size
 //! 2. **Preimage-based**: Authorize anyone to store a specific preimage (by content hash)
 
-use crate::types::{AuthorizationScope, Error, Result};
+use crate::types::AuthorizationScope;
 
-/// Authorization information.
-#[derive(Debug, Clone)]
-pub struct Authorization {
-	/// The authorization scope.
-	pub scope: AuthorizationScope,
-	/// Number of transactions authorized.
-	pub transactions: u32,
-	/// Maximum total size in bytes.
-	pub max_size: u64,
-	/// Block number when authorization expires (if known).
-	pub expires_at: Option<u32>,
-}
-
-/// Authorization manager for checking and tracking authorization state.
+/// Client-side authorization settings and requirement estimates.
 ///
 /// Note: This is a client-side helper. Actual authorization calls
 /// must be made through the blockchain runtime using `authorize_account`
@@ -63,33 +50,6 @@ impl AuthorizationManager {
 		self
 	}
 
-	/// Check if sufficient authorization exists for storing data.
-	///
-	/// This is a client-side helper. The actual authorization check
-	/// is performed on-chain when submitting the transaction.
-	pub fn check_authorization(
-		&self,
-		available: &Authorization,
-		required_size: u64,
-		num_transactions: u32,
-	) -> Result<()> {
-		if available.transactions < num_transactions {
-			return Err(Error::InsufficientAuthorization {
-				need: num_transactions as u64,
-				available: available.transactions as u64,
-			});
-		}
-
-		if available.max_size < required_size {
-			return Err(Error::InsufficientAuthorization {
-				need: required_size,
-				available: available.max_size,
-			});
-		}
-
-		Ok(())
-	}
-
 	/// Calculate authorization requirements for storing chunked data.
 	pub fn calculate_requirements(
 		&self,
@@ -114,7 +74,7 @@ impl AuthorizationManager {
 
 	/// Estimate authorization needed for storing data of given size.
 	///
-	/// This calculates based on default chunk size (1 MiB).
+	/// This calculates based on default chunk size (2 MiB).
 	pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64) {
 		use crate::chunker::DEFAULT_CHUNK_SIZE;
 
@@ -128,48 +88,6 @@ impl AuthorizationManager {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn test_check_authorization_sufficient() {
-		let manager = AuthorizationManager::new();
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 10_000_000,
-			expires_at: None,
-		};
-
-		let result = manager.check_authorization(&auth, 5_000_000, 5);
-		assert!(result.is_ok());
-	}
-
-	#[test]
-	fn test_check_authorization_insufficient_transactions() {
-		let manager = AuthorizationManager::new();
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 5,
-			max_size: 10_000_000,
-			expires_at: None,
-		};
-
-		let result = manager.check_authorization(&auth, 5_000_000, 10);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_check_authorization_insufficient_size() {
-		let manager = AuthorizationManager::new();
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 1_000_000,
-			expires_at: None,
-		};
-
-		let result = manager.check_authorization(&auth, 5_000_000, 5);
-		assert!(result.is_err());
-	}
 
 	#[test]
 	fn test_calculate_requirements() {
@@ -190,14 +108,12 @@ mod tests {
 	fn test_estimate_authorization() {
 		let manager = AuthorizationManager::new();
 
-		// 10 MB data = 10 chunks (1 MB each)
 		let (txs, bytes) = manager.estimate_authorization(10_000_000, false);
-		assert_eq!(txs, 10);
+		assert_eq!(txs, 5, "10 MB is 5 chunks of 2 MiB");
 
-		// With manifest
 		let (txs_with_manifest, bytes_with_manifest) =
 			manager.estimate_authorization(10_000_000, true);
-		assert_eq!(txs_with_manifest, 11);
+		assert_eq!(txs_with_manifest, 6);
 		assert!(bytes_with_manifest > bytes);
 	}
 
@@ -219,114 +135,6 @@ mod tests {
 		assert!(manager.auto_refresh);
 	}
 
-	// ==================== Authorization Expiry Edge Cases ====================
-
-	#[test]
-	fn test_authorization_with_expiry_set() {
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 10_000_000,
-			expires_at: Some(1000),
-		};
-
-		// Authorization struct correctly stores expiry
-		assert_eq!(auth.expires_at, Some(1000));
-	}
-
-	#[test]
-	fn test_authorization_without_expiry() {
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 10_000_000,
-			expires_at: None,
-		};
-
-		// No expiry means authorization doesn't expire
-		assert_eq!(auth.expires_at, None);
-	}
-
-	#[test]
-	fn test_authorization_at_exact_boundary() {
-		let manager = AuthorizationManager::new();
-
-		// Exactly at the limit - should succeed
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 5,
-			max_size: 5_000_000,
-			expires_at: None,
-		};
-
-		let result = manager.check_authorization(&auth, 5_000_000, 5);
-		assert!(result.is_ok());
-	}
-
-	#[test]
-	fn test_authorization_one_over_transaction_limit() {
-		let manager = AuthorizationManager::new();
-
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 5,
-			max_size: 10_000_000,
-			expires_at: None,
-		};
-
-		// Requesting 6 transactions when only 5 authorized
-		let result = manager.check_authorization(&auth, 1_000_000, 6);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_authorization_one_byte_over_size_limit() {
-		let manager = AuthorizationManager::new();
-
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 5_000_000,
-			expires_at: None,
-		};
-
-		// Requesting 1 byte more than authorized
-		let result = manager.check_authorization(&auth, 5_000_001, 1);
-		assert!(result.is_err());
-	}
-
-	#[test]
-	fn test_authorization_zero_transactions_required() {
-		let manager = AuthorizationManager::new();
-
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 0,
-			max_size: 0,
-			expires_at: None,
-		};
-
-		// Zero required should succeed even with zero available
-		let result = manager.check_authorization(&auth, 0, 0);
-		assert!(result.is_ok());
-	}
-
-	#[test]
-	fn test_authorization_max_values() {
-		let manager = AuthorizationManager::new();
-
-		let auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: u32::MAX,
-			max_size: u64::MAX,
-			expires_at: Some(u32::MAX),
-		};
-
-		// Should handle max values without overflow
-		let result = manager.check_authorization(&auth, u64::MAX, u32::MAX);
-		assert!(result.is_ok());
-	}
-
 	#[test]
 	fn test_calculate_requirements_overflow_protection() {
 		let manager = AuthorizationManager::new();
@@ -346,26 +154,5 @@ mod tests {
 		// Zero size should still require 1 transaction
 		let (txs, _bytes) = manager.estimate_authorization(0, false);
 		assert_eq!(txs, 1);
-	}
-
-	#[test]
-	fn test_preimage_vs_account_scope() {
-		let account_auth = Authorization {
-			scope: AuthorizationScope::Account,
-			transactions: 10,
-			max_size: 10_000_000,
-			expires_at: None,
-		};
-
-		let preimage_auth = Authorization {
-			scope: AuthorizationScope::Preimage,
-			transactions: 1,
-			max_size: 1_000_000,
-			expires_at: None,
-		};
-
-		// Verify different scopes are correctly stored
-		assert!(matches!(account_auth.scope, AuthorizationScope::Account));
-		assert!(matches!(preimage_auth.scope, AuthorizationScope::Preimage));
 	}
 }

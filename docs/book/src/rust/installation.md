@@ -4,12 +4,12 @@ Add the SDK to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
+bulletin-sdk-rust = "1.0"
 ```
 
 ## Feature Flags
 
-The SDK exposes several feature flags to optimize your build:
+The SDK has one feature flag:
 
 | Feature | Default | Description |
 |---------|---------|-------------|
@@ -21,11 +21,12 @@ The SDK provides two approaches for transaction submission:
 
 ### Option 1: TransactionClient (Recommended)
 
-`TransactionClient` handles all chain interactions out of the box. The SDK includes embedded chain metadata, so no additional setup is required:
+`TransactionClient` handles all chain interactions out of the box. The SDK includes embedded chain metadata; add `subxt` for the `AccountId32` type that the authorization methods take:
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
+bulletin-sdk-rust = "1.0"
+subxt = "0.44"
 subxt-signer = { version = "0.44", features = ["sr25519"] }
 tokio = { version = "1", features = ["full"] }
 ```
@@ -43,7 +44,7 @@ For advanced use cases where you manage your own subxt client (connection reuse,
 
 ```toml
 [dependencies]
-bulletin-sdk-rust = { git = "https://github.com/paritytech/polkadot-bulletin-chain" }
+bulletin-sdk-rust = "1.0"
 subxt = "0.44"
 subxt-signer = { version = "0.44", features = ["sr25519"] }
 tokio = { version = "1", features = ["full"] }

@@ -4,7 +4,7 @@ Extending the retention of stored data with the Rust SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — call it via subxt (see [concepts](../concepts/renewal.md)).
+> **Note**: `TransactionClient::renew` schedules a one-shot renewal that fires at the retention boundary; `TransactionClient::force_renew` (same arguments) renews immediately, and `TransactionClient::enable_auto_renew(content_hash, ..)` renews every period.
 
 ## Two Clients
 
@@ -57,19 +57,72 @@ println!("Renewed {:?} in block {}", receipt.entry, receipt.block_hash);
 
 `RenewReceipt` has `entry` (the `TransactionRef` that was renewed) and `block_hash`.
 
-## Storing and Tracking
+## Recurring Auto-Renewal
 
-`TransactionClient::store` submits data; record the `(block, index)` from the `Stored` event (see [Basic Storage](./basic-storage.md)) to build the `StorageRef` used for renewal.
+`enable_auto_renew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization, and the chain drops the registration with a `RenewalFailed` event once the quota runs out.
 
 ```rust
-let receipt = tx_client.store(data, &signer, WaitFor::Finalized).await?;
-// Read (block, index) from the Stored event to construct:
+let content_hash =
+    calculate_cid_with_config(&data, CidCodec::Raw, HashingAlgorithm::Blake2b256)?.content_hash;
+
+tx_client.enable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
+
+// Only succeeds after the prepaid cycle has fired.
+tx_client.disable_auto_renew(content_hash, &signer, WaitFor::Finalized).await?;
+```
+
+A content hash carries at most one registration, so `renew` and `enable_auto_renew` exclude each other. The transaction pool rejects these calls as invalid transactions before they reach a block:
+
+| Call | Rejected when | Pool error |
+|------|---------------|------------|
+| `renew`, `enable_auto_renew` | a renewal is already registered for the content hash | custom 11, `RENEWAL_ALREADY_ENABLED` |
+| `disable_auto_renew` | no renewal is registered for the content hash | custom 9, `AUTO_RENEWAL_NOT_ENABLED` |
+| `disable_auto_renew` | the caller does not own the registration | custom 10, `NOT_AUTO_RENEWAL_OWNER` |
+| `disable_auto_renew` | the next cycle is still prepaid | custom 12, `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL` |
+
+The call then returns `Error::TransactionInvalid` with `custom_code: Some(<code>)`.
+
+## Storing and Tracking
+
+The upload pipeline reports each item's `(block, index)` in its `UploadEvent::ItemFinalized` event; use it to build the `StorageRef` used for renewal. `StoreReceipt` (from `TransactionClient::store`) does not contain the index.
+
+```rust
+use std::sync::{Arc, Mutex};
+
+let position = Arc::new(Mutex::new(None));
+let position_sink = position.clone();
+let config = UploadConfig {
+    on_event: Some(Arc::new(move |event: UploadEvent| {
+        if let UploadEvent::ItemFinalized {
+            block_number: Some(block),
+            transaction_index: Some(index),
+            ..
+        } = event
+        {
+            *position_sink.lock().unwrap() = Some((block, index));
+        }
+    })),
+    ..Default::default()
+};
+
+let estimate = tx_client
+    .estimate_upload(
+        UploadInput::Items(vec![UploadItem::new(data.clone())]),
+        UploadEstimateOptions::default(),
+    )
+    .await?;
+let source: Arc<dyn SeekableSource> = Arc::new(blob_from_items(vec![data]));
+tx_client.submit(&signer, estimate, source, config).await?;
+
+let (block_number, index) = position.lock().unwrap().expect("item finalized");
 let storage_ref = StorageRef::new(block_number, index);
 ```
 
+Alternatively, renew by content hash, which does not change across renewals.
+
 ## Using RenewalTracker
 
-For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — submitting again before the boundary rejects with `RenewalAlreadyEnabled`:
+For applications managing multiple stored items, use `RenewalTracker` to know when to renew. `renew` registers at most one scheduled renewal per content hash — the pool rejects a second submission before the boundary (custom error 11, `RENEWAL_ALREADY_ENABLED`):
 
 ```rust
 let mut tracker = RenewalTracker::new();
@@ -87,27 +140,20 @@ tracker.track(
 
 // Periodically find entries close to expiry.
 let buffer = 1000; // renew this many blocks before expiration
-let expiring: Vec<StorageRef> = tracker
+let expiring: Vec<Vec<u8>> = tracker
     .expiring_before(current_block + buffer)
     .iter()
-    .map(|e| e.storage_ref)
+    .map(|e| e.content_hash.clone())
     .collect();
 
-for storage_ref in expiring {
-    let renewal = client.prepare_renew(storage_ref)?;
-    tx_client
-        .renew((renewal.block(), renewal.index()), &signer, WaitFor::Finalized)
-        .await?;
-
-    // Update the tracker with the new reference (read from the Renewed event
-    // when using the pallet's force_renew; see concepts).
-    tracker.update_after_renewal(
-        storage_ref,
-        StorageRef::new(new_block, new_index),
-        retention_period,
-    );
+for content_hash in expiring {
+    let content_hash: ContentHash = content_hash.as_slice().try_into()?;
+    // Schedules a one-shot renewal that fires at the retention boundary
+    tx_client.renew(content_hash, &signer, WaitFor::Finalized).await?;
 }
 ```
+
+`renew` does not move the data right away. When the scheduled renewal fires, the chain stores the data again and emits `DataRenewal.DataRenewed { index, .. }` in that block; `force_renew` stores it again in its own inclusion block and emits `DataRenewal.Renewed { index, .. }`. Pass that block and index to `tracker.update_after_renewal(old_ref, StorageRef::new(block, index), retention_period)`.
 
 `TrackedEntry` fields: `storage_ref` (with `.block` / `.index`), `content_hash`, `size`, `expires_at`.
 
@@ -158,7 +204,7 @@ fn restore_entries(entries: Vec<PersistedEntry>) -> RenewalTracker {
 
 ## Error Handling
 
-`prepare_renew` rejects invalid input (e.g. block 0) with `Error::RenewalFailed`; submission errors surface the same variant, including on-chain rejections such as `RenewalAlreadyEnabled` (a renewal is already scheduled for the content hash):
+`prepare_renew` rejects invalid input (e.g. block 0) with `Error::InvalidConfig`. Submission errors surface as `Error::TransactionInvalid` when the transaction pool rejects the call (for example custom error 11, `RENEWAL_ALREADY_ENABLED`: a renewal is already scheduled for the content hash) and as `Error::TransactionFailed` otherwise. A chain without any `renew` call, and legacy runtimes that take only `(block, index)`, return `Error::UnsupportedOperation` (code `UNSUPPORTED_OPERATION`) for the calls they cannot encode, before submitting:
 
 ```rust
 match client.prepare_renew(storage_ref) {
@@ -168,7 +214,7 @@ match client.prepare_renew(storage_ref) {
             tracing::error!(?e, "Renewal submission failed");
         }
     }
-    Err(Error::RenewalFailed(msg)) => {
+    Err(Error::InvalidConfig(msg)) => {
         tracing::error!(reason = %msg, "Invalid renewal parameters");
     }
     Err(e) => {

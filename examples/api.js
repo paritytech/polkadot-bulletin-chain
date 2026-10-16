@@ -1,216 +1,8 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-import fs from 'fs';
 import assert from 'assert';
-import { cidFromBytes } from "./cid_dag_metadata.js";
-import { Enum } from '@polkadot-api/substrate-bindings';
-import { CHUNK_SIZE, toHex, toHashingEnum, getContentHash } from './common.js';
-
-function toBytes(data) {
-    if (typeof data === 'string') {
-        const buf = Buffer.from(data);
-        return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    }
-    if (data instanceof Uint8Array) return data;
-    return new Uint8Array(data);
-}
-
-export async function authorizeAccount(
-    typedApi,
-    authorizationSigner,
-    whos,
-    transactions,
-    bytes,
-    txMode = TX_MODE_IN_BLOCK
-) {
-    const accounts = Array.isArray(whos) ? whos : [whos];
-
-    console.log(
-        `⬆️ Authorizing accounts: ${accounts.join(', ')} ` +
-        `for transactions: ${transactions} and bytes: ${bytes}...`
-    );
-
-    // Collect accounts that need authorization
-    const accountsToAuthorize = [];
-    for (const who of accounts) {
-        const auth = await typedApi.query.TransactionStorage.Authorizations.getValue(Enum("Account", who));
-        console.log(`ℹ Account: ${who} Authorization info: `, auth);
-        if (auth != null) {
-            const authValue = auth.extent;
-            const accountTransactions = authValue.transactions;
-            const accountBytes = authValue.bytes;
-
-            if (accountTransactions >= transactions && accountBytes >= bytes) {
-                console.log('✅ Account authorization is sufficient.');
-                continue;
-            }
-        } else {
-            console.log('ℹ️ No existing authorization found — requesting new one...');
-        }
-        accountsToAuthorize.push(who);
-    }
-
-    if (accountsToAuthorize.length === 0) {
-        console.log('✅ All accounts already have sufficient authorization.');
-        return;
-    }
-
-    // Build batch of authorize_account calls
-    const authorizeCalls = accountsToAuthorize.map(who =>
-        typedApi.tx.TransactionStorage.authorize_account({
-            who,
-            transactions,
-            bytes
-        }).decodedCall
-    );
-
-    // Wrap in Utility::batchAll(...)
-    const batchTx = typedApi.tx.Utility.batch_all({
-        calls: authorizeCalls
-    });
-
-    await waitForTransaction(batchTx, authorizationSigner, "BatchAuthorize", txMode);
-}
-
-export async function authorizePreimage(
-    typedApi,
-    authorizationSigner,
-    contentHashes,
-    maxSize = CHUNK_SIZE,
-    txMode = TX_MODE_IN_BLOCK,
-    batchSize = UTILITY_BATCH_SIZE,
-) {
-    const contentHashesArray = Array.isArray(contentHashes) ? contentHashes : [contentHashes];
-    const totalBatches = Math.ceil(contentHashesArray.length / batchSize);
-
-    for (let i = 0; i < contentHashesArray.length; i += batchSize) {
-        const batchNumber = Math.floor(i / batchSize) + 1;
-        const batch = contentHashesArray.slice(i, i + batchSize);
-        console.log(`\n🔄 Processing batch ${batchNumber} of ${totalBatches}`);
-        console.log(`⬆️ Authorizing preimage with content hash: ${batch.map(toHex).join(', ')}`);
-
-        const authorizeCalls = batch.map(contentHash =>
-            typedApi.tx.TransactionStorage.authorize_preimage({
-                content_hash: toHex(contentHash),
-                max_size: BigInt(maxSize)
-            }).decodedCall
-        );
-
-        // Wrap in Utility::batchAll(...)
-        const batchTx = typedApi.tx.Utility.batch_all({
-            calls: authorizeCalls
-        });
-
-        await waitForTransaction(batchTx, authorizationSigner, `BatchAuthorize Preimages ${batchNumber}`, txMode);
-    }
-}
-
-export async function store(typedApi, signer, data, cidCodec = null, mhCode = null, txMode = TX_MODE_IN_BLOCK, client = null) {
-    console.log('⬆️ Storing data with length=', data.length);
-
-    let expectedCid;
-    let tx;
-    if (cidCodec != null && mhCode != null) {
-        expectedCid = await cidFromBytes(data, cidCodec, mhCode);
-        tx = typedApi.tx.TransactionStorage.store_with_cid_config({
-            cid: {
-                codec: BigInt(cidCodec),
-                hashing: toHashingEnum(mhCode),
-            },
-            data: toBytes(data),
-        });
-    } else {
-        expectedCid = await cidFromBytes(data);
-        tx = typedApi.tx.TransactionStorage.store({ data: toBytes(data) });
-    }
-
-    const result = await waitForTransaction(tx, signer, "Store", txMode, DEFAULT_TX_TIMEOUT_MS, client);
-    return { cid: expectedCid, blockHash: result?.block?.hash, blockNumber: result?.block?.number };
-}
-
-const UTILITY_BATCH_SIZE = 20;
-export const TX_MODE_IN_BLOCK = "in-block";
-export const TX_MODE_FINALIZED_BLOCK = "finalized-block";
-export const TX_MODE_IN_POOL = "in-tx-pool";
-
-const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
-
-const TX_MODE_CONFIG = {
-    [TX_MODE_IN_BLOCK]: {
-        match: (ev) => ev.type === "inBestBlock",
-        log: (txName, ev) => `📦 ${txName} included in block: ${ev.block.hash}`,
-    },
-    [TX_MODE_IN_POOL]: {
-        match: (ev) => ev.type === "broadcasted",
-        log: (txName, ev) => `📦 ${txName} broadcasted with txHash: ${ev.txHash}`,
-    },
-    [TX_MODE_FINALIZED_BLOCK]: {
-        match: (ev) => ev.type === "finalized",
-        log: (txName, ev) => `📦 ${txName} included in finalized block: ${ev.block.hash}`,
-    },
-};
-
-export async function waitForTransaction(tx, signer = null, txName, txMode = TX_MODE_IN_BLOCK, timeoutMs = DEFAULT_TX_TIMEOUT_MS, client = null, txOpts = {}) {
-    const config = TX_MODE_CONFIG[txMode];
-    if (!config) {
-        throw new Error(`Unhandled txMode: ${txMode}`);
-    }
-
-    // Get the observable - either signed or unsigned
-    let observable;
-    if (signer === null) {
-        console.log(`⬆️ Submitting unsigned ${txName}`);
-        // TODO: https://github.com/polkadot-api/polkadot-api/issues/760
-        // const bareTx = await tx.getBareTx(txOpts);
-        if (Object.keys(txOpts).length > 0) {
-            throw new Error(`txOpts not supported for unsigned transactions (getBareTx doesn't accept options). See: https://github.com/polkadot-api/polkadot-api/issues/760`);
-        }
-        const bareTx = await tx.getBareTx();
-        observable = client.submitAndWatch(bareTx);
-    } else {
-        observable = tx.createSubmitAndWatch(signer, txOpts);
-    }
-
-    return new Promise((resolve, reject) => {
-        let sub;
-        let resolved = false;
-
-        const cleanup = () => {
-            resolved = true;
-            clearTimeout(timeoutId);
-            if (sub) sub.unsubscribe();
-        };
-
-        const timeoutId = setTimeout(() => {
-            if (!resolved) {
-                cleanup();
-                reject(new Error(`${txName} transaction timed out after ${timeoutMs}ms waiting for ${txMode}`));
-            }
-        }, timeoutMs);
-
-        sub = observable.subscribe({
-            next: (ev) => {
-                console.log(`✅ ${txName} event:`, ev.type);
-                if (!resolved && config.match(ev)) {
-                    console.log(config.log(txName, ev));
-                    cleanup();
-                    resolve(ev);
-                }
-            },
-            error: (err) => {
-                console.error(`❌ ${txName} error:`, err);
-                if (!resolved) {
-                    cleanup();
-                    reject(err);
-                }
-            },
-            complete: () => {
-                console.log(`✅ ${txName} complete!`);
-            }
-        });
-    });
-}
+import { getContentHash } from './common.js';
 
 export async function fetchCid(httpIpfsApi, cid) {
     const contentUrl = `${httpIpfsApi}/ipfs/${cid.toString()}`;
@@ -240,7 +32,9 @@ export async function fetchCidRaw(httpIpfsApi, cid) {
  */
 export async function fetchCidFromNode(client, cid) {
     console.log('⬇️ Downloading content by cid from node via bitswap_v1_get: ', cid.toString());
-    const hex = await client._request('bitswap_v1_get', [cid.toString()]);
+    // `client` is a raw PAPI client (`_request`) or the SDK BulletinClient (`request`).
+    const request = (client._request ?? client.request).bind(client);
+    const hex = await request('bitswap_v1_get', [cid.toString()]);
     return Buffer.from(hex.replace(/^0x/, ''), 'hex');
 }
 
@@ -272,47 +66,17 @@ export const smoldotRpcSource = (client) => nodeRpcSource(client, 'smoldot-bitsw
 
 /**
  * Fetch the block `cid` addresses from every source and assert each hashes to the
- * CID. Verifying every block against the CID also proves they are byte-identical
- * (equal digests under a collision-resistant hash), so no separate cross-source
- * compare is needed. Returns the block, the raw node for dag-pb CIDs, not the
- * assembled file (use `fetchCid` for that).
+ * CID. With a single source this is a plain hash-verified fetch; with several it
+ * is also a cross-check — verifying every block against the CID proves they are
+ * byte-identical (equal digests under a collision-resistant hash), so no separate
+ * cross-source compare is needed. Returns the block, the raw node for dag-pb CIDs,
+ * not the assembled file (use `fetchCid` for that).
  */
 export async function fetchAndVerifyBlock(cid, ...sources) {
-    assert(sources.length >= 2, `cross-check needs >=2 sources, got ${sources.length}`);
+    assert(sources.length >= 1, `verification needs >=1 source, got ${sources.length}`);
     const blocks = await Promise.all(
         sources.map(async (s) => ({ name: s.name, data: await s.fetch(cid) })),
     );
     for (const { name, data } of blocks) verifyCid(data, cid, name);
     return blocks[0].data;
-}
-
-/**
- * Read the file, chunk it, store in Bulletin and return CIDs.
- * @param {object} typedApi - PAPI typed API
- * @param {object} signer - Signer for transactions
- * @param {string} filePath - Path to file to chunk and store
- * @param {number} chunkSize - Size of each chunk in bytes
- * @returns {{ chunks: Array<{ cid, bytes, len }> }}
- */
-export async function storeChunkedFile(typedApi, signer, filePath, chunkSize) {
-    const fileData = fs.readFileSync(filePath);
-    console.log(`📁 Read ${filePath}, size ${fileData.length} bytes`);
-
-    const chunks = [];
-    for (let i = 0; i < fileData.length; i += chunkSize) {
-        const chunk = fileData.subarray(i, i + chunkSize);
-        const cid = await cidFromBytes(chunk);
-        chunks.push({ cid, bytes: chunk, len: chunk.length });
-    }
-    console.log(`✂️ Split into ${chunks.length} chunks`);
-
-    // Store chunks in Bulletin
-    for (let i = 0; i < chunks.length; i++) {
-        const { cid: expectedCid, bytes } = chunks[i];
-        console.log(`📤 Storing chunk #${i + 1} CID: ${expectedCid}`);
-        let { cid } = await store(typedApi, signer, bytes);
-        assert.deepStrictEqual(expectedCid, cid);
-        console.log(`✅ Stored chunk #${i + 1} and CID equals!`);
-    }
-    return { chunks };
 }

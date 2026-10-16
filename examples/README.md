@@ -97,13 +97,12 @@ just run-test-rust authorize-and-store <test_dir> <runtime>
 
 | File | Description |
 |------|-------------|
-| `authorize_and_store_papi.js` | Basic authorization and storage via WebSocket RPC |
-| `authorize_and_store_papi_smoldot.js` | Same workflow using Smoldot light client |
+| `authorize_and_store_papi.js` | Basic authorization and storage (WebSocket RPC, or Smoldot light client via `--smoldot=<relay-spec>:<para-spec>`) |
 | `authorize_preimage_and_store_papi.js` | Content-addressed authorization using preimage hashes |
 | `store_chunked_data.js` | Large file storage with DAG-PB chunking |
 | `store_big_data.js` | Very large file handling with parallel chunk uploads |
 | `native_ipfs_dag_pb_chunked_data.js` | Native IPFS DAG-PB chunked data example |
-| `api.js` | Shared transaction and storage API helpers |
+| `api.js` | Retrieval and CID verification helpers (IPFS gateway, node `bitswap_v1_get`) |
 | `common.js` | Shared utilities (signers, image generation, etc.) |
 | `logger.js` | Unified logging functions |
 | `cid_dag_metadata.js` | CID and DAG metadata utilities |

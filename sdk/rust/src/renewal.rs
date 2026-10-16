@@ -18,8 +18,8 @@
 //! let client = BulletinClient::new();
 //! let operation = client.prepare_renew(storage_ref)?;
 //!
-//! // Submit via subxt:
-//! // api.tx().transaction_storage().renew(operation.block, operation.index)
+//! // Submit via the transaction client:
+//! // tx_client.renew((operation.block(), operation.index()), &signer, wait_for).await?
 //! ```
 
 use crate::types::{Error, Result, StorageRef};
@@ -28,7 +28,7 @@ use scale_info::TypeInfo;
 
 /// A renewal operation ready for submission.
 ///
-/// This contains the parameters needed to call `transactionStorage.renew()`.
+/// This contains the `(block, index)` position that `TransactionClient::renew` takes.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct RenewalOperation {
 	/// The storage reference identifying the data to renew.
@@ -50,7 +50,7 @@ impl RenewalOperation {
 	pub fn validate(&self) -> Result<()> {
 		// Block 0 is typically genesis and unlikely to have user transactions
 		if self.storage_ref.block == 0 {
-			return Err(Error::RenewalFailed("Block 0 is not a valid renewal target".into()));
+			return Err(Error::InvalidConfig("block 0 is not a valid renewal target".into()));
 		}
 		Ok(())
 	}

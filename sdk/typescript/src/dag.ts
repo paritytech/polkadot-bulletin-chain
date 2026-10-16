@@ -60,10 +60,35 @@ export class UnixFsDagBuilder {
       }
       return chunk.cid
     })
+    const chunkSizes = chunks.map((chunk) => chunk.data.length)
+    return this.buildFromParts(chunkCids, chunkSizes, hashAlgorithm)
+  }
 
-    // Calculate total size and block sizes
-    const totalSize = chunks.reduce((sum, chunk) => sum + chunk.data.length, 0)
-    const blockSizes = chunks.map((chunk) => BigInt(chunk.data.length))
+  /**
+   * Build a manifest from chunk CIDs + sizes alone — no chunk data needed.
+   * Lets the streaming plan path produce a manifest without holding the file
+   * in memory (CIDs are ~36 bytes each).
+   */
+  async buildFromParts(
+    chunkCids: CID[],
+    chunkSizes: number[],
+    hashAlgorithm: HashAlgorithm = HashAlgorithm.Blake2b256,
+  ): Promise<DagManifest> {
+    if (chunkCids.length === 0) {
+      throw new BulletinError(
+        "Cannot build DAG from empty chunks",
+        ErrorCode.EMPTY_DATA,
+      )
+    }
+    if (chunkCids.length !== chunkSizes.length) {
+      throw new BulletinError(
+        "chunkCids and chunkSizes length mismatch",
+        ErrorCode.DAG_ENCODING_FAILED,
+      )
+    }
+
+    const totalSize = chunkSizes.reduce((sum, n) => sum + n, 0)
+    const blockSizes = chunkSizes.map((n) => BigInt(n))
 
     // Build UnixFS file metadata (no inline data here)
     const fileData = new UnixFS({
@@ -74,10 +99,10 @@ export class UnixFsDagBuilder {
     // DAG-PB node: our file with chunk links
     const dagNode = dagPB.prepare({
       Data: fileData.marshal(),
-      Links: chunks.map((chunk, i) => ({
+      Links: chunkCids.map((cid, i) => ({
         Name: "",
-        Tsize: chunk.data.length,
-        Hash: chunkCids[i],
+        Tsize: chunkSizes[i],
+        Hash: cid,
       })),
     })
 

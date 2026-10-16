@@ -43,7 +43,7 @@ For **Rust SDK** changes, read:
 
 For **TypeScript SDK** changes, read:
 - `sdk/typescript/src/index.ts` — all re-exports
-- `sdk/typescript/src/client.ts` — AsyncBulletinClient
+- `sdk/typescript/src/client.ts` — BulletinClient
 - `sdk/typescript/src/builder.ts` — StoreBuilder, CallBuilder, AuthCallBuilder
 - `sdk/typescript/src/preparer.ts` — BulletinPreparer
 - `sdk/typescript/src/mock.ts` — MockBulletinClient
@@ -82,7 +82,7 @@ When updating documentation:
 - **Code examples must compile/run**: Use actual SDK APIs with correct signatures. Never invent methods or parameters.
 - **API reference pages are comprehensive**: Every public class, method, type, enum, constant must be listed in `{lang}/api-reference.md`.
 - **Constructor examples must be complete**: Show all required parameters, not zero-arg constructors if the real constructor requires args.
-- **Introduction and quickstart use the high-level clients**: TypeScript uses `AsyncBulletinClient`, Rust uses `TransactionClient`.
+- **Introduction and quickstart use the high-level clients**: TypeScript uses `BulletinClient`, Rust uses `TransactionClient`.
 - **Keep existing page structure**: Don't reorganize sections unless the API change requires it.
 - **Don't add features that don't exist**: If a method was removed, remove it from docs. If return types changed, update them.
 - **Match the exact type names**: `StoreOptions` not `StoreOpts`, `HashAlgorithm` not `HashAlgo`, etc.

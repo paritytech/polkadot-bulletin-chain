@@ -6,9 +6,11 @@ This guide shows how to manage authorization using the TypeScript SDK.
 
 ## Overview
 
-Before storing data on Bulletin Chain, accounts must be authorized. Authorization specifies:
-- **transactions**: Number of store transactions allowed
-- **bytes**: Total bytes allowed to store
+Before storing data on Bulletin Chain, accounts must be authorized. Authorization grants:
+- **transactions**: Number of store transactions
+- **bytes**: Total bytes to store
+
+On chain, an authorization's `extent` contains the granted `transactions_allowance` and `bytes_allowance`, and the used `transactions` and `bytes`. Stores beyond the allowance are still accepted, at lower priority.
 
 ## Checking Authorization
 
@@ -28,14 +30,9 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
 });
 
 if (auth) {
-  // `*_allowance` fields are the caps; `transactions`/`bytes` are consumed so far.
-  // The caps gate transaction *priority*, not acceptance: going over doesn't
-  // reject stores, they just lose their priority boost.
-  const txBoostRemaining = auth.extent.transactions_allowance - auth.extent.transactions;
-  const bytesBoostRemaining = auth.extent.bytes_allowance - auth.extent.bytes;
-  console.log("Boost-tier transactions remaining:", txBoostRemaining);
-  console.log("Boost-tier bytes remaining:", bytesBoostRemaining);
-  console.log("Expires at block:", auth.expiration ?? "Never");
+  console.log("Transactions remaining:", auth.extent.transactions_allowance - auth.extent.transactions);
+  console.log("Bytes remaining:", auth.extent.bytes_allowance - auth.extent.bytes);
+  console.log("Expires at block:", auth.expiration);
 } else {
   console.log("Account not authorized");
 }
@@ -44,8 +41,8 @@ if (auth) {
 ### Check Preimage Authorization
 
 ```typescript
-// Check if a specific content hash is pre-authorized.
-// Fixed-size hashes are passed as 0x-prefixed hex (PAPI SizedHex).
+// Check if a specific content hash is pre-authorized. PAPI represents a
+// 32-byte hash as a 0x-prefixed hex string; a Uint8Array encodes a different key.
 const contentHash = "0x...";  // Your content hash
 
 const auth = await api.query.TransactionStorage.Authorizations.getValue({
@@ -75,59 +72,50 @@ console.log("Transactions needed:", estimate.transactions);
 console.log("Bytes needed:", estimate.bytes);
 ```
 
-Or using `AsyncBulletinClient`:
+Or using `BulletinClient`:
 
 ```typescript
 const estimate = client.estimateAuthorization(fileSize);
 ```
 
-The estimation accounts for:
-- Chunking overhead (for files > 2 MiB)
-- DAG-PB manifest size
-- A small safety margin
+The estimation is offline and approximate:
+- One transaction per chunk: ⌈size / `defaultChunkSize`⌉ (2 MiB by default)
+- With `createManifest` (the default), one more transaction and about 50 bytes per chunk plus 1000 bytes for the manifest, even for single-chunk data that `submit` stores without a manifest
+
+For the exact figures of an upload, use `client.estimateUpload(input)` (`transactions`, `bytes`).
 
 ## Granting Authorization
 
-Authorization can only be granted by privileged accounts (sudo/root on testnets).
+Authorization is granted by an account in the chain's `AllowedAuthorizers` set (or via sudo). Construct the client with that account as `authorizerSigner`, then use the SDK methods — `authorizeAccount` / `authorizePreimage` are signed by `authorizerSigner`, while uploads use `uploadSigner`.
 
 ### Authorize Account
 
 ```typescript
-// Only works with sudo access
-const authTx = api.tx.Sudo.sudo({
-  call: api.tx.TransactionStorage.authorize_account({
-    who: targetAddress,
-    transactions: 100,
-    bytes: BigInt(100 * 1024 * 1024) // 100 MiB
-  })
+const client = new BulletinClient({
+  providers: () => [getWsProvider(url)],
+  uploadSigner,
+  authorizerSigner, // an AllowedAuthorizers account
 });
 
-await authTx.createAndSubmit(sudoSigner);
-console.log("Account authorized!");
+await client
+  .authorizeAccount(targetAddress, 100, BigInt(100 * 1024 * 1024)) // 100 MiB
+  .send();
+
+// If the authorizer is the sudo key rather than an AllowedAuthorizer:
+// await client.authorizeAccount(targetAddress, 100, ...).withSudo().send();
 ```
 
 ### Authorize Preimage (Content Hash)
 
-Pre-authorize a specific content hash. Useful for allowing anyone to store specific data:
+Pre-authorize a specific content hash so anyone can store that exact data (used by the unsigned `.asUnsigned()` upload path):
 
 ```typescript
 import { getContentHash, HashAlgorithm } from "@parity/bulletin-sdk";
-import { Binary } from "polkadot-api";
 
-// Calculate content hash for the data
 const data = new TextEncoder().encode("Specific content to authorize");
 const contentHash = await getContentHash(data, HashAlgorithm.Blake2b256);
 
-// Authorize this specific content (fixed-size hashes are passed as hex)
-const authTx = api.tx.Sudo.sudo({
-  call: api.tx.TransactionStorage.authorize_preimage({
-    content_hash: Binary.toHex(contentHash),
-    max_size: BigInt(data.length)
-  })
-});
-
-await authTx.createAndSubmit(sudoSigner);
-console.log("Preimage authorized!");
+await client.authorizePreimage(contentHash, BigInt(data.length)).send();
 ```
 
 ## Using the Faucet (Testnets)
@@ -135,16 +123,14 @@ console.log("Preimage authorized!");
 On testnets, the easiest way to get authorization is via the Faucet in the Console UI:
 
 1. Open the Console UI
-2. Connect your wallet
-3. Go to **Dashboard**
-4. Click the **Faucet** button
-5. Confirm the transaction in your wallet
+2. Open the **Faucet** page
+3. Enter the account (or content) to authorize and submit
 
-The faucet grants a default authorization (typically 10 transactions, 1 MiB).
+The faucet signs with its own authorizer key, so no wallet confirmation is needed. Its form defaults to 100 transactions and 10 MB (editable).
 
 ## Manual Authorization Check
 
-You can query the chain directly via PAPI before uploading to avoid wasted fees:
+You can query the chain directly via PAPI before uploading, to fail fast:
 
 ```typescript
 import { BulletinPreparer } from "@parity/bulletin-sdk";
@@ -165,21 +151,23 @@ if (!auth) {
   throw new Error("Not authorized. Request authorization first.");
 }
 
-// Boost budget left = allowance (cap) - consumed. Exceeding it doesn't reject
-// stores; they just lose their priority boost — so warn, don't block.
-const availableTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
-const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
+const remainingTransactions = auth.extent.transactions_allowance - auth.extent.transactions;
+const remainingBytes = auth.extent.bytes_allowance - auth.extent.bytes;
 
-if (availableTransactions < transactions || availableBytes < bytes) {
-  console.warn("Boost budget exhausted - the upload will proceed at lower priority");
+if (remainingTransactions < transactions) {
+  throw new Error(`Need ${transactions} transactions, have ${remainingTransactions}`);
 }
 
-console.log("Proceeding with upload...");
+if (remainingBytes < BigInt(bytes)) {
+  throw new Error(`Need ${bytes} bytes, have ${remainingBytes}`);
+}
+
+console.log("Authorization sufficient, proceeding with upload...");
 ```
 
 ## Authorization Expiration
 
-Authorization can have an optional expiration block:
+Every authorization has an expiration block:
 
 ```typescript
 const auth = await api.query.TransactionStorage.Authorizations.getValue({
@@ -187,7 +175,7 @@ const auth = await api.query.TransactionStorage.Authorizations.getValue({
   value: myAddress
 });
 
-if (auth?.expiration) {
+if (auth) {
   const currentBlock = await api.query.System.Number.getValue();
   const blocksRemaining = auth.expiration - currentBlock;
 
@@ -202,45 +190,37 @@ if (auth?.expiration) {
 ## Complete Example
 
 ```typescript
-import { createClient, Binary } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
 import { bulletin } from "@polkadot-api/descriptors";
-import { AsyncBulletinClient, BulletinPreparer } from "@parity/bulletin-sdk";
+import { BulletinClient, blobFromBytes } from "@parity/bulletin-sdk";
 
 async function storeWithAuthCheck() {
-  // Setup
-  const papiClient = createClient(getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io"));
-  const api = papiClient.getTypedApi(bulletin);
-  const preparer = new BulletinPreparer();
-
-  // Data to store
-  const data = new TextEncoder().encode("Hello, Bulletin Chain!");
-
-  // 1. Estimate authorization needs
-  const estimate = preparer.estimateAuthorization(data.length);
-  console.log("Need:", estimate.transactions, "txs,", estimate.bytes, "bytes");
-
-  // 2. Check current authorization
-  const auth = await api.query.TransactionStorage.Authorizations.getValue({
-    type: "Account",
-    value: myAddress
+  const client = new BulletinClient({
+    providers: () => [getWsProvider("wss://paseo-bulletin-next-rpc.polkadot.io")],
+    uploadSigner: signer,
+    descriptor: bulletin,
   });
 
-  if (!auth) {
-    console.log("Not authorized. Please use the Faucet.");
-    return;
+  const data = new TextEncoder().encode("Hello, Bulletin Chain!");
+  const src = blobFromBytes(data);
+
+  // 1. Estimate the upload.
+  const estimate = await client.estimateUpload(src);
+  console.log("Need:", estimate.transactions, "txs,", estimate.bytes, "bytes");
+
+  // 2. Check the remaining allowance (reuse the client's own connection).
+  const auth = await client.api.query?.TransactionStorage.Authorizations.getValue({
+    type: "Account",
+    value: myAddress,
+  });
+  const remainingBytes = auth ? (auth.extent.bytes_allowance ?? 0n) - auth.extent.bytes : 0n;
+  if (remainingBytes < estimate.bytes) {
+    console.log("Allowance too low: stores beyond it get lower priority. Top up via the Faucet.");
   }
 
-  // Boost budget left = allowance (cap) - consumed (priority only, not a hard limit)
-  const availableBytes = auth.extent.bytes_allowance - auth.extent.bytes;
-  if (availableBytes < estimate.bytes) {
-    console.warn("Boost budget exhausted - storing at lower priority");
-  }
-
-  // 3. Store via SDK
-  const client = new AsyncBulletinClient(api, signer, papiClient.submit);
-  const result = await client.store(data).send();
-  console.log("Stored with CID:", result.cid.toString());
+  // 3. Store. `.ensureAuthorized()` fails fast if the authorization is missing or expired.
+  const { cids } = await client.submit(estimate, src).ensureAuthorized().send();
+  console.log("Stored with CID:", cids[cids.length - 1].toString());
 }
 ```
 

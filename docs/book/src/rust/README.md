@@ -16,13 +16,14 @@ The `bulletin-sdk-rust` crate provides a robust client for interacting with the 
 
 ## Key Features
 
-- **Direct Transaction Submission**: `TransactionClient` handles all chain interactions out of the box
-- **Offline Preparation**: `BulletinClient` prepares operations (CID calculation, chunking, DAG building) without network access
-- **Configurable Stores**: `StoreOptions` for CID codec, hash algorithm, and confirmation level
-- **Runtime Metadata**: Embedded metadata for Bulletin Chain - works out of the box
-- **Structured Errors**: Error codes, retryable detection, and recovery hints consistent with TypeScript SDK
-- **Progress Tracking**: Callback-based progress events for uploads
-- **no_std Compatible**: Core functionality works in no_std environments
+- **Exactly-once upload pipeline**: `estimate_upload` → `submit` drives items to finality with wave batching, content-hash dedup, hijack recovery, watchdogs, and re-subscribe/retry-resume — a resumed run never double-pays; set `skip_existing: true` in the estimate options to skip content already on chain
+- **Streaming**: upload a file from a `SeekableSource`, range-read lazily (resident memory tracks the in-flight window, not the file)
+- **Provider-agnostic**: `from_rpc_clients` takes any subxt `RpcClient` — WS node or smoldot light client — and fans broadcast out across all of them
+- **Unsigned (preimage) path**: `submit_unsigned` for preimage-authorized bare extrinsics
+- **Offline preparation**: `BulletinClient` prepares operations (CID, chunking, DAG building) without network access
+- **Runtime metadata**: embedded — works out of the box
+- **Structured errors**: error codes, retryable detection, and recovery hints consistent with the TypeScript SDK
+- **no_std compatible**: core (CID/chunking/DAG) works in `no_std`
 
 ## Architecture
 
@@ -74,7 +75,7 @@ For advanced use cases (custom submission, light clients, batching), prepare ope
 
 ## Public API
 
-The SDK's public API is exposed through the crate root and the `prelude` module. Internal modules are not directly accessible — use the prelude for convenient imports:
+The SDK's public API is exposed through the crate root, the `prelude` module, and the `compat` module (renewal call shapes). Other modules are private — use the prelude for convenient imports:
 
 ```rust
 use bulletin_sdk_rust::prelude::*;
@@ -83,11 +84,12 @@ use bulletin_sdk_rust::prelude::*;
 Key types available through the prelude:
 
 - **Clients**: `TransactionClient`, `BulletinClient`
+- **Uploads** (std only): `UploadInput`, `UploadItem`, `UploadEstimateOptions`, `StreamEstimate`, `UploadConfig`, `UploadEvent`, `UploadResult`, `SeekableSource`, `blob_from_bytes`, `blob_from_items`
 - **Chunking**: `FixedSizeChunker`, `Chunker` trait
 - **CID**: `calculate_cid`, `CidCodec`, `HashingAlgorithm`, `CidConfig`
 - **DAG**: `UnixFsDagBuilder`, `DagManifest`, `DagBuilder` trait
 - **Storage**: `StorageOperation`, `BatchStorageOperation`
-- **Authorization**: `Authorization`, `AuthorizationManager`
+- **Authorization**: `AuthorizationManager`
 - **Renewal**: `RenewalTracker`, `RenewalOperation`
 - **Types**: `StoreResult`, `StoreOptions`, `ChunkerConfig`, `Error`, `ProgressEvent`, etc.
 - **Transaction Receipts** (std only): `StoreReceipt`, `AuthorizationReceipt`, `RenewReceipt`
@@ -106,33 +108,37 @@ use subxt_signer::sr25519::Keypair;
 use std::str::FromStr;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Connect to Bulletin Chain
     let client = TransactionClient::new("ws://localhost:10000").await?;
 
-    // Create signer (dev account for testing)
-    let uri = subxt_signer::SecretUri::from_str("//Alice")?;
-    let signer = Keypair::from_uri(&uri)?;
+    // Dev accounts: //Alice uploads, //Eve is a genesis authorizer in the dev preset.
+    let signer = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Alice")?)?;
+    let authorizer = Keypair::from_uri(&subxt_signer::SecretUri::from_str("//Eve")?)?;
     let account = subxt::utils::AccountId32::from(signer.public_key().0);
 
-    // Authorize account (requires sudo)
-    client.authorize_account(account.clone(), 10, 10 * 1024 * 1024, &signer, WaitFor::InBlock).await?;
+    // Authorize the uploader. The signer of this call must be a registered authorizer.
+    client.authorize_account(account, 10, 10 * 1024 * 1024, &authorizer, WaitFor::Finalized).await?;
 
-    // Store data with progress tracking
-    let data = b"Hello, Bulletin!".to_vec();
-    let receipt = client.store_with_progress(
-        data,
-        &signer,
-        WaitFor::InBlock,
-        Some(std::sync::Arc::new(|event| {
-            println!("Progress: {:?}", event);
-        })),
-    ).await?;
+    // Upload via the `estimate_upload` -> `submit` pipeline (exactly-once).
+    let items = vec![UploadItem::new(b"Hello, Bulletin!".to_vec())];
+    let datas: Vec<Vec<u8>> = items.iter().map(|i| i.data.clone()).collect();
+    let estimate = client
+        .estimate_upload(UploadInput::Items(items), UploadEstimateOptions::default())
+        .await?;
+    let source: std::sync::Arc<dyn SeekableSource> = std::sync::Arc::new(blob_from_items(datas));
+    let result = client.submit(&signer, estimate, source, UploadConfig::default()).await?;
 
-    println!("Stored in block: {}", receipt.block_hash);
+    println!("Stored CIDs: {:?}", result.cids);
     Ok(())
 }
 ```
+
+For a large file, pass `UploadInput::Source(source)` (e.g. `blob_from_bytes(..)`)
+to `estimate_upload` and the same `source` to `submit` — it is chunked (with a
+DAG-PB manifest when it spans more than one chunk) and range-read lazily during upload. Use `submit_unsigned` for the
+preimage-authorized path, and `from_endpoints(&[..])` for multi-provider
+broadcast.
 
 ### Using BulletinClient (Prepare Only)
 
@@ -146,7 +152,7 @@ let client = BulletinClient::new();
 let data = b"Hello, Bulletin!".to_vec();
 let options = StoreOptions::default();
 
-// Prepare the operation (calculates CID, no network calls)
+// Validate the operation (no network calls), then compute its CID
 let operation = client.prepare_store(data, options)?;
 let cid = cid_to_bytes(&operation.calculate_cid()?)?;
 println!("CID: {:?}", cid);
@@ -159,17 +165,15 @@ println!("CID: {:?}", cid);
 For production, use a seed phrase or private key:
 
 ```rust
-use subxt_signer::sr25519::Keypair;
+use std::str::FromStr;
+use subxt_signer::{bip39::Mnemonic, sr25519::Keypair, SecretUri};
 
 // From mnemonic seed phrase
-let signer = Keypair::from_phrase(
-    "bottom drive obey lake curtain smoke basket hold race lonely fit walk",
-    None, // password
-).expect("Invalid seed phrase");
+let phrase = Mnemonic::from_str("bottom drive obey lake curtain smoke basket hold race lonely fit walk")?;
+let signer = Keypair::from_phrase(&phrase, None)?; // None = no password
 
 // From secret URI (like //Alice for dev)
-let signer = Keypair::from_uri("//Alice")
-    .expect("Invalid URI");
+let signer = Keypair::from_uri(&SecretUri::from_str("//Alice")?)?;
 ```
 
 Proceed to [Installation](./installation.md) to get started.

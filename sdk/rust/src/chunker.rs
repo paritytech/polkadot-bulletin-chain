@@ -6,10 +6,8 @@
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 
-/// Maximum chunk size allowed (2 MiB).
-///
-/// This limit ensures IPFS Bitswap compatibility. The chain's MaxTransactionSize
-/// is 8 MiB, but chunks larger than 2 MiB are not well-supported by Bitswap peers.
+/// Maximum chunk size allowed (2 MiB): the chain's `MaxTransactionSize` and the Bitswap
+/// block-size limit for IPFS compatibility.
 pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// Maximum file size the SDK will chunk in a single operation (64 MiB).
@@ -19,11 +17,8 @@ pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 /// independently, managing the relationship between segments itself.
 pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 
-/// Default chunk size (1 MiB).
-///
-/// This provides a good balance between transaction overhead and throughput
-/// for most use cases. Users can configure up to MAX_CHUNK_SIZE (2 MiB).
-pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
+/// Default chunk size: [`MAX_CHUNK_SIZE`] (2 MiB).
+pub const DEFAULT_CHUNK_SIZE: usize = MAX_CHUNK_SIZE;
 
 /// Trait for chunking strategies.
 pub trait Chunker {
@@ -86,7 +81,10 @@ impl Chunker for FixedSizeChunker {
 			return Err(Error::EmptyData);
 		}
 		if data.len() > MAX_FILE_SIZE {
-			return Err(Error::FileTooLarge(data.len() as u64));
+			return Err(Error::DataTooLarge(alloc::format!(
+				"data size {} exceeds the maximum of {MAX_FILE_SIZE} bytes (64 MiB)",
+				data.len()
+			)));
 		}
 
 		let chunk_size = self.config.chunk_size as usize;
@@ -233,9 +231,9 @@ mod tests {
 
 		assert_eq!(chunker.num_chunks(0), 0);
 		assert_eq!(chunker.num_chunks(1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
-		assert_eq!(chunker.num_chunks(1024 * 1024 * 2), 2);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024), 1);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024 + 1), 2);
+		assert_eq!(chunker.num_chunks(4 * 1024 * 1024), 2);
 	}
 
 	#[test]
@@ -244,8 +242,8 @@ mod tests {
 
 		// Create chunks where total_chunks doesn't match actual count
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 3 },
-			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 },
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 3 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 },
 			// Missing third chunk - only 2 chunks but total_chunks says 3
 		];
 
@@ -260,8 +258,8 @@ mod tests {
 
 		// Create chunks from different files (inconsistent total_chunks)
 		let chunks = vec![
-			Chunk { data: vec![1, 2, 3], index: 0, total_chunks: 2 },
-			Chunk { data: vec![4, 5, 6], index: 1, total_chunks: 3 }, // Wrong total
+			Chunk { data: vec![1, 2, 3], cid: None, index: 0, total_chunks: 2 },
+			Chunk { data: vec![4, 5, 6], cid: None, index: 1, total_chunks: 3 }, // Wrong total
 		];
 
 		let result = reassemble_chunks(&chunks);
@@ -340,8 +338,8 @@ mod tests {
 
 		assert!(result.is_err());
 		match result {
-			Err(Error::FileTooLarge(size)) => assert_eq!(size, data_size as u64),
-			_ => panic!("Expected FileTooLarge error"),
+			Err(Error::DataTooLarge(message)) => assert!(message.contains(&data_size.to_string())),
+			_ => panic!("DataTooLarge error missing"),
 		}
 	}
 
@@ -461,9 +459,12 @@ mod tests {
 	fn test_default_config_values() {
 		let chunker = FixedSizeChunker::default_config();
 
-		// Verify default chunk size is 1 MiB
-		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
+		assert_eq!(
+			chunker.num_chunks(2 * 1024 * 1024),
+			1,
+			"2 MiB, the Bitswap block-size limit and the chain's MaxTransactionSize, is one chunk"
+		);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024 + 1), 2);
 	}
 
 	#[test]

@@ -13,23 +13,24 @@ Off-chain client SDK for Polkadot Bulletin Chain with PAPI integration.
 ## Quick Start
 
 ```typescript
-import { AsyncBulletinClient } from '@parity/bulletin-sdk';
-import { createClient } from 'polkadot-api';
+import { BulletinClient, blobFromBytes } from '@parity/bulletin-sdk';
 import { getTxCreator } from 'polkadot-api/tx-creator';
 import { getWsProvider } from 'polkadot-api/ws';
 
-// Setup PAPI
-const wsProvider = getWsProvider('ws://localhost:9944');
-const papiClient = createClient(wsProvider);
-const api = papiClient.getTypedApi(/* chain descriptors */);
 const signer = getTxCreator(publicKey, 'Sr25519', sign);
 
-// Create client
-const client = new AsyncBulletinClient(api, signer, papiClient.submit);
+// The SDK owns its PAPI connection.
+const client = new BulletinClient({
+  providers: () => [getWsProvider('ws://localhost:9944')],
+  uploadSigner: signer,
+  // descriptor: bulletinDescriptor, // optional; omit to use getUnsafeApi()
+});
 
-// Store data using builder pattern
-const result = await client.store(data).send();
-console.log('Stored with CID:', result.cid.toString());
+// Estimate (preview cost / size authorization), then submit.
+const src = blobFromBytes(data);
+const { cids } = await client.submit(await client.estimateUpload(src), src).send();
+// Last CID is the retrieval id: the manifest root, or the lone chunk's CID.
+console.log('Stored with CID:', cids[cids.length - 1].toString());
 ```
 
 > See the [examples](../../examples/) directory for more usage patterns.
@@ -72,7 +73,7 @@ The SDK book contains:
 ## Features
 
 - CID calculation (Raw, DAG-PB, DAG-CBOR codecs)
-- Automatic chunking (default 1 MiB, configurable)
+- Automatic chunking (default 2 MiB, configurable)
 - DAG-PB manifest generation (IPFS-compatible)
 - Authorization management (`authorizeAccount`, `authorizePreimage`)
 - Data renewal (`renew`)
