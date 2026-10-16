@@ -85,9 +85,10 @@ const UNPROMOTED_EXPIRY_TIMEOUT_SECS: u64 = 240;
 /// outlasts the test and the promotion window only opens `buffer` before that.
 const INTEGRITY_HOP_RETENTION_SECS: u64 = 900;
 const INTEGRITY_HOP_PROMOTION_BUFFER_SECS: u64 = 10;
-/// Comfortably above the submit rate of the phases before the burst phase, so the limiter
-/// doesn't throttle them.
-const INTEGRITY_SUBMIT_RATE_PER_MIN: u32 = 600;
+/// Low enough that the burst phase's back-to-back submits drain the bucket on any runner: at
+/// this refill rate the 60 submits trip the limiter unless they take over 80 s in total. The
+/// phases before the burst make fewer submits than the bucket holds, so they are not throttled.
+const INTEGRITY_SUBMIT_RATE_PER_MIN: u32 = 30;
 const INTEGRITY_SUBMIT_BURST: u32 = 20;
 /// MiB. `user < pool` is required: the pool check runs before the per-user charge, so an
 /// equal pair would make `PoolFull` mask `UserQuotaExceeded` permanently.
