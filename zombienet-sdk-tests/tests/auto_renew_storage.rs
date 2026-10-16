@@ -13,8 +13,9 @@ use crate::{
 		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
 		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
 		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, override_alice_authorization, resolve_canonical_store_block,
-		sdk_client, set_retention_period, set_retention_period_finalized, submit_force_renew,
+		initialize_network, override_alice_authorization,
+		parachain_network_config_without_crash_teardown, resolve_canonical_store_block, sdk_client,
+		set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
 		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
@@ -3315,9 +3316,10 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	Ok(())
 }
 
-// Restart-with-modified-args scenarios. zombienet-sdk-0.3.13 has no API to restart a node
-// with modified args (`NetworkNode::restart()` reuses the original), so we SIGTERM the
-// collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
+// Restart-with-modified-args scenarios: SIGTERM the collator process and re-spawn
+// `polkadot-omni-node` directly with the new `--blocks-pruning`, capturing its exit code and log.
+// substrate may reject the new setting, so the network runs without zombienet's crash teardown,
+// which would otherwise exit the test process once collator-1 stops answering.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
 
@@ -3483,7 +3485,7 @@ async fn run_pruning_restart_scenario(
 		Some(n) => get_para_node_args_with_pruning(n),
 		None => get_para_node_args(),
 	};
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = parachain_network_config_without_crash_teardown(para_args)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
