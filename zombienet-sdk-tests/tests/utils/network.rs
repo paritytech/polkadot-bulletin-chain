@@ -5,8 +5,50 @@
 
 use super::config::*;
 use anyhow::{anyhow, Context, Result};
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Stdio, time::Duration};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use zombienet_sdk::{LocalFileSystem, Network, NetworkConfig, NetworkConfigBuilder};
+
+pub fn arg_value(args: &[String], name: &str) -> Option<String> {
+	let name_with_equals = format!("{name}=");
+	args.iter().enumerate().find_map(|(index, arg)| {
+		if arg == name {
+			args.get(index + 1).cloned()
+		} else {
+			arg.strip_prefix(&name_with_equals).map(str::to_string)
+		}
+	})
+}
+
+pub async fn omni_node_exit_and_log(
+	binary: &str,
+	args: &[String],
+	timeout: Duration,
+) -> Result<(Option<i32>, String)> {
+	let mut child = tokio::process::Command::new(binary)
+		.args(args)
+		.stdout(Stdio::piped())
+		.stderr(Stdio::piped())
+		.kill_on_drop(true)
+		.spawn()
+		.with_context(|| format!("failed to spawn {binary}"))?;
+	let stdout_text = tokio::spawn(pipe_text(child.stdout.take().context("missing child stdout")?));
+	let stderr_text = tokio::spawn(pipe_text(child.stderr.take().context("missing child stderr")?));
+	let exit_code = match tokio::time::timeout(timeout, child.wait()).await {
+		Ok(exit_status) => exit_status.context("failed to wait for the node process")?.code(),
+		Err(_) => {
+			let _ = child.kill().await;
+			None
+		},
+	};
+	Ok((exit_code, stdout_text.await?? + &stderr_text.await??))
+}
+
+async fn pipe_text(mut pipe: impl AsyncRead + Unpin) -> std::io::Result<String> {
+	let mut bytes = Vec::new();
+	pipe.read_to_end(&mut bytes).await?;
+	Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
 
 pub async fn initialize_network(
 	config: NetworkConfig,
@@ -116,6 +158,20 @@ pub fn verify_parachain_binaries() -> Result<()> {
 pub fn build_parachain_network_config_three_relay_validators(
 	para_node_args: Vec<String>,
 ) -> Result<NetworkConfig> {
+	parachain_network_config(para_node_args, None)
+}
+
+pub fn parachain_network_config_with_retention_period(
+	para_node_args: Vec<String>,
+	genesis_retention_period: u32,
+) -> Result<NetworkConfig> {
+	parachain_network_config(para_node_args, Some(genesis_retention_period))
+}
+
+fn parachain_network_config(
+	para_node_args: Vec<String>,
+	genesis_retention_period: Option<u32>,
+) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
 	let para_chain_spec = get_parachain_chain_spec();
@@ -145,16 +201,19 @@ pub fn build_parachain_network_config_three_relay_validators(
 				.with_node(|node| node.with_name("charlie").validator(true).with_args(relay_args3))
 		})
 		.with_parachain(|parachain| {
-			parachain
-				.with_id(para_id)
-				.with_chain_spec_path(para_chain_spec.as_str())
-				.cumulus_based(true)
-				.with_collator(|c| {
-					c.with_name("collator-1")
-						.validator(true)
-						.with_command(para_binary.as_str())
-						.with_args(para_args)
-				})
+			let parachain =
+				parachain.with_id(para_id).with_chain_spec_path(para_chain_spec.as_str());
+			let parachain = match genesis_retention_period {
+				Some(retention_period) => parachain
+					.with_genesis_overrides(retention_period_genesis_overrides(retention_period)),
+				None => parachain,
+			};
+			parachain.cumulus_based(true).with_collator(|c| {
+				c.with_name("collator-1")
+					.validator(true)
+					.with_command(para_binary.as_str())
+					.with_args(para_args)
+			})
 		})
 		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
 			Ok(val) => gs.with_base_dir(val),
@@ -167,9 +226,14 @@ pub fn build_parachain_network_config_three_relay_validators(
 		})
 }
 
+fn retention_period_genesis_overrides(retention_period: u32) -> serde_json::Value {
+	serde_json::json!({ "transactionStorage": { "retentionPeriod": retention_period } })
+}
+
 /// 3 relay validators + 3 collators, all collators using the same `para_node_args`.
 pub fn build_parachain_network_config_three_collators(
 	para_node_args: Vec<String>,
+	genesis_retention_period: u32,
 ) -> Result<NetworkConfig> {
 	let relay_binary = get_relay_binary_path();
 	let para_binary = get_parachain_binary_path();
@@ -199,6 +263,9 @@ pub fn build_parachain_network_config_three_collators(
 			parachain
 				.with_id(para_id)
 				.with_chain_spec_path(para_chain_spec.as_str())
+				.with_genesis_overrides(retention_period_genesis_overrides(
+					genesis_retention_period,
+				))
 				.cumulus_based(true)
 				.with_collator(|c| {
 					c.with_name("collator-1")

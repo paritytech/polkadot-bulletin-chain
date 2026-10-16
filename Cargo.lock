@@ -2028,6 +2028,7 @@ dependencies = [
  "serde_json",
  "subxt 0.43.1",
  "subxt-signer 0.43.0",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.19",
