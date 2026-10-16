@@ -213,6 +213,11 @@ async fn submit_and_wait_finalized(
 	anyhow::bail!("setup transaction failed {SETUP_RESUBMIT_LIMIT} times")
 }
 
+/// Funds `who` from Alice so it can pay fees. `One`/`Two` are not endowed at genesis.
+async fn fund_from_alice(client: &OnlineClient<SubstrateConfig>, who: [u8; 32]) -> Result<()> {
+	submit_and_wait_finalized(client, &dev::alice(), &transfer_payload(who)).await
+}
+
 async fn authorize_from_eve(
 	client: &OnlineClient<SubstrateConfig>,
 	who: [u8; 32],
@@ -439,6 +444,7 @@ async fn parachain_priority_levels_order_within_block_test() -> Result<()> {
 			.await?;
 	}
 	authorize_from_eve(&client, in_budget.public_key().0, LARGE_ALLOWANCE_BYTES).await?;
+	fund_from_alice(&client, payer.public_key().0).await?;
 
 	let renew_data = generate_test_data(STORE_BYTES, b"PRIORITY_RENEW_SOURCE_");
 	submit_and_wait_finalized(&client, &renew_owner, &store_payload(renew_data.clone())).await?;
@@ -457,7 +463,11 @@ async fn parachain_priority_levels_order_within_block_test() -> Result<()> {
 	let renew = signed_bytes(
 		&client,
 		&renew_owner,
-		&tx("DataRenewal", "force_renew", vec![value!(ContentHash(Value::from_bytes(renew_hash)))]),
+		&tx(
+			"DataRenewal",
+			"force_renew",
+			vec![Value::unnamed_variant("ContentHash", [Value::from_bytes(renew_hash)])],
+		),
 		account_nonce(&client, &renew_owner).await?,
 		0,
 	)?;
