@@ -287,6 +287,18 @@ async fn submit_backlog(
 	submitter.submit_all(batch).await
 }
 
+/// Fisher-Yates with an xorshift generator, so no extra dependency is needed.
+fn shuffle<T>(items: &mut [T], seed: u64) {
+	let mut state = seed.max(1);
+	for index in (1..items.len()).rev() {
+		state ^= state << 13;
+		state ^= state >> 7;
+		state ^= state << 17;
+		let other = (state % (index as u64 + 1)) as usize;
+		items.swap(index, other);
+	}
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Category {
 	Store,
@@ -500,10 +512,30 @@ async fn parachain_priority_levels_order_within_block_test() -> Result<()> {
 	let backlog_block = best_block_number(&client).await?;
 	wait_for_block_height(collator, backlog_block + 1, BLOCK_WAIT_TIMEOUT_SECS).await?;
 
-	test_log!(TEST, "submitting one transaction per category");
+	// The five transactions come from five different accounts. They are submitted in
+	// parallel in a per-run random order, so the test never controls arrival order and
+	// only the priority rules can produce the asserted layout. The seed is logged so a
+	// failing order can be replayed.
+	let mut injected = vec![
+		("transfer", transfer),
+		("in_budget_store", in_budget_store),
+		("renew", renew),
+		("preimage_store", preimage_store),
+		("authorize", authorize),
+	];
+	let seed = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map(|elapsed| elapsed.as_nanos() as u64)
+		.unwrap_or(1);
+	shuffle(&mut injected, seed);
+	let order: Vec<&str> = injected.iter().map(|(label, _)| *label).collect();
+	test_log!(
+		TEST,
+		"submitting one transaction per category in parallel, seed {seed}, order {order:?}"
+	);
 	let injected_block = best_block_number(&client).await?;
 	submitter
-		.submit_all(vec![transfer, in_budget_store, renew, preimage_store, authorize])
+		.submit_all(injected.into_iter().map(|(_, bytes)| bytes).collect())
 		.await?;
 	let last_candidate = injected_block + 4;
 	wait_for_finalized_height(collator, last_candidate, FINALITY_TIMEOUT_SECS).await?;
