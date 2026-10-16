@@ -368,6 +368,13 @@ async fn parachain_auto_renew_test() -> Result<()> {
 /// `--blocks-pruning < RetentionPeriod` evicts the proof target's col11 entry before the
 /// proof block; `apply_block_inherents` is not emitted and `on_finalize`'s `assert!(proof_ok)`
 /// halts the chain at `S + RetentionPeriod - 1`.
+///
+/// The node compares `--blocks-pruning` with the retention period only when it creates
+/// `ChainSync`, at startup. The network therefore starts with a genesis retention period the
+/// window covers and raises the period on-chain afterwards. The node never re-checks that
+/// increase, so a pruned node that was valid at startup keeps running with a window below the
+/// retention period, and this runtime halt is the only guard left. That is the scenario under
+/// test.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	const TEST: &str = "para_check_proof_pruning";
@@ -446,6 +453,10 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 /// Auto-renewal does not rescue the chain from the `check_proof` halt: the proof block
 /// (`S + RP`) precedes the renewal block (`S + RP + 1`) by one block, so the chain panics
 /// before auto-renewal fires.
+///
+/// Like [`parachain_check_proof_fails_under_pruning_test`], the network starts with a genesis
+/// retention period the pruning window covers and raises the period on-chain afterwards, which
+/// the node's startup check never re-examines.
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_auto_renew_under_pruning_chain_halts_test() -> Result<()> {
 	const TEST: &str = "para_auto_renew_pruning_halt";
