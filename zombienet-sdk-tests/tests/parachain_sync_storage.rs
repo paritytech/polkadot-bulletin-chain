@@ -28,16 +28,16 @@
 //! 3. `parachain_warp_sync_test` - Warp sync without block pruning
 //!    - Starts 3 relay validators, 1 collator, stores transaction data below the warp target
 //!    - Adds an archive sync node with --sync=warp
-//!    - Verifies the node resolves `GapSyncBodyPolicy::All`, gap sync restores the indexed
-//!      transactions from the block bodies it downloads, and bitswap serves every item
+//!    - Verifies gap sync downloads the body of every store block (`GapSyncBodyPolicy::All`),
+//!      restores the indexed transactions from them, and bitswap serves every item
 //!
-//! 4. `parachain_warp_sync_with_pruning_test` - Warp sync on a pruned sync node
+//! 4. `parachain_warp_sync_with_pruning_test` - Warp sync on a sync node with a pruning window
 //!    - Starts 3 relay validators, 1 archive collator, sets the retention period to 24
 //!    - Stores items far below the later warp target, then one item just below it
-//!    - Adds a sync node with --sync=warp and --blocks-pruning=24
-//!    - Verifies the node resolves `GapSyncBodyPolicy::BodiesWithinWindow(12)`, bitswap serves the
-//!      item inside the gap body window and returns DONT_HAVE for the items below it, which the
-//!      collator still serves
+//!    - Adds a sync node with --sync=warp and --blocks-pruning=200
+//!    - Verifies the gap body window (`GapSyncBodyPolicy::BodiesWithinWindow(12)`): the recent
+//!      store block arrives with its body and bitswap serves its item, the old store blocks arrive
+//!      header-only and bitswap returns DONT_HAVE for them, while the collator still serves them
 //!
 //! 5. `parachain_full_sync_test` - Full sync without block pruning
 //!    - Starts 1 collator, stores transaction data
@@ -135,17 +135,19 @@ use crate::{
 	test_log,
 	utils::{
 		arg_value, authorize_and_store_data, authorize_and_store_data_finalized,
-		authorize_and_store_items, build_parachain_network_config_three_relay_validators,
-		content_hash_and_cid, expect_all_items_bitswap_dont_have, expect_log_line,
-		generate_test_data, get_alice_nonce, get_db_path, get_para_id, get_parachain_binary_path,
-		get_parachain_chain_id, initialize_network, log_line_at_least_once, omni_node_exit_and_log,
+		authorize_and_store_items, block_availability,
+		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
+		expect_all_items_bitswap_dont_have, expect_log_line, generate_test_data, get_alice_nonce,
+		get_db_path, get_para_id, get_parachain_binary_path, get_parachain_chain_id,
+		initialize_network, log_line_at_least_once, omni_node_exit_and_log,
 		parachain_network_config_with_retention_period, set_retention_period,
 		set_retention_period_finalized, verify_all_items_bitswap, verify_col11, verify_ldb_tool,
 		verify_node_bitswap, verify_parachain_binaries, verify_state_sync_completed,
-		verify_warp_sync_completed, wait_for_block_height, wait_for_finalized_height,
-		wait_for_fullnode, wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, LOG_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
-		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+		verify_warp_sync_completed, wait_for_block_body, wait_for_block_height,
+		wait_for_finalized_height, wait_for_fullnode, wait_for_relay_chain_to_sync,
+		wait_for_session_change_on_node, BlockAvailability, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		LOG_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN,
+		SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{anyhow, Context, Result};
@@ -161,9 +163,6 @@ const RETENTION_PERIOD: u32 = 10;
 /// Three items of different sizes for multi-item verification.
 const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SIZE * 2];
 
-const STORAGE_CHAIN_IMPORT_LOG_CONFIG: &str = "-lstorage-chain-block-import=debug";
-const GAP_SYNC_COMPLETE_LOG: &str = "Block history download is complete";
-const GAP_SYNC_RESTORE_LOG: &str = r"gap-sync block #[0-9]+ .*: [1-9][0-9]* indexed entries";
 const STATE_SYNC_COMPLETE_LOG: &str = "State sync is complete, continuing with block sync.";
 const BELOW_RETENTION_ERROR: &str =
 	"must be at least the runtime's transaction storage retention period";
@@ -476,7 +475,6 @@ async fn parachain_warp_sync_test() -> Result<()> {
 			"--relay-chain-rpc-url".into(),
 			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-			STORAGE_CHAIN_IMPORT_LOG_CONFIG.into(),
 		],
 		is_validator: false,
 		..Default::default()
@@ -496,27 +494,18 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Verify warp sync completed and node is idle
 	verify_warp_sync_completed(sync_node).await?;
 
-	expect_log_line(
-		sync_node,
-		"Resolved gap sync body policy All ",
-		LOG_TIMEOUT_SECS,
-		"archive sync node did not resolve GapSyncBodyPolicy::All",
-	)
-	.await?;
-	expect_log_line(
-		sync_node,
-		GAP_SYNC_COMPLETE_LOG,
-		SYNC_TIMEOUT_SECS,
-		"gap sync did not finish downloading the block history below the warp target",
-	)
-	.await?;
-	expect_log_line(
-		sync_node,
-		GAP_SYNC_RESTORE_LOG,
-		LOG_TIMEOUT_SECS,
-		"gap sync imported no block whose indexed transactions it restored",
-	)
-	.await?;
+	// Gap sync fills the history below the warp target in ascending order; an archive node
+	// downloads every body, so each store block ends up with its extrinsics.
+	let sync_rpc = sync_node.rpc().await?;
+	for item in &stored_items {
+		let extrinsic_count =
+			wait_for_block_body(&sync_rpc, item.block_number, SYNC_TIMEOUT_SECS).await?;
+		tracing::info!(
+			"sync-node has block {} with {} extrinsics",
+			item.block_number,
+			extrinsic_count
+		);
+	}
 	verify_all_items_bitswap(sync_node, &stored_items, 30, "Sync-node").await?;
 
 	test_log!(TEST, "=== Parachain Warp Sync Test PASSED ===");
@@ -525,6 +514,10 @@ async fn parachain_warp_sync_test() -> Result<()> {
 }
 
 const WINDOW_TEST_RETENTION_PERIOD: u32 = 24;
+/// Bounded, so the sync node resolves a body window, but longer than the chain this test
+/// reaches, so the node prunes nothing: an old store block without a body was downloaded
+/// header-only, not pruned afterwards.
+const WINDOW_TEST_BLOCKS_PRUNING: u32 = 200;
 const WINDOW_TEST_MAX_BLOCKS_PER_REQUEST: u64 = 4;
 const WINDOW_TEST_MARGIN_BLOCKS: u64 = 3;
 
@@ -537,7 +530,7 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	test_log!(TEST, "=== Parachain Warp Sync Test (pruned sync node) ===");
 	tracing::info!(
 		"Sync node will use --blocks-pruning={} against retention-period={}, gap body window {}",
-		WINDOW_TEST_RETENTION_PERIOD,
+		WINDOW_TEST_BLOCKS_PRUNING,
 		WINDOW_TEST_RETENTION_PERIOD,
 		body_window
 	);
@@ -604,14 +597,13 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		args: vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
-			format!("--blocks-pruning={WINDOW_TEST_RETENTION_PERIOD}").as_str().into(),
+			format!("--blocks-pruning={WINDOW_TEST_BLOCKS_PRUNING}").as_str().into(),
 			format!("--max-blocks-per-request={WINDOW_TEST_MAX_BLOCKS_PER_REQUEST}")
 				.as_str()
 				.into(),
 			"--relay-chain-rpc-url".into(),
 			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
-			STORAGE_CHAIN_IMPORT_LOG_CONFIG.into(),
 		],
 		is_validator: false,
 		..Default::default()
@@ -629,22 +621,19 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		.context("Sync node failed to sync via warp sync")?;
 	verify_warp_sync_completed(sync_node).await?;
 
-	expect_log_line(
-		sync_node,
-		&format!(r"Resolved gap sync body policy BodiesWithinWindow\({body_window}\)"),
-		LOG_TIMEOUT_SECS,
-		&format!(
-			"pruned sync node did not resolve GapSyncBodyPolicy::BodiesWithinWindow({body_window})"
-		),
-	)
-	.await?;
-	expect_log_line(
-		sync_node,
-		GAP_SYNC_COMPLETE_LOG,
-		SYNC_TIMEOUT_SECS,
-		"gap sync did not finish downloading the block history below the warp target",
-	)
-	.await?;
+	// Gap sync fills the history in ascending order, so once the recent store block has its
+	// body, the old store blocks below the body window have been imported header-only.
+	let sync_rpc = sync_node.rpc().await?;
+	wait_for_block_body(&sync_rpc, recent_items[0].block_number, SYNC_TIMEOUT_SECS).await?;
+	for item in &old_items {
+		assert_eq!(
+			block_availability(&sync_rpc, item.block_number).await?,
+			BlockAvailability::HeaderOnly,
+			"store block {} lies below the gap body window, so the sync node must have imported \
+			 it without a body",
+			item.block_number,
+		);
+	}
 
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 	verify_all_items_bitswap(sync_node, &recent_items, 30, "Sync-node").await?;
