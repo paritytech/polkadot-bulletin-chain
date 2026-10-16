@@ -123,16 +123,11 @@ async fn main() -> Result<()> {
 
 	// Plan the upload offline: chunk boundaries, per-chunk CIDs, the DAG-PB
 	// manifest, and the authorization cost.
-	let chunker_config = ChunkerConfig {
-		chunk_size: 1024 * 1024, // 1 MiB chunks
-		max_parallel: 4,
-		create_manifest: true, // Create DAG-PB manifest
-	};
 	let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(large_data));
 	let estimate = client
 		.estimate_upload(
 			UploadInput::Source(source.clone()),
-			UploadEstimateOptions { chunker: chunker_config, ..Default::default() },
+			UploadEstimateOptions::default(),
 		)
 		.await
 		.map_err(|e| anyhow!("Estimate failed: {:?}", e))?;

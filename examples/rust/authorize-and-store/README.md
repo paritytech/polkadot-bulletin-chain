@@ -97,12 +97,11 @@ INFO   Data size: 42 bytes
 INFO
 --- Step 3: Chunked Storage with DAG-PB Manifest ---
 INFO Large data size: 3145728 bytes (3 MiB)
-INFO Planned 3 chunks + manifest: 4 transactions, ... bytes of authorization
-INFO   item 1/4 in block: 0x...
-INFO   item 2/4 in block: 0x...
-INFO   item 3/4 in block: 0x...
-INFO   item 4/4 in block: 0x...
-INFO ✅ Chunked upload complete: 4 stores (chunks + manifest)
+INFO Planned 2 chunks + manifest: 3 transactions, ... bytes of authorization
+INFO   item 1/3 in block: 0x...
+INFO   item 2/3 in block: 0x...
+INFO   item 3/3 in block: 0x...
+INFO ✅ Chunked upload complete: 3 stores (chunks + manifest)
 INFO   Manifest root CID: 0170...
 INFO   Use this manifest CID to retrieve the complete file via IPFS/Bitswap
 INFO
@@ -140,11 +139,9 @@ For large files, plan the upload with `estimate_upload` and submit it through th
 ```rust
 // Plan: chunk CIDs, DAG-PB manifest, and the authorization the upload needs
 let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(large_data));
-let options = UploadEstimateOptions {
-    chunker: ChunkerConfig { chunk_size: 1024 * 1024, ..Default::default() },
-    ..Default::default()
-};
-let estimate = client.estimate_upload(UploadInput::Source(source.clone()), options).await?;
+let estimate = client
+    .estimate_upload(UploadInput::Source(source.clone()), UploadEstimateOptions::default())
+    .await?;
 
 // Submit: the pipeline owns nonce assignment, retries, and reorg recovery
 let config = UploadConfig { complete_on: WaitFor::InBlock, ..Default::default() };

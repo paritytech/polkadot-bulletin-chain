@@ -147,6 +147,14 @@ describe("planStream", () => {
     expect(plan.manifestData).toBeUndefined()
   })
 
+  it("defaults to 2 MiB chunks, the Bitswap block-size limit", async () => {
+    const plan = await new BulletinPreparer().planStream(
+      blobFromBytes(makeData(2 * MiB + 1)),
+    )
+    expect(plan.chunkSizes).toEqual([2 * MiB, 1])
+    expect(new FixedSizeChunker().chunkSize).toBe(2 * MiB)
+  })
+
   it("throws on an empty source", async () => {
     const preparer = new BulletinPreparer()
     await expect(

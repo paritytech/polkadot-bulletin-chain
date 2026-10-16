@@ -202,7 +202,7 @@ describe("BulletinClient Integration Tests", {
         total: number
       }> = []
 
-      // Default 1 MiB chunk size → 5 chunks + 1 manifest.
+      // Default 2 MiB chunk size → 3 chunks + 1 manifest.
       const { cids } = await (await submitBlob(client, data))
         .withCallback((ev) =>
           events.push({ type: ev.type, index: ev.index, total: ev.total }),
@@ -211,12 +211,12 @@ describe("BulletinClient Integration Tests", {
 
       // Root CID (the retrieval id) is the last unit — the manifest.
       expect(cids[cids.length - 1]).toBeDefined()
-      // 5 chunks + 1 manifest = 6 items
+      // 3 chunks + 1 manifest = 4 items
       const finalized = events.filter(
         (e) => e.type === UploadStatus.ItemFinalized,
       )
-      expect(finalized).toHaveLength(6)
-      expect(finalized[0]?.total).toBe(6)
+      expect(finalized).toHaveLength(4)
+      expect(finalized[0]?.total).toBe(4)
     })
 
     it("fires events in input order (Started → InBlock → Finalized per item)", {
@@ -242,14 +242,14 @@ describe("BulletinClient Integration Tests", {
         })
         .send()
 
-      // 3 chunks + 1 manifest = 4 items
-      expect(lastSeenByIndex.size).toBe(4)
+      // 2 chunks + 1 manifest = 3 items
+      expect(lastSeenByIndex.size).toBe(3)
     })
 
     it("surfaces per-item CIDs through ItemFinalized events", {
       timeout: CHUNKED_TEST_TIMEOUT,
     }, async () => {
-      const data = makeChunkedTestData(2 * 1024 * 1024) // 2 MiB → 2 chunks
+      const data = makeChunkedTestData(4 * 1024 * 1024) // 4 MiB → 2 chunks
       const finalizedCids: string[] = []
 
       const { cids } = await (await submitBlob(client, data))

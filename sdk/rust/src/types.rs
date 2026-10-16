@@ -158,7 +158,7 @@ impl Error {
 /// Configuration for chunking large data.
 #[derive(Debug, Clone, Encode, Decode, TypeInfo)]
 pub struct ChunkerConfig {
-	/// Size of each chunk in bytes (default: 1 MiB).
+	/// Size of each chunk in bytes (default: 2 MiB).
 	pub chunk_size: u32,
 	/// Maximum number of parallel uploads (default: 8).
 	pub max_parallel: u32,
@@ -169,7 +169,7 @@ pub struct ChunkerConfig {
 impl Default for ChunkerConfig {
 	fn default() -> Self {
 		Self {
-			chunk_size: 1024 * 1024, // 1 MiB
+			chunk_size: crate::chunker::DEFAULT_CHUNK_SIZE as u32,
 			max_parallel: 8,
 			create_manifest: true,
 		}

@@ -8,7 +8,7 @@
 //!
 //! ## Storage Operations (Supported)
 //!
-//! - **Automatic Chunking**: Split large files into optimal chunks (default 1 MiB)
+//! - **Automatic Chunking**: Split large files into chunks (default 2 MiB)
 //! - **DAG-PB Manifests**: Manifest generation for chunked data
 //! - **Authorization Management**: Helper functions for account and preimage authorization
 //! - **Progress Tracking**: Callback-based progress events for uploads

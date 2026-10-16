@@ -410,7 +410,7 @@ async fn pipeline_exactly_once_accounting_parallel() {
 }
 
 /// Phase 3 streaming submission: `estimate_upload` plans an 8 MiB file in
-/// `O(chunk)` memory (8 × 1 MiB chunks + a DAG-PB manifest), then `submit`
+/// `O(chunk)` memory (4 chunks of the default 2 MiB + a DAG-PB manifest), then `submit`
 /// stores it fetching each chunk's bytes lazily via the seekable source's
 /// `read(offset, size)`. Asserts the manifest root + every chunk CID come back,
 /// and that the on-chain `Authorizations.extent` advances by exactly the
@@ -418,9 +418,9 @@ async fn pipeline_exactly_once_accounting_parallel() {
 #[tokio::test]
 #[ignore]
 async fn submit_streams_a_file_lazily() {
-	const CHUNK: usize = 1024 * 1024; // 1 MiB
-	const CHUNKS: usize = 8;
-	const FILE: usize = CHUNK * CHUNKS; // 8 MiB
+	const CHUNK: usize = 2 * 1024 * 1024;
+	const CHUNKS: usize = 4;
+	const FILE: usize = CHUNK * CHUNKS;
 
 	let client = TransactionClient::new(&ws()).await.expect("connect");
 	let alice = dev::alice();
@@ -449,7 +449,7 @@ async fn submit_streams_a_file_lazily() {
 		data[off + 16..off + 24].copy_from_slice(&(c as u64).to_le_bytes());
 	}
 
-	let cfg = ChunkerConfig { chunk_size: CHUNK as u32, max_parallel: 8, create_manifest: true };
+	let cfg = ChunkerConfig::default();
 
 	// Plan + size authorization without buffering.
 	let src: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(data.clone()));
@@ -468,9 +468,9 @@ async fn submit_streams_a_file_lazily() {
 		est.plan.chunk_cids.len(),
 		est.plan.root_cid.is_some(),
 	);
-	assert_eq!(est.plan.chunk_cids.len(), CHUNKS, "8 chunk CIDs planned");
+	assert_eq!(est.plan.chunk_cids.len(), CHUNKS, "default 2 MiB chunks: 4 chunk CIDs planned");
 	assert!(est.plan.root_cid.is_some(), "manifest planned");
-	assert_eq!(est.base.transactions, (CHUNKS + 1) as u32, "8 chunks + manifest, none stored yet");
+	assert_eq!(est.base.transactions, (CHUNKS + 1) as u32, "4 chunks + manifest, none stored yet");
 	let expected_tx = est.base.transactions;
 	let expected_bytes = est.base.bytes;
 
@@ -492,7 +492,7 @@ async fn submit_streams_a_file_lazily() {
 		.await
 		.expect("submit");
 
-	assert_eq!(result.cids.len(), CHUNKS + 1, "8 chunk CIDs + manifest root");
+	assert_eq!(result.cids.len(), CHUNKS + 1, "4 chunk CIDs + manifest root");
 	let mut sorted = result.cids.clone();
 	sorted.sort();
 	sorted.dedup();

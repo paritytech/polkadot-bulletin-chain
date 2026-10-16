@@ -74,7 +74,7 @@ impl AuthorizationManager {
 
 	/// Estimate authorization needed for storing data of given size.
 	///
-	/// This calculates based on default chunk size (1 MiB).
+	/// This calculates based on default chunk size (2 MiB).
 	pub fn estimate_authorization(&self, data_size: u64, create_manifest: bool) -> (u32, u64) {
 		use crate::chunker::DEFAULT_CHUNK_SIZE;
 
@@ -108,14 +108,12 @@ mod tests {
 	fn test_estimate_authorization() {
 		let manager = AuthorizationManager::new();
 
-		// 10 MB data = 10 chunks (1 MB each)
 		let (txs, bytes) = manager.estimate_authorization(10_000_000, false);
-		assert_eq!(txs, 10);
+		assert_eq!(txs, 5, "10 MB is 5 chunks of 2 MiB");
 
-		// With manifest
 		let (txs_with_manifest, bytes_with_manifest) =
 			manager.estimate_authorization(10_000_000, true);
-		assert_eq!(txs_with_manifest, 11);
+		assert_eq!(txs_with_manifest, 6);
 		assert!(bytes_with_manifest > bytes);
 	}
 

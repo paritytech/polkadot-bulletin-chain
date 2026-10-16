@@ -6,10 +6,8 @@
 use crate::types::{Chunk, ChunkerConfig, Error, Result};
 use alloc::vec::Vec;
 
-/// Maximum chunk size allowed (2 MiB).
-///
-/// This limit ensures IPFS Bitswap compatibility. The chain's MaxTransactionSize
-/// is 8 MiB, but chunks larger than 2 MiB are not well-supported by Bitswap peers.
+/// Maximum chunk size allowed (2 MiB): the chain's `MaxTransactionSize` and the Bitswap
+/// block-size limit for IPFS compatibility.
 pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 
 /// Maximum file size the SDK will chunk in a single operation (64 MiB).
@@ -19,11 +17,8 @@ pub const MAX_CHUNK_SIZE: usize = 2 * 1024 * 1024;
 /// independently, managing the relationship between segments itself.
 pub const MAX_FILE_SIZE: usize = 64 * 1024 * 1024;
 
-/// Default chunk size (1 MiB).
-///
-/// This provides a good balance between transaction overhead and throughput
-/// for most use cases. Users can configure up to MAX_CHUNK_SIZE (2 MiB).
-pub const DEFAULT_CHUNK_SIZE: usize = 1024 * 1024;
+/// Default chunk size: [`MAX_CHUNK_SIZE`] (2 MiB).
+pub const DEFAULT_CHUNK_SIZE: usize = MAX_CHUNK_SIZE;
 
 /// Trait for chunking strategies.
 pub trait Chunker {
@@ -236,9 +231,9 @@ mod tests {
 
 		assert_eq!(chunker.num_chunks(0), 0);
 		assert_eq!(chunker.num_chunks(1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
-		assert_eq!(chunker.num_chunks(1024 * 1024 * 2), 2);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024), 1);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024 + 1), 2);
+		assert_eq!(chunker.num_chunks(4 * 1024 * 1024), 2);
 	}
 
 	#[test]
@@ -464,9 +459,12 @@ mod tests {
 	fn test_default_config_values() {
 		let chunker = FixedSizeChunker::default_config();
 
-		// Verify default chunk size is 1 MiB
-		assert_eq!(chunker.num_chunks(1024 * 1024), 1);
-		assert_eq!(chunker.num_chunks(1024 * 1024 + 1), 2);
+		assert_eq!(
+			chunker.num_chunks(2 * 1024 * 1024),
+			1,
+			"2 MiB, the Bitswap block-size limit and the chain's MaxTransactionSize, is one chunk"
+		);
+		assert_eq!(chunker.num_chunks(2 * 1024 * 1024 + 1), 2);
 	}
 
 	#[test]

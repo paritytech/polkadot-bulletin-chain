@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 /// Configuration for the Bulletin client.
 #[derive(Debug, Clone)]
 pub struct ClientConfig {
-	/// Default chunk size for large files (default: 1 MiB).
+	/// Default chunk size for large files (default: 2 MiB).
 	pub default_chunk_size: u32,
 	/// Maximum parallel uploads (default: 8).
 	pub max_parallel: u32,
@@ -32,7 +32,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
 	fn default() -> Self {
 		Self {
-			default_chunk_size: 1024 * 1024, // 1 MiB
+			default_chunk_size: crate::chunker::DEFAULT_CHUNK_SIZE as u32,
 			max_parallel: 8,
 			create_manifest: true,
 		}
@@ -197,7 +197,7 @@ mod tests {
 	#[test]
 	fn test_client_new() {
 		let client = BulletinClient::new();
-		assert_eq!(client.config.default_chunk_size, 1024 * 1024);
+		assert_eq!(client.config.default_chunk_size, 2 * 1024 * 1024);
 		assert_eq!(client.config.max_parallel, 8);
 		assert!(client.config.create_manifest);
 	}
@@ -259,8 +259,7 @@ mod tests {
 		let client = BulletinClient::new();
 		let (txs, bytes) = client.estimate_authorization(10_000_000);
 
-		// 10 MB = 10 chunks + 1 manifest
-		assert_eq!(txs, 11);
+		assert_eq!(txs, 6, "5 chunks of 2 MiB and a manifest");
 		assert!(bytes > 10_000_000);
 	}
 

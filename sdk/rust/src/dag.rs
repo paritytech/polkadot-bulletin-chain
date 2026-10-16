@@ -9,7 +9,7 @@
 /// Maximum number of chunks supported in a single DAG manifest.
 ///
 /// This limit prevents excessive memory allocation when building manifests.
-/// With 1 MiB chunks, this allows files up to ~1 TB. For larger files,
+/// With the default 2 MiB chunks, this allows files up to ~2 TB. For larger files,
 /// consider using a hierarchical DAG structure or streaming approach.
 pub const MAX_MANIFEST_CHUNKS: usize = 1_000_000;
 

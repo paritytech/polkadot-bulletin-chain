@@ -39,7 +39,7 @@ export enum HashAlgorithm {
  * Configuration for chunking large data
  */
 export interface ChunkerConfig {
-  /** Size of each chunk in bytes (default: 1 MiB) */
+  /** Size of each chunk in bytes (default: 2 MiB) */
   chunkSize: number
   /** Whether to create a DAG-PB manifest (default: true) */
   createManifest: boolean
@@ -48,11 +48,11 @@ export interface ChunkerConfig {
 /**
  * Default chunker configuration
  *
- * Uses 1 MiB chunk size by default (safe and efficient for most use cases).
- * Maximum allowed is 2 MiB (MAX_CHUNK_SIZE, Bitswap limit for IPFS compatibility).
+ * Uses 2 MiB chunks (MAX_CHUNK_SIZE): the chain's `MaxTransactionSize` and the
+ * Bitswap block-size limit for IPFS compatibility.
  */
 export const DEFAULT_CHUNKER_CONFIG: ChunkerConfig = {
-  chunkSize: 1024 * 1024, // 1 MiB (default)
+  chunkSize: 2 * 1024 * 1024,
   createManifest: true,
 }
 
@@ -508,12 +508,12 @@ export const DEFAULT_BLOCK_LIMITS: BlockLimits = {
  * Client configuration
  */
 export interface ClientConfig {
-  /** Default chunk size for large files (default: 1 MiB) */
+  /** Default chunk size for large files (default: 2 MiB) */
   defaultChunkSize?: number
   /** Whether to create manifests for chunked uploads (default: true) */
   createManifest?: boolean
-  /** Threshold for automatic chunking (default: 2 MiB).
-   * Data larger than this will be automatically chunked by `store()`. */
+  /** Largest data `BulletinPreparer.prepareStore` accepts for one transaction
+   * (default: 2 MiB, the chain's `MaxTransactionSize`). */
   chunkingThreshold?: number
   /** Defensive timeout in milliseconds per transaction (default: 420_000).
    * PAPI handles reconnects and mortality, so this should rarely fire.
@@ -578,7 +578,7 @@ export type ResolvedClientConfig = Required<
   Pick<ClientConfig, "providers" | "authorizerSigner">
 
 export const DEFAULT_CLIENT_CONFIG: ResolvedClientConfig = {
-  defaultChunkSize: 1024 * 1024, // 1 MiB
+  defaultChunkSize: DEFAULT_CHUNKER_CONFIG.chunkSize,
   createManifest: true,
   chunkingThreshold: 2 * 1024 * 1024, // 2 MiB
   txTimeout: 420_000, // 7 minutes (above PAPI's 64-block mortality window)
