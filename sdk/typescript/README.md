@@ -73,7 +73,7 @@ The SDK book contains:
 ## Features
 
 - CID calculation (Raw, DAG-PB, DAG-CBOR codecs)
-- Automatic chunking (default 1 MiB, configurable)
+- Automatic chunking (default 2 MiB, configurable)
 - DAG-PB manifest generation (IPFS-compatible)
 - Authorization management (`authorizeAccount`, `authorizePreimage`)
 - Data renewal (`renew`)

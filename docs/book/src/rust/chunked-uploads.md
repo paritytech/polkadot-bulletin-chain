@@ -1,6 +1,6 @@
 # Chunked Uploads
 
-`estimate_upload` → `submit` uploads a large file in chunks (default 1 MiB). When the file spans more than one chunk, the SDK also stores a DAG-PB manifest that links the chunks; the manifest CID is the file's retrieval CID.
+`estimate_upload` → `submit` splits a file into chunks of 2 MiB by default. 2 MiB is also the maximum: the chain's per-transaction limit and the Bitswap block-size limit for IPFS compatibility. A file above 2 MiB spans more than one chunk, so the SDK also stores a DAG-PB manifest that links the chunks; the manifest CID is the file's retrieval CID.
 
 > **Complete Working Example**: See [`examples/rust/authorize-and-store`](https://github.com/paritytech/polkadot-bulletin-chain/tree/main/examples/rust/authorize-and-store) for a complete runnable example demonstrating chunked storage with DAG-PB manifests.
 
@@ -22,10 +22,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let source: Arc<dyn SeekableSource> = Arc::new(blob_from_bytes(large_data));
 
     // Plan: chunk CIDs, DAG-PB manifest, and the authorization the upload needs
-    let options = UploadEstimateOptions {
-        chunker: ChunkerConfig { chunk_size: 1024 * 1024, ..Default::default() },
-        ..Default::default()
-    };
+    let options = UploadEstimateOptions::default();
     let estimate = client.estimate_upload(UploadInput::Source(source.clone()), options).await?;
     info!("{} transactions, {} bytes", estimate.base.transactions, estimate.base.bytes);
 
@@ -56,14 +53,14 @@ By default, `submit` stores every chunk again even if the same content is alread
 
 ```rust
 let options = UploadEstimateOptions {
-    chunker: ChunkerConfig { chunk_size: 2 * 1024 * 1024, ..Default::default() },
+    chunker: ChunkerConfig { chunk_size: 1024 * 1024, ..Default::default() },
     ..Default::default()
 };
 ```
 
 **Guidelines:**
-- Default: 1 MiB
-- Maximum: 2 MiB (2,097,152 bytes), the chain's maximum transaction size. `estimate_upload` only rejects a chunk size of 0, so keep the value within this limit yourself.
+- Default: 2 MiB, which is also the maximum
+- Maximum: 2 MiB (2,097,152 bytes), the chain's maximum transaction size and the Bitswap block-size limit for IPFS compatibility. `estimate_upload` only rejects a chunk size of 0, so keep the value within this limit yourself.
 - `estimate_upload` and `submit` have no file size limit. `BulletinClient::prepare_store_chunked` accepts up to 64 MiB.
 
 ### Manifest Creation
@@ -192,7 +189,7 @@ if let Some(manifest_bytes) = manifest_data {
 ## Best Practices
 
 1. **Estimate and check authorization** before starting large uploads
-2. **Choose an appropriate chunk size**: 1 MiB is a good default; never exceed 2 MiB
+2. **Keep the default chunk size** of 2 MiB unless you need smaller chunks; never exceed 2 MiB
 3. **Keep manifest creation enabled** for files that need to be retrieved as a whole via IPFS
 4. **Track progress** with `UploadConfig.on_event` to show users what's happening
 5. **Handle partial failures**: uploads are not atomic. After `UploadIncomplete`, the chunks that were stored remain on chain; re-run with `skip_existing: true` to upload only the missing ones
@@ -201,5 +198,5 @@ if let Some(manifest_bytes) = manifest_data {
 ## Next Steps
 
 - [Authorization](./authorization.md) - Manage storage authorization
-- [Basic Storage](./basic-storage.md) - For small data
+- [Basic Storage](./basic-storage.md) - For data up to 2 MiB
 - [Error Handling](./error-handling.md) - Error codes, retry logic, recovery hints

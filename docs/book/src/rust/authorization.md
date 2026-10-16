@@ -124,7 +124,7 @@ tracing::info!(
 );
 ```
 
-`BulletinClient::estimate_authorization(size)` is an offline approximation: it assumes 1 MiB chunks and estimates the manifest as 10 bytes per chunk plus 1000 bytes.
+`BulletinClient::estimate_authorization(size)` is an offline approximation: it assumes 2 MiB chunks and estimates the manifest as 10 bytes per chunk plus 1000 bytes.
 
 ## Automatic Pre-Store Check
 

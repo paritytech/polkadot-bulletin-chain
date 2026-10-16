@@ -167,6 +167,6 @@ This is useful when:
 
 ## Next Steps
 
-- [Chunked Uploads](./chunked-uploads.md) - For large files
+- [Chunked Uploads](./chunked-uploads.md) - For files above 2 MiB
 - [Authorization](./authorization.md) - Managing storage authorization
 - [Error Handling](./error-handling.md) - Error codes, retry logic, recovery hints

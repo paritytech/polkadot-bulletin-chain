@@ -4,7 +4,7 @@ The SDK supports two primary modes of operation.
 
 ## Simple Storage (Direct)
 
-For small data (up to one chunk, 1 MiB by default; the chain accepts up to 2 MiB per transaction), the data is stored directly in a single transaction.
+For small data (up to 2 MiB, the chain's per-transaction limit), the data is stored directly in a single transaction.
 
 - **Pros**: Simple, atomic (all or nothing).
 - **Cons**: Limited by block size and transaction size limits.
@@ -14,9 +14,9 @@ The SDK calculates the CID for you (Rust offline API: `BulletinClient::prepare_s
 
 ## Chunked Storage (DAG-PB)
 
-For larger files, the data is split into a **Merkle DAG** (Directed Acyclic Graph).
+For larger files (above 2 MiB), the data is split into a **Merkle DAG** (Directed Acyclic Graph).
 
-1.  **Chunking**: The file is split into 1 MiB chunks.
+1.  **Chunking**: The file is split into 2 MiB chunks (the default and the maximum).
 2.  **Upload**: Each chunk is uploaded as a separate transaction.
 3.  **Manifest**: A "Manifest" node is created. This is a small Protobuf message that lists the links (CIDs) to all the chunks.
 4.  **Finalize**: The Manifest is uploaded last. Its CID represents the *entire file*.

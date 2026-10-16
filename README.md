@@ -129,7 +129,7 @@ Multi-language client SDKs for submitting data, managing authorizations, and gen
 
 `no_std` compatible core with optional `std` features for direct transaction submission via subxt.
 
-- Automatic chunking with configurable chunk size (default 1 MiB)
+- Automatic chunking with configurable chunk size (default 2 MiB)
 - DAG-PB manifest generation for chunked data
 - `BulletinClient` for offline prepare operations
 - Progress tracking via callbacks

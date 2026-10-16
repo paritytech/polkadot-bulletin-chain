@@ -79,7 +79,7 @@ const estimate = client.estimateAuthorization(fileSize);
 ```
 
 The estimation is offline and approximate:
-- One transaction per chunk: ⌈size / `defaultChunkSize`⌉ (1 MiB by default)
+- One transaction per chunk: ⌈size / `defaultChunkSize`⌉ (2 MiB by default)
 - With `createManifest` (the default), one more transaction and about 50 bytes per chunk plus 1000 bytes for the manifest, even for single-chunk data that `submit` stores without a manifest
 
 For the exact figures of an upload, use `client.estimateUpload(input)` (`transactions`, `bytes`).

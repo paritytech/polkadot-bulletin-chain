@@ -125,7 +125,7 @@ impl BulletinClient {
 
 ```rust
 pub struct ClientConfig {
-    pub default_chunk_size: u32,    // default: 1 MiB
+    pub default_chunk_size: u32,    // default: 2 MiB
     pub max_parallel: u32,          // default: 8
     pub create_manifest: bool,      // default: true
 }
@@ -498,7 +498,7 @@ pub trait Chunker {
 
 ```rust
 pub struct ChunkerConfig {
-    pub chunk_size: u32,          // default: 1 MiB
+    pub chunk_size: u32,          // default: 2 MiB
     pub max_parallel: u32,        // default: 8
     pub create_manifest: bool,    // default: true
 }
@@ -773,4 +773,4 @@ pub type ProgressCallback = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 | `VERSION` (crate root) | `env!("CARGO_PKG_VERSION")` | Crate version string |
 | `DEFAULT_BLOCK_LIMITS` | `BlockLimits { .. }` | Block capacity of bulletin-westend / bulletin-paseo runtimes, used to size upload waves |
 
-`FixedSizeChunker` (and `prepare_store_chunked`) enforce a chunk size between 1 byte and 2 MiB and a total size of at most 64 MiB; these limits are not exported as constants. The default chunk size is 1 MiB.
+`FixedSizeChunker` (and `prepare_store_chunked`) enforce a chunk size between 1 byte and 2 MiB and a total size of at most 64 MiB; these limits are not exported as constants. The default chunk size is 2 MiB.

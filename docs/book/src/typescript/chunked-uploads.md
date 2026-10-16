@@ -1,8 +1,8 @@
 # Chunked Uploads
 
-When you estimate a `BlobSource`, the SDK streams it once, splits it into chunks of up to **2 MiB** (default **1 MiB**, the Bitswap block-size limit for IPFS compatibility), and builds a DAG-PB manifest linking them. `submit()` then stores each chunk plus the manifest, fetching chunk bytes on demand so the whole file never sits in memory at once.
+When you estimate a `BlobSource`, the SDK streams it once, splits it into chunks of **2 MiB** by default (also the maximum: the chain's per-transaction limit and the Bitswap block-size limit for IPFS compatibility), and builds a DAG-PB manifest linking them. `submit()` then stores each chunk plus the manifest, fetching chunk bytes on demand so the whole file never sits in memory at once.
 
-A single chunk needs no manifest — its own CID is the retrieval id.
+Data up to 2 MiB is a single chunk and needs no manifest — its own CID is the retrieval id.
 
 ## Uploading a File
 
@@ -75,19 +75,19 @@ For estimation-only or offline planning you can also wrap a re-openable forward 
 
 ## Chunk Size
 
-The chunk size comes from the client config (`defaultChunkSize`, 1 MiB by default):
+The chunk size comes from the client config (`defaultChunkSize`, 2 MiB by default):
 
 ```typescript
 const client = new BulletinClient({
   providers: () => [getWsProvider(url)],
   uploadSigner: signer,
-  defaultChunkSize: 2 * 1024 * 1024, // 2 MiB (MAX_CHUNK_SIZE)
+  defaultChunkSize: 1024 * 1024, // 1 MiB
 });
 ```
 
 Guidelines:
-- Maximum: 2 MiB (`MAX_CHUNK_SIZE`) — the Bitswap block-size limit.
-- Default: 1 MiB — a good balance of efficiency and compatibility.
+- Maximum: 2 MiB (`MAX_CHUNK_SIZE`) — the chain's per-transaction limit and the Bitswap block-size limit.
+- Default: 2 MiB, the maximum.
 - `MAX_FILE_SIZE` (64 MiB) applies only to `FixedSizeChunker` / `BulletinPreparer.prepareStoreChunked`; `estimateUpload` + `submit` stream sources of any size.
 
 ## Sizing Authorization
@@ -101,8 +101,8 @@ console.log('Need', estimate.transactions, 'txs and', estimate.bytes, 'bytes');
 
 | File Size | Chunk Size | Chunks | Transactions |
 |-----------|------------|--------|--------------|
-| 2 MiB | 1 MiB | 2 | 3 (2 chunks + manifest) |
-| 10 MiB | 1 MiB | 10 | 11 |
+| 2 MiB | 2 MiB | 1 | 1 (no manifest) |
+| 10 MiB | 2 MiB | 5 | 6 |
 | 50 MiB | 2 MiB | 25 | 26 |
 | 64 MiB | 2 MiB | 32 | 33 |
 

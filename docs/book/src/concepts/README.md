@@ -32,8 +32,8 @@ Before storing data, accounts must be **authorized**. This prevents spam and man
 
 Once authorized, submit data to the chain:
 
-- **Small data** (up to the chunk size, 1 MiB by default): Stored directly in a single transaction
-- **Large data**: Split into chunks (1 MiB by default) with a DAG-PB manifest
+- **Small data** (up to 2 MiB): Stored directly in a single transaction
+- **Large data** (above 2 MiB): Split into chunks of up to 2 MiB with a DAG-PB manifest
 - On success, you receive:
   - **CID** (Content Identifier) for retrieval
   - The **block number** and **index** of each stored item, from the SDK's upload events (needed for renewal by position; renewal by content hash needs neither)
@@ -74,8 +74,8 @@ When you store data, the chain records the CID. This proves that *this specific 
 
 | Limit | Value | Notes |
 |-------|-------|-------|
-| Max Transaction Size | ~2 MiB | runtime `MaxTransactionSize` |
-| Recommended Chunk Size | 1 MiB | Optimal for most use cases |
+| Max Transaction Size | 2 MiB | runtime `MaxTransactionSize` |
+| Default Chunk Size | 2 MiB | The maximum: the Bitswap block-size limit for IPFS compatibility |
 | Retention Period | Chain-specific | Storage value `TransactionStorage.RetentionPeriod` (default 201,600 blocks) |
 
 Files larger than the transaction limit must be chunked. The SDKs handle this automatically.

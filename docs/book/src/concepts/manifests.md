@@ -88,7 +88,7 @@ let client = BulletinClient::new();
 let large_file = vec![0u8; 10_000_000]; // 10 MB
 
 let config = ChunkerConfig {
-    chunk_size: 1024 * 1024, // 1 MiB
+    chunk_size: 2 * 1024 * 1024, // 2 MiB
     create_manifest: true,
     ..Default::default()
 };

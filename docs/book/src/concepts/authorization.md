@@ -129,15 +129,15 @@ println!("Need {} transactions and {} bytes", txs, bytes);
 // TypeScript
 import { estimateAuthorization } from "@parity/bulletin-sdk";
 
-const chunkSize = 1024 * 1024; // 1 MiB
+const chunkSize = 2 * 1024 * 1024; // 2 MiB
 const { transactions, bytes } = estimateAuthorization(fileSizeInBytes, chunkSize, true);
 console.log(`Need ${transactions} transactions and ${bytes} bytes`);
 ```
 
-**Example Calculation** (100 MiB file with 1 MiB chunks):
-- Chunks: 100
+**Example Calculation** (100 MiB file with 2 MiB chunks):
+- Chunks: 50
 - Manifest: 1
-- **Total Transactions**: 101
+- **Total Transactions**: 51
 - **Total Bytes**: ~100 MiB + manifest overhead
 
 ## Authorization Expiry

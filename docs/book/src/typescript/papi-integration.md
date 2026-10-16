@@ -146,7 +146,7 @@ const { cid } = await preparer.prepareStore(smallData);
 const client = new BulletinClient({
   providers: () => [getWsProvider(url)],
   uploadSigner: signer,
-  defaultChunkSize: 1024 * 1024,        // 1 MiB (max 2 MiB)
+  defaultChunkSize: 2 * 1024 * 1024,    // 2 MiB (default and max)
   chunkingThreshold: 2 * 1024 * 1024,   // only used by BulletinPreparer.prepareStore
   txTimeout: 420_000,                   // timeout (ms) for single-transaction calls such as authorizeAccount() and renew(); not used by submit()
 });

@@ -86,7 +86,7 @@ Both SDKs provide:
 - ✅ **Store submission** through an exactly-once upload pipeline (estimate, then submit)
 - ✅ **Authorization operations** (authorize account/preimage, refresh, remove expired)
 - ✅ **Renewal** (`renew`, force renew; recurring auto-renew in TypeScript)
-- ✅ **Automatic chunking** with configurable chunk size (default 1 MiB)
+- ✅ **Automatic chunking** with configurable chunk size (default 2 MiB)
 - ✅ **DAG-PB manifests** (IPFS-compatible)
 - ✅ **Progress tracking** via callbacks
 - ✅ **Comprehensive examples** and tests

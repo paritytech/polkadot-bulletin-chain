@@ -59,7 +59,7 @@ use alloc::vec::Vec;
 
 fn prepare_chunks(data: &[u8]) -> Vec<Vec<u8>> {
     let config = ChunkerConfig {
-        chunk_size: 1024 * 1024, // 1 MiB chunks
+        chunk_size: 2 * 1024 * 1024, // 2 MiB chunks
         create_manifest: false,
         ..Default::default()
     };

@@ -61,7 +61,7 @@ interface BulletinClientOptions extends Partial<ClientConfig> {
 
 ```typescript
 interface ClientConfig {
-  defaultChunkSize?: number;          // default 1 MiB (max 2 MiB)
+  defaultChunkSize?: number;          // default 2 MiB (the maximum)
   chunkingThreshold?: number;         // default 2 MiB; only used by BulletinPreparer.prepareStore
   createManifest?: boolean;           // default true
   txTimeout?: number;                 // default 420_000 ms; single-transaction calls only, not submit()
@@ -310,8 +310,8 @@ function validateChunkSize(chunkSize: number): void;
 |----------|-------|
 | `MAX_CHUNK_SIZE` | 2 MiB |
 | `MAX_FILE_SIZE` | 64 MiB |
-| `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 1 MiB, createManifest: true }` |
-| `DEFAULT_CLIENT_CONFIG` | chunk 1 MiB, threshold 2 MiB, `txTimeout` 420_000 ms |
+| `DEFAULT_CHUNKER_CONFIG` | `{ chunkSize: 2 MiB, createManifest: true }` |
+| `DEFAULT_CLIENT_CONFIG` | chunk 2 MiB, threshold 2 MiB, `txTimeout` 420_000 ms |
 | `DEFAULT_STORE_OPTIONS` | `{ cidCodec: Raw, hashingAlgorithm: Blake2b256, waitFor: 'in_block' }` |
 
 The SDK also re-exports `CID` from `multiformats/cid`.
