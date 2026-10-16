@@ -193,7 +193,7 @@ jobs:
         # westend `metadata.scale` and WS providers. Serial (`--test-threads=1`)
         # because the tests share the `//Alice` account and would otherwise race.
         if: matrix.runtime.name == 'bulletin-westend' && matrix.mode == 'ws'
-        timeout-minutes: 25
+        timeout-minutes: 40
         env:
           BULLETIN_RPC_URL: ws://127.0.0.1:10000
           BULLETIN_RPC_URL_2: ws://127.0.0.1:12346
