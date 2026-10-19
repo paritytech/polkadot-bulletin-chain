@@ -32,14 +32,14 @@ export async function buildExtrinsicDecoder(client: PolkadotClient): Promise<Ext
   const ext = unified.extrinsic as {
     address?: number;
     signature?: number;
-    signedExtensions: Record<number, Array<{ type: number }>>;
+    extensionsByVersion: Record<number, Array<{ type: number }>>;
   };
 
   const address = ext.address != null ? (builder.buildDefinition(ext.address) as Codec<unknown>) : null;
   const signature = ext.signature != null ? (builder.buildDefinition(ext.signature) as Codec<unknown>) : null;
 
   const extByVersion: Record<number, Codec<unknown[]>> = {};
-  for (const [v, exts] of Object.entries(ext.signedExtensions)) {
+  for (const [v, exts] of Object.entries(ext.extensionsByVersion)) {
     const codecs = exts.map((e) => builder.buildDefinition(e.type) as Codec<unknown>);
     extByVersion[Number(v)] = Tuple(...codecs) as Codec<unknown[]>;
   }

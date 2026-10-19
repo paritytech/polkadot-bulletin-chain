@@ -24,7 +24,7 @@ import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { AsyncBulletinClient } from '@parity/bulletin-sdk';
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
-import { getPolkadotSigner } from 'polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
 
 // 1. Setup WebSocket connection
@@ -37,7 +37,7 @@ const api = papiClient.getTypedApi(bulletinDescriptor);
 // 3. Create signer
 const derive = sr25519CreateDerive(DEV_MINI_SECRET);
 const aliceKeyPair = derive("//Alice");
-const signer = getPolkadotSigner(
+const signer = getTxCreator(
     aliceKeyPair.publicKey,
     "Sr25519",
     aliceKeyPair.sign,
@@ -174,14 +174,14 @@ For testing, use dev accounts:
 
 ```typescript
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
-import { getPolkadotSigner } from 'polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { DEV_MINI_SECRET } from '@polkadot-labs/hdkd-helpers';
 
 const derive = sr25519CreateDerive(DEV_MINI_SECRET);
 
 // Alice
 const aliceKeyPair = derive("//Alice");
-const aliceSigner = getPolkadotSigner(
+const aliceSigner = getTxCreator(
     aliceKeyPair.publicKey,
     "Sr25519",
     aliceKeyPair.sign,
@@ -189,7 +189,7 @@ const aliceSigner = getPolkadotSigner(
 
 // Bob
 const bobKeyPair = derive("//Bob");
-const bobSigner = getPolkadotSigner(
+const bobSigner = getTxCreator(
     bobKeyPair.publicKey,
     "Sr25519",
     bobKeyPair.sign,
@@ -202,7 +202,7 @@ For production, use a seed phrase or mnemonic:
 
 ```typescript
 import { sr25519CreateDerive } from '@polkadot-labs/hdkd';
-import { getPolkadotSigner } from 'polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { mnemonicToMiniSecret } from '@polkadot-labs/hdkd-helpers';
 
 // sr25519CreateDerive takes a mini-secret, not a raw mnemonic
@@ -212,7 +212,7 @@ const miniSecret = mnemonicToMiniSecret(
 const derive = sr25519CreateDerive(miniSecret);
 
 const keyPair = derive("//0"); // Derive first account
-const signer = getPolkadotSigner(
+const signer = getTxCreator(
     keyPair.publicKey,
     "Sr25519",
     keyPair.sign,
@@ -236,7 +236,7 @@ const extension = await connectInjectedExtension('polkadot-js');
 const accounts = extension.getAccounts();
 
 // Create client with first account
-const client = new AsyncBulletinClient(api, accounts[0].polkadotSigner, papiClient.submit);
+const client = new AsyncBulletinClient(api, accounts[0].txCreator, papiClient.submit);
 ```
 
 ## Multiple Accounts
@@ -275,7 +275,7 @@ console.log('CID:', prepared.cid.toString());
 const tx = api.tx.TransactionStorage.store({
     data: prepared.data
 });
-await tx.signAndSubmit(signer);
+await tx.createAndSubmit(signer);
 ```
 
 **Large data** — use `prepareStoreChunked` and submit each chunk separately:
@@ -287,14 +287,14 @@ for (const chunk of prepared.chunks) {
     const tx = api.tx.TransactionStorage.store({
         data: chunk.data
     });
-    await tx.signAndSubmit(signer);
+    await tx.createAndSubmit(signer);
 }
 
 if (prepared.manifest) {
     const tx = api.tx.TransactionStorage.store({
         data: prepared.manifest.data
     });
-    await tx.signAndSubmit(signer);
+    await tx.createAndSubmit(signer);
     console.log('Manifest CID:', prepared.manifest.cid.toString());
 }
 ```

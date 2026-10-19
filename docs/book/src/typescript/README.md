@@ -26,7 +26,7 @@ The `@parity/bulletin-sdk` package provides a modern, type-safe client for Node.
 - **Typed Error Codes**: `ErrorCode` enum with IDE autocomplete
 - **Retryable Detection**: `error.retryable` identifies transient failures
 - **Recovery Hints**: `error.recoveryHint` provides actionable suggestions
-- **Transaction Events**: Full lifecycle tracking (validated, broadcasted, finalized, etc.)
+- **Transaction Events**: Full lifecycle tracking (created, broadcasted, finalized, etc.)
 
 ### Developer Experience
 - **Full Type Support**: Written in TypeScript with complete definitions
