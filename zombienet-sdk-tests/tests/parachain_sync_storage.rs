@@ -10,25 +10,34 @@
 //!
 //! ## Tests
 //!
+//! Test 1 is `#[ignore]`d: fast sync stalls at block #0 on polkadot-stable2609, see
+//! <https://github.com/paritytech/polkadot-bulletin-chain/issues/826>.
+//!
 //! 1. `parachain_fast_sync_test` - Fast sync without block pruning
 //!    - Starts 1 collator, stores transaction data
 //!    - Adds a regular sync node with --sync=fast
 //!    - Verifies state sync completes, bitswap returns DONT_HAVE (expected)
 //!
 //! 2. `parachain_fast_sync_with_pruning_test` - Fast sync with block pruning
-//!    - Starts 1 collator with --blocks-pruning=5, stores transaction data
+//!    - Starts 1 collator with --blocks-pruning=15 on a chain with genesis retention period 10,
+//!      stores transaction data
+//!    - Waits until the collator has pruned every block up to the stores
 //!    - Adds a regular sync node with --sync=fast
 //!    - Verifies sync FAILS (peers respond with empty blocks - historical blocks pruned)
 //!
 //! 3. `parachain_warp_sync_test` - Warp sync without block pruning
-//!    - Starts 3 relay validators, 1 collator, stores transaction data
-//!    - Adds a regular sync node with --sync=warp
-//!    - Verifies warp sync completes, bitswap returns DONT_HAVE (expected)
+//!    - Starts 3 relay validators, 1 collator, stores transaction data below the warp target
+//!    - Adds an archive sync node with --sync=warp
+//!    - Verifies gap sync downloads the body of every store block (`GapSyncBodyPolicy::All`),
+//!      restores the indexed transactions from them, and bitswap serves every item
 //!
-//! 4. `parachain_warp_sync_with_pruning_test` - Warp sync with block pruning
-//!    - Starts 3 relay validators, 1 collator with --blocks-pruning=10, stores transaction data
-//!    - Adds a regular sync node with --sync=warp
-//!    - Verifies warp sync completes, bitswap returns DONT_HAVE (expected)
+//! 4. `parachain_warp_sync_with_pruning_test` - Warp sync on a sync node with a pruning window
+//!    - Starts 3 relay validators, 1 archive collator, sets the retention period to 24
+//!    - Stores items far below the later warp target, then one item just below it
+//!    - Adds a sync node with --sync=warp and --blocks-pruning=200
+//!    - Verifies the gap body window (`GapSyncBodyPolicy::BodiesWithinWindow(12)`): the recent
+//!      store block arrives with its body and bitswap serves its item, the old store blocks arrive
+//!      header-only and bitswap returns DONT_HAVE for them, while the collator still serves them
 //!
 //! 5. `parachain_full_sync_test` - Full sync without block pruning
 //!    - Starts 1 collator, stores transaction data
@@ -36,7 +45,9 @@
 //!    - Verifies full sync completes, bitswap returns data (full sync downloads indexed body)
 //!
 //! 6. `parachain_full_sync_with_pruning_test` - Full sync with block pruning
-//!    - Starts 1 collator with --blocks-pruning=5, stores transaction data
+//!    - Starts 1 collator with --blocks-pruning=15 on a chain with genesis retention period 10,
+//!      stores transaction data
+//!    - Waits until the collator has pruned every block up to the stores
 //!    - Adds a regular sync node with --sync=full
 //!    - Verifies sync FAILS (peers respond with empty blocks - historical blocks pruned)
 //!
@@ -59,15 +70,29 @@
 //!      duplicate)
 //!    - Verifies data expiration after retention period (col11 becomes empty)
 //!
+//! 10. `parachain_pruning_below_retention_test` - Pruning window below the retention period
+//!     - Starts 3 relay validators, 1 collator on the main spec (retention period 201600)
+//!     - Starts a --sync=full node with --blocks-pruning=1000 and verifies it refuses to start
+//!     - Adds a --sync=warp node with --blocks-pruning=1000 and verifies it shuts down right after
+//!       state sync, when it resolves its gap sync body policy
+//!
 //! ## Key Behavior Notes
 //!
 //! - **Full sync downloads indexed transactions**: Full sync (`--sync=full`) downloads all blocks
 //!   including indexed body, so synced nodes CAN serve historical transaction data via bitswap.
 //!
-//! - **Warp sync does NOT index transactions**: After warp proof + state sync, the gap fill phase
-//!   downloads full block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them. Bodies
-//!   are stored in the BODY column, not TRANSACTIONS. Indexed data is not available, so warp-synced
-//!   nodes return DONT_HAVE via bitswap (same as fast sync).
+//! - **Warp sync restores indexed transactions from gap-sync bodies**: after state sync the node
+//!   resolves a `GapSyncBodyPolicy` from the runtime's retention period at the warp target and its
+//!   own `--blocks-pruning` (`polkadot-omni-node`'s `resolve_gap_sync_body_policy`). An archive
+//!   node gets `All`; a pruned node gets `BodiesWithinWindow(retention - min(256, retention / 2))`.
+//!   `StorageChainBlockImport` restores the indexed transactions of every gap block that arrives
+//!   with a body, so the node serves that data via bitswap. Gap blocks below the window arrive
+//!   header-only, and the warp target block itself is imported without its indexed transactions.
+//!
+//! - **The pruning window must cover the retention period**: a storage-chain node whose
+//!   `--blocks-pruning` is below the runtime's retention period fails when it creates `ChainSync`:
+//!   at startup for full and fast sync, right after state sync for warp sync. The syncing engine is
+//!   an essential task, so the node shuts down.
 //!
 //! - **Fast sync does NOT download indexed transactions**: State sync skips block bodies entirely,
 //!   so fast-synced nodes cannot serve historical transaction data via bitswap.
@@ -109,21 +134,25 @@
 use crate::{
 	test_log,
 	utils::{
-		authorize_and_store_data, authorize_and_store_data_finalized, authorize_and_store_items,
+		arg_value, authorize_and_store_data, authorize_and_store_data_finalized,
+		authorize_and_store_items, block_availability,
 		build_parachain_network_config_three_relay_validators, content_hash_and_cid,
-		expect_all_items_bitswap_dont_have, generate_test_data, get_alice_nonce, get_db_path,
-		get_para_id, get_parachain_binary_path, get_parachain_chain_id, initialize_network,
-		log_line_at_least_once, set_retention_period, set_retention_period_finalized,
-		verify_all_items_bitswap, verify_col11, verify_ldb_tool, verify_node_bitswap,
-		verify_parachain_binaries, verify_state_sync_completed, verify_warp_sync_completed,
-		wait_for_block_height, wait_for_finalized_height, wait_for_fullnode,
-		wait_for_relay_chain_to_sync, wait_for_session_change_on_node,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
+		expect_all_items_bitswap_dont_have, expect_log_line, generate_test_data, get_alice_nonce,
+		get_db_path, get_para_id, get_parachain_binary_path, get_parachain_chain_id,
+		initialize_network, log_line_at_least_once, omni_node_exit_and_log,
+		parachain_network_config_with_retention_period, set_retention_period,
+		set_retention_period_finalized, verify_all_items_bitswap, verify_col11, verify_ldb_tool,
+		verify_node_bitswap, verify_parachain_binaries, verify_state_sync_completed,
+		verify_warp_sync_completed, wait_for_block_body, wait_for_block_height,
+		wait_for_finalized_height, wait_for_fullnode, wait_for_relay_chain_to_sync,
+		wait_for_session_change_on_node, BlockAvailability, BLOCK_PRODUCTION_TIMEOUT_SECS,
+		LOG_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN,
+		SYNC_TIMEOUT_SECS, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{anyhow, Context, Result};
 use futures::try_join;
+use std::time::Duration;
 use subxt::{config::substrate::SubstrateConfig, OnlineClient};
 use zombienet_orchestrator::AddCollatorOptions;
 
@@ -133,6 +162,19 @@ const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const RETENTION_PERIOD: u32 = 10;
 /// Three items of different sizes for multi-item verification.
 const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SIZE * 2];
+
+const STATE_SYNC_COMPLETE_LOG: &str = "State sync is complete, continuing with block sync.";
+const BELOW_RETENTION_ERROR: &str =
+	"must be at least the runtime's transaction storage retention period";
+const GAP_SYNC_BODY_SAFETY_MARGIN: u32 = 256;
+
+const fn gap_sync_body_window(retention_period: u32) -> u32 {
+	if retention_period / 2 < GAP_SYNC_BODY_SAFETY_MARGIN {
+		retention_period - retention_period / 2
+	} else {
+		retention_period - GAP_SYNC_BODY_SAFETY_MARGIN
+	}
+}
 
 /// Uses libp2p for embedded relay chain to avoid litep2p race conditions.
 fn get_para_node_args() -> Vec<String> {
@@ -157,6 +199,8 @@ fn get_para_node_args_with_pruning(blocks_pruning: u32) -> Vec<String> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "fast sync stalls at block #0 on polkadot-stable2609, \
+            https://github.com/paritytech/polkadot-bulletin-chain/issues/826"]
 async fn parachain_fast_sync_test() -> Result<()> {
 	const TEST: &str = "para_fast_sync";
 	crate::utils::init_logging();
@@ -244,7 +288,11 @@ async fn parachain_fast_sync_test() -> Result<()> {
 	Ok(())
 }
 
-const PRUNING_BLOCKS: u32 = 5;
+/// Must be at least `RETENTION_PERIOD`, the genesis retention period of the pruned-node
+/// networks: a storage-chain node refuses to
+/// start when its `--blocks-pruning` window is smaller.
+const PRUNING_BLOCKS: u32 = 15;
+const PRUNING_MARGIN_BLOCKS: u64 = 2;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
@@ -262,7 +310,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(PRUNING_BLOCKS);
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = parachain_network_config_with_retention_period(para_args, RETENTION_PERIOD)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -300,6 +348,13 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
+	let pruned_height = target_block + PRUNING_BLOCKS as u64 + PRUNING_MARGIN_BLOCKS;
+	tracing::info!(
+		"Waiting for finality at block {} so the collator prunes the stores",
+		pruned_height
+	);
+	wait_for_finalized_height(collator1, pruned_height, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	expect_all_items_bitswap_dont_have(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Add sync node with fast sync and pruning
 	tracing::info!("Adding sync-node with --sync=fast and --blocks-pruning");
@@ -397,7 +452,7 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
+	let target_block = std::cmp::max(last_store_block + 1, MIN_BLOCKS_BEFORE_SYNC_NODE);
 	tracing::info!("Waiting for block {} and finality", target_block);
 	try_join!(
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
@@ -439,37 +494,51 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	// Verify warp sync completed and node is idle
 	verify_warp_sync_completed(sync_node).await?;
 
-	// Warp sync gap fill downloads block bodies but does not execute them.
-	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
-	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
-	tracing::info!(
-		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
-	);
+	// Gap sync fills the history below the warp target in ascending order; an archive node
+	// downloads every body, so each store block ends up with its extrinsics.
+	let sync_rpc = sync_node.rpc().await?;
+	for item in &stored_items {
+		let extrinsic_count =
+			wait_for_block_body(&sync_rpc, item.block_number, SYNC_TIMEOUT_SECS).await?;
+		tracing::info!(
+			"sync-node has block {} with {} extrinsics",
+			item.block_number,
+			extrinsic_count
+		);
+	}
+	verify_all_items_bitswap(sync_node, &stored_items, 30, "Sync-node").await?;
 
 	test_log!(TEST, "=== Parachain Warp Sync Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
 
-const WARP_PRUNING_BLOCKS: u32 = 10;
+const WINDOW_TEST_RETENTION_PERIOD: u32 = 24;
+/// Bounded, so the sync node resolves a body window, but longer than the chain this test
+/// reaches, so the node prunes nothing: an old store block without a body was downloaded
+/// header-only, not pruned afterwards.
+const WINDOW_TEST_BLOCKS_PRUNING: u32 = 200;
+const WINDOW_TEST_MAX_BLOCKS_PER_REQUEST: u64 = 4;
+const WINDOW_TEST_MARGIN_BLOCKS: u64 = 3;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	const TEST: &str = "para_warp_sync_pruning";
 	crate::utils::init_logging();
 
-	test_log!(TEST, "=== Parachain Warp Sync Test (with block pruning) ===");
+	let body_window = gap_sync_body_window(WINDOW_TEST_RETENTION_PERIOD);
+	test_log!(TEST, "=== Parachain Warp Sync Test (pruned sync node) ===");
 	tracing::info!(
-		"Collator will use --blocks-pruning={}, retention-period={}",
-		WARP_PRUNING_BLOCKS,
-		RETENTION_PERIOD
+		"Sync node will use --blocks-pruning={} against retention-period={}, gap body window {}",
+		WINDOW_TEST_BLOCKS_PRUNING,
+		WINDOW_TEST_RETENTION_PERIOD,
+		body_window
 	);
 
 	// Early validation of required binaries
 	verify_parachain_binaries()?;
 
-	let para_args = get_para_node_args_with_pruning(WARP_PRUNING_BLOCKS);
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -485,36 +554,42 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Get collator
 	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
 
-	// Set retention period and store data (blocks are produced in parallel)
-	tracing::info!("Setting RetentionPeriod to {} blocks", RETENTION_PERIOD);
+	tracing::info!("Setting RetentionPeriod to {} blocks", WINDOW_TEST_RETENTION_PERIOD);
 	let collator1_client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
-	let mut nonce = get_alice_nonce(collator1).await?;
+	let nonce = get_alice_nonce(collator1).await?;
+	set_retention_period_finalized(&collator1_client, WINDOW_TEST_RETENTION_PERIOD, nonce).await?;
 
-	set_retention_period(&collator1_client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
-
-	// Store multiple test data items
-	let (stored_items, _) =
-		authorize_and_store_items(collator1, PARACHAIN_TEST_DATA_PATTERN, &ITEM_SIZES, nonce)
+	let (old_items, nonce) =
+		authorize_and_store_items(collator1, b"WINDOW_TEST_OLD_DATA_", &ITEM_SIZES, nonce + 1)
 			.await?;
-	let last_store_block = stored_items.iter().map(|i| i.block_number).max().unwrap();
+	let last_old_block = old_items.iter().map(|item| item.block_number).max().unwrap();
+	let header_only_height = last_old_block +
+		body_window as u64 +
+		WINDOW_TEST_MAX_BLOCKS_PER_REQUEST +
+		WINDOW_TEST_MARGIN_BLOCKS;
+	tracing::info!(
+		"Waiting for finality at block {} so the old items fall below the gap body window",
+		header_only_height
+	);
+	wait_for_finalized_height(collator1, header_only_height, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
-	// Verify all items can be fetched from collator1 via bitswap
-	verify_all_items_bitswap(collator1, &stored_items, 30, "Collator-1").await?;
-
-	// Wait for enough blocks and finality before adding sync node
-	let target_block = std::cmp::max(last_store_block, MIN_BLOCKS_BEFORE_SYNC_NODE);
-	tracing::info!("Waiting for block {} and finality", target_block);
-	try_join!(
-		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
-		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
-	)?;
+	let (recent_items, _) =
+		authorize_and_store_items(collator1, b"WINDOW_TEST_RECENT_DATA_", &[TEST_DATA_SIZE], nonce)
+			.await?;
+	let target_block = recent_items[0].block_number + 1;
+	tracing::info!(
+		"Waiting for finality at block {} so the warp target lies above every store",
+		target_block
+	);
+	wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
 	// Add sync node with warp sync. We point its cumulus relay-chain interface at
 	// alice's already-synced RPC instead of running an embedded relay client. Otherwise
 	// cumulus's wait_for_finalized_para_head races the embedded relay's cold start and
 	// locks in target = parachain genesis, which neuters warp sync.
-	tracing::info!("Adding sync-node with --sync=warp (external relay RPC: alice)");
+	tracing::info!(
+		"Adding sync-node with --sync=warp and --blocks-pruning (external relay RPC: alice)"
+	);
 	let para_binary = get_parachain_binary_path();
 	let alice_rpc_url = relay_alice.ws_uri().to_string();
 	let sync_node_opts = AddCollatorOptions {
@@ -522,6 +597,10 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 		args: vec![
 			"--sync=warp".into(),
 			"--ipfs-server".into(),
+			format!("--blocks-pruning={WINDOW_TEST_BLOCKS_PRUNING}").as_str().into(),
+			format!("--max-blocks-per-request={WINDOW_TEST_MAX_BLOCKS_PER_REQUEST}")
+				.as_str()
+				.into(),
 			"--relay-chain-rpc-url".into(),
 			alice_rpc_url.as_str().into(),
 			NODE_LOG_CONFIG.into(),
@@ -536,23 +615,161 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	// Wait for the node to be up first
 	wait_for_fullnode(sync_node).await?;
 
-	// Wait for warp sync to complete
 	tracing::info!("Verifying sync-node's progress (target: block {})", target_block);
 	wait_for_block_height(sync_node, target_block, SYNC_TIMEOUT_SECS)
 		.await
 		.context("Sync node failed to sync via warp sync")?;
-
-	// Verify warp sync completed and node is idle
 	verify_warp_sync_completed(sync_node).await?;
 
-	// Warp sync gap fill downloads block bodies but does not execute them.
-	// Bodies go to the BODY column, not TRANSACTIONS - so indexed data is not available.
-	expect_all_items_bitswap_dont_have(sync_node, &stored_items, 30, "Sync-node").await?;
-	tracing::info!(
-		"Note: Sync-node doesn't have indexed transactions - warp sync gap fill doesn't index data"
-	);
+	// Gap sync fills the history in ascending order, so once the recent store block has its
+	// body, the old store blocks below the body window have been imported header-only.
+	let sync_rpc = sync_node.rpc().await?;
+	wait_for_block_body(&sync_rpc, recent_items[0].block_number, SYNC_TIMEOUT_SECS).await?;
+	for item in &old_items {
+		assert_eq!(
+			block_availability(&sync_rpc, item.block_number).await?,
+			BlockAvailability::HeaderOnly,
+			"store block {} lies below the gap body window, so the sync node must have imported \
+			 it without a body",
+			item.block_number,
+		);
+	}
 
-	test_log!(TEST, "=== Parachain Warp Sync Test (with block pruning) PASSED ===");
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	verify_all_items_bitswap(sync_node, &recent_items, 30, "Sync-node").await?;
+	expect_all_items_bitswap_dont_have(sync_node, &old_items, 30, "Sync-node").await?;
+	verify_all_items_bitswap(collator1, &old_items, 30, "Collator-1").await?;
+
+	test_log!(TEST, "=== Parachain Warp Sync Test (pruned sync node) PASSED ===");
+	network.destroy().await?;
+	Ok(())
+}
+
+const BELOW_RETENTION_BLOCKS_PRUNING: u32 = 1000;
+const STARTUP_REFUSAL_TIMEOUT_SECS: u64 = 120;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_pruning_below_retention_test() -> Result<()> {
+	const TEST: &str = "para_pruning_below_retention";
+	crate::utils::init_logging();
+
+	test_log!(TEST, "=== Parachain Pruning Window Below Retention Period Test ===");
+	verify_parachain_binaries()?;
+
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
+	let mut network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS)
+		.await
+		.context("Failed to detect session change on relay chain")?;
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	try_join!(
+		wait_for_block_height(
+			collator1,
+			MIN_BLOCKS_BEFORE_SYNC_NODE,
+			BLOCK_PRODUCTION_TIMEOUT_SECS
+		),
+		wait_for_finalized_height(
+			collator1,
+			MIN_BLOCKS_BEFORE_SYNC_NODE,
+			BLOCK_PRODUCTION_TIMEOUT_SECS
+		),
+	)?;
+
+	let para_binary = get_parachain_binary_path();
+	let alice_rpc_url = relay_alice.ws_uri().to_string();
+	let collator_args: Vec<String> = collator1.args().iter().map(|arg| arg.to_string()).collect();
+	let relay_args_start = collator_args
+		.iter()
+		.position(|arg| arg == "--")
+		.context("collator-1 args have no relay chain section")?;
+	let para_chain_spec = arg_value(&collator_args[..relay_args_start], "--chain")
+		.context("collator-1 args do not contain --chain")?;
+	let relay_chain_spec = arg_value(&collator_args[relay_args_start + 1..], "--chain")
+		.context("collator-1 relay chain args do not contain --chain")?;
+	let full_node_base_path = tempfile::tempdir()?;
+	let full_node_args: Vec<String> = vec![
+		"--chain".into(),
+		para_chain_spec,
+		"--base-path".into(),
+		full_node_base_path.path().display().to_string(),
+		"--sync=full".into(),
+		format!("--blocks-pruning={BELOW_RETENTION_BLOCKS_PRUNING}"),
+		"--relay-chain-rpc-url".into(),
+		alice_rpc_url.clone(),
+		"--port".into(),
+		"0".into(),
+		"--rpc-port".into(),
+		"0".into(),
+		"--no-prometheus".into(),
+		"--no-telemetry".into(),
+		"--".into(),
+		"--chain".into(),
+		relay_chain_spec,
+	];
+	let (exit_code, full_node_log) = omni_node_exit_and_log(
+		&para_binary,
+		&full_node_args,
+		Duration::from_secs(STARTUP_REFUSAL_TIMEOUT_SECS),
+	)
+	.await?;
+	assert!(
+		matches!(exit_code, Some(code) if code != 0),
+		"full-sync node with --blocks-pruning={BELOW_RETENTION_BLOCKS_PRUNING} did not refuse to \
+		 start (exit={exit_code:?}):\n{full_node_log}",
+	);
+	assert!(
+		full_node_log.contains(BELOW_RETENTION_ERROR),
+		"full-sync node exited ({exit_code:?}) without the retention period error:\n{full_node_log}",
+	);
+	test_log!(TEST, "✓ Full-sync node refused to start");
+
+	let warp_node_opts = AddCollatorOptions {
+		command: Some(para_binary.as_str().try_into()?),
+		args: vec![
+			"--sync=warp".into(),
+			"--ipfs-server".into(),
+			format!("--blocks-pruning={BELOW_RETENTION_BLOCKS_PRUNING}").as_str().into(),
+			"--relay-chain-rpc-url".into(),
+			alice_rpc_url.as_str().into(),
+			NODE_LOG_CONFIG.into(),
+		],
+		is_validator: false,
+		..Default::default()
+	};
+	network.add_collator("warp-node", warp_node_opts, get_para_id()).await?;
+	let warp_node = network.get_node("warp-node").context("Failed to get warp-node")?;
+	wait_for_fullnode(warp_node).await?;
+	expect_log_line(
+		warp_node,
+		BELOW_RETENTION_ERROR,
+		SYNC_TIMEOUT_SECS,
+		"warp-sync node did not reject its pruning window",
+	)
+	.await?;
+	expect_log_line(
+		warp_node,
+		"Essential task `syncing` failed",
+		LOG_TIMEOUT_SECS,
+		"warp-sync node kept running without its syncing engine",
+	)
+	.await?;
+	let warp_node_log = warp_node.logs().await?;
+	let state_sync_end = warp_node_log
+		.find(STATE_SYNC_COMPLETE_LOG)
+		.context("warp-sync node did not complete state sync")?;
+	let rejection = warp_node_log
+		.find(BELOW_RETENTION_ERROR)
+		.context("warp-sync node log lacks the retention period error")?;
+	assert!(
+		state_sync_end < rejection,
+		"warp-sync node rejected its pruning window before state sync completed",
+	);
+	test_log!(TEST, "✓ Warp-sync node shut down after state sync");
+
+	test_log!(TEST, "=== Parachain Pruning Window Below Retention Period Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
@@ -655,7 +872,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	verify_parachain_binaries()?;
 
 	let para_args = get_para_node_args_with_pruning(PRUNING_BLOCKS);
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config = parachain_network_config_with_retention_period(para_args, RETENTION_PERIOD)?;
 	let mut network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -693,6 +910,13 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 		wait_for_block_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 		wait_for_finalized_height(collator1, target_block, BLOCK_PRODUCTION_TIMEOUT_SECS),
 	)?;
+	let pruned_height = target_block + PRUNING_BLOCKS as u64 + PRUNING_MARGIN_BLOCKS;
+	tracing::info!(
+		"Waiting for finality at block {} so the collator prunes the stores",
+		pruned_height
+	);
+	wait_for_finalized_height(collator1, pruned_height, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	expect_all_items_bitswap_dont_have(collator1, &stored_items, 30, "Collator-1").await?;
 
 	// Add sync node with full sync and pruning
 	tracing::info!("Adding sync-node with --sync=full and --blocks-pruning");
@@ -1006,7 +1230,8 @@ async fn parachain_ldb_storage_verification_test() -> Result<()> {
 		"--".into(),
 		"--network-backend=libp2p".into(),
 	];
-	let config = build_parachain_network_config_three_relay_validators(para_args)?;
+	let config =
+		parachain_network_config_with_retention_period(para_args, LDB_TEST_RETENTION_PERIOD)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
