@@ -247,7 +247,7 @@ jobs:
 
       - name: Install subweight for bench
         if: startsWith(github.event.inputs.cmd, 'bench')
-        run: cargo install subweight
+        run: cargo install subweight --locked
 
       - name: Run Subweight for bench
         id: subweight

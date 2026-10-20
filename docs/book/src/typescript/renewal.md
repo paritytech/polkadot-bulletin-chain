@@ -4,9 +4,9 @@ Extending the retention of stored data with the TypeScript SDK.
 
 > **Prerequisites**: Read [Data Renewal Concepts](../concepts/renewal.md) first to understand the renewal flow.
 
-> **Note**: `client.renew(ref)` takes a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires at the retention boundary; `client.forceRenew(ref)` renews immediately. Recurring `enable_auto_renew` is not exposed by the SDK — use a [raw PAPI transaction](#raw-runtime-renewal).
+> **Note**: `client.renew(ref)` takes a `{ block, index }` position or a 32-byte content hash (`Uint8Array`) — the SDK infers the `TransactionRef` variant from the shape. It schedules a one-shot renewal that fires at the retention boundary; `client.forceRenew(ref)` renews immediately, and `client.enableAutoRenew(contentHash)` renews every period.
 >
-> On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there.
+> On chains still running the pre-`TransactionRef` runtime, positions fall back to the legacy `renew` extrinsic (which renews immediately); content hashes and `forceRenew` error there. Runtimes older than the auto-renew calls reject `enableAutoRenew` / `disableAutoRenew` with `UNSUPPORTED_OPERATION`.
 
 ## Using the SDK Client
 
@@ -33,6 +33,21 @@ await client.renew({ block: blockNumber, index }).send();
 
 `store().send()` returns a `StoreResult` (`cid`, `size`, `blockNumber`, `extrinsicIndex`).
 `renew(ref).send()` returns a `TransactionReceipt` (`blockHash`, `txHash`, `blockNumber`).
+
+## Recurring Auto-Renewal
+
+`enableAutoRenew` takes the 32-byte content hash, not a position. The first cycle is prepaid at registration; later cycles charge the owner's authorization and the registration is dropped with a `RenewalFailed` event once the quota runs out.
+
+```typescript
+const contentHash = result.cid.multihash.digest; // Uint8Array
+
+await client.enableAutoRenew(contentHash).send();
+
+// Only succeeds after the prepaid cycle has fired.
+await client.disableAutoRenew(contentHash).send();
+```
+
+A content hash carries at most one registration, so `renew` and `enableAutoRenew` are mutually exclusive — the second call rejects with `RenewalAlreadyEnabled`.
 
 ## Querying the Retention Period
 
@@ -104,6 +119,11 @@ api.tx.TransactionStorage.force_renew({
 // Recurring auto-renewal (takes the content hash directly, not an `entry`;
 // fixed-size hashes are passed as 0x-prefixed hex)
 api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
+```
+
+On current runtimes these calls live on `api.tx.DataRenewal` instead; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
+
+```typescript
 ```
 
 `disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.

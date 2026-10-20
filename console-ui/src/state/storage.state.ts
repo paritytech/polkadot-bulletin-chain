@@ -75,7 +75,8 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
     used: {
       transactions: BigInt(extent?.transactions ?? 0),
       bytesEphemeral: BigInt(extent?.bytes ?? 0n),
-      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+      // `extra` is the renewal pallet's single-field `PermanentExtent`, which PAPI unwraps to a bigint.
+      bytesPermanent: BigInt(extent?.extra ?? 0n),
     },
     allowance: {
       transactions: extentAllowanceTransactions(extent),

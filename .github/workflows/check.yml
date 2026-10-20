@@ -58,7 +58,7 @@ jobs:
 
       - name: Install taplo
         if: steps.cache-taplo.outputs.cache-hit != 'true'
-        run: cargo install taplo-cli --version ${{ env.TAPLO_VERSION }}
+        run: cargo install taplo-cli --locked --version ${{ env.TAPLO_VERSION }}
 
       - name: Cache zepter
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
