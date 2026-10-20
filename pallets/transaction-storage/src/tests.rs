@@ -29,8 +29,9 @@ use super::{
 	pallet::Origin,
 	AllowedAuthorizers, AuthorizationExtent, AuthorizationOrigin, AuthorizationScope,
 	AuthorizedCaller, AuthorizerBudget, EnsureAllowedAuthorizers, Event, Quota, TransactionInfo,
-	TransactionStorageProof, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED, AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE,
-	DEFAULT_MAX_BLOCK_TRANSACTIONS, DEFAULT_MAX_TRANSACTION_SIZE,
+	TransactionStorageProof, AUTHORIZATION_NOT_EXHAUSTED, AUTHORIZATION_NOT_EXPIRED,
+	AUTHORIZER_NOT_FOUND, BAD_DATA_SIZE, DEFAULT_MAX_BLOCK_TRANSACTIONS,
+	DEFAULT_MAX_TRANSACTION_SIZE,
 };
 
 use crate::mock::RuntimeGenesisConfig;
@@ -2347,11 +2348,8 @@ fn run_to_block_with_retention_proofs(to: u64, stored: Vec<(u64, Vec<u8>)>) {
 fn retention_period_live_changes_follow_current_period() {
 	new_test_ext().execute_with(|| {
 		RetentionPeriod::put(3u64);
-		let stored = vec![
-			(1u64, store_unique(1)),
-			(2u64, store_unique(2)),
-			(3u64, store_unique(3)),
-		];
+		let stored =
+			vec![(1u64, store_unique(1)), (2u64, store_unique(2)), (3u64, store_unique(3))];
 
 		run_to_block(1, || None);
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), stored[0].1.clone()));
@@ -2380,7 +2378,10 @@ fn retention_period_live_changes_follow_current_period() {
 				.and_then(|(_, d)| proof_for_data(d))
 		});
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), store_unique(5)));
-		assert!(!Transactions::contains_key(2), "block 2 metadata must be pruned under retention 2");
+		assert!(
+			!Transactions::contains_key(2),
+			"block 2 metadata must be pruned under retention 2"
+		);
 		RetentionPeriod::put(4u64);
 		let stored_for_block6 = stored.clone();
 		run_to_block(6, move || {
