@@ -2092,7 +2092,7 @@ fn obsolete_sweep_decrements_only_permanent_entries() {
 	});
 }
 
-/// The sweep emits a single `PermanentStorageUsedUpdated` event per obsolete block
+/// The sweep contributes a single `PermanentStorageUsedUpdated` event per obsolete block
 /// (not per renewed entry within the block) — keeps event volume bounded.
 #[test]
 fn obsolete_sweep_emits_single_used_updated_event_per_block() {
@@ -2122,6 +2122,9 @@ fn obsolete_sweep_emits_single_used_updated_event_per_block() {
 		System::set_block_number(14);
 		System::reset_events();
 		<TransactionStorage as Hooks<u64>>::on_initialize(14);
+		// The event lands in `on_finalize`; no registrations here, so `PendingRenewals` is
+		// empty and its invariant holds.
+		<DataRenewal as Hooks<u64>>::on_finalize(14);
 
 		let count = System::events()
 			.iter()
@@ -2177,8 +2180,9 @@ fn transaction_info_encoding_matches_pre_split_layout() {
 	assert_eq!(decoded.meta, EntryKind::Renew);
 }
 
-/// Renew emits `PermanentStorageUsedUpdated { used }` so off-chain capacity-planning
-/// dashboards can track [`crate::PermanentStorageUsed`] without polling storage.
+/// A block that moves [`crate::PermanentStorageUsed`] emits `PermanentStorageUsedUpdated`
+/// from `on_finalize`, so off-chain capacity-planning dashboards can track the counter
+/// without polling storage.
 #[test]
 fn renew_emits_permanent_storage_used_updated() {
 	new_test_ext().execute_with(|| {
@@ -2197,6 +2201,13 @@ fn renew_emits_permanent_storage_used_updated() {
 		};
 		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
 
+		// Nothing mid-block.
+		assert!(!System::events().iter().any(|r| matches!(
+			r.event,
+			RuntimeEvent::DataRenewal(crate::Event::PermanentStorageUsedUpdated { .. })
+		)));
+
+		<DataRenewal as Hooks<u64>>::on_finalize(3);
 		System::assert_has_event(RuntimeEvent::DataRenewal(
 			crate::Event::PermanentStorageUsedUpdated { used: 2000 },
 		));
@@ -2897,6 +2908,8 @@ fn permanent_storage_near_cap_fires_on_rising_edge_only() {
 				entry: TransactionRef::Position { block: store_block, index: 0 },
 			};
 			assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
+			// The edge is measured block-start to block-end.
+			<DataRenewal as Hooks<u64>>::on_finalize(System::block_number());
 		};
 
 		// Step 1: 500 bytes (PermanentStorageUsed: 0 → 500). Below threshold; no near-cap.
@@ -2918,6 +2931,181 @@ fn permanent_storage_near_cap_fires_on_rising_edge_only() {
 
 		// Quick sanity check on the threshold formula matching the constant.
 		assert_eq!(crate::PERMANENT_STORAGE_NEAR_CAP_PERCENT, 80);
+	});
+}
+
+/// A drain inherent renewing a full block's worth of entries emits **one**
+/// `PermanentStorageUsedUpdated`, carrying the block-end value — not one per renewal on top
+/// of the sweep's (`1 + MaxBlockTransactions` = 513 at the default cap). Half the renewals
+/// are starved of allowance so the block has a real net change to report.
+#[test]
+fn full_renewal_block_emits_one_used_updated_event() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let size: u32 = 500;
+		let n =
+			<<Test as pallet_bulletin_transaction_storage::Config>::MaxBlockTransactions as Get<
+				u32,
+			>>::get();
+		let total = n as u64 * size as u64;
+
+		// `store` is unsigned; this grant covers the `enable_auto_renew` prepayments below.
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, n, total));
+		let hashes: Vec<[u8; 32]> = (0..n)
+			.map(|i| {
+				let mut data = vec![0u8; size as usize];
+				data[..4].copy_from_slice(&i.to_le_bytes());
+				assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+				blake2_256(&data)
+			})
+			.collect();
+
+		run_to_block(2, || None);
+		for hash in &hashes {
+			assert_ok!(enable_auto_renew_via_extension(who, *hash));
+		}
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), total);
+
+		// Cycle 1: `Transactions[1]` ages out as `Store` entries (nothing to decrement) and
+		// every prepaid renewal fires free — the counter does not move.
+		init_block(12);
+		assert_ok!(apply_block_inherents_full(None));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), total);
+		// Carry the cycle-12 renews out of `BlockTransactions` so they age out at block 23.
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
+
+		// Cycle 2: the sweep decrements all `n` renewed entries in one call, then the
+		// inherent re-charges one entry at a time against an allowance covering half.
+		init_block(23);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, n, total / 2));
+		assert_ok!(apply_block_inherents_full(None));
+		<DataRenewal as Hooks<u64>>::on_finalize(23);
+
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), total / 2);
+
+		let events = System::events();
+		let used_updated: Vec<u64> = events
+			.iter()
+			.filter_map(|r| match r.event {
+				RuntimeEvent::DataRenewal(crate::Event::PermanentStorageUsedUpdated { used }) =>
+					Some(used),
+				_ => None,
+			})
+			.collect();
+		assert_eq!(
+			used_updated,
+			vec![total / 2],
+			"one event for the block, at the block-end value"
+		);
+
+		// Per-renewal receipts are untouched: half renewed, half dropped.
+		let count =
+			|f: &dyn Fn(&RuntimeEvent) -> bool| events.iter().filter(|r| f(&r.event)).count();
+		assert_eq!(
+			count(&|e| matches!(e, RuntimeEvent::DataRenewal(crate::Event::DataRenewed { .. }))),
+			n as usize / 2,
+		);
+		assert_eq!(
+			count(&|e| matches!(e, RuntimeEvent::DataRenewal(crate::Event::RenewalFailed { .. }))),
+			n as usize / 2,
+		);
+	});
+}
+
+/// A retention-boundary block frees the aged-out renewed bytes and the drain inherent
+/// re-charges the same bytes, so the block nets to zero and must emit neither
+/// `PermanentStorageUsedUpdated` nor — with the cap set so the sweep's dip crosses the
+/// threshold — `PermanentStorageNearCap`.
+///
+/// Per mutation, that block emitted 1 + one-per-renewal of the former and re-armed the
+/// latter's rising edge on every boundary block.
+#[test]
+fn net_zero_renewal_block_emits_no_storage_used_events() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![3u8; 500];
+		let content_hash = blake2_256(&data);
+
+		// Threshold = 600 * 80 / 100 = 480: the steady-state 500 sits above it, the sweep's
+		// dip to 0 below.
+		MaxPermanentStorageSize::set(&600);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(2, || None);
+
+		// Registration prepays cycle 1: `PermanentStorageUsed` 0 → 500.
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 500);
+
+		// Cycle 1: `Transactions[1]` ages out as a `Store` entry (nothing to decrement) and
+		// the prepaid renewal fires free — the counter does not move.
+		init_block(12);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(apply_block_inherents_full(None));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 500);
+		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
+		// Carry the cycle-12 renew out of `BlockTransactions` so it can age out at block 23.
+		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
+
+		let proof_data = data.clone();
+		let proof_provider = move || {
+			let period: u64 = pallet_bulletin_transaction_storage::RetentionPeriod::<Test>::get();
+			let target = System::block_number().saturating_sub(period);
+			if target == 0 {
+				return None;
+			}
+			let txs = pallet_bulletin_transaction_storage::Transactions::<Test>::get(target)?;
+			let data_vec: Vec<Vec<u8>> = txs.iter().map(|_| proof_data.clone()).collect();
+			build_proof(System::parent_hash().as_ref(), data_vec).unwrap()
+		};
+		run_to_block(22, proof_provider);
+
+		// Cycle 2: `Transactions[12]` holds a `Renew` entry, so the sweep decrements
+		// 500 → 0 and the now-unpaid registration re-charges 0 → 500.
+		init_block(23);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(apply_block_inherents_full(None));
+		<DataRenewal as Hooks<u64>>::on_finalize(23);
+
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 500, "the block nets to zero");
+
+		let events = System::events();
+		assert_eq!(
+			events
+				.iter()
+				.filter(|r| matches!(
+					r.event,
+					RuntimeEvent::DataRenewal(crate::Event::PermanentStorageUsedUpdated { .. })
+				))
+				.count(),
+			0,
+			"a net-zero block must not report a change",
+		);
+		assert_eq!(
+			events
+				.iter()
+				.filter(|r| matches!(
+					r.event,
+					RuntimeEvent::DataRenewal(crate::Event::PermanentStorageNearCap { .. })
+				))
+				.count(),
+			0,
+			"the intra-block dip below the threshold must not re-arm the rising edge",
+		);
+		// Per-renewal detail is unaffected.
+		assert_eq!(
+			events
+				.iter()
+				.filter(|r| matches!(
+					r.event,
+					RuntimeEvent::DataRenewal(crate::Event::DataRenewed { .. })
+				))
+				.count(),
+			1,
+		);
 	});
 }
 
