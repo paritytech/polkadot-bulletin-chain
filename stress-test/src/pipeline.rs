@@ -32,7 +32,7 @@ use crate::{
 	accounts::NonceTracker,
 	authorize::{self, AUTHORIZE_BATCH_SIZE},
 	client::BulletinConfig,
-	metrics::metrics,
+	metrics::{metrics, OUTCOME_ACCEPTED},
 	report::BlockStats,
 	store::{
 		classify_tx_error, read_timestamp_at, sign_store_extrinsic_blocking,
@@ -51,7 +51,8 @@ struct SubmitCounters {
 	stale_nonces: AtomicU64,
 }
 
-/// Content hash → extrinsic size mapping (separate lock from counters to reduce contention).
+/// Content hash → uncompressed payload size mapping, filled on acceptance and drained by the block
+/// monitor to attribute payload bytes to blocks (separate lock from counters to reduce contention).
 type ContentHashMap = std::collections::HashMap<[u8; 32], u64>;
 
 /// Bounded capacity for the generator → reader `mpsc` (backpressure when full).
@@ -176,7 +177,13 @@ pub enum StressWorkItem {
 	/// processing further [`Store`](Self::Store) items.
 	AwaitPendingAuth,
 	/// Pre-signed `TransactionStorage::store` extrinsic for a one-shot account (nonce 0).
-	Store { account_id: AccountId32, extrinsic: Arc<Vec<u8>>, content_hash: [u8; 32] },
+	/// `payload_len` is the uncompressed payload size (the extrinsic itself is larger).
+	Store {
+		account_id: AccountId32,
+		extrinsic: Arc<Vec<u8>>,
+		content_hash: [u8; 32],
+		payload_len: u64,
+	},
 }
 
 /// One iteration of the sweep: account count and derivation prefix for `//{prefix}/{idx}`.
@@ -487,6 +494,9 @@ struct StoreWorkMsg {
 	account_id: AccountId32,
 	extrinsic: Arc<Vec<u8>>,
 	content_hash: [u8; 32],
+	/// Uncompressed payload size, the unit of every write-path `_bytes_total` metric (the encoded
+	/// `extrinsic` additionally carries signature and call overhead).
+	payload_len: u64,
 }
 
 /// Per-worker state for store submission.
@@ -503,8 +513,13 @@ struct StoreWorker {
 
 impl StoreWorker {
 	/// Submit one pre-signed store extrinsic; retries pool-full / banned / reconnect.
+	///
+	/// Metric-wise the extrinsic is offered exactly once here and leaves through exactly one of
+	/// `tx_accepted_*` or `tx_abandoned_*`; every iteration of the loop is one `submit_attempts`
+	/// sample.
 	async fn submit(&mut self, msg: &StoreWorkMsg) -> Result<()> {
 		let id = self.worker_id;
+		metrics().inc_offered(self.variant, msg.payload_len);
 		loop {
 			let result =
 				store_submit_pre_signed(self.client.as_ref(), msg.extrinsic.as_ref()).await;
@@ -514,8 +529,9 @@ impl StoreWorker {
 					let ext_len = msg.extrinsic.len() as u64;
 					let n = self.counters.submitted.fetch_add(1, Ordering::Relaxed) + 1;
 					self.counters.submitted_bytes.fetch_add(ext_len, Ordering::Relaxed);
-					metrics().inc_submitted(self.variant, ext_len);
-					self.content_hash_map.lock().unwrap().insert(msg.content_hash, ext_len);
+					metrics().inc_submit_attempt(self.variant, OUTCOME_ACCEPTED);
+					metrics().inc_accepted(self.variant, msg.payload_len, ext_len);
+					self.content_hash_map.lock().unwrap().insert(msg.content_hash, msg.payload_len);
 					self.consecutive_conn_errors = 0;
 					if n == 1 || n.is_multiple_of(256) {
 						tracing::debug!(
@@ -526,7 +542,7 @@ impl StoreWorker {
 				},
 				Err(e) => {
 					let class = classify_tx_error(&e);
-					metrics().inc_error(self.variant, class.metric_class());
+					metrics().inc_submit_attempt(self.variant, class.metric_class());
 					tracing::debug!(
 						"pipeline store: worker {id} class={class:?} account={} err={e:#}",
 						msg.account_id
@@ -569,6 +585,7 @@ impl StoreWorker {
 											"pipeline store: worker {id}: giving up reconnect"
 										);
 										self.counters.errors.fetch_add(1, Ordering::Relaxed);
+										self.abandon(msg, class);
 										return Err(anyhow::anyhow!(
 											"pipeline store: reconnect failed (worker {id})"
 										));
@@ -578,32 +595,44 @@ impl StoreWorker {
 						TxPoolError::TxDropped => {
 							self.consecutive_conn_errors = 0;
 							self.counters.pool_full_retries.fetch_add(1, Ordering::Relaxed);
+							self.abandon(msg, class);
 							return Ok(());
 						},
 						TxPoolError::AlreadyImported => {
 							self.consecutive_conn_errors = 0;
+							self.abandon(msg, class);
 							return Ok(());
 						},
 						TxPoolError::StaleNonce => {
 							self.consecutive_conn_errors = 0;
 							self.counters.stale_nonces.fetch_add(1, Ordering::Relaxed);
+							self.abandon(msg, class);
 							return Ok(());
 						},
 						TxPoolError::FutureNonce => {
 							self.consecutive_conn_errors = 0;
 							self.counters.errors.fetch_add(1, Ordering::Relaxed);
+							self.abandon(msg, class);
 							return Ok(());
 						},
 						TxPoolError::Other => {
 							self.consecutive_conn_errors = 0;
 							tracing::warn!("pipeline store: worker {id} (class={class:?}): {e:#}");
 							self.counters.errors.fetch_add(1, Ordering::Relaxed);
+							self.abandon(msg, class);
 							return Ok(());
 						},
 					}
 				},
 			}
 		}
+	}
+
+	/// Count one extrinsic this worker stops tracking; the error class doubles as the `reason`
+	/// label. Call on every path out of [`Self::submit`] that is not an acceptance, so that
+	/// `offered = accepted + abandoned + in-flight` holds.
+	fn abandon(&self, msg: &StoreWorkMsg, class: TxPoolError) {
+		metrics().inc_abandoned(self.variant, class.metric_class(), msg.payload_len);
 	}
 }
 
@@ -858,9 +887,9 @@ pub async fn run_block_capacity_pipeline(
 					}
 				}
 			},
-			StressWorkItem::Store { account_id, extrinsic, content_hash } => {
+			StressWorkItem::Store { account_id, extrinsic, content_hash, payload_len } => {
 				if let Err(e) = dispatch_store_to_workers(
-					StoreWorkMsg { account_id, extrinsic, content_hash },
+					StoreWorkMsg { account_id, extrinsic, content_hash, payload_len },
 					&worker_txs,
 					&mut store_worker_rr,
 				)
@@ -1072,6 +1101,7 @@ async fn build_store_work_items(
 					account_id,
 					extrinsic: Arc::new(encoded),
 					content_hash,
+					payload_len: payload_size as u64,
 				})
 			}
 		})
