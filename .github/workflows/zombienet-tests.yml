@@ -249,9 +249,65 @@ jobs:
             !/tmp/zombie-*/**/db/**/*.log
           retention-days: 14
 
+  zombienet-priority-tests:
+    needs: [set-image, prepare-binaries]
+    name: priority / ${{ matrix.runtime.name }}
+    runs-on: parity-large
+    container:
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime:
+          - name: westend
+            para_id: 1010
+          - name: paseo
+            para_id: 1501
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Polkadot binaries
+        uses: ./.github/actions/use-polkadot-binaries
+        with:
+          groups: polkadot-node chain-spec-builder
+          mode: consume
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: .
+          shared-key: "bulletin-cache-zombienet-priority-tests-${{ matrix.runtime.name }}"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Restore bulletin chain specs cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run zombienet priority tests
+        env:
+          PARACHAIN_ID: ${{ matrix.runtime.para_id }}
+        run: just test-zombienet-priority ${{ matrix.runtime.name }}
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zombienet-priority-test-logs-bulletin-${{ matrix.runtime.name }}
+          path: |
+            /tmp/zombie-*/**/*.log
+            !/tmp/zombie-*/**/db/**/*.log
+          retention-days: 14
+
   zombienet-tests-complete:
     name: All zombienet tests passed
-    needs: [changes, zombienet-auto-renew-tests, zombienet-sync-tests, zombienet-hop-tests]
+    needs: [changes, zombienet-auto-renew-tests, zombienet-sync-tests, zombienet-hop-tests, zombienet-priority-tests]
     if: always()
     runs-on: ubuntu-latest
     steps:

@@ -26,10 +26,13 @@ parameter_types! {
 	pub storage MaxPermanentStorageSize: u64 = 17 * 1024 * 1024 * 1024 * 1024 / 10;
 }
 
-/// Cleanup runs before stores compete for blockspace.
-const CLEANUP_PRIORITY: TransactionPriority = TransactionPriority::MAX;
-/// Below `MAX` so `AllowanceBasedPriority` can add its boost without saturating `u64`.
-const STORE_PRIORITY: TransactionPriority = TransactionPriority::MAX / 4;
+/// Cleanup runs before authorization calls and stores compete for blockspace.
+const CLEANUP_PRIORITY: TransactionPriority = TransactionPriority::MAX / 2;
+const AUTHORIZE_PRIORITY: TransactionPriority = TransactionPriority::MAX / 4;
+/// Above HOP promotion (`0`). The allowance boost lifts in-budget and preimage stores.
+const STORE_PRIORITY: TransactionPriority = 1;
+const RENEW_PRIORITY: TransactionPriority =
+	STORE_PRIORITY + pallet_bulletin_transaction_storage::extension::ALLOWANCE_PRIORITY_BOOST;
 const TX_LONGEVITY: TransactionLongevity = crate::DAYS as TransactionLongevity;
 
 parameter_types! {
@@ -37,9 +40,9 @@ parameter_types! {
 	pub const StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("TransactionStorageStore", STORE_PRIORITY, TX_LONGEVITY);
 	pub const RenewTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("TransactionStorageRenew", STORE_PRIORITY, TX_LONGEVITY);
+		ValidTransactionParams::new("TransactionStorageRenew", RENEW_PRIORITY, TX_LONGEVITY);
 	pub const AuthorizeTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("TransactionStorageAuthorize", STORE_PRIORITY, TX_LONGEVITY);
+		ValidTransactionParams::new("TransactionStorageAuthorize", AUTHORIZE_PRIORITY, TX_LONGEVITY);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
 		ValidTransactionParams::new(
 			"TransactionStorageRemoveExpiredAccountAuthorization",

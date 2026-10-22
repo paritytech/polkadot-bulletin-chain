@@ -22,10 +22,14 @@ use crate::{
 use alloc::vec::Vec;
 use codec::{Decode, DecodeWithMemTracking, Encode};
 use core::{fmt, marker::PhantomData};
+use frame_support::dispatch::DispatchInfo;
 use polkadot_sdk_frame::{
 	deps::*,
 	prelude::*,
-	traits::{AsSystemOriginSigner, Implication, OriginTrait},
+	traits::{
+		AsSystemOriginSigner, Dispatchable, Implication, OriginTrait, PostDispatchInfoOf,
+		TransactionExtensionMetadata, UniqueSaturatedInto,
+	},
 };
 
 type RuntimeCallOf<T> = <T as frame_system::Config>::RuntimeCall;
@@ -358,8 +362,9 @@ where
 	}
 }
 
-/// Priority bonus given to an in-budget signer. Over-budget signers get `0`.
-pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = 1_000_000_000;
+/// Priority bonus for in-budget account stores and for preimage stores. Over-budget signers get
+/// `0`.
+pub const ALLOWANCE_PRIORITY_BOOST: TransactionPriority = TransactionPriority::MAX / 8;
 
 /// Maps the prospective post-this-tx [`AuthorizationExtent`] to the priority bonus
 /// added by [`AllowanceBasedPriority`]. Pick a concrete impl in the runtime's
@@ -513,6 +518,139 @@ where
 		_len: usize,
 	) -> Result<Self::Pre, TransactionValidityError> {
 		Ok(())
+	}
+}
+
+/// Priority bonus for a signer's next transaction. Each transaction of the signer ahead of it in
+/// the pool lowers the bonus by [`QUEUE_BONUS_STEP`].
+pub const MAX_QUEUE_BONUS: TransactionPriority = 1_000_000_000_000;
+/// Larger than the payment priority of an untipped call, so queue position decides between
+/// fee-paying calls and over-budget stores.
+pub const QUEUE_BONUS_STEP: TransactionPriority = 1_000_000;
+
+/// [`frame_system::CheckNonce`] plus a priority bonus: [`MAX_QUEUE_BONUS`] minus
+/// [`QUEUE_BONUS_STEP`] for each of the signer's transactions ahead of this one in the pool. Each
+/// signer's next transaction ranks first, so the pool alternates between signers. Bare transactions
+/// get the full bonus; unsigned general transactions get none.
+///
+/// Uses the identifier, encoding and metadata type of `CheckNonce`, so the transaction format stays
+/// the same. Skips the bonus for `TransactionSource::InBlock`, where the runtime ignores priority,
+/// so the weight equals the `CheckNonce` weight.
+#[derive(Clone, PartialEq, Eq, Encode, Decode, DecodeWithMemTracking)]
+pub struct NonceCheckWithQueueBonus<T: frame_system::Config>(pub frame_system::CheckNonce<T>);
+
+impl<T: frame_system::Config> NonceCheckWithQueueBonus<T> {
+	/// Creates the extension for a transaction with `nonce`.
+	pub fn new(nonce: T::Nonce) -> Self {
+		Self(frame_system::CheckNonce::from(nonce))
+	}
+
+	fn queue_bonus(&self, origin: &T::RuntimeOrigin) -> TransactionPriority
+	where
+		T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId>,
+	{
+		let transaction_nonce = self.0 .0;
+		origin.as_system_origin_signer().map_or(0, |who| {
+			let queued_transactions: u64 = transaction_nonce
+				.saturating_sub(frame_system::Pallet::<T>::account_nonce(who))
+				.unique_saturated_into();
+			MAX_QUEUE_BONUS.saturating_sub(queued_transactions.saturating_mul(QUEUE_BONUS_STEP))
+		})
+	}
+}
+
+impl<T: frame_system::Config> fmt::Debug for NonceCheckWithQueueBonus<T> {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		fmt::Debug::fmt(&self.0, f)
+	}
+}
+
+impl<T: frame_system::Config> scale_info::TypeInfo for NonceCheckWithQueueBonus<T> {
+	type Identity = frame_system::CheckNonce<T>;
+
+	fn type_info() -> scale_info::Type {
+		frame_system::CheckNonce::<T>::type_info()
+	}
+}
+
+impl<T: frame_system::Config> TransactionExtension<RuntimeCallOf<T>> for NonceCheckWithQueueBonus<T>
+where
+	RuntimeCallOf<T>: Dispatchable<Info = DispatchInfo>,
+	T::RuntimeOrigin: AsSystemOriginSigner<T::AccountId> + Clone,
+{
+	const IDENTIFIER: &'static str =
+		<frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::IDENTIFIER;
+	type Implicit =
+		<frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Implicit;
+	type Val = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Val;
+	type Pre = <frame_system::CheckNonce<T> as TransactionExtension<RuntimeCallOf<T>>>::Pre;
+
+	fn metadata() -> Vec<TransactionExtensionMetadata> {
+		frame_system::CheckNonce::<T>::metadata()
+	}
+
+	fn implicit(&self) -> Result<Self::Implicit, TransactionValidityError> {
+		self.0.implicit()
+	}
+
+	fn weight(&self, call: &RuntimeCallOf<T>) -> Weight {
+		self.0.weight(call)
+	}
+
+	fn bare_validate(
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+	) -> TransactionValidity {
+		let mut validity = frame_system::CheckNonce::<T>::bare_validate(call, info, len)?;
+		validity.priority = validity.priority.saturating_add(MAX_QUEUE_BONUS);
+		Ok(validity)
+	}
+
+	fn validate(
+		&self,
+		origin: T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+		self_implicit: Self::Implicit,
+		inherited_implication: &impl Implication,
+		source: TransactionSource,
+	) -> ValidateResult<Self::Val, RuntimeCallOf<T>> {
+		let queue_bonus =
+			if source == TransactionSource::InBlock { 0 } else { self.queue_bonus(&origin) };
+		let (mut validity, val, origin) = self.0.validate(
+			origin,
+			call,
+			info,
+			len,
+			self_implicit,
+			inherited_implication,
+			source,
+		)?;
+		validity.priority = validity.priority.saturating_add(queue_bonus);
+		Ok((validity, val, origin))
+	}
+
+	fn prepare(
+		self,
+		val: Self::Val,
+		origin: &T::RuntimeOrigin,
+		call: &RuntimeCallOf<T>,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+	) -> Result<Self::Pre, TransactionValidityError> {
+		self.0.prepare(val, origin, call, info, len)
+	}
+
+	fn post_dispatch_details(
+		pre: Self::Pre,
+		info: &DispatchInfoOf<RuntimeCallOf<T>>,
+		post_info: &PostDispatchInfoOf<RuntimeCallOf<T>>,
+		len: usize,
+		result: &DispatchResult,
+	) -> Result<Weight, TransactionValidityError> {
+		frame_system::CheckNonce::<T>::post_dispatch_details(pre, info, post_info, len, result)
 	}
 }
 
