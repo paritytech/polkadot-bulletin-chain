@@ -38,10 +38,13 @@ Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `Auto
 
 ## Retention Period
 
-The retention period is a runtime **storage value** (`RetentionPeriod`), not a fixed constant — it can be changed by governance. Query it from storage:
+The retention period is a runtime **storage value**, not a fixed constant — it can be changed by governance:
 
-- Storage: `TransactionStorage.RetentionPeriod`
+- Requested: `TransactionStorage.RetentionPeriod` (what governance sets)
+- In force: `TransactionStorage.EffectiveRetentionPeriod`, also returned by the `retention_period` runtime API
 - Default: 201,600 blocks (~14 days at 6s/block)
+
+The value in force follows the requested one at block ends, in steps that never break storage proofs: a raise applies at once on a fresh chain and otherwise by one block per block; a decrease only skips blocks that hold no data. Node operators should raise `--blocks-pruning` before raising the period, and lower it only once `EffectiveRetentionPeriod` has come down.
 
 After the retention period, validators may prune the data. The chain no longer guarantees availability.
 
