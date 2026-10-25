@@ -3033,6 +3033,36 @@ fn can_renew_rejects_when_chain_wide_cap_reached() {
 	});
 }
 
+/// `can_renew` rejects content that already has a renewal registered, like `renew` does.
+#[test]
+fn can_renew_rejects_when_renewal_already_registered() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let (alice, bob) = (1, 2);
+		let data = vec![0u8; 1000];
+		let entry = TransactionRef::ContentHash(blake2_256(&data));
+		for who in [alice, bob] {
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who,
+				10,
+				10_000
+			));
+		}
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert!(DataRenewal::can_renew(&bob, &entry));
+
+		assert_ok!(renew_via_extension(alice, entry.clone()));
+		let call = crate::Call::<Test>::renew { entry: entry.clone() };
+		assert_eq!(
+			DataRenewal::validate_renewal_signed(&bob, &call).map(|_| ()),
+			Err(crate::RENEWAL_ALREADY_ENABLED.into()),
+		);
+		assert!(!DataRenewal::can_renew(&bob, &entry));
+	});
+}
+
 /// A pre-split `Authorization` — written when `bytes_permanent` was an inline field —
 /// decodes through the current type with every field in the right place. This is what makes
 /// the relocation migration able to leave `Authorizations` untouched.
