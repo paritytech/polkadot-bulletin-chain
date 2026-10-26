@@ -1,8 +1,8 @@
-//! Coverage for the v6→v7 stepped migration.
+//! Coverage for the v5→v6 stepped migration.
 
 use super::*;
 use crate::{
-	migrations::v7::{LegacyAuthorization, MigrateV6ToV7},
+	migrations::v6::{LegacyAuthorization, MigrateV5ToV6},
 	mock::set_relay_now,
 	weights::WeightInfo,
 	AuthorizationExtent, AuthorizationScope,
@@ -13,31 +13,40 @@ use polkadot_sdk_frame::deps::frame_support::{
 };
 
 type Authorizations = super::Authorizations;
-type LegacyAuthorizations = crate::migrations::v7::LegacyAuthorizations<Test>;
+type LegacyAuthorizations = crate::migrations::v6::LegacyAuthorizations<Test>;
 
 const RELAY_NOW: u32 = 1_000;
 
 /// Set the mock relay block to a non-zero value and pin the on-chain
-/// storage version to v6 so the migration has a real pre-migration state
+/// storage version to v5 so the migration has a real pre-migration state
 /// to walk.
-fn setup_v6() {
+fn setup_v5() {
 	set_relay_now(RELAY_NOW);
-	StorageVersion::new(6).put::<TransactionStorage>();
+	StorageVersion::new(5).put::<TransactionStorage>();
+}
+
+/// Seed a pre-slot entry the way a grant left it: value under the legacy layout plus the
+/// provider reference `authorization_added` took for account scopes.
+fn seed_legacy(scope: &AuthorizationScope<u64>, entry: LegacyAuthorization<u64, ()>) {
+	LegacyAuthorizations::insert(scope, entry);
+	if let AuthorizationScope::Account(who) = scope {
+		frame_system::Pallet::<Test>::inc_providers(who);
+	}
 }
 
 /// Per-step weight from the mock `()` `WeightInfo`. Used to size meters.
 fn step_weight() -> polkadot_sdk_frame::deps::sp_runtime::Weight {
-	<Test as crate::Config>::WeightInfo::migrate_v6_to_v7_step()
+	<Test as crate::Config>::WeightInfo::migrate_v5_to_v6_step()
 }
 
-/// Drive the v6→v7 stepped migration to completion against the test
+/// Drive the v5→v6 stepped migration to completion against the test
 /// externalities, mirroring the v2→v3 helper.
 fn drive_migration() {
 	let mut meter = WeightMeter::new();
-	let mut cursor: Option<<MigrateV6ToV7<Test> as SteppedMigration>::Cursor> = None;
+	let mut cursor: Option<<MigrateV5ToV6<Test> as SteppedMigration>::Cursor> = None;
 	loop {
 		cursor =
-			MigrateV6ToV7::<Test>::step(cursor, &mut meter).expect("v6->v7 step must not fail");
+			MigrateV5ToV6::<Test>::step(cursor, &mut meter).expect("v5->v6 step must not fail");
 		if cursor.is_none() {
 			break;
 		}
@@ -48,12 +57,12 @@ fn legacy_with(
 	bytes_allowance: u64,
 	transactions_allowance: u32,
 	expiration: u64,
-) -> LegacyAuthorization<u64> {
+) -> LegacyAuthorization<u64, ()> {
 	LegacyAuthorization {
 		extent: AuthorizationExtent {
 			bytes: 0,
-			bytes_permanent: 0,
 			transactions: 0,
+			extra: (),
 			bytes_allowance,
 			transactions_allowance,
 		},
@@ -64,16 +73,15 @@ fn legacy_with(
 #[test]
 fn translates_active_account_auth() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let who = 1u64;
 		let scope = AuthorizationScope::Account(who);
 		let parachain_now = System::block_number();
 		let mut entry = legacy_with(5_000, 10, parachain_now + 100);
 		// Non-zero used counters to confirm the reset.
 		entry.extent.bytes = 1234;
-		entry.extent.bytes_permanent = 567;
 		entry.extent.transactions = 3;
-		LegacyAuthorizations::insert(&scope, entry);
+		seed_legacy(&scope, entry);
 
 		drive_migration();
 
@@ -88,40 +96,41 @@ fn translates_active_account_auth() {
 		assert_eq!(slot.extent.bytes_allowance, 5_000);
 		assert_eq!(slot.extent.transactions_allowance, 10);
 		assert_eq!(slot.extent.bytes, 0);
-		assert_eq!(slot.extent.bytes_permanent, 0);
 		assert_eq!(slot.extent.transactions, 0);
+		// The provider reference taken at grant time carries over, exactly once.
 		assert_eq!(System::providers(&who), 1);
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
 	});
 }
 
 #[test]
 fn drops_expired_account_auth() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let who = 1u64;
 		let scope = AuthorizationScope::Account(who);
 		let parachain_now = System::block_number();
-		LegacyAuthorizations::insert(&scope, legacy_with(5_000, 10, parachain_now));
+		seed_legacy(&scope, legacy_with(5_000, 10, parachain_now));
 
 		drive_migration();
 
 		assert!(Authorizations::get(&scope).is_none());
 		assert!(LegacyAuthorizations::get(&scope).is_none());
+		// Dropping the entry releases the grant's provider reference.
 		assert_eq!(System::providers(&who), 0);
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
 	});
 }
 
 #[test]
 fn drops_empty_account_auth() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let who = 1u64;
 		let scope = AuthorizationScope::Account(who);
 		let parachain_now = System::block_number();
 		// `bytes_allowance == 0` ⇒ already-unusable in the legacy invariant.
-		LegacyAuthorizations::insert(&scope, legacy_with(0, 10, parachain_now + 100));
+		seed_legacy(&scope, legacy_with(0, 10, parachain_now + 100));
 
 		drive_migration();
 
@@ -134,7 +143,7 @@ fn drops_empty_account_auth() {
 #[test]
 fn translates_preimage_auth() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let hash = [42u8; 32];
 		let scope = AuthorizationScope::Preimage(hash);
 		let parachain_now = System::block_number();
@@ -153,7 +162,7 @@ fn translates_preimage_auth() {
 #[test]
 fn resumes_across_steps() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let parachain_now = System::block_number();
 		for who in 0u64..10u64 {
 			LegacyAuthorizations::insert(
@@ -164,10 +173,10 @@ fn resumes_across_steps() {
 
 		let per_step_budget = step_weight().saturating_mul(3);
 		let mut total_steps = 0u32;
-		let mut cursor: Option<<MigrateV6ToV7<Test> as SteppedMigration>::Cursor> = None;
+		let mut cursor: Option<<MigrateV5ToV6<Test> as SteppedMigration>::Cursor> = None;
 		loop {
 			let mut meter = WeightMeter::with_limit(per_step_budget);
-			cursor = MigrateV6ToV7::<Test>::step(cursor, &mut meter).expect("step must not fail");
+			cursor = MigrateV5ToV6::<Test>::step(cursor, &mut meter).expect("step must not fail");
 			total_steps += 1;
 			if cursor.is_none() {
 				break;
@@ -181,7 +190,7 @@ fn resumes_across_steps() {
 		for (_, auth) in Authorizations::iter() {
 			assert_eq!(auth.slots.len(), 1, "translated entry has one slot");
 		}
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
 	});
 }
 
@@ -189,50 +198,50 @@ fn resumes_across_steps() {
 fn bails_on_relay_now_zero() {
 	new_test_ext().execute_with(|| {
 		set_relay_now(0);
-		StorageVersion::new(6).put::<TransactionStorage>();
+		StorageVersion::new(5).put::<TransactionStorage>();
 		let scope = AuthorizationScope::Account(1u64);
 		LegacyAuthorizations::insert(&scope, legacy_with(1_000, 1, System::block_number() + 50));
 
 		let mut meter = WeightMeter::new();
-		let result = MigrateV6ToV7::<Test>::step(None, &mut meter);
+		let result = MigrateV5ToV6::<Test>::step(None, &mut meter);
 		assert!(matches!(result, Err(SteppedMigrationError::Failed)));
 		// Storage untouched: legacy entry still decodes under the legacy view.
 		assert!(LegacyAuthorizations::get(&scope).is_some());
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(5));
 	});
 }
 
 #[test]
 fn version_bumps_only_after_drain() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let scope = AuthorizationScope::Account(1u64);
 		LegacyAuthorizations::insert(&scope, legacy_with(1_000, 1, System::block_number() + 50));
 
 		// Step 1: budget for exactly one inner-loop iteration. The single
 		// legacy entry translates; the loop breaks before the iter is
-		// re-checked, so the version stays at 3 and the cursor is `Some`.
+		// re-checked, so the version stays at 5 and the cursor is `Some`.
 		let mut meter = WeightMeter::with_limit(step_weight());
 		let cursor =
-			MigrateV6ToV7::<Test>::step(None, &mut meter).expect("first step must not fail");
+			MigrateV5ToV6::<Test>::step(None, &mut meter).expect("first step must not fail");
 		assert!(cursor.is_some(), "cursor still points at last-processed scope");
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(5));
 		assert!(Authorizations::get(&scope).is_some());
 
 		// Step 2: with the legacy map empty, the iter exhausts and the
-		// version bumps to 4.
+		// version bumps to 6.
 		let mut meter = WeightMeter::with_limit(step_weight());
 		let cursor =
-			MigrateV6ToV7::<Test>::step(cursor, &mut meter).expect("second step must not fail");
+			MigrateV5ToV6::<Test>::step(cursor, &mut meter).expect("second step must not fail");
 		assert!(cursor.is_none());
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
 	});
 }
 
 #[test]
 fn rewrites_all_entries_in_place() {
 	new_test_ext().execute_with(|| {
-		setup_v6();
+		setup_v5();
 		let parachain_now = System::block_number();
 		for who in 0u64..3u64 {
 			LegacyAuthorizations::insert(
@@ -251,7 +260,7 @@ fn rewrites_all_entries_in_place() {
 }
 
 #[test]
-fn v1_entries_translate_through_v2_then_v7() {
+fn v1_entries_translate_through_v2_then_v6() {
 	use crate::migrations::v2::{MigrateV1ToV2, V1Authorization, V1AuthorizationExtent};
 	use polkadot_sdk_frame::{deps::frame_support::storage::unhashed, traits::OnRuntimeUpgrade};
 
@@ -277,7 +286,7 @@ fn v1_entries_translate_through_v2_then_v7() {
 		MigrateV1ToV2::<Test>::on_runtime_upgrade();
 		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(2));
 
-		// The active entry now holds the single-window layout the v6→v7 step
+		// The active entry now holds the single-window layout the v5→v6 step
 		// consumes; the old remaining quota became the allowance. Expired and
 		// zero-quota entries are gone.
 		let legacy = LegacyAuthorizations::get(&active).expect("translated");
@@ -287,7 +296,7 @@ fn v1_entries_translate_through_v2_then_v7() {
 		assert!(LegacyAuthorizations::get(&expired).is_none());
 		assert!(LegacyAuthorizations::get(&empty).is_none());
 
-		StorageVersion::new(6).put::<TransactionStorage>();
+		StorageVersion::new(5).put::<TransactionStorage>();
 		drive_migration();
 
 		let slots = Authorizations::get(&active).expect("auth exists").slots.into_inner();
@@ -296,6 +305,6 @@ fn v1_entries_translate_through_v2_then_v7() {
 		assert_eq!(slots[0].extent.transactions_allowance, 7);
 		assert!(Authorizations::get(&expired).is_none());
 		assert!(Authorizations::get(&empty).is_none());
-		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(7));
+		assert_eq!(TransactionStorage::on_chain_storage_version(), StorageVersion::new(6));
 	});
 }

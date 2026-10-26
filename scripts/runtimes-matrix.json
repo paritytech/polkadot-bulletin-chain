@@ -4,6 +4,7 @@
     "package": "bulletin-westend-runtime",
     "path": "runtimes/bulletin-westend",
     "integration_tests": true,
+    "data_renewal": true,
     "try_runtime": {
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
       "instances": [
@@ -20,6 +21,7 @@
     "package": "bulletin-paseo-runtime",
     "path": "runtimes/bulletin-paseo",
     "integration_tests": true,
+    "data_renewal": true,
     "try_runtime": {
       "spec_name_check": "--disable-spec-name-check",
       "extra_flags": "--blocktime 24000 --disable-spec-version-check",
@@ -31,6 +33,40 @@
     "benchmarks_templates": {
       "pallet_xcm_benchmarks::generic": "templates/xcm-bench-template.hbs",
       "pallet_xcm_benchmarks::fungible": "templates/xcm-bench-template.hbs"
+    }
+  },
+  {
+    "name": "bulletin-polkadot",
+    "package": "bulletin-polkadot-runtime",
+    "integration_tests": true,
+    "data_renewal": true,
+    "try_runtime": {
+      "extra_flags": "--blocktime 24000 --disable-spec-version-check",
+      "instances": [
+        { "name": "polkadot", "uris": ["wss://bulletin-rpc.polkadot.io"] }
+      ]
+    },
+    "external_runtime": {
+      "repo": "https://github.com/polkadot-fellows/runtimes.git",
+      "ref": "3936c7e4d42b449b964e41bd7b69d5f1db1e3a1f",
+      "path": "./system-parachains/bulletin/bulletin-polkadot"
+    }
+  },
+  {
+    "name": "bulletin-paseo-external",
+    "package": "bulletin-paseo-runtime",
+    "integration_tests": false,
+    "data_renewal": true,
+    "try_runtime": {
+      "extra_flags": "--blocktime 24000 --disable-spec-version-check",
+      "instances": [
+        { "name": "paseo", "uris": ["wss://bulletin-paseo.tservices.es:8443"] }
+      ]
+    },
+    "external_runtime": {
+      "repo": "https://github.com/paseo-network/runtimes.git",
+      "ref": "edb16707e3305277b94876b17c201a2f3a50c401",
+      "path": "./system-parachains/bulletin-paseo"
     }
   }
 ]

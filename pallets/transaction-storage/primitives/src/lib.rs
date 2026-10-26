@@ -30,6 +30,24 @@ pub mod cids;
 /// 32-byte hash of a stored blob of data.
 pub type ContentHash = [u8; 32];
 
+/// Stock `EntryMeta` for runtimes wiring the renewal pallet; each variant is written
+/// by exactly one pallet. A runtime needing more variants wires its own enum
+/// implementing the same consumer traits.
+///
+/// INVARIANT: live `Transactions` entries store these exact bytes; do not reorder or
+/// renumber variants. Locked by `entry_kind_encoding_is_frozen`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Encode, Decode, TypeInfo, MaxEncodedLen)]
+pub enum EntryKind {
+	/// Written by the storage pallet's `store` calls, as the `Default` value.
+	#[default]
+	#[codec(index = 0)]
+	Store,
+	/// Written by the renewal pallet's `renew`/`force_renew`/auto-renewal, via its
+	/// `RenewMeta` impl.
+	#[codec(index = 1)]
+	Renew,
+}
+
 /// A [`ValidTransaction`] minus its `provides` payload. Families that must not evict each
 /// other in the pool need distinct `tag_prefix`es.
 #[derive(Clone, Copy, Encode, TypeInfo)]
@@ -127,5 +145,14 @@ mod tests {
 	#[should_panic(expected = "A and A_AGAIN must not share the tag prefix `a`")]
 	fn shared_tag_prefix_panics() {
 		assert_distinct_tag_prefixes(&[("A", A), ("B", B), ("A_AGAIN", A_AGAIN)]);
+	}
+
+	/// The containing `TransactionInfo` layout is pinned by the renewal pallet's
+	/// `transaction_info_encoding_matches_pre_split_layout`.
+	#[test]
+	fn entry_kind_encoding_is_frozen() {
+		assert_eq!(EntryKind::Store.encode(), vec![0u8]);
+		assert_eq!(EntryKind::Renew.encode(), vec![1u8]);
+		assert_eq!(EntryKind::default(), EntryKind::Store);
 	}
 }

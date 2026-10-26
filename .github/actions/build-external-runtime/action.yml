@@ -1,0 +1,63 @@
+name: Build external runtime
+description: |
+  Restore the per-sha WASM cache and build the runtime via
+  `just build-external-runtime`. Repo, ref, and paths all come from
+  scripts/runtimes-matrix.json via `just external-runtime-paths`. Callers only
+  need to checkout the repo first.
+
+inputs:
+  name:
+    description: Runtime name in scripts/runtimes-matrix.json.
+    required: true
+  features:
+    description: Cargo features to build with. Each feature set uses its own checkout and cache.
+    required: false
+    default: ""
+
+outputs:
+  sha:
+    description: Resolved commit sha of the external runtime.
+    value: ${{ steps.resolve.outputs.sha }}
+  wasm-path:
+    description: Path to the built compact.compressed runtime WASM.
+    value: ${{ steps.build.outputs.wasm-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install just
+      uses: ./.github/actions/install-just
+
+    # Key the WASM cache on the commit sha so re-runs skip the multi-minute
+    # out-of-tree build.
+    - name: Resolve external runtime paths
+      id: resolve
+      shell: bash
+      working-directory: examples
+      env:
+        NAME: ${{ inputs.name }}
+        FEATURES: ${{ inputs.features }}
+      run: |
+        set -euo pipefail
+        read -r SHA WASM_DIR _ KEY < <(just external-runtime-paths "$NAME" "$FEATURES")
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "wasm-dir=$WASM_DIR" >> "$GITHUB_OUTPUT"
+        echo "cache-key=$KEY" >> "$GITHUB_OUTPUT"
+
+    - name: Cache external runtime WASM
+      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      with:
+        path: ${{ steps.resolve.outputs.wasm-dir }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Build external runtime
+      id: build
+      shell: bash
+      working-directory: examples
+      env:
+        NAME: ${{ inputs.name }}
+        FEATURES: ${{ inputs.features }}
+      run: |
+        set -euo pipefail
+        WASM_PATH="$(just build-external-runtime "$NAME" "$FEATURES")"
+        echo "wasm-path=$WASM_PATH" >> "$GITHUB_OUTPUT"

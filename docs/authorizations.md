@@ -52,27 +52,31 @@ Per-scope state is `Authorizations`, a map from `AuthorizationScope::{Account, P
 
 ```rust
 struct Authorization<T: Config> {
-    slots: BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
+    slots: BoundedVec<TimedAuthorizationFor<T>, T::MaxAuthorizationSlots>,
 }
 
-struct TimedAuthorization {
-    extent: AuthorizationExtent,
-    starts_at: u32,   // inclusive relay block
-    expiration: u32,  // exclusive relay block
+struct TimedAuthorization<BlockNumber, Extra> {
+    extent: AuthorizationExtent<Extra>,
+    starts_at: BlockNumber,   // inclusive relay block
+    expiration: BlockNumber,  // exclusive relay block
 }
 ```
 
+`BlockNumber` is the relay provider's block type (`u32` on the parachain runtimes). `Extra` is the opaque consumer-pallet payload (`pallet-bulletin-data-renewal`'s `PermanentExtent { bytes_permanent }` on the runtimes); the storage pallet never interprets it and renewals charge it per slot through `try_mutate_active_authorization`, which runs the renewal pallet's check on each active slot, earliest-expiring first, until one accepts.
+
 `starts_at` and `expiration` are **relay-chain** block numbers, sourced from `Config::RelayChainBlockNumberProvider` (cumulus parachain-system on live chains). A slot is **active** at `relay_now` iff `starts_at <= relay_now < expiration`; **future** while `starts_at > relay_now`; **expired** once `expiration <= relay_now`.
+
+The runtime API's `account_authorization` folds the active slots (usage summed, caps summed, `bytes_permanent_used` summed by the runtime) and reports `expires_at` as the latest active slot's expiration — a **relay** block, even though the field is typed as the parachain block number.
 
 The bounded vec is kept sorted by `expiration` ascending (tiebreak `starts_at`) by `add_slot`. The order keeps the SCALE encoding deterministic, makes the `try_state` invariant a single forward pass, and makes "earliest-expiring active slot" a forward scan.
 
-**Lazy prune.** Every read or mutate path goes through `prune_expired`, which drops slots where `expiration <= relay_now`. Drained-but-active slots (those at the soft cap on `bytes` / `transactions`) are intentionally kept — `store` never gates on those caps, so a drained slot still serves low-priority stores until it expires. Once every slot for a scope is dropped, the entry itself is removed and the provider-ref (for `Account` scope) is decremented.
+**Lazy prune.** Every mutating path goes through `prune_expired`, which drops slots where `expiration <= relay_now`; read paths simply ignore inactive slots. Drained-but-active slots (those at the soft cap on `bytes` / `transactions`) are intentionally kept — `store` never gates on those caps, so a drained slot still serves low-priority stores until it expires. Once every slot for a scope is dropped, the entry itself is removed and the provider-ref (for `Account` scope) is decremented.
 
 Westend / Paseo wiring:
 
 | Constant | Value |
 |---|---|
-| `MaxAuthorizationSlots` | `8` |
+| `MaxAuthorizationSlots` | `2` |
 | `DefaultAuthorizationWindow` | `14 × 14 400` = 201 600 relay blocks (14 days) |
 | `MaxStartsAtFuture` | `30 × 14 400` = 432 000 relay blocks (30 days) |
 
@@ -97,10 +101,10 @@ Counters live **inside a slot** — there is no cross-slot subsidy. `bytes` / `t
 
 ### Slot selection on `store` / `renew`
 
-`pick_slot_for_consumption` (in `lib.rs`) picks the earliest-expiring **active** slot:
+Consumption picks the earliest-expiring **active** slot:
 
-- `store`: any active slot is acceptable; the soft counters never gate. The earliest-expiring slot is chosen so capacity expiring soonest is consumed first.
-- `renew`: additionally filters to slots whose per-slot renew cap covers `size` (`bytes_permanent + size <= bytes_allowance`).
+- `store` (`check_authorization`): any active slot is acceptable; the soft counters never gate. The earliest-expiring slot is chosen so capacity expiring soonest is consumed first.
+- `renew` (`try_mutate_active_authorization`, driven by the renewal pallet's `check_renew_authorization`): the renewal check runs on each active slot in expiration order and the first slot whose per-slot renew cap covers `size` (`bytes_permanent + size <= bytes_allowance`) is charged.
 
 If no slot qualifies, `renew` returns `PermanentAllowanceExceeded` (when at least one slot is active but none has renew capacity) or `InvalidTransaction::Payment` (when no slot is active). On success, the chosen slot's `bytes` (store) or `bytes_permanent` (renew) is bumped by `size` and its `transactions` by 1. On a successful renew, the chain-wide `PermanentStorageUsed` is also bumped.
 
@@ -144,7 +148,7 @@ Preimage slots carry `transactions_allowance = 2`. The slot model gates the tran
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. `renew` and preimage-scoped stores get `0`.
-- The strategy is fed the **post-this-tx, folded** extent — `Pallet::account_authorization_extent(who)` sums per-slot `bytes` and `transactions` across *active* slots, **clamping each slot's used counters to that slot's own allowance** before adding. The clamp matters: without it an over-cap soft store on one slot would inflate the folded `bytes` past the folded `bytes_allowance` and mask another slot's remaining room from the boost.
+- The strategy is fed the **post-this-tx, folded** usage — `Authorization::usage(relay_now)` sums per-slot `bytes` and `transactions` across *active* slots, **clamping each slot's used counters to that slot's own allowance** before adding. The clamp matters: without it an over-cap soft store on one slot would inflate the folded `bytes` past the folded `bytes_allowance` and mask another slot's remaining room from the boost.
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while folded-in-budget on both axes, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
 
@@ -190,7 +194,7 @@ That obsolete-block cleanup is the only path that ever decrements `PermanentStor
 Stated up front:
 
 - Chain-wide bound at any block: total renewed bytes ≤ `MaxPermanentStorageSize`.
-- Per-account bound: with `K = RetentionPeriod / DefaultAuthorizationWindow` (Westend / Paseo: `K = 1`) and at most `S = MaxAuthorizationSlots = 8` concurrently active slots, the on-chain peak per account is bounded by `(K + 1) × S × bytes_allowance` in the worst case. Under the normal flow where a caller does not stack overlapping `_window` grants, the bound collapses to `(K + 1) × bytes_allowance`.
+- Per-account bound: with `K = RetentionPeriod / DefaultAuthorizationWindow` (Westend / Paseo: `K = 1`) and at most `S = MaxAuthorizationSlots = 2` concurrently active slots, the on-chain peak per account is bounded by `(K + 1) × S × bytes_allowance` in the worst case. Under the normal flow where a caller does not stack overlapping `_window` grants, the bound collapses to `(K + 1) × bytes_allowance`.
 
 Why: every renewed byte ages out exactly `RetentionPeriod` blocks after its renew block (the obsolete-block cleanup in `on_initialize`). New renews are gated by the chain-wide cap, so the counter can only enter the in-bounds region; as old data ages out, the cap recovers. Slot expiry only ends the *capacity to renew further* in that slot — it does not retroactively evict already-renewed bytes.
 
@@ -259,7 +263,7 @@ After both calls, `Authorizations[Bob].slots` is `[slot_A, slot_B]` (sorted by `
 | `renew(5 MiB)` of a 5 MiB blob | A | `bytes_permanent = 5 MiB` | unchanged |
 | `renew(6 MiB)` of a 6 MiB blob | B (A would breach `5 + 6 > 10`) | unchanged | `bytes_permanent = 6 MiB` |
 
-The folded `account_authorization_extent(Bob)` reports `bytes_allowance = 20 MiB`, `bytes_permanent = 11 MiB`, `transactions = 3`. The priority boost reads the folded view and stays in-budget on the soft axes.
+The runtime API's `account_authorization(Bob)` reports `bytes_allowance = 20 MiB`, `bytes_permanent_used = 11 MiB`, `transactions_used = 3`. The priority boost reads the folded view and stays in-budget on the soft axes.
 
 ### Example 5 — chain-wide cap at scale
 
@@ -277,15 +281,13 @@ A single account, even via stacked `_window` grants, cannot push concurrent on-c
 
 ## Migration
 
-`STORAGE_VERSION = 7`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, ..., v7}` modules for the wiring.
+`STORAGE_VERSION = 6`. Migrations are only relevant for the Paseo / Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, ..., v6}` modules. Both testnets are at on-chain version 5, so only `v6` is wired (`MbmMigrations`).
 
-`v3 → v4` (`migrations::v4::MigrateV3ToV4`, a `SteppedMigration`) re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring: true, paid: false }`. All pre-existing entries were written by the old fee-paying `enable_auto_renew`, which is the forever-renewal path and did **not** pre-pay against the owner's authorization — so `do_process_auto_renewals` charges them per-cycle, preserving their on-chain behaviour across the upgrade. New one-shot (`recurring: false`) and new prepaid (`paid: true`) entries are only reachable through the newer extrinsics, which can't have written any entries before the migration runs.
+`v3 → v4` (`migrations::v4::MigrateV3ToV4`) is a storage-version bump only; the `AutoRenewals` reshape it used to carry moved to `pallet_bulletin_data_renewal::migrations::RelocateFromTransactionStorage` with the renewal split.
 
-`v4 → v5` (`migrations::v5::MigrateV4ToV5`, single-block) re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping the pre-slots `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
+`v4 → v5` (`migrations::v5::MigrateV4ToV5`, single-block) re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
 
-`v5 → v6` (`migrations::v6::MigrateV5ToV6`, single-block) re-adds `authorization_period: Option<u32>` (now in relay blocks, as a per-authorizer cap on slot windows) to `AuthorizerBudget`, defaulting existing entries to `None`.
-
-`v6 → v7` (`migrations::v7::MigrateV6ToV7`, a `SteppedMigration`) translates each legacy `Authorizations[scope]` entry into a single-slot `Authorization { slots: [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }] }` in place (shared storage prefix), dropping zero-allowance or already-expired entries. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
+`v5 → v6` (`migrations::v6::MigrateV5ToV6`, a `SteppedMigration`) translates each pre-slot `Authorizations[scope]` entry into a single-slot `Authorization { slots: [TimedAuthorization { extent, starts_at: relay_now, expiration: relay_now + DefaultAuthorizationWindow }] }` in place (shared storage prefix), dropping zero-allowance or already-expired entries and releasing their provider reference. Consumed counters in the legacy `AuthorizationExtent` are dropped — translated slots start with `bytes = bytes_permanent = transactions = 0` and the legacy caps applied to a fresh window. The migration aborts cleanly if the relay-chain block number is unavailable (`relay_now == 0`); a later block reruns it.
 
 ## Capacity planning operational steps
 
@@ -296,7 +298,7 @@ When `PermanentStorageNearCap` fires, governance can either:
 
 ## Auto-renewal
 
-`AutoRenewals` entries carry `{ account, recurring: bool, paid: bool }`:
+`Renewals` entries (in `pallet-bulletin-data-renewal`) carry `{ account, recurring: bool, paid: bool }`:
 
 - `recurring: false` — one-shot, set by [`renew`](#storage-types). The first cycle consumes the prepayment and removes the registration.
 - `recurring: true` — forever, set by `enable_auto_renew`. The first cycle consumes the prepayment; cycle 2 onward charges per-cycle from the owner's authorization.
@@ -304,20 +306,20 @@ When `PermanentStorageNearCap` fires, governance can either:
 
 ### Registration
 
-`renew` and `enable_auto_renew` route through `extension::check_signed` with `is_renew = true`, which calls `check_authorization` and atomically picks an active slot with `bytes_permanent + size <= bytes_allowance`. Failure surfaces immediately at pool ingress (`PermanentAllowanceExceeded` per-slot, `ChainPermanentCapReached` chain-wide). Spam is bounded structurally by this up-front charge — a caller cannot over-schedule past `bytes_allowance` or `MaxPermanentStorageSize`. The pallet body then writes the `AutoRenewals` entry with `paid: true`; it does **not** re-invoke `do_renew`, otherwise `bytes_permanent` would be double-charged (once at registration, once on the prepaid cycle).
+`renew` and `enable_auto_renew` route through the renewal pallet's extension leaf, which calls `check_renew_authorization` and atomically picks an active slot with `bytes_permanent + size <= bytes_allowance`. Failure surfaces immediately at pool ingress (`PermanentAllowanceExceeded` per-slot, `ChainPermanentCapReached` chain-wide). Spam is bounded structurally by this up-front charge — a caller cannot over-schedule past `bytes_allowance` or `MaxPermanentStorageSize`. The pallet body then writes the `Renewals` entry with `paid: true`; it does **not** re-invoke `do_renew`, otherwise `bytes_permanent` would be double-charged (once at registration, once on the prepaid cycle).
 
 `disable_auto_renew` is rejected for signed owners while `paid: true` (`CannotDisablePrepaidAutoRenewal`) — the prepayment has already been deducted and cannot be reclaimed before the first cycle fires. Root bypasses the check (governance / cleanup); the prepayment is then forfeit.
 
 ### Cycle delivery
 
-The actual renewal flows through `process_auto_renewals` (driven by the `apply_block_inherents` mandatory inherent). It drains `PendingAutoRenewals` (populated by the obsolete-block cleanup in `on_initialize`) entry-by-entry:
+The actual renewal flows through `pallet-bulletin-data-renewal`'s `process_pending_renewals` mandatory inherent. It drains `PendingRenewals` (populated by the obsolete-block cleanup in `on_initialize`) entry-by-entry:
 
 1. If `paid: true`: deliver the renewal **without** charging the owner, then flip `paid` to `false` so subsequent cycles charge per-cycle. For `recurring: false`, the registration is removed immediately after the prepaid cycle.
-2. If `paid: false`: call the same `check_authorization` → `pick_slot_for_consumption` path as a user `renew`. The per-slot hard cap, chain-wide `PermanentStorageUsed` cap, `kind = Renew` stamp in `Transactions`, and obsolete-cleanup decrement all fire consistently. No separate accounting path.
+2. If `paid: false`: call the same `check_renew_authorization` → `try_mutate_active_authorization` path as a user `renew`. The per-slot hard cap, chain-wide `PermanentStorageUsed` cap, `kind = Renew` stamp in `Transactions`, and obsolete-cleanup decrement all fire consistently. No separate accounting path.
 
-If a queued auto-renewal can no longer pass the gate (no active slot, per-slot cap, or chain-wide cap), `process_auto_renewals` removes the registration and emits `AutoRenewalFailed`; the data ages out normally on its `RetentionPeriod`. The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
+If a queued auto-renewal can no longer pass the gate (no active slot, per-slot cap, or chain-wide cap), `process_pending_renewals` removes the registration and emits `RenewalFailed`; the data ages out normally on its `RetentionPeriod`. The latest-entry guard in `on_initialize` skips an obsolete entry when `TransactionByContentHash[hash]` points to a later block — a manual `force_renew` may have moved the latest reference forward; the renewal cycle then fires from the new entry's expiry, not the original.
 
 ## TODO
 
-- **Reserve block-transaction slots for user txs.** `process_auto_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
+- **Reserve block-transaction slots for user txs.** `process_pending_renewals` is mandatory and pushes into the same `BlockTransactions` slot as user `store` / `force_renew`. Cap auto-renewals to a fraction of `MaxBlockTransactions` or partition the slot budget.
 - **Per-content dedup of re-renewals (nice-to-have).** On a renew of `X`, look up the previous `(block, idx)` for `X` via `TransactionByContentHash` and cancel its pending decrement — drops the per-content double-count when the same content is renewed in multiple consecutive windows.

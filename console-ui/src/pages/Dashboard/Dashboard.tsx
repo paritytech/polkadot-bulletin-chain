@@ -14,6 +14,7 @@ import { useChainState, useApi } from "@/state/chain.state";
 import {
   extentAllowanceBytes,
   type RawTransactionInfo,
+  entryKindOf,
 } from "@/state/storage.state";
 import { formatBlockNumber, formatBytes, formatNumber } from "@/utils/format";
 
@@ -72,7 +73,7 @@ function QuickActions() {
 }
 
 function ChainInfoCard() {
-  const { status, chainName, specVersion, tokenSymbol, blockNumber, network } = useChainState();
+  const { status, chainName, specVersion, tokenSymbol, blockNumber, network, connectedEndpoint } = useChainState();
 
   return (
     <Card>
@@ -90,10 +91,29 @@ function ChainInfoCard() {
               <span className="text-sm text-muted-foreground">Network</span>
               <Badge variant="secondary">{network.name}</Badge>
             </div>
-            {network.endpoints[0] && (
-              <p className="text-xs text-muted-foreground font-mono mt-1 text-right break-all">
-                {network.endpoints[0]}
-              </p>
+            {network.endpoints.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {network.endpoints.map((endpoint) => {
+                  const isActive = endpoint === connectedEndpoint;
+                  return (
+                    <p
+                      key={endpoint}
+                      className={`text-xs font-mono text-right break-all ${
+                        isActive ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    >
+                      {isActive && (
+                        <span
+                          className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${
+                            status === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"
+                          }`}
+                        />
+                      )}
+                      {endpoint}
+                    </p>
+                  );
+                })}
+              </div>
             )}
           </div>
           <div className="flex items-center justify-between">
@@ -177,7 +197,8 @@ function WelcomeCard() {
 
 interface UsageStats {
   ephemeral: { count: number; bytes: bigint };
-  permanent: { count: number; used: bigint; cap: bigint };
+  /** null on runtimes that ship without renewal. */
+  permanent: { count: number; used: bigint; cap: bigint } | null;
   userAuths: { count: number; bytes: bigint };
   preimageAuths: { count: number; bytes: bigint };
 }
@@ -225,16 +246,20 @@ function UsageCard() {
         recordPalletError(err);
         return null;
       }),
-      api.query.TransactionStorage.PermanentStorageUsed.getValue().catch((err: unknown) => {
-        recordPalletError(err);
-        return null;
-      }),
-      Promise.resolve(api.constants.TransactionStorage.MaxPermanentStorageSize()).catch(
-        (err: unknown) => {
-          recordPalletError(err);
-          return null;
-        }
-      ),
+      // The chain-wide counter and cap moved from TransactionStorage to
+      // DataRenewal. api.query/api.constants are proxies that are truthy for
+      // any pallet name, so presence can't be tested; probe the new pallet
+      // with a call and fall back to the old one when the runtime rejects it.
+      // Neither answering means the runtime ships without renewal at all — not
+      // a TransactionStorage failure, so it must not set `palletError`.
+      Promise.resolve()
+        .then(() => (api.query as any).DataRenewal.PermanentStorageUsed.getValue())
+        .catch(() => (api.query as any).TransactionStorage.PermanentStorageUsed.getValue())
+        .catch(() => null),
+      Promise.resolve()
+        .then(() => (api.constants as any).DataRenewal.MaxPermanentStorageSize())
+        .catch(() => (api.constants as any).TransactionStorage.MaxPermanentStorageSize())
+        .catch(() => null),
     ])
       .then(([authEntries, txEntries, permUsed, permCap]: [any[] | null, { value: RawTransactionInfo[] }[] | null, bigint | null, bigint | null]) => {
         if (cancelled) return;
@@ -262,10 +287,11 @@ function UsageCard() {
           for (const { value } of txEntries) {
             if (Array.isArray(value)) {
               for (const info of value) {
-                if (info?.kind?.type === "Store") {
+                const entryKind = entryKindOf(info);
+                if (entryKind === "Store") {
                   ephemeral.count++;
                   ephemeral.bytes += BigInt(info.size);
-                } else if (info?.kind?.type === "Renew") {
+                } else if (entryKind === "Renew") {
                   permanentCount.count++;
                 }
               }
@@ -275,11 +301,10 @@ function UsageCard() {
 
         setStats({
           ephemeral,
-          permanent: {
-            count: permanentCount.count,
-            used: permUsed ?? 0n,
-            cap: permCap ?? 0n,
-          },
+          permanent:
+            permUsed === null && permCap === null
+              ? null
+              : { count: permanentCount.count, used: permUsed ?? 0n, cap: permCap ?? 0n },
           userAuths,
           preimageAuths,
         });
@@ -328,18 +353,22 @@ function UsageCard() {
                 <TotalsStat label="Bytes" value={formatBytes(stats.ephemeral.bytes)} />
               </div>
             </div>
-            <hr />
-            <div>
-              <p className="text-sm font-medium mb-2">Permanent</p>
-              <div className="grid grid-cols-2 gap-4">
-                <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
-                <TotalsStat
-                  label="Bytes"
-                  value={formatBytes(stats.permanent.used)}
-                  hint={`of ${formatBytes(stats.permanent.cap)}`}
-                />
-              </div>
-            </div>
+            {stats.permanent && (
+              <>
+                <hr />
+                <div>
+                  <p className="text-sm font-medium mb-2">Permanent</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <TotalsStat label="Transactions" value={formatNumber(stats.permanent.count)} />
+                    <TotalsStat
+                      label="Bytes"
+                      value={formatBytes(stats.permanent.used)}
+                      hint={`of ${formatBytes(stats.permanent.cap)}`}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
             <hr />
             <div>
               <p className="text-sm font-medium mb-2">Authorizations</p>

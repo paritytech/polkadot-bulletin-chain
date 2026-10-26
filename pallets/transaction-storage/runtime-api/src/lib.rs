@@ -18,14 +18,15 @@ use scale_info::TypeInfo;
 /// has an unexpired authorization entry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub struct AccountAuthorization<BlockNumber> {
-	/// Block at which this account's authorization expires.
+	/// Relay-chain block at which the account's latest active authorization slot expires.
+	/// Slot windows run on the relay clock, not the parachain's.
 	pub expires_at: BlockNumber,
 	/// Total byte cap granted by the authorizer.
 	pub bytes_allowance: u64,
 	/// Bytes already consumed by `store` calls.
 	pub bytes_used: u64,
-	/// Bytes already consumed by `renew` calls (counts against the same
-	/// `bytes_allowance` cap).
+	/// Bytes already consumed by `renew` calls. Checked against `bytes_allowance` on
+	/// its own — it does not add to `bytes_used`.
 	pub bytes_permanent_used: u64,
 	/// Total transaction cap granted by the authorizer. Used together with
 	/// `transactions_used` to predict whether a `store` will receive the
@@ -37,6 +38,7 @@ pub struct AccountAuthorization<BlockNumber> {
 
 sp_api::decl_runtime_apis! {
 	/// Runtime API for the Bulletin Chain transaction-storage pallet.
+	#[api_version(1)]
 	pub trait BulletinTransactionStorageApi<AccountId, BlockNumber>
 	where
 		AccountId: Codec,

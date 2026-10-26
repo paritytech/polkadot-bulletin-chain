@@ -21,6 +21,15 @@ use subxt_signer::sr25519::Keypair;
 #[subxt::subxt(runtime_metadata_path = "../metadata.scale")]
 pub mod bulletin {}
 
+/// Runtime name of the pallet holding the renewal extrinsics. Absent on chains that ship
+/// without `pallet-bulletin-data-renewal`.
+const RENEWAL_PALLET: &str = "DataRenewal";
+
+/// Runtime API exposing the authorization summary, and the method on it that
+/// [`TransactionClient::query_account_authorization`] calls. Absent on runtimes that predate them.
+const AUTHORIZATION_API: &str = "BulletinTransactionStorageApi";
+const AUTHORIZATION_METHOD: &str = "account_authorization";
+
 /// Convert the primitives `TransactionRef` into the subxt-generated one.
 fn to_runtime_ref(
 	entry: &TransactionRef<u32>,
@@ -224,68 +233,63 @@ impl TransactionClient {
 	}
 
 	/// Query the current authorization for an account and return the remaining boost-tier
-	/// capacity as `(transactions_remaining, bytes_remaining)`, summed over the slots
-	/// active at the current relay-chain block.
+	/// capacity as `(transactions_remaining, bytes_remaining)`.
 	///
-	/// `bytes` and `transactions` on a slot's extent are *consumed* counters; this
-	/// helper subtracts them from the granted caps (saturating to `0` if a slot is
-	/// already over-cap on either axis) before summing. Note that overshooting the caps
-	/// no longer rejects the transaction — it only forfeits the priority boost — so the
-	/// returned remaining values are a soft-budget preflight, not a hard precondition.
+	/// `bytes` and `transactions` on `AuthorizationExtent` are *consumed* counters; this
+	/// helper subtracts them from the granted caps (saturating to `0` if the holder is
+	/// already over-cap on either axis). Note that overshooting the caps no longer rejects
+	/// the transaction — it only forfeits the priority boost — so the returned remaining
+	/// values are a soft-budget preflight, not a hard precondition.
 	///
-	/// Returns `None` if no authorization exists or no slot is currently active.
+	/// Returns `None` if no authorization exists or it has expired, and
+	/// [`Error::AuthorizationApiUnavailable`] on a runtime without [`AUTHORIZATION_API`].
 	pub async fn query_account_authorization(
 		&self,
 		who: &AccountId32,
 	) -> Result<Option<(u32, u64)>> {
-		use bulletin::runtime_types::pallet_bulletin_transaction_storage::types::AuthorizationScope as OnChainScope;
+		self.ensure_authorization_api_available()?;
 
-		let storage_query = bulletin::storage()
-			.transaction_storage()
-			.authorizations(OnChainScope::Account(who.clone()));
+		let call = bulletin::apis()
+			.bulletin_transaction_storage_api()
+			.account_authorization(who.clone());
 
-		let latest_block = self
+		let maybe_auth = self
 			.api
-			.blocks()
+			.runtime_api()
 			.at_latest()
 			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?;
-
-		// Slot windows are expressed in relay-chain blocks.
-		let relay_now = latest_block
-			.storage()
-			.fetch_or_default(
-				&bulletin::storage().parachain_system().last_relay_chain_block_number(),
-			)
+			.map_err(|e| Error::NetworkError(format!("Failed to get latest block: {e:?}")))?
+			.call(call)
 			.await
-			.map_err(|e| Error::NetworkError(format!("Failed to query relay block: {e:?}")))?;
+			.map_err(|e| Error::NetworkError(format!("Failed to query authorization: {e:?}")))?;
 
-		let maybe_auth =
-			latest_block.storage().fetch(&storage_query).await.map_err(|e| {
-				Error::NetworkError(format!("Failed to query authorization: {e:?}"))
-			})?;
-
+		// The runtime API already filters out expired authorizations.
 		let Some(auth) = maybe_auth else { return Ok(None) };
 
-		let mut active = false;
-		let mut transactions_remaining: u32 = 0;
-		let mut bytes_remaining: u64 = 0;
-		for slot in auth.slots.0 {
-			if slot.starts_at <= relay_now && relay_now < slot.expiration {
-				active = true;
-				transactions_remaining = transactions_remaining.saturating_add(
-					slot.extent.transactions_allowance.saturating_sub(slot.extent.transactions),
-				);
-				bytes_remaining = bytes_remaining
-					.saturating_add(slot.extent.bytes_allowance.saturating_sub(slot.extent.bytes));
-			}
-		}
+		let transactions_remaining =
+			auth.transactions_allowance.saturating_sub(auth.transactions_used);
+		// `bytes_permanent_used` is checked against `bytes_allowance` on its own and never adds to
+		// `bytes_used`, so a `store` preflight looks at `bytes_used` alone.
+		let bytes_remaining = auth.bytes_allowance.saturating_sub(auth.bytes_used);
+		Ok(Some((transactions_remaining, bytes_remaining)))
+	}
 
-		if active {
-			Ok(Some((transactions_remaining, bytes_remaining)))
-		} else {
-			Ok(None)
+	/// Reject up front on a runtime that predates [`AUTHORIZATION_API`], where the call would
+	/// otherwise fail with subxt's metadata-validation error instead of the actual reason.
+	///
+	/// Checks the method rather than just the trait: a runtime can carry the trait at an older
+	/// version that does not yet declare [`AUTHORIZATION_METHOD`].
+	fn ensure_authorization_api_available(&self) -> Result<()> {
+		let has_method = self
+			.api
+			.metadata()
+			.runtime_api_trait_by_name(AUTHORIZATION_API)
+			.is_some_and(|api| api.method_by_name(AUTHORIZATION_METHOD).is_some());
+
+		if !has_method {
+			return Err(Error::AuthorizationApiUnavailable);
 		}
+		Ok(())
 	}
 
 	/// Check that sufficient authorization exists for a store operation.
@@ -301,13 +305,22 @@ impl TransactionClient {
 	///
 	/// If the query itself fails (e.g., network error), the error is returned
 	/// so the caller can decide whether to proceed.
+	///
+	/// A runtime without [`AUTHORIZATION_API`] is the one exception: there is nothing to
+	/// preflight against, and a soft check must not block a `store` the chain would accept,
+	/// so the check passes. Matches the TypeScript SDK, which also proceeds when it cannot
+	/// read the authorization.
 	pub async fn check_authorization_for_store(
 		&self,
 		who: &AccountId32,
 		required_transactions: u32,
 		required_bytes: u64,
 	) -> Result<()> {
-		let auth_data = self.query_account_authorization(who).await?;
+		let auth_data = match self.query_account_authorization(who).await {
+			Ok(auth_data) => auth_data,
+			Err(Error::AuthorizationApiUnavailable) => return Ok(()),
+			Err(e) => return Err(e),
+		};
 
 		match auth_data {
 			Some((transactions, bytes)) => {
@@ -444,11 +457,26 @@ impl TransactionClient {
 		Ok(PreimageAuthorizationReceipt { content_hash, max_size, block_hash: result.block_hash })
 	}
 
+	/// Reject renewal calls up front on a chain that has no renewal pallet.
+	///
+	/// The generated calls are built from `sdk/metadata.scale`, which comes from a runtime
+	/// that wires `pallet-bulletin-data-renewal`. A runtime that omits it has no
+	/// [`RENEWAL_PALLET`] at all, and submitting would surface subxt's metadata-validation
+	/// error instead of the actual reason.
+	fn ensure_renewal_available(&self) -> Result<()> {
+		if self.api.metadata().pallet_by_name(RENEWAL_PALLET).is_none() {
+			return Err(Error::RenewalUnavailable);
+		}
+		Ok(())
+	}
+
 	/// Schedule a one-shot renewal of stored data.
 	///
 	/// The renewal fires once when the data reaches its retention boundary; it
 	/// does not renew synchronously. For immediate renewal use
 	/// [`force_renew`](Self::force_renew).
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
 	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
@@ -458,8 +486,9 @@ impl TransactionClient {
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
+		self.ensure_renewal_available()?;
 		let entry = entry.into();
-		let tx = bulletin::tx().transaction_storage().renew(to_runtime_ref(&entry));
+		let tx = bulletin::tx().data_renewal().renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {
@@ -474,14 +503,17 @@ impl TransactionClient {
 	///
 	/// `entry` accepts anything convertible to [`TransactionRef`]: a
 	/// `(block, index)` tuple or a [`ContentHash`].
+	///
+	/// Returns [`Error::RenewalUnavailable`] on a chain without the renewal pallet.
 	pub async fn force_renew(
 		&self,
 		entry: impl Into<TransactionRef<u32>>,
 		signer: &Keypair,
 		wait_for: WaitFor,
 	) -> Result<RenewReceipt> {
+		self.ensure_renewal_available()?;
 		let entry = entry.into();
-		let tx = bulletin::tx().transaction_storage().force_renew(to_runtime_ref(&entry));
+		let tx = bulletin::tx().data_renewal().force_renew(to_runtime_ref(&entry));
 
 		let result = self
 			.submit_and_watch(&tx, signer, wait_for, None, |e| {

@@ -109,7 +109,8 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
     used: {
       transactions: BigInt(extent?.transactions ?? 0),
       bytesEphemeral: BigInt(extent?.bytes ?? 0n),
-      bytesPermanent: BigInt(extent?.bytes_permanent ?? 0n),
+      // `extra` is the renewal pallet's single-field `PermanentExtent`, which PAPI unwraps to a bigint.
+      bytesPermanent: BigInt(extent?.extra ?? 0n),
     },
     allowance: {
       transactions: extentAllowanceTransactions(extent),
@@ -118,7 +119,7 @@ function buildAuthorization(extent: any, expiration: number | null | undefined):
   };
 }
 
-export type TransactionKind = "Store" | "Renew";
+export type EntryKind = "Store" | "Renew";
 
 export interface TransactionInfo {
   chunkRoot: Uint8Array;
@@ -127,10 +128,27 @@ export interface TransactionInfo {
   blockChunks: number;
 }
 
-/** Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we read. */
+/**
+ * Raw PAPI shape for a TransactionStorage::Transactions entry, with only the fields we
+ * read. `meta` is the current runtime's field name; `kind` is the pre-split name still
+ * used by live chains (and by descriptors generated from them). The variant names are
+ * identical on both sides — read via [`entryKindOf`].
+ */
 export interface RawTransactionInfo {
   size: number;
-  kind: { type: TransactionKind };
+  meta?: { type: EntryKind };
+  kind?: { type: EntryKind };
+}
+
+/**
+ * Entry kind of a raw `Transactions` entry, tolerant of pre-split runtimes.
+ *
+ * Runtimes that ship without `pallet-bulletin-data-renewal` wire `EntryMeta = ()`, which
+ * decodes to nothing — there is no renewal on such a chain, so every entry is a `Store`.
+ */
+export function entryKindOf(info: RawTransactionInfo | undefined): EntryKind | undefined {
+  if (!info) return undefined;
+  return info.meta?.type ?? info.kind?.type ?? "Store";
 }
 
 // Account authorization state

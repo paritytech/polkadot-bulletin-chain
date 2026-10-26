@@ -42,28 +42,20 @@ impl SortedMembers<AccountId> for TestAccounts {
 	}
 }
 
-/// Number of relay-chain blocks per day (relay produces a block every 6 s, so
-/// 14 400 blocks/day). Used to express slot-window constants in relay-chain
-/// time, which is what [`pallet_bulletin_transaction_storage`] uses for slot
-/// `(starts_at, expiration)`.
-pub const DAYS_RELAY: u32 = 14_400;
-
 /// Cleanup runs before stores compete for blockspace.
 const CLEANUP_PRIORITY: TransactionPriority = TransactionPriority::MAX;
 /// Below `MAX` so `AllowanceBasedPriority` can add its boost without saturating `u64`.
 const STORE_PRIORITY: TransactionPriority = TransactionPriority::MAX / 4;
+/// Relay-chain blocks per day (6s blocks).
+pub const DAYS_RELAY: u32 = 14_400;
+
 const TX_LONGEVITY: TransactionLongevity = crate::DAYS as TransactionLongevity;
 
 parameter_types! {
-	/// Default authorization window for `authorize_account` / `authorize_preimage`
-	/// (relay blocks). 14 days = 201 600 relay blocks.
+	/// Slot windows are measured in relay blocks (6s).
 	pub const DefaultAuthorizationWindow: u32 = 14 * DAYS_RELAY;
-	/// Maximum future offset for `authorize_account_window` / `authorize_preimage_window`
-	/// (relay blocks). 30 days of headroom — more than enough to schedule
-	/// future slots ahead of People-chain rollovers.
 	pub const MaxStartsAtFuture: u32 = 30 * DAYS_RELAY;
-	/// Maximum number of overlapping slots stored per scope.
-	pub const MaxAuthorizationSlots: u32 = 8;
+	pub const MaxAuthorizationSlots: u32 = 2;
 	pub const StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("TransactionStorageStore", STORE_PRIORITY, TX_LONGEVITY);
 	pub const RenewTxParams: ValidTransactionParams =
@@ -90,7 +82,7 @@ parameter_types! {
 		);
 }
 
-/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateStorageCalls`] how to find
+/// Tells [`pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls`] how to find
 /// storage calls inside wrapper extrinsics so it can recursively validate and consume
 /// authorization.
 ///
@@ -133,7 +125,6 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
 	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
 	type MaxStartsAtFuture = MaxStartsAtFuture;
 	type MaxAuthorizationSlots = MaxAuthorizationSlots;
@@ -164,14 +155,22 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 		EnsureAllowedAuthorizers<Runtime>,
 	>;
 	type StoreTxParams = StoreTxParams;
-	type RenewTxParams = RenewTxParams;
 	type AuthorizeTxParams = AuthorizeTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	type EntryMeta = bulletin_transaction_storage_primitives::EntryKind;
+	type AuthorizationExtra = pallet_bulletin_data_renewal::PermanentExtent;
+	type OnObsoleteTransactions = crate::DataRenewal;
 	#[cfg(feature = "runtime-benchmarks")]
-	type BenchmarkHelper =
-		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
+	type BenchmarkHelper = pallet_bulletin_data_renewal::RenewalBenchmarkHelper;
+}
+
+impl pallet_bulletin_data_renewal::Config for Runtime {
+	type RuntimeEvent = RuntimeEvent;
+	type WeightInfo = crate::weights::pallet_bulletin_data_renewal::WeightInfo<Runtime>;
+	type MaxPermanentStorageSize = ConstU64<{ MAX_PERMANENT_STORAGE_SIZE }>;
+	type RenewTxParams = RenewTxParams;
 }
 
 parameter_types! {

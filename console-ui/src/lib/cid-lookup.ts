@@ -5,6 +5,7 @@ import type { CID } from "@parity/bulletin-sdk";
 import { CidCodec, UnixFsDagBuilder } from "@parity/bulletin-sdk";
 import { bulletin_paseo_next_v2 } from "@polkadot-api/descriptors";
 import { Binary, type HexString, type SizedHex, type TypedApi } from "polkadot-api";
+import { entryKindOf } from "@/state/storage.state";
 
 /** Chain truth for a single stored transaction. */
 export interface OnChainTransaction {
@@ -74,7 +75,7 @@ async function locateContentHashes(
       blockNumber,
       index: txIndex,
       size: info?.size != null ? Number(info.size) : undefined,
-      kind: info?.kind?.type,
+      kind: entryKindOf(info),
       cidCodec: info?.cid_codec != null ? Number(info.cid_codec) : undefined,
       hashing: info?.hashing?.type,
     });
@@ -92,6 +93,40 @@ export async function lookupCidOnChain(
   const hash = contentHashHex(cid) as HexString;
   const map = await locateContentHashes(api, [hash]);
   return map.get(hash) ?? null;
+}
+
+/** A `Renewals` entry: one registration per content hash. */
+export interface RenewalRegistration {
+  account: string;
+  /** Recurring auto-renewal, versus a one-shot scheduled `renew`. */
+  recurring: boolean;
+  /** Next cycle is prepaid; the chain refuses `disable_auto_renew` until it fires. */
+  paid: boolean;
+}
+
+/**
+ * `Renewals[content_hash]`, or null when unregistered or the runtime ships no
+ * renewal pallet.
+ *
+ * The counter moved from `TransactionStorage` to `DataRenewal`; PAPI namespaces
+ * are truthy proxies for any name, so probe by call and fall back.
+ */
+export async function fetchRenewalRegistration(
+  api: Api,
+  contentHash: HexString,
+): Promise<RenewalRegistration | null> {
+  const hash = contentHash as SizedHex<32>;
+  const raw = await Promise.resolve()
+    .then(() => api.query.DataRenewal.Renewals.getValue(hash))
+    // biome-ignore lint/suspicious/noExplicitAny: pre-split runtime fallback
+    .catch(() => (api.query as any).TransactionStorage.Renewals.getValue(hash))
+    .catch(() => null);
+  if (!raw) return null;
+  return {
+    account: raw.account,
+    recurring: raw.recurring,
+    paid: raw.paid,
+  };
 }
 
 export interface ResolveCidOptions {

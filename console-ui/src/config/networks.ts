@@ -15,6 +15,8 @@ export interface MonitoringLinks {
   grafana?: string;
   /** Grafana Bitswap server insights dashboard (IPFS/Bitswap serve load). */
   bitswap?: string;
+  /** Grafana Bulletin dashboard: chain liveness, IPFS, Bitswap, HOP pool/promotion/RPC. */
+  bulletin?: string;
   /** Sentry dashboard for product-side telemetry on this chain. */
   sentry?: string;
   /** Sentry drill-down: deploy.storage phase (per-deploy Bulletin write). */
@@ -198,7 +200,12 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
   "products-devnet": {
     id: "products-devnet",
     name: "Products Devnet",
-    endpoints: ["wss://bullet.tunastaking.eu", "wss://bullet.sik.rocks"],
+    endpoints: [
+      "wss://bullet.sik.rocks",
+      "wss://bullet.tunastaking.eu",
+      "wss://bulletin-paseo.tservices.es:8443",
+      "wss://bulletin-paseo-02.tservices.es:9443",
+    ],
     lightClient: false,
     descriptor: bulletin_products_devnet,
     peerMultiaddrs: [
@@ -239,6 +246,8 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
         "next-bulletin-paseo",
         "paseo-bulletin-next-collator-node-0",
       ),
+      bulletin:
+        "https://grafana.teleport.parity.io/d/bulletin-paseo?orgId=1&from=now-6h&to=now&timezone=utc&var-datasource=PC96415006F908B67&var-chain=next-bulletin-paseo",
       bitswap: bitswapLink("next-bulletin-paseo"),
       sentry: SENTRY_BULLETIN_DEPLOY_HEALTH,
       sentryStorageSpan: SENTRY_STORAGE_SPAN,

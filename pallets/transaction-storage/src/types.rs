@@ -15,12 +15,16 @@
 
 //! Type definitions for the transaction storage pallet.
 
+pub use bulletin_transaction_storage_primitives::{
+	assert_distinct_tag_prefixes, TransactionRef, ValidTransactionParams,
+};
 use bulletin_transaction_storage_primitives::{
 	cids::{CidCodec, HashingAlgorithm},
 	ContentHash,
 };
-pub use bulletin_transaction_storage_primitives::{TransactionRef, ValidTransactionParams};
 use codec::{Decode, Encode, MaxEncodedLen};
+use frame_support::{CloneNoBound, DebugNoBound, EqNoBound, PartialEqNoBound};
+use pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization;
 #[cfg(feature = "runtime-benchmarks")]
 use polkadot_sdk_frame::deps::frame_benchmarking;
 use polkadot_sdk_frame::{
@@ -28,6 +32,7 @@ use polkadot_sdk_frame::{
 	prelude::*,
 	traits::fungible::{Credit, Inspect},
 };
+use sp_runtime::traits::BlockNumberProvider;
 use sp_transaction_storage_proof::ChunkIndex;
 
 use crate::{AllowedAuthorizers, Config, Pallet};
@@ -38,40 +43,42 @@ pub(crate) type BalanceOf<T> =
 
 pub type CreditOf<T> = Credit<<T as frame_system::Config>::AccountId, <T as Config>::Currency>;
 
-/// Usage state of an authorization. All four counters reset to `0` when the authorization
-/// is (re-)granted on the expired-but-present path, so they measure consumption **within
-/// the current authorization window** — not lifetime on-chain footprint:
+/// Relay-chain block number type, as reported by [`Config::RelayChainBlockNumberProvider`].
+/// Authorization slot windows are expressed in this clock.
+pub type RelayBlockNumberFor<T> =
+	<<T as Config>::RelayChainBlockNumberProvider as BlockNumberProvider>::BlockNumber;
+
+/// Usage state of one authorization slot. Counters measure per-slot consumption:
 ///
-/// - `bytes` / `transactions` — soft side (priority signal). Saturate upward on every `store`;
-///   never gate.
-/// - `bytes_permanent` — hard side (per-window renew quota). Increments on every `renew`, gates
-///   with [`crate::Error::PermanentAllowanceExceeded`] when `bytes_permanent + size >
-///   bytes_allowance`. Never decrements; the chain-wide [`crate::PermanentStorageUsed`] counter is
-///   the source of truth for renewed on-chain bytes.
+/// - `bytes` / `transactions` — soft side (priority signal); saturate, never gate.
 /// - `bytes_allowance` / `transactions_allowance` — caps set at grant time. `bytes_allowance` is
-///   shared between the soft and hard axes.
+///   shared with the consumer pallet's `extra` accounting.
+/// - `extra` — opaque consumer-pallet state; this pallet only stores it.
+///
+/// FIELD ORDER IS LOAD-BEARING. Before the renewal split this struct held a `bytes_permanent:
+/// u64` where `extra` now sits; the v5→v6 migration decodes the pre-slot layout through
+/// [`crate::migrations::v6::LegacyAuthorization`], which relies on `extra` keeping that slot.
+/// Pinned by `pallet_bulletin_data_renewal::tests::authorization_encoding_matches_pre_split_layout`.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Default, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
-pub struct AuthorizationExtent {
+pub struct AuthorizationExtent<Extra> {
 	/// Transactions consumed so far.
 	pub transactions: u32,
 	/// Total transaction allowance granted.
 	pub transactions_allowance: u32,
 	/// Bytes consumed by `store` calls (temporary storage).
 	pub bytes: u64,
-	/// Bytes consumed by `renew` calls (permanent storage).
-	pub bytes_permanent: u64,
+	/// Opaque consumer-pallet state, mutated only through
+	/// [`crate::Pallet::try_mutate_active_authorization`]. Occupies the pre-split
+	/// `bytes_permanent` slot — see the struct docs.
+	pub extra: Extra,
 	/// Total byte allowance granted.
 	pub bytes_allowance: u64,
 }
 
-impl AuthorizationExtent {
-	/// Per-account renew quota check: `bytes_permanent + size <= bytes_allowance`.
-	pub fn has_permanent_capacity(&self, size: u64) -> bool {
-		self.bytes_permanent.saturating_add(size) <= self.bytes_allowance
-	}
-}
+/// [`AuthorizationExtent`] bound to a runtime's [`crate::Config::AuthorizationExtra`].
+pub type AuthorizationExtentFor<T> = AuthorizationExtent<<T as Config>::AuthorizationExtra>;
 
 /// The scope of an authorization.
 ///
@@ -95,14 +102,13 @@ pub enum AuthorizationScope<AccountId> {
 	Preimage(ContentHash),
 }
 
-pub(crate) type AuthorizationScopeFor<T> =
-	AuthorizationScope<<T as frame_system::Config>::AccountId>;
+pub type AuthorizationScopeFor<T> = AuthorizationScope<<T as frame_system::Config>::AccountId>;
 
 /// Describes the caller of a store/renew extrinsic after origin validation.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum AuthorizedCaller<AccountId> {
 	/// A signed transaction whose origin was transformed to
-	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateStorageCalls`].
+	/// [`crate::pallet::Origin::Authorized`] by [`crate::extension::ValidateAuthorizedCalls`].
 	Signed { who: AccountId, scope: AuthorizationScope<AccountId> },
 	/// A root call (e.g. via `sudo`).
 	Root,
@@ -114,44 +120,54 @@ pub enum AuthorizedCaller<AccountId> {
 /// Convenience alias for [`AuthorizedCaller`] bound to a runtime's `AccountId`.
 pub type AuthorizedCallerFor<T> = AuthorizedCaller<<T as frame_system::Config>::AccountId>;
 
-/// A single authorization slot with an explicit `(starts_at, expiration)` window
-/// expressed in **relay-chain** block numbers.
+/// One authorization slot: an extent valid over the **relay-chain** block window
+/// `[starts_at, expiration)`.
 ///
-/// Slots can overlap. They are stored sorted by `expiration` ascending (tiebreak
-/// `starts_at`) inside an [`Authorization`]; the deterministic order keeps the
-/// SCALE encoding stable, lets `try_state` express a simple invariant, and makes
-/// "earliest-expiring active slot with capacity" a single forward scan.
+/// Slots may overlap. Inside an [`Authorization`] they are kept sorted by `expiration`
+/// ascending (tiebreak `starts_at`), so "earliest-expiring active slot" is a forward scan.
 #[derive(
 	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
 )]
-pub struct TimedAuthorization {
-	/// Per-slot consumption + caps. `bytes_permanent` is per-slot — the renew
-	/// hard-cap is checked against this slot's `bytes_allowance` only.
-	pub extent: AuthorizationExtent,
+pub struct TimedAuthorization<BlockNumber, Extra> {
+	pub extent: AuthorizationExtent<Extra>,
 	/// First relay block at which this slot is active (inclusive).
-	pub starts_at: u32,
+	pub starts_at: BlockNumber,
 	/// Relay block at which this slot ceases to be active (exclusive).
-	pub expiration: u32,
+	pub expiration: BlockNumber,
 }
 
-impl TimedAuthorization {
-	/// `starts_at <= relay_now < expiration`. The expiration boundary is exclusive
-	/// so the lazy prune predicate (`expiration <= relay_now`) stays symmetric.
-	pub fn is_active(&self, relay_now: u32) -> bool {
+impl<BlockNumber: PartialOrd + Copy, Extra> TimedAuthorization<BlockNumber, Extra> {
+	/// `starts_at <= relay_now < expiration`.
+	pub fn is_active(&self, relay_now: BlockNumber) -> bool {
 		self.starts_at <= relay_now && relay_now < self.expiration
+	}
+
+	/// `expiration <= relay_now`; the lazy-prune predicate.
+	pub fn expired(&self, relay_now: BlockNumber) -> bool {
+		self.expiration <= relay_now
 	}
 }
 
+pub type TimedAuthorizationFor<T> =
+	TimedAuthorization<RelayBlockNumberFor<T>, <T as Config>::AuthorizationExtra>;
+
 /// Per-scope authorization: a bounded vec of [`TimedAuthorization`] slots.
-#[derive(Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
+#[derive(
+	CloneNoBound,
+	PartialEqNoBound,
+	EqNoBound,
+	DebugNoBound,
+	Encode,
+	Decode,
+	scale_info::TypeInfo,
+	MaxEncodedLen,
+)]
 #[scale_info(skip_type_params(T))]
 pub struct Authorization<T: Config> {
-	pub slots: BoundedVec<TimedAuthorization, T::MaxAuthorizationSlots>,
+	pub slots: BoundedVec<TimedAuthorizationFor<T>, T::MaxAuthorizationSlots>,
 }
 
-// Hand-written `Default`: the derive adds `T: Default` and
-// `T::MaxAuthorizationSlots: Default` bounds (neither holds for runtime
-// `Config` impls), but an empty `BoundedVec` is always a valid default.
+// Hand-written: the derive would require `T: Default`.
 impl<T: Config> Default for Authorization<T> {
 	fn default() -> Self {
 		Self { slots: BoundedVec::new() }
@@ -159,54 +175,114 @@ impl<T: Config> Default for Authorization<T> {
 }
 
 impl<T: Config> Authorization<T> {
-	/// `true` when every slot has expired at `relay_now` — i.e. no slot is
-	/// still active, even drained ones.
-	pub fn all_expired(&self, relay_now: u32) -> bool {
-		self.slots.iter().all(|s| s.expiration <= relay_now)
+	/// `true` when no slot is still active or pending at `relay_now`.
+	pub fn all_expired(&self, relay_now: RelayBlockNumberFor<T>) -> bool {
+		self.slots.iter().all(|s| s.expired(relay_now))
 	}
 
-	/// Folded extent across active slots at `relay_now`. Per-slot `bytes` and
-	/// `transactions` are clamped at their own caps before summing — `store()`
-	/// saturates them without gating, so a low-priority over-cap store on one
-	/// slot would otherwise inflate the folded counters past the folded
-	/// allowance and mask remaining room on other slots from the priority boost.
-	/// `bytes_permanent` is already bounded per slot by the renew hard cap.
-	pub fn extent(&self, relay_now: u32) -> AuthorizationExtent {
-		let mut acc = AuthorizationExtent::default();
-		for slot in self.slots.iter() {
-			if !slot.is_active(relay_now) {
-				continue;
-			}
-			acc.bytes_allowance = acc.bytes_allowance.saturating_add(slot.extent.bytes_allowance);
-			let slot_bytes = slot.extent.bytes.min(slot.extent.bytes_allowance);
-			acc.bytes = acc.bytes.saturating_add(slot_bytes);
-			acc.bytes_permanent = acc.bytes_permanent.saturating_add(slot.extent.bytes_permanent);
+	/// Slots active at `relay_now`, earliest-expiring first.
+	pub fn active_slots(
+		&self,
+		relay_now: RelayBlockNumberFor<T>,
+	) -> impl Iterator<Item = &TimedAuthorizationFor<T>> {
+		self.slots.iter().filter(move |s| s.is_active(relay_now))
+	}
 
+	/// Fold of the soft counters and caps over active slots. `extra` is opaque to this
+	/// pallet and is not folded, hence the `()` payload; consumers that need it sum it
+	/// over [`Self::active_slots`] themselves (see [`Self::to_account_authorization`]).
+	///
+	/// Per-slot `bytes` / `transactions` are clamped at their own caps before summing:
+	/// `store` saturates them without gating, so an over-cap store on one slot must not
+	/// mask remaining room on another from the priority boost.
+	pub fn usage(&self, relay_now: RelayBlockNumberFor<T>) -> AuthorizationExtent<()> {
+		let mut acc = AuthorizationExtent::<()>::default();
+		for slot in self.active_slots(relay_now) {
+			acc.bytes_allowance = acc.bytes_allowance.saturating_add(slot.extent.bytes_allowance);
+			acc.bytes =
+				acc.bytes.saturating_add(slot.extent.bytes.min(slot.extent.bytes_allowance));
 			acc.transactions_allowance =
 				acc.transactions_allowance.saturating_add(slot.extent.transactions_allowance);
-			let slot_tx = slot.extent.transactions.min(slot.extent.transactions_allowance);
-			acc.transactions = acc.transactions.saturating_add(slot_tx);
+			acc.transactions = acc
+				.transactions
+				.saturating_add(slot.extent.transactions.min(slot.extent.transactions_allowance));
 		}
 		acc
 	}
+
+	/// Project into the runtime-API summary, or `None` when no slot is active.
+	/// `expires_at` is the latest `expiration` across active slots, in relay blocks.
+	/// `extra` is opaque here, so the caller passes `bytes_permanent_used` in.
+	pub fn to_account_authorization(
+		&self,
+		relay_now: RelayBlockNumberFor<T>,
+		bytes_permanent_used: u64,
+	) -> Option<AccountAuthorization<RelayBlockNumberFor<T>>> {
+		let expires_at = self.active_slots(relay_now).map(|s| s.expiration).max()?;
+		let usage = self.usage(relay_now);
+		Some(AccountAuthorization {
+			expires_at,
+			bytes_allowance: usage.bytes_allowance,
+			bytes_used: usage.bytes,
+			bytes_permanent_used,
+			transactions_allowance: usage.transactions_allowance,
+			transactions_used: usage.transactions,
+		})
+	}
 }
 
-/// Distinguishes a stored transaction created by `store` (temporary) from one created by
-/// `renew` (permanent), so that `on_initialize`'s obsolete-block cleanup can decrement
-/// `PermanentStorageUsed` only for the renewed entries.
-#[derive(
-	Copy, Clone, PartialEq, Eq, Debug, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen,
-)]
-pub enum TransactionKind {
-	Store,
-	Renew,
+/// Mutable view over one active slot, passed to
+/// [`crate::Pallet::try_mutate_active_authorization`]'s closure: the opaque payload
+/// plus one native tx slot — never allowances or expiry.
+pub struct ActiveAuthorization<'a, T: Config> {
+	pub(crate) slot: &'a mut TimedAuthorizationFor<T>,
+}
+
+impl<T: Config> ActiveAuthorization<'_, T> {
+	/// Read-only view of the slot's extent (counters, allowances, and the opaque extra).
+	pub fn extent(&self) -> &AuthorizationExtentFor<T> {
+		&self.slot.extent
+	}
+
+	/// Mutable access to the opaque consumer-pallet payload.
+	pub fn extra_mut(&mut self) -> &mut T::AuthorizationExtra {
+		&mut self.slot.extent.extra
+	}
+
+	/// Consume one native transaction slot (saturating).
+	pub fn note_transaction(&mut self) {
+		self.slot.extent.transactions = self.slot.extent.transactions.saturating_add(1);
+	}
+}
+
+/// Callback fired by [`crate::Pallet::on_initialize`] when transactions age out of the
+/// `RetentionPeriod` window.
+///
+/// The storage pallet eagerly takes `Transactions[obsolete]`, computes `is_latest` for each
+/// entry (whether `TransactionByContentHash` still points at this `(block, index)`),
+/// removes the `TransactionByContentHash` mapping for `is_latest` entries, and then hands the
+/// resulting slice to this trait. Implementers — typically
+/// `pallet-bulletin-data-renewal` — inspect each entry's opaque `meta` to
+/// maintain chain-wide renewed-byte counters and queue auto-renewals.
+///
+/// Wiring `()` (the default impl) makes the obsolete sweep a pure storage-pallet concern,
+/// suitable for runtimes that omit the renewal pallet entirely.
+pub trait OnObsoleteTransactions<BlockNumber, Meta> {
+	/// `obsolete` is the block whose transactions just aged out. `items` are the entries
+	/// taken from `Transactions[obsolete]` paired with their `is_latest` flag. The order
+	/// preserves the original `BoundedVec` order.
+	fn handle_obsolete(obsolete: BlockNumber, items: &[(TransactionInfo<Meta>, bool)]);
+}
+
+impl<BlockNumber, Meta> OnObsoleteTransactions<BlockNumber, Meta> for () {
+	fn handle_obsolete(_: BlockNumber, _: &[(TransactionInfo<Meta>, bool)]) {}
 }
 
 /// State data for a stored transaction.
 #[derive(Encode, Decode, Clone, Debug, PartialEq, Eq, scale_info::TypeInfo, MaxEncodedLen)]
-pub struct TransactionInfo {
+pub struct TransactionInfo<Meta> {
 	/// Chunk trie root.
-	pub(crate) chunk_root: <BlakeTwo256 as Hash>::Output,
+	pub chunk_root: <BlakeTwo256 as Hash>::Output,
 
 	/// Plain hash of indexed data.
 	pub content_hash: ContentHash,
@@ -226,27 +302,30 @@ pub struct TransactionInfo {
 	///
 	/// Cumulative value of all previous transactions in the block; the last transaction holds the
 	/// total chunks.
-	pub(crate) block_chunks: ChunkIndex,
+	pub block_chunks: ChunkIndex,
 
-	/// Whether the entry was created by a `store` (temporary) or a `renew` (permanent).
-	/// Used by the obsolete-block cleanup in `on_initialize` to decrement the chain-wide
-	/// `PermanentStorageUsed` counter for renewed bytes that have just aged out. Field
-	/// is appended at the end of the struct so the v1→v2 translation is a tail-extend.
-	pub kind: TransactionKind,
+	/// Opaque per-entry payload ([`crate::Config::EntryMeta`]), stored verbatim and
+	/// handed back through [`OnObsoleteTransactions::handle_obsolete`] at expiry.
+	/// Tail field; live entries store one byte here, so the wired type must keep a
+	/// 1-byte encoding.
+	pub meta: Meta,
 }
 
-impl TransactionInfo {
+/// [`TransactionInfo`] bound to a runtime's [`crate::Config::EntryMeta`].
+pub type TransactionInfoFor<T> = TransactionInfo<<T as Config>::EntryMeta>;
+
+impl<Meta> TransactionInfo<Meta> {
 	/// Get the number of total chunks.
 	///
 	/// See the `block_chunks` field of [`TransactionInfo`] for details.
-	pub fn total_chunks(txs: &[TransactionInfo]) -> ChunkIndex {
+	pub fn total_chunks(txs: &[TransactionInfo<Meta>]) -> ChunkIndex {
 		txs.last().map_or(0, |t| t.block_chunks)
 	}
 }
 
 /// Context of a `check_signed`/`check_unsigned` call.
 #[derive(Clone, Copy)]
-pub(crate) enum CheckContext {
+pub enum CheckContext {
 	/// `validate_signed` or `validate_unsigned`.
 	Validate,
 	/// `pre_dispatch_signed` or `pre_dispatch`.
@@ -256,12 +335,12 @@ pub(crate) enum CheckContext {
 impl CheckContext {
 	/// Should authorization be consumed in this context? If not, we merely check that
 	/// authorization exists.
-	pub(crate) fn consume_authorization(self) -> bool {
+	pub fn consume_authorization(self) -> bool {
 		matches!(self, CheckContext::PreDispatch)
 	}
 
 	/// Should `check_signed`/`check_unsigned` return a `ValidTransaction`?
-	pub(crate) fn want_valid_transaction(self) -> bool {
+	pub fn want_valid_transaction(self) -> bool {
 		matches!(self, CheckContext::Validate)
 	}
 }
@@ -281,14 +360,6 @@ impl CheckContext {
 pub struct AuthorizerBudget<BlockNumber> {
 	/// `None` is unlimited; `Some(_)` decrements both axes per dispatch.
 	pub quota: Option<Quota>,
-	/// Optional per-authorizer override of the authorization window length, in
-	/// **relay** blocks. `None` ⇒ use [`Config::DefaultAuthorizationWindow`].
-	/// `Some(p)` caps every grant from this authorizer to a window of at most
-	/// `p` relay-blocks — for both the default `authorize_*` and explicit
-	/// `authorize_*_window` forms. Validated at `add_authorizer` time:
-	/// `0 < p < DefaultAuthorizationWindow`; the override exists to *shorten*
-	/// this authorizer's grants, not extend them.
-	pub authorization_period: Option<u32>,
 	/// Optional expiration block. While `Some(t)`, this authorizer can authorize only
 	/// while `now < t`; once `now >= t`, [`EnsureAllowedAuthorizers`] rejects them and
 	/// [`Pallet::remove_exhausted_authorizer`] becomes callable on this entry.
@@ -358,13 +429,10 @@ pub(crate) type AuthorizerBudgetFor<T> = AuthorizerBudget<BlockNumberFor<T>>;
 /// the authorizer:
 ///
 /// - `authorizer`: the account whose [`AllowedAuthorizers`] budget will be charged.
-/// - `valid_until`: the authorizer's expiry block. Authorizations granted through this dispatch
-///   have their expiration clamped to `valid_until` — a grant cannot outlive the authorizer that
-///   issued it.
+/// - `valid_until`: the authorizer's expiry block.
 ///
 /// `None` (as the full [`EnsureOrigin::Success`]) means the dispatcher is a
-/// non-account authorizer (Root / XCM / signed-by list) — no budget to charge
-/// and no clamping.
+/// non-account authorizer (Root / XCM / signed-by list) — no budget to charge.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorizationOrigin<AccountId, BlockNumber> {
 	pub authorizer: AccountId,
@@ -413,7 +481,6 @@ where
 					&new,
 					AuthorizerBudget {
 						quota: Some(Quota { transactions: 10_000, bytes: 100_000 }),
-						authorization_period: None,
 						valid_until: None,
 						feeless: false,
 					},

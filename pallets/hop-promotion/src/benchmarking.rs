@@ -15,17 +15,21 @@
 
 //! Benchmarks for `pallet-bulletin-hop-promotion`.
 
-use super::{signing_payload, Call, Config, Pallet};
-use alloc::vec;
+use super::{signing_payload, signing_payload_v2, Call, Config, Pallet};
+use alloc::{vec, vec::Vec};
+use codec::Encode;
 use frame_support::traits::Authorize;
 use pallet_bulletin_transaction_storage::Config as TxStorageConfig;
 use polkadot_sdk_frame::benchmarking::prelude::*;
+use sp_core::H256;
 use sp_io::{
 	crypto::{sr25519_generate, sr25519_sign},
 	hashing::blake2_256,
 };
 use sp_runtime::{
-	traits::IdentifyAccount, transaction_validity::TransactionSource, MultiSignature, MultiSigner,
+	traits::{IdentifyAccount, Zero},
+	transaction_validity::TransactionSource,
+	MultiSignature, MultiSigner,
 };
 
 #[benchmarks(where T: Send + Sync)]
@@ -70,6 +74,62 @@ mod benchmarks {
 		let signature = MultiSignature::Sr25519(sig);
 
 		let call = Call::<T>::promote { data, signer, signature, submit_timestamp: ts };
+
+		#[block]
+		{
+			call.authorize(TransactionSource::InBlock)
+				.expect("call has an authorize hook")
+				.expect("authorize closure returns Ok");
+		}
+
+		Ok(())
+	}
+
+	/// Worst-case authorize path for the V2 variant: same as `authorize_promote`,
+	/// but over the V2 payload, which embeds the client-supplied recipients hash.
+	#[benchmark]
+	fn authorize_promote_v2(
+		d: Linear<1, { <T as TxStorageConfig>::MaxTransactionSize::get() }>,
+	) -> Result<(), BenchmarkError> {
+		let ts: u64 = 1_700_000_000_000;
+		pallet_timestamp::Now::<T>::put(ts);
+
+		let public = sr25519_generate(0.into(), None);
+		let signer = MultiSigner::Sr25519(public);
+		let account_id = signer.clone().into_account();
+
+		let auth_origin = <T as TxStorageConfig>::Authorizer::try_successful_origin()
+			.map_err(|_| BenchmarkError::Stop("unable to compute authorizer origin"))?;
+		pallet_bulletin_transaction_storage::Pallet::<T>::authorize_account(
+			auth_origin,
+			account_id.clone(),
+			1,
+			1,
+		)
+		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
+
+		let data = vec![0u8; d as usize];
+		let recipients: Vec<MultiSigner> =
+			vec![MultiSigner::Sr25519(sr25519_generate(0.into(), None))];
+		let recipients_hash = H256::from(blake2_256(&recipients.encode()));
+		let genesis_hash = frame_system::Pallet::<T>::block_hash(BlockNumberFor::<T>::zero());
+		let payload = signing_payload_v2(
+			&blake2_256(&data),
+			ts,
+			genesis_hash.as_fixed_bytes(),
+			recipients_hash.as_fixed_bytes(),
+		);
+		let sig = sr25519_sign(0.into(), &public, &payload[..])
+			.ok_or(BenchmarkError::Stop("unable to sign"))?;
+		let signature = MultiSignature::Sr25519(sig);
+
+		let call = Call::<T>::promote_v2 {
+			signer,
+			signature,
+			submit_timestamp: ts,
+			recipients_hash,
+			data,
+		};
 
 		#[block]
 		{

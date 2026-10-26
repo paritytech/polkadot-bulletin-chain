@@ -21,11 +21,7 @@ describe("Authorization Check", () => {
 
       // Minimal mock tx object
       const mockTx = {
-        signAndSubmit: async () => ({
-          txHash: "0x01",
-          block: { hash: "0x02", number: 1 },
-        }),
-        signSubmitAndWatch: () => ({
+        createSubmitAndWatch: () => ({
           subscribe: (observer: {
             next: (ev: unknown) => void
             error: (err: unknown) => void

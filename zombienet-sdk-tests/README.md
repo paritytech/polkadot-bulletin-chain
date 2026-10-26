@@ -32,7 +32,7 @@ just chain-spec westend
 To pin a different polkadot-sdk version for one session, override the env var:
 
 ```bash
-POLKADOT_NODE_VERSION=polkadot-stable2603 just binaries-polkadot
+POLKADOT_NODE_VERSION=polkadot-stable2606 just binaries-polkadot
 # OR by commit hash (source-built):
 POLKADOT_NODE_VERSION=d6a4f5977b39bf5e5152e2f2bb6719ea92b992ea just binaries-polkadot
 ```
@@ -74,7 +74,7 @@ just test-zombienet-auto-renew
 # Single auto-renew test:
 just test-zombienet-auto-renew westend parachain_auto_renew_quota_exhaustion_test
 
-# HOP promotion suite:
+# HOP suite:
 just test-zombienet-hop
 ```
 
@@ -94,16 +94,19 @@ are resource-intensive.
 
 | Test | Sync mode | Pruning | Expected outcome |
 |---|---|---|---|
-| `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE |
+| `parachain_fast_sync_test` | fast | no | Sync completes, bitswap DONT_HAVE. Ignored: fast sync stalls at block #0 on polkadot-stable2609 ([#826](https://github.com/paritytech/polkadot-bulletin-chain/issues/826)) |
 | `parachain_fast_sync_with_pruning_test` | fast | yes | Sync fails (pruned blocks) |
-| `parachain_warp_sync_test` | warp | no | Sync completes, bitswap DONT_HAVE |
-| `parachain_warp_sync_with_pruning_test` | warp | yes | Sync completes, bitswap DONT_HAVE |
+| `parachain_warp_sync_test` | warp | no | Sync completes, gap sync downloads every store block's body and restores the indexed transactions, bitswap serves every item |
+| `parachain_warp_sync_with_pruning_test` | warp | yes (sync node) | Sync completes; store blocks inside the gap body window arrive with bodies and bitswap serves them, older store blocks arrive header-only and return DONT_HAVE |
+| `parachain_pruning_below_retention_test` | full, warp | yes | `--blocks-pruning` below the retention period: the full-sync node refuses to start, the warp-sync node shuts down after state sync |
 | `parachain_full_sync_test` | full | no | Sync completes, bitswap works |
 | `parachain_full_sync_with_pruning_test` | full | yes | Sync fails (pruned blocks) |
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
 | `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
 | `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
-| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. |
+| `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. Also asserts the `substrate_hop_*` metrics and `HopRuntimeApi`. |
+| `parachain_hop_unpromoted_expiry_test` | - | no | A pooled blob whose account authorization expires before the promotion window ages out unpromoted and is counted in `substrate_hop_pool_removed_total{reason="expired_unpromoted"}`. |
+| `parachain_hop_pool_integrity_test` | - | no | `substrate_hop_*` counts malformed, duplicate, already-claimed, rate-limited and over-capacity requests, a corrupt blob file and an orphan `.meta` file under their reason labels. |
 
 ## Environment variables
 

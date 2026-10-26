@@ -13,6 +13,7 @@ use bulletin_transaction_storage_primitives::cids::{calculate_cid, CidConfig, Ha
 use frame_support::{
 	assert_err, assert_ok, dispatch::GetDispatchInfo, pallet_prelude::Hooks, traits::Get,
 };
+use pallet_bulletin_data_renewal::{Call as DataRenewalCall, WeightInfo as _};
 use pallet_bulletin_transaction_storage::{
 	extension::{AllowanceBasedPriority, ALLOWANCE_PRIORITY_BOOST},
 	AuthorizationExtent, AuthorizationScope, Call as TxStorageCall, Config as TxStorageConfig,
@@ -79,9 +80,13 @@ fn construct_extrinsic(
 		pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 			pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0u128),
 		),
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
 			Runtime,
 			bulletin_paseo_runtime::storage::StorageCallInspector,
+			(
+				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+			),
 		>::default(),
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
 		),
@@ -129,6 +134,61 @@ fn assert_ok_ok(apply_result: ApplyExtrinsicResult) {
 	assert_ok!(apply_result.unwrap());
 }
 
+/// Raw extent of the single active slot at `scope`; tests here hold at most one slot per
+/// scope. Zero when no slot is active.
+fn slot_extent(
+	scope: AuthorizationScope<AccountId>,
+) -> AuthorizationExtent<pallet_bulletin_data_renewal::PermanentExtent> {
+	let Some(auth) = TransactionStorage::get_active_authorization(&scope) else {
+		return AuthorizationExtent::default();
+	};
+	assert_eq!(auth.slots.len(), 1, "tests hold one slot per scope");
+	auth.slots[0].extent
+}
+
+fn account_extent(
+	who: AccountId,
+) -> AuthorizationExtent<pallet_bulletin_data_renewal::PermanentExtent> {
+	slot_extent(AuthorizationScope::Account(who))
+}
+
+fn preimage_extent(
+	hash: bulletin_transaction_storage_primitives::ContentHash,
+) -> AuthorizationExtent<pallet_bulletin_data_renewal::PermanentExtent> {
+	slot_extent(AuthorizationScope::Preimage(hash))
+}
+
+/// Move the runtime's relay clock past the genesis sentinel `0`, which every authorize
+/// path rejects. Returns the relay block in use.
+fn seed_relay_for_tests() -> u32 {
+	use sp_runtime::traits::BlockNumberProvider;
+	let n = 1u32;
+	cumulus_pallet_parachain_system::RelaychainDataProvider::<Runtime>::set_block_number(n);
+	n
+}
+
+/// Test externalities whose `execute_with` seeds the relay clock first.
+struct TestExt(sp_io::TestExternalities);
+
+impl TestExt {
+	fn new(storage: sp_core::storage::Storage) -> Self {
+		Self(sp_io::TestExternalities::new(storage))
+	}
+
+	fn execute_with<R>(&mut self, f: impl FnOnce() -> R) -> R {
+		self.0.execute_with(|| {
+			seed_relay_for_tests();
+			f()
+		})
+	}
+}
+
+impl From<sp_io::TestExternalities> for TestExt {
+	fn from(ext: sp_io::TestExternalities) -> Self {
+		Self(ext)
+	}
+}
+
 #[test]
 fn transaction_storage_runtime_sizes() {
 	TestExt::new(RuntimeGenesisConfig::default().build_storage().unwrap()).execute_with(|| {
@@ -154,10 +214,10 @@ fn transaction_storage_runtime_sizes() {
 			total_bytes
 		));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: total_bytes,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -180,14 +240,12 @@ fn transaction_storage_runtime_sizes() {
 			assert_ok!(res.unwrap());
 		}
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: total_bytes,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: total_bytes,
-				// `transactions` is clamped to `transactions_allowance` in
-				// the folded extent — see `Pallet::authorization_extent`.
-				transactions: 0,
+				transactions: 6,
 				transactions_allowance: 0,
 			},
 		);
@@ -205,14 +263,14 @@ fn transaction_storage_runtime_sizes() {
 			oversized
 		));
 		// Re-authorize within the unexpired window adds to the existing allowance;
-		// `bytes` (used) is preserved and expiry is unchanged. `transactions` is
-		// clamped to `transactions_allowance` in the folded extent.
+		// `bytes` (used) is preserved and expiry is unchanged.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: total_bytes,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: total_bytes + oversized,
+				// The additive merge clamps the used counters to the old caps first.
 				transactions: 0,
 				transactions_allowance: 0,
 			},
@@ -251,10 +309,10 @@ fn transaction_storage_max_throughput_per_block() {
 			(NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE
 		));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -289,15 +347,14 @@ fn transaction_storage_max_throughput_per_block() {
 			)
 		);
 
-		// Verify the byte counters; `transactions` is clamped to
-		// `transactions_allowance` in the folded extent.
+		// Verify just 8 authorizations were consumed
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: NUM_TRANSACTIONS as u64 * TRANSACTION_SIZE,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: (NUM_TRANSACTIONS as u64 + 1) * TRANSACTION_SIZE,
-				transactions: 0,
+				transactions: NUM_TRANSACTIONS,
 				transactions_allowance: 0,
 			},
 		);
@@ -307,6 +364,7 @@ fn transaction_storage_max_throughput_per_block() {
 #[test]
 fn authorized_storage_transactions_are_for_free() {
 	TestExt::new(RuntimeGenesisConfig::default().build_storage().unwrap()).execute_with(|| {
+		// 1. user authorization flow.
 		let account = Sr25519Keyring::Eve;
 		let who: AccountId = account.to_account_id();
 		let data = vec![0u8; 24];
@@ -319,15 +377,12 @@ fn authorized_storage_transactions_are_for_free() {
 			construct_and_apply_extrinsic(Some(account.pair()), call.clone()),
 			transaction_validity::TransactionValidityError::Invalid(InvalidTransaction::Payment)
 		);
-		// Authorize user for store + renew + enable_auto_renew. `enable_auto_renew`
-		// prepays 1 tx slot + `data.len()` bytes_permanent on top of the
-		// `force_renew` that already consumed 1 slot, so the allowance has to
-		// cover both.
+		// Authorize user for store + renew + enable_auto_renew.
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			who.clone(),
-			10,
-			1024,
+			0,
+			48
 		));
 		// Store should now work without funding (feeless).
 		let stored_block = System::block_number();
@@ -338,7 +393,7 @@ fn authorized_storage_transactions_are_for_free() {
 		advance_block();
 
 		// Renew should also work without funding (feeless).
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+		let renew_call = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::force_renew {
 			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 		let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
@@ -350,19 +405,72 @@ fn authorized_storage_transactions_are_for_free() {
 		// `enable_auto_renew` is feeless but pre-pays one cycle at registration
 		// — same hard-cap accounting as `force_renew`. The next cycle fires
 		// free thanks to `paid: true`; subsequent cycles charge per-cycle.
-		let extent_before = TransactionStorage::account_authorization_extent(who.clone());
-		let enable_call =
-			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::enable_auto_renew {
-				content_hash,
-			});
+		let extent_before = account_extent(who.clone());
+		let enable_call = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::enable_auto_renew {
+			content_hash,
+		});
 		let res = construct_and_apply_extrinsic(Some(account.pair()), enable_call);
 		assert_ok!(res);
 		assert_ok!(res.unwrap());
-		let extent_after = TransactionStorage::account_authorization_extent(who.clone());
+		let extent_after = account_extent(who.clone());
 		assert_eq!(extent_after.transactions, extent_before.transactions + 1);
 		assert_eq!(extent_after.bytes, extent_before.bytes);
-		assert_eq!(extent_after.bytes_permanent, extent_before.bytes_permanent + data.len() as u64,);
+		assert_eq!(
+			extent_after.extra.bytes_permanent,
+			extent_before.extra.bytes_permanent + data.len() as u64,
+		);
 	});
+}
+
+/// One-shot `renew` pre-pays the renewal at registration time. Verify that
+/// `bytes_permanent` advances by `info.size` at the runtime level.
+#[test]
+fn renew_one_shot_prepays_bytes_permanent() {
+	TestExt::new(RuntimeGenesisConfig::default().build_storage().unwrap())
+		.execute_with(|| {
+			let account = Sr25519Keyring::Bob;
+			let who: AccountId = account.to_account_id();
+			let data = vec![0u8; 24];
+			let content_hash = sp_io::hashing::blake2_256(&data);
+
+			assert_ok!(TransactionStorage::authorize_account(
+				RuntimeOrigin::root(),
+				who.clone(),
+				2,
+				48,
+			));
+			assert_ok!(construct_and_apply_extrinsic(
+				Some(account.pair()),
+				RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store {
+					data: data.clone(),
+				}),
+			)
+			.unwrap());
+			advance_block();
+
+			let before = account_extent(who.clone());
+			let renew_call = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::renew {
+				entry: TransactionRef::ContentHash(content_hash),
+			});
+			let res = construct_and_apply_extrinsic(Some(account.pair()), renew_call);
+			assert_ok!(res);
+			assert_ok!(res.unwrap());
+
+			let after = account_extent(who.clone());
+			assert_eq!(
+				after.extra.bytes_permanent,
+				before.extra.bytes_permanent + data.len() as u64
+			);
+			assert_eq!(after.transactions, before.transactions + 1);
+
+			use pallet_bulletin_transaction_storage_runtime_api::runtime_decl_for_bulletin_transaction_storage_api::BulletinTransactionStorageApiV1;
+			// The runtime API reports that same counter as `bytes_permanent_used`; the
+			// composition lives in `impl_runtime_apis!`, so only a runtime test reaches it.
+			let summary = Runtime::account_authorization(who).expect("authorization is active");
+			assert_eq!(summary.bytes_permanent_used, after.extra.bytes_permanent);
+			assert_eq!(summary.bytes_used, after.bytes);
+			assert_eq!(summary.transactions_used, after.transactions);
+		});
 }
 
 /// Run `AllowanceBasedPriority::validate` and return the contributed priority.
@@ -425,7 +533,7 @@ fn allowance_based_priority_works() {
 		assert_eq!(allowance_based_priority(origin.clone(), &store), 0);
 
 		// `renew` carries `Origin::Authorized` too, but must not be boosted.
-		let renew = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+		let renew = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::force_renew {
 			entry: TransactionRef::Position { block: 1, index: 0 },
 		});
 		assert_eq!(allowance_based_priority(origin, &renew), 0);
@@ -450,10 +558,10 @@ fn store_with_cid_config_works() {
 			3 * total_bytes
 		));
 		assert_eq!(
-			runtime::TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 3 * total_bytes,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -850,39 +958,6 @@ fn non_authorizer_cannot_sign_authorize_account_extrinsic() {
 	});
 }
 
-/// Bump the runtime's `RelaychainDataProvider` so `ensure_relay_now()` does
-/// not reject the genesis sentinel `0`. Returns the relay block in use.
-fn seed_relay_for_tests() -> u32 {
-	use sp_runtime::traits::BlockNumberProvider;
-	let n = 1u32;
-	cumulus_pallet_parachain_system::RelaychainDataProvider::<Runtime>::set_block_number(n);
-	n
-}
-
-/// Test externalities wrapper whose `execute_with` calls
-/// [`seed_relay_for_tests`] before running the closure, so every test that goes
-/// through `do_authorize_*` clears the relay-chain genesis sentinel.
-struct TestExt(sp_io::TestExternalities);
-
-impl TestExt {
-	fn new(storage: sp_core::storage::Storage) -> Self {
-		Self(sp_io::TestExternalities::new(storage))
-	}
-
-	fn execute_with<R>(&mut self, f: impl FnOnce() -> R) -> R {
-		self.0.execute_with(|| {
-			seed_relay_for_tests();
-			f()
-		})
-	}
-}
-
-impl From<sp_io::TestExternalities> for TestExt {
-	fn from(ext: sp_io::TestExternalities) -> Self {
-		Self(ext)
-	}
-}
-
 #[test]
 fn people_chain_can_authorize_storage_with_transact() {
 	// People chain (parachain 1502) should be able to authorize storage via XCM Transact.
@@ -909,8 +984,6 @@ fn people_chain_can_authorize_storage_with_transact() {
 		.build()
 		.execute_with(|| {
 			let relay_now = seed_relay_for_tests();
-			let expiration = relay_now +
-				<Runtime as pallet_bulletin_transaction_storage::Config>::DefaultAuthorizationWindow::get();
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
 				(people_location, OriginKind::Xcm),
 				authorize_call,
@@ -925,7 +998,8 @@ fn people_chain_can_authorize_storage_with_transact() {
 					transactions: 0,
 					bytes: 1024,
 					starts_at: relay_now,
-					expiration,
+					expiration: relay_now +
+						<Runtime as TxStorageConfig>::DefaultAuthorizationWindow::get(),
 				},
 			));
 		})
@@ -957,8 +1031,6 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		.build()
 		.execute_with(|| {
 			let relay_now = seed_relay_for_tests();
-			let expiration = relay_now +
-				<Runtime as pallet_bulletin_transaction_storage::Config>::DefaultAuthorizationWindow::get();
 			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
 				(people_next_location, OriginKind::Xcm),
 				authorize_call,
@@ -973,20 +1045,53 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 					transactions: 0,
 					bytes: 1024,
 					starts_at: relay_now,
-					expiration,
+					expiration: relay_now +
+						<Runtime as TxStorageConfig>::DefaultAuthorizationWindow::get(),
 				},
 			));
 		})
 }
 
+/// Promotion must lose to both `store` and renewals; only the runtime sees all three.
+#[test]
+fn promote_priority_is_below_store_and_renew() {
+	let promote =
+		<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams::get().priority;
+	let store = <Runtime as TxStorageConfig>::StoreTxParams::get().priority;
+	let renew = <Runtime as pallet_bulletin_data_renewal::Config>::RenewTxParams::get().priority;
+	assert!(promote < store, "promote ({promote}) must be below store priority ({store})");
+	assert!(promote < renew, "promote ({promote}) must be below renew priority ({renew})");
+}
+
+/// Both tag on the bare content hash, and no pallet sees the other's params — the storage
+/// pallet's `integrity_test` covers every other pair.
+#[test]
+fn renew_and_promote_tag_prefixes_differ() {
+	pallet_bulletin_transaction_storage::assert_distinct_tag_prefixes(&[
+		("RenewTxParams", <Runtime as pallet_bulletin_data_renewal::Config>::RenewTxParams::get()),
+		(
+			"PromoteTxParams",
+			<Runtime as pallet_bulletin_hop_promotion::Config>::PromoteTxParams::get(),
+		),
+	]);
+}
+
 /// See [`pallet_bulletin_transaction_storage::ensure_weight_sanity`].
 #[test]
 fn transaction_storage_weight_sanity() {
+	// Collator-side PoV cap: default 85% of max_pov_size.
+	// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
+	const POV_PERCENT: Option<u64> = Some(85);
+	// Mandatory on the same worst-case block as the storage pallet's own mandatory work.
+	let renewal_drain =
+		<Runtime as pallet_bulletin_data_renewal::Config>::WeightInfo::process_pending_renewals(
+			<Runtime as TxStorageConfig>::MaxBlockTransactions::get(),
+		);
 	pallet_bulletin_transaction_storage::ensure_weight_sanity::<Runtime>(
-		// Collator-side PoV cap: default 85% of max_pov_size.
-		// See cumulus/client/consensus/aura/src/collators/slot_based/block_builder_task.rs
-		Some(85),
+		POV_PERCENT,
+		renewal_drain,
 	);
+	pallet_bulletin_data_renewal::ensure_weight_sanity::<Runtime>(POV_PERCENT);
 }
 
 // ============================================================================
@@ -1150,15 +1255,14 @@ fn authorized_wrapped_store_rejected() {
 			);
 		}
 
-		// Only the direct store consumed authorization (1 tx — folded view
-		// clamps `transactions` to `transactions_allowance`, so it reads `0`).
+		// Only the direct store consumed authorization (1 tx, data.len() bytes).
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: data.len() as u64,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 4 * data.len() as u64,
-				transactions: 0,
+				transactions: 1,
 				transactions_allowance: 0,
 			},
 		);
@@ -1211,12 +1315,11 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 		);
 
 		// Authorizations were NOT consumed (rejected before prepare).
-		// Preimage slots get `transactions_allowance = 2` (store-then-renew).
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(content_hash_a),
+			preimage_extent(content_hash_a),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 100,
 				transactions: 0,
 				transactions_allowance: 2,
@@ -1224,10 +1327,10 @@ fn batch_store_with_mixed_preimage_and_account_auth_rejected() {
 			"Preimage authorization should not be consumed",
 		);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 200,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1273,13 +1376,12 @@ fn preimage_authorized_storage_transactions_work() {
 		// Now should work via preimage authorization.
 		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
 
-		// Verify preimage authorization was consumed. Preimage slots get
-		// `transactions_allowance = 2` (store-then-renew).
+		// Verify preimage authorization was consumed.
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(content_hash),
+			preimage_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 24,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 24,
 				transactions: 1,
 				transactions_allowance: 2,
@@ -1316,13 +1418,12 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
 		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), call));
 
-		// Verify: preimage authorization was consumed, account authorization unchanged.
-		// Preimage slots get `transactions_allowance = 2` (store-then-renew).
+		// Verify: preimage authorization was consumed, account authorization unchanged
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(content_hash),
+			preimage_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 100,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 100,
 				transactions: 1,
 				transactions_allowance: 2,
@@ -1330,10 +1431,10 @@ fn signed_store_prefers_preimage_authorization_over_account() {
 			"Preimage authorization should be consumed"
 		);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 500,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1384,20 +1485,19 @@ fn renew_must_be_direct_extrinsic() {
 
 		advance_block();
 
-		let renew_call = RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::force_renew {
+		let renew_call = RuntimeCall::DataRenewal(DataRenewalCall::<Runtime>::force_renew {
 			entry: TransactionRef::Position { block: stored_block, index: 0 },
 		});
 
 		// Direct renew succeeds with the existing account authorization.
-		// `transactions` is clamped to `transactions_allowance` in the folded extent.
 		assert_ok_ok(construct_and_apply_extrinsic(Some(account.pair()), renew_call.clone()));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: 100,
-				bytes_permanent: 100,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 100 },
 				bytes_allowance: 100,
-				transactions: 0,
+				transactions: 2,
 				transactions_allowance: 0,
 			},
 		);
@@ -1455,10 +1555,10 @@ fn wrapped_authorize_account_requires_authorizer_origin() {
 		let batch_call = RuntimeCall::Utility(pallet_utility::Call::batch { calls: vec![call] });
 		let _ = construct_and_apply_extrinsic(Some(attacker.pair()), batch_call);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1502,10 +1602,10 @@ fn wrapped_authorize_account_succeeds() {
 
 		// Authorization must have been created.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(target.clone()),
+			account_extent(target.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 10 * 1024,
 				transactions: 0,
 				transactions_allowance: 10,
@@ -1571,10 +1671,10 @@ fn mixed_batch_store_and_authorize_rejected() {
 
 		// Authorization was NOT consumed (rejected before prepare).
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: data.len() as u64,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1617,10 +1717,10 @@ fn mixed_batch_store_and_non_storage_call_rejected() {
 
 		// Authorization was NOT consumed.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: data.len() as u64,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1692,10 +1792,10 @@ fn sudo_store_works_for_sudo_key_holder() {
 
 		// No account authorization was needed or consumed.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1730,10 +1830,10 @@ fn xcm_transact_store_is_blocked() {
 			data.len() as u64
 		));
 		assert_ne!(
-			TransactionStorage::account_authorization_extent(who.clone()),
+			account_extent(who.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1744,9 +1844,9 @@ fn xcm_transact_store_is_blocked() {
 			RuntimeCall::TransactionStorage(TxStorageCall::<Runtime>::store { data: data.clone() });
 
 		// Build an XCM message: UnpaidExecution + Transact(Superuser, store).
-		// GovernanceLocation (relay chain) has LocationAsSuperuser in the
-		// OriginConverter, so origin conversion would succeed — but SafeCallFilter
-		// must block the call before that matters.
+		// The governance location has LocationAsSuperuser in the OriginConverter,
+		// so origin conversion would succeed — but SafeCallFilter must block the
+		// call before that matters.
 		let message: Xcm<RuntimeCall> = Xcm::builder_unsafe()
 			.unpaid_execution(Unlimited, None)
 			.transact(OriginKind::Superuser, None, store_call.encode())
@@ -1767,10 +1867,10 @@ fn xcm_transact_store_is_blocked() {
 
 		// Authorization must not have been consumed.
 		assert_ne!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1822,10 +1922,10 @@ fn xcm_transact_wrapped_store_is_blocked() {
 
 		// Authorization must not have been consumed.
 		assert_ne!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1845,10 +1945,10 @@ fn xcm_transact_authorize_account_works() {
 
 		// Verify no authorization exists yet.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(target.clone()),
+			account_extent(target.clone()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 0,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1881,10 +1981,10 @@ fn xcm_transact_authorize_account_works() {
 
 		// Authorization must have been created.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(target),
+			account_extent(target),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 1024,
 				transactions: 0,
 				transactions_allowance: 0,
@@ -1918,7 +2018,7 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 
 	let zero = AuthorizationExtent {
 		bytes: 0,
-		bytes_permanent: 0,
+		extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 		bytes_allowance: 0,
 		transactions: 0,
 		transactions_allowance: 0,
@@ -1954,7 +2054,7 @@ fn xcm_transact_authorize_account_from_asset_hub_contract() {
 				Weight::MAX,
 			);
 			(
-				TransactionStorage::account_authorization_extent(target.clone()),
+				account_extent(target.clone()),
 				pallet_bulletin_transaction_storage::AllowedAuthorizers::<Runtime>::get(&hashed),
 			)
 		})
@@ -1984,7 +2084,6 @@ fn default_authorizer_budget() -> pallet_bulletin_transaction_storage::Authorize
 			transactions: 1000,
 			bytes: 100 * 1024 * 1024,
 		}),
-		authorization_period: None,
 		valid_until: None,
 		feeless: false,
 	}
@@ -2030,10 +2129,10 @@ fn sudo_round_trips_authorizer_membership() {
 		));
 		assert_ok_ok(construct_and_apply_extrinsic(Some(eve.pair()), authorize.clone()));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(target.to_account_id()),
+			account_extent(target.to_account_id()),
 			AuthorizationExtent {
 				bytes: 0,
-				bytes_permanent: 0,
+				extra: pallet_bulletin_data_renewal::PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 1024,
 				transactions: 0,
 				transactions_allowance: 5,

@@ -8,6 +8,9 @@
 # scripts/get_polkadot_binaries.sh
 /.polkadot-binaries/
 
+# External runtime checkouts and their WASM, from `just build-external-runtime`
+/.external-runtimes/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -71,3 +74,4 @@ console-ui/playwright/.cache/
 # Specs for zombienet (need to be fresh)
 zombienet/bulletin-westend-spec.json
 zombienet/bulletin-paseo-spec.json
+zombienet/bulletin-polkadot-spec.json

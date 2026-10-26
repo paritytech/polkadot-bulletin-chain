@@ -103,9 +103,15 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_transaction_payment::ChargeTransactionPayment<Runtime>,
 		>,
-		pallet_bulletin_transaction_storage::extension::ValidateStorageCalls<
+		// Single extension that walks the call tree once and dispatches each leaf
+		// to either pallet's validator.
+		pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls<
 			Runtime,
 			storage::StorageCallInspector,
+			(
+				pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+				pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+			),
 		>,
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority<
 			Runtime,
@@ -125,22 +131,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (
-		pallet_collator_selection::migration::v2::MigrationToV2<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v4::MigrationToV4<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v5::MigrateV4ToV5<Runtime>,
-		pallet_session::migrations::v1::MigrateV0ToV1<
-			Runtime,
-			pallet_session::migrations::v1::InitOffenceSeverity<Runtime>,
-		>,
-		cumulus_pallet_aura_ext::migration::MigrateV0ToV1<Runtime>,
-		cumulus_pallet_xcmp_queue::migration::v6::MigrateV5ToV6<Runtime>,
-		cumulus_pallet_parachain_system::migration::Migration<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v1::MigrateV0ToV1<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v2::MigrateV1ToV2<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v5::MigrateV4ToV5<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,
-	);
+	pub type Unreleased = ();
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -155,11 +146,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = (
-		pallet_bulletin_transaction_storage::migrations::v3::MigrateV2ToV3<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v4::MigrateV3ToV4<Runtime>,
-		pallet_bulletin_transaction_storage::migrations::v7::MigrateV6ToV7<Runtime>,
-	);
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -184,7 +172,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_016,
+	spec_version: 1_000_027,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -345,6 +333,7 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
 	type RelayParentOffset = ConstU32<0>;
+	type SchedulingSignatureVerifier = ();
 }
 
 type ConsensusHook = cumulus_pallet_aura_ext::FixedVelocityConsensusHook<
@@ -569,9 +558,13 @@ where
 			pallet_skip_feeless_payment::SkipCheckIfFeeless::from(
 				pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
 			),
-			pallet_bulletin_transaction_storage::extension::ValidateStorageCalls::<
+			pallet_bulletin_transaction_storage::extension::ValidateAuthorizedCalls::<
 				Runtime,
 				storage::StorageCallInspector,
+				(
+					pallet_bulletin_transaction_storage::extension::StorageLeaves<Runtime>,
+					pallet_bulletin_data_renewal::extension::RenewalLeaves<Runtime>,
+				),
 			>::default(),
 			pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<
 				Runtime,
@@ -629,6 +622,8 @@ mod runtime {
 	pub type TransactionStorage = pallet_bulletin_transaction_storage;
 	#[runtime::pallet_index(41)]
 	pub type HopPromotion = pallet_bulletin_hop_promotion;
+	#[runtime::pallet_index(42)]
+	pub type DataRenewal = pallet_bulletin_data_renewal;
 
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
@@ -668,6 +663,7 @@ mod benches {
 		[pallet_collator_selection, CollatorSelection]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
+		[pallet_bulletin_data_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
@@ -694,6 +690,10 @@ impl_runtime_apis! {
 	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn relay_parent_offset() -> u32 {
 			0
+		}
+
+		fn max_claim_queue_offset() -> u8 {
+			cumulus_pallet_parachain_system::Pallet::<Runtime>::max_claim_queue_offset()
 		}
 	}
 
@@ -939,7 +939,7 @@ impl_runtime_apis! {
 
 	impl sp_hop::HopRuntimeApi<Block, AccountId> for Runtime {
 		fn can_account_promote(who: AccountId, data_len: u32) -> bool {
-			pallet_bulletin_hop_promotion::Pallet::<Runtime>::can_account_promote(&who, data_len)
+			HopPromotion::can_account_promote(&who, data_len)
 		}
 
 		fn create_promotion_extrinsic(
@@ -966,7 +966,7 @@ impl_runtime_apis! {
 		}
 
 		fn is_promoted_on_chain(hash: [u8; 32]) -> bool {
-			pallet_bulletin_hop_promotion::Pallet::<Runtime>::is_promoted_on_chain(hash)
+			HopPromotion::is_promoted_on_chain(hash)
 		}
 	}
 
@@ -974,18 +974,29 @@ impl_runtime_apis! {
 		fn account_authorization(
 			account: AccountId,
 		) -> Option<pallet_bulletin_transaction_storage_runtime_api::AccountAuthorization<BlockNumber>> {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::account_authorization(account)
+			use pallet_bulletin_transaction_storage::AuthorizationScope;
+
+			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
+				.and_then(|auth| {
+					// `extra` is opaque to the storage pallet; sum the renewal quota here.
+					let bytes_permanent_used =
+						auth.slots.iter().map(|slot| slot.extent.extra.bytes_permanent).sum();
+					auth.to_account_authorization(
+						TransactionStorage::relay_now(),
+						bytes_permanent_used,
+					)
+				})
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_store(&account, data_len)
+			TransactionStorage::can_store(&account, data_len)
 		}
 
 		fn can_renew(
 			account: AccountId,
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
-			pallet_bulletin_transaction_storage::Pallet::<Runtime>::can_renew(&account, &entry)
+			DataRenewal::can_renew(&account, &entry)
 		}
 	}
 
@@ -1112,6 +1123,11 @@ impl_runtime_apis! {
 						fun: Fungible(ExistentialDeposit::get()),
 					}
 				}
+
+				/// `Utility::batch`, so weighing a `Transact` recurses over every nested call.
+				fn batch_call(calls: Vec<RuntimeCall>) -> Option<RuntimeCall> {
+					Some(RuntimeCall::Utility(pallet_utility::Call::<Runtime>::batch { calls }))
+				}
 			}
 
 			parameter_types! {
@@ -1221,10 +1237,10 @@ impl_runtime_apis! {
 				}
 
 				fn alias_origin() -> Result<(Location, Location), BenchmarkError> {
-					Ok((
-						Location::new(1, [Parachain(1000)]),
-						Location::new(1, [Parachain(1000), AccountId32 { id: [111u8; 32], network: None }]),
-					))
+					// Worst case: `AuthorizedAliasers`, the last and priciest `Aliasers` entry.
+					Ok(parachains_common::benchmarking::set_up_worst_case_authorized_alias::<
+						Runtime,
+					>())
 				}
 			}
 

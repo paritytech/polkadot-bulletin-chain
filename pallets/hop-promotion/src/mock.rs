@@ -19,7 +19,7 @@ use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::{AsAuthorizer, ValidTransactionParams};
 use polkadot_sdk_frame::{
-	deps::{frame_support, frame_system},
+	deps::{frame_support, frame_system, sp_runtime::traits::BlockNumberProvider},
 	prelude::*,
 	runtime::prelude::*,
 	testing_prelude::*,
@@ -79,11 +79,10 @@ impl pallet_timestamp::Config for Test {
 }
 
 parameter_types! {
-	/// Default slot window length in mock relay blocks.
+	/// In mock relay blocks; tests advance relay time with [`set_relay_now`].
 	pub const DefaultAuthorizationWindow: u32 = 10;
 	pub const MaxStartsAtFuture: u32 = 100;
-	pub const MaxAuthorizationSlots: u32 = 8;
-	/// Storage-backed mock relay-chain block number.
+	pub const MaxAuthorizationSlots: u32 = 2;
 	pub storage MockRelayBlockNumber: u32 = 1;
 	// `static` so a test can lower the priority and check `integrity_test` rejects it.
 	pub static StoreTxParams: ValidTransactionParams =
@@ -91,8 +90,6 @@ parameter_types! {
 	pub const PromoteTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("HopPromotion", 0, 5);
 	// Never exercised; only their prefixes matter, for `integrity_test`.
-	pub const RenewTxParams: ValidTransactionParams =
-		ValidTransactionParams::new("Renew", PRIORITY, LONGEVITY);
 	pub const AuthorizeTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Authorize", PRIORITY, LONGEVITY);
 	pub const RemoveExpiredAccountAuthorizationTxParams: ValidTransactionParams =
@@ -101,24 +98,6 @@ parameter_types! {
 		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
-}
-
-/// Test-side `BlockNumberProvider` for the slot model. Defaults to relay block
-/// `1` so `ensure_relay_now()` clears the genesis sentinel.
-pub struct MockRelayBlockNumberProvider;
-impl polkadot_sdk_frame::deps::sp_runtime::traits::BlockNumberProvider
-	for MockRelayBlockNumberProvider
-{
-	type BlockNumber = u32;
-
-	fn current_block_number() -> u32 {
-		MockRelayBlockNumber::get()
-	}
-
-	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
-	fn set_block_number(n: u32) {
-		MockRelayBlockNumber::set(&n);
-	}
 }
 
 /// Use a small max transaction size for test efficiency.
@@ -131,6 +110,20 @@ parameter_types! {
 	pub const SubmitTimestampTolerance: u64 = TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS;
 }
 
+pub struct MockRelayBlockNumberProvider;
+impl BlockNumberProvider for MockRelayBlockNumberProvider {
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
+}
+
 impl pallet_bulletin_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -140,7 +133,6 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
-	type MaxPermanentStorageSize = ConstU64<{ u64::MAX }>;
 	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
 	type MaxStartsAtFuture = MaxStartsAtFuture;
 	type MaxAuthorizationSlots = MaxAuthorizationSlots;
@@ -149,11 +141,15 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
 	type StoreTxParams = StoreTxParams;
-	type RenewTxParams = RenewTxParams;
 	type AuthorizeTxParams = AuthorizeTxParams;
 	type RemoveExpiredAccountAuthorizationTxParams = RemoveExpiredAccountAuthorizationTxParams;
 	type RemoveExpiredPreimageAuthorizationTxParams = RemoveExpiredPreimageAuthorizationTxParams;
 	type RemoveExhaustedAuthorizerTxParams = RemoveExhaustedAuthorizerTxParams;
+	// No renewal here, so the storage pallet's opaque payloads stay at the documented
+	// `()`. Keeps this test runtime independent of the renewal pallet.
+	type EntryMeta = ();
+	type AuthorizationExtra = ();
+	type OnObsoleteTransactions = ();
 	#[cfg(feature = "runtime-benchmarks")]
 	type BenchmarkHelper =
 		pallet_bulletin_transaction_storage::benchmarking::DefaultCheckProofHelper;
@@ -179,12 +175,13 @@ pub fn new_test_ext() -> TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
-	#[allow(unused_mut)]
 	let mut ext: TestExternalities = t.into();
 	#[cfg(feature = "runtime-benchmarks")]
 	ext.register_extension(sp_keystore::KeystoreExt::new(
 		sp_keystore::testing::MemoryKeystore::new(),
 	));
+	// Genesis runs with relay = 0; move past the sentinel so `ensure_relay_now` passes.
+	ext.execute_with(|| MockRelayBlockNumber::set(&1));
 	ext
 }
 
