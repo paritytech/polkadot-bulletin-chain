@@ -133,6 +133,23 @@ pub fn run_to_block<T: Config>(n: frame_system::pallet_prelude::BlockNumberFor<T
 	}
 }
 
+/// Move the relay clock past the genesis sentinel (`0`), which every authorize path
+/// rejects. `set_block_number` is the benchmarking-only hook on `BlockNumberProvider`; on
+/// `RelaychainDataProvider` it writes through to `ValidationData`.
+pub fn bump_relay_for_bench<T: Config>() {
+	if TransactionStorage::<T>::relay_now().is_zero() {
+		T::RelayChainBlockNumberProvider::set_block_number(One::one());
+	}
+}
+
+/// Advance the relay clock by one default window, expiring every slot granted so far.
+fn expire_slots_for_bench<T: Config>() {
+	let relay_now = TransactionStorage::<T>::relay_now();
+	T::RelayChainBlockNumberProvider::set_block_number(
+		relay_now.saturating_add(T::DefaultAuthorizationWindow::get()),
+	);
+}
+
 /// Default `AuthorizerBudget` used by the `add_authorizer` / `remove_authorizer`
 /// benchmarks. Kept at module scope (not inside `mod benchmarks`) so the
 /// `#[benchmarks]` macro doesn't try to interpret it as a benchmark fn.
@@ -231,15 +248,46 @@ mod benchmarks {
 
 	#[benchmark]
 	fn authorize_account() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = worst_case_authorizer_origin::<T>()?;
 		let who: T::AccountId = worst_case_authorize_target::<T>()?;
 		let transactions: u32 = 10;
 		let bytes: u64 = 1024 * 1024;
+		let starts_at = TransactionStorage::<T>::relay_now();
+		let expiration = starts_at.saturating_add(T::DefaultAuthorizationWindow::get());
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, who.clone(), transactions, bytes);
 
-		assert_last_event::<T>(Event::AccountAuthorized { who, transactions, bytes }.into());
+		assert_last_event::<T>(
+			Event::AccountAuthorized { who, transactions, bytes, starts_at, expiration }.into(),
+		);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn authorize_account_window() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
+		let origin = worst_case_authorizer_origin::<T>()?;
+		let who: T::AccountId = worst_case_authorize_target::<T>()?;
+		let transactions: u32 = 10;
+		let bytes: u64 = 1024 * 1024;
+		let starts_at = TransactionStorage::<T>::relay_now();
+		let expiration = starts_at.saturating_add(100u32.into());
+
+		#[extrinsic_call]
+		_(
+			origin as T::RuntimeOrigin,
+			who.clone(),
+			transactions,
+			bytes,
+			Some(starts_at),
+			expiration,
+		);
+
+		assert_last_event::<T>(
+			Event::AccountAuthorized { who, transactions, bytes, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
@@ -278,6 +326,7 @@ mod benchmarks {
 
 	#[benchmark]
 	fn refresh_account_authorization() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = worst_case_authorizer_origin::<T>()?;
 		let who: T::AccountId = worst_case_authorize_target::<T>()?;
 		let bytes: u64 = 1024 * 1024;
@@ -299,19 +348,43 @@ mod benchmarks {
 
 	#[benchmark]
 	fn authorize_preimage() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = worst_case_authorizer_origin::<T>()?;
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
+		let starts_at = TransactionStorage::<T>::relay_now();
+		let expiration = starts_at.saturating_add(T::DefaultAuthorizationWindow::get());
 
 		#[extrinsic_call]
 		_(origin as T::RuntimeOrigin, content_hash, max_size);
 
-		assert_last_event::<T>(Event::PreimageAuthorized { content_hash, max_size }.into());
+		assert_last_event::<T>(
+			Event::PreimageAuthorized { content_hash, max_size, starts_at, expiration }.into(),
+		);
+		Ok(())
+	}
+
+	#[benchmark]
+	fn authorize_preimage_window() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
+		let origin = worst_case_authorizer_origin::<T>()?;
+		let content_hash = [0u8; 32];
+		let max_size: u64 = 1024 * 1024;
+		let starts_at = TransactionStorage::<T>::relay_now();
+		let expiration = starts_at.saturating_add(100u32.into());
+
+		#[extrinsic_call]
+		_(origin as T::RuntimeOrigin, content_hash, max_size, Some(starts_at), expiration);
+
+		assert_last_event::<T>(
+			Event::PreimageAuthorized { content_hash, max_size, starts_at, expiration }.into(),
+		);
 		Ok(())
 	}
 
 	#[benchmark]
 	fn refresh_preimage_authorization() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = worst_case_authorizer_origin::<T>()?;
 		let content_hash = [0u8; 32];
 		let max_size: u64 = 1024 * 1024;
@@ -332,19 +405,15 @@ mod benchmarks {
 
 	#[benchmark]
 	fn remove_expired_account_authorization() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let who: T::AccountId = worst_case_authorize_target::<T>()?;
 		TransactionStorage::<T>::authorize_account(origin, who.clone(), 0, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
-		// `AuthorizationPeriod` is ~14 days of blocks on real runtimes; iterating
-		// `on_initialize`/`on_finalize` for each is ~1.3M no-op iterations per step.
-		// The dispatchable only compares `block_number >= expiration`, so we can jump
-		// the system block number directly without running intermediate block hooks.
-		let period = T::AuthorizationPeriod::get();
-		let now = System::<T>::block_number();
-		System::<T>::set_block_number(now + period);
+		// Slots expire on the relay clock; jump it directly rather than running block hooks.
+		expire_slots_for_bench::<T>();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, who.clone());
@@ -355,15 +424,14 @@ mod benchmarks {
 
 	#[benchmark]
 	fn remove_expired_preimage_authorization() -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let content_hash = [0; 32];
 		TransactionStorage::<T>::authorize_preimage(origin, content_hash, 1)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize preimage"))?;
 
-		let period = T::AuthorizationPeriod::get();
-		let now = System::<T>::block_number();
-		System::<T>::set_block_number(now + period);
+		expire_slots_for_bench::<T>();
 
 		#[extrinsic_call]
 		_(RawOrigin::None, content_hash);
@@ -396,6 +464,7 @@ mod benchmarks {
 	fn validate_store(
 		l: Linear<{ 1 }, { T::MaxTransactionSize::get() }>,
 	) -> Result<(), BenchmarkError> {
+		bump_relay_for_bench::<T>();
 		let origin = T::Authorizer::try_successful_origin()
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
@@ -426,7 +495,10 @@ mod benchmarks {
 		}
 
 		// prepare added `l` bytes to the used counter
-		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
+		let auth =
+			TransactionStorage::<T>::get_active_authorization(&AuthorizationScope::Account(caller))
+				.expect("authorized above");
+		let extent = &auth.slots[0].extent;
 		assert_eq!(extent.bytes, l as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
@@ -622,6 +694,51 @@ mod benchmarks {
 		let v3 = Transactions::<T>::get(block).expect("entry exists");
 		assert_eq!(v3.len(), max as usize);
 		assert_eq!(v3[0].extrinsic_index, u32::MAX);
+
+		Ok(())
+	}
+
+	#[benchmark]
+	fn migrate_v5_to_v6_step() -> Result<(), BenchmarkError> {
+		use crate::migrations::v6::{LegacyAuthorization, LegacyAuthorizations, MigrateV5ToV6};
+		use polkadot_sdk_frame::deps::frame_support::{
+			migrations::SteppedMigration, weights::WeightMeter,
+		};
+
+		bump_relay_for_bench::<T>();
+
+		// One legacy entry on the translating branch (active, non-empty).
+		let who: T::AccountId = whitelisted_caller();
+		let scope = AuthorizationScope::<T::AccountId>::Account(who.clone());
+		LegacyAuthorizations::<T>::insert(
+			&scope,
+			LegacyAuthorization {
+				extent: AuthorizationExtent {
+					bytes: 0,
+					transactions: 0,
+					extra: Default::default(),
+					bytes_allowance: 1024 * 1024,
+					transactions_allowance: 10,
+				},
+				expiration: frame_system::Pallet::<T>::block_number() + 100u32.into(),
+			},
+		);
+
+		let mut meter = WeightMeter::new();
+
+		#[block]
+		{
+			MigrateV5ToV6::<T>::step(None, &mut meter).expect("step must succeed");
+		}
+
+		// Rewritten in place. The legacy and slot decoders each accept prefixes of the
+		// other's encoding (SCALE ignores trailing bytes), so compare raw bytes.
+		let auth = crate::pallet::Authorizations::<T>::get(&scope).expect("auth exists");
+		assert_eq!(auth.slots.len(), 1);
+		assert_eq!(auth.slots[0].extent.bytes_allowance, 1024 * 1024);
+		let raw = sp_io::storage::get(&crate::pallet::Authorizations::<T>::hashed_key_for(&scope))
+			.expect("raw value exists");
+		assert_eq!(&*raw, auth.encode().as_slice());
 
 		Ok(())
 	}

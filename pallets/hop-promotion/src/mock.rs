@@ -19,7 +19,7 @@ use crate as pallet_bulletin_hop_promotion;
 use bulletin_pallets_common::NoCurrency;
 use pallet_bulletin_transaction_storage::{AsAuthorizer, ValidTransactionParams};
 use polkadot_sdk_frame::{
-	deps::{frame_support, frame_system},
+	deps::{frame_support, frame_system, sp_runtime::traits::BlockNumberProvider},
 	prelude::*,
 	runtime::prelude::*,
 	testing_prelude::*,
@@ -79,7 +79,11 @@ impl pallet_timestamp::Config for Test {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	/// In mock relay blocks; tests advance relay time with [`set_relay_now`].
+	pub const DefaultAuthorizationWindow: u32 = 10;
+	pub const MaxStartsAtFuture: u32 = 100;
+	pub const MaxAuthorizationSlots: u32 = 2;
+	pub storage MockRelayBlockNumber: u32 = 1;
 	// `static` so a test can lower the priority and check `integrity_test` rejects it.
 	pub static StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
@@ -106,6 +110,20 @@ parameter_types! {
 	pub const SubmitTimestampTolerance: u64 = TEST_SUBMIT_TIMESTAMP_TOLERANCE_MS;
 }
 
+pub struct MockRelayBlockNumberProvider;
+impl BlockNumberProvider for MockRelayBlockNumberProvider {
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
+}
+
 impl pallet_bulletin_transaction_storage::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type RuntimeCall = RuntimeCall;
@@ -115,7 +133,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<512>;
 	type MaxTransactionSize = ConstU32<TEST_MAX_TRANSACTION_SIZE>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer =
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>;
@@ -154,12 +175,13 @@ pub fn new_test_ext() -> TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
-	#[allow(unused_mut)]
 	let mut ext: TestExternalities = t.into();
 	#[cfg(feature = "runtime-benchmarks")]
 	ext.register_extension(sp_keystore::KeystoreExt::new(
 		sp_keystore::testing::MemoryKeystore::new(),
 	));
+	// Genesis runs with relay = 0; move past the sentinel so `ensure_relay_now` passes.
+	ext.execute_with(|| MockRelayBlockNumber::set(&1));
 	ext
 }
 

@@ -146,7 +146,8 @@ pub mod migrations {
 	pub type SingleBlockMigrations = (Unreleased, Permanent);
 
 	/// MBM migrations to apply on runtime upgrade.
-	pub type MbmMigrations = ();
+	pub type MbmMigrations =
+		(pallet_bulletin_transaction_storage::migrations::v6::MigrateV5ToV6<Runtime>,);
 }
 
 /// Executive: handles dispatch to the various modules.
@@ -976,7 +977,15 @@ impl_runtime_apis! {
 			use pallet_bulletin_transaction_storage::AuthorizationScope;
 
 			TransactionStorage::get_active_authorization(&AuthorizationScope::Account(account))
-				.map(|auth| auth.to_account_authorization(auth.extent.extra.bytes_permanent))
+				.and_then(|auth| {
+					// `extra` is opaque to the storage pallet; sum the renewal quota here.
+					let bytes_permanent_used =
+						auth.slots.iter().map(|slot| slot.extent.extra.bytes_permanent).sum();
+					auth.to_account_authorization(
+						TransactionStorage::relay_now(),
+						bytes_permanent_used,
+					)
+				})
 		}
 
 		fn can_store(account: AccountId, data_len: u32) -> bool {

@@ -605,6 +605,7 @@ async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
 			bytes: 0,
 			bytes_permanent: 0,
 			bytes_allowance: AUTH_BYTES,
+			starts_at: 0,
 			expiration: 1,
 		},
 		nonce,

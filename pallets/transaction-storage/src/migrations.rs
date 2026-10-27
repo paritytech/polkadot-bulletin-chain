@@ -22,6 +22,10 @@ use polkadot_sdk_frame::{
 	traits::{Get, OnRuntimeUpgrade, Zero},
 };
 
+/// Shared `pallet_id` of this pallet's stepped migrations; only the version pair
+/// distinguishes them to the MBM scheduler.
+const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
+
 /// Runtime migration that sets the `RetentionPeriod` storage item to a
 /// non-zero `NewValue` value **only if it is currently zero**.
 ///
@@ -288,10 +292,13 @@ pub mod v1 {
 /// current layout in bounded per-block steps. `BlockTransactions` is still translated
 /// here defensively (single transient `StorageValue`).
 pub mod v2 {
-	use super::*;
+	use super::{
+		v6::{LegacyAuthorization, LegacyAuthorizations},
+		*,
+	};
 	use crate::{
-		pallet::{Authorizations, BlockTransactions, Pallet},
-		Authorization, AuthorizationExtent, TransactionInfo, TransactionInfoFor,
+		pallet::{BlockTransactions, Pallet},
+		AuthorizationExtent, TransactionInfo, TransactionInfoFor,
 	};
 	use bulletin_transaction_storage_primitives::{
 		cids::{CidCodec, HashingAlgorithm},
@@ -323,24 +330,6 @@ pub mod v2 {
 		}
 	}
 
-	/// `Authorization` layout v1→v2 actually produces — frozen. The `From` impl
-	/// below maps it into the current `Authorization` struct; any future field
-	/// added to `Authorization` becomes a compile error here, forcing the author
-	/// to pick an explicit placeholder rather than silently writing the new shape
-	/// from this old migration.
-	pub(crate) struct V2Authorization<BlockNumber, Extra> {
-		pub extent: AuthorizationExtent<Extra>,
-		pub expiration: BlockNumber,
-	}
-
-	impl<BlockNumber, Extra> From<V2Authorization<BlockNumber, Extra>>
-		for Authorization<BlockNumber, Extra>
-	{
-		fn from(v2: V2Authorization<BlockNumber, Extra>) -> Self {
-			Self { extent: v2.extent, expiration: v2.expiration }
-		}
-	}
-
 	/// `TransactionInfo` layout at v1 — same shape as v2 minus the trailing `kind`
 	/// field. Used here to decode existing entries during translation.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -360,26 +349,25 @@ pub mod v2 {
 			let mut auth_migrated: u64 = 0;
 			let mut auth_dropped: u64 = 0;
 			let now = Pallet::<T>::now();
-			Authorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
+			// Written through the legacy alias: the live map's value type is the slot
+			// shape, which the stepped v5→v6 migration produces from exactly this layout.
+			LegacyAuthorizations::<T>::translate::<V1Authorization<BlockNumberFor<T>>, _>(
 				|_scope, old| {
 					if old.extent.bytes == 0 || old.expired(now) {
 						auth_dropped = auth_dropped.saturating_add(1);
 						return None;
 					}
 					auth_migrated = auth_migrated.saturating_add(1);
-					Some(
-						V2Authorization {
-							extent: AuthorizationExtent {
-								bytes: 0,
-								extra: Default::default(),
-								bytes_allowance: old.extent.bytes,
-								transactions: 0,
-								transactions_allowance: old.extent.transactions,
-							},
-							expiration: old.expiration,
-						}
-						.into(),
-					)
+					Some(LegacyAuthorization {
+						extent: AuthorizationExtent {
+							bytes: 0,
+							extra: Default::default(),
+							bytes_allowance: old.extent.bytes,
+							transactions: 0,
+							transactions_allowance: old.extent.transactions,
+						},
+						expiration: old.expiration,
+					})
 				},
 			);
 			tracing::info!(
@@ -481,8 +469,6 @@ pub mod v3 {
 	};
 	use sp_transaction_storage_proof::ChunkIndex;
 
-	const MIGRATIONS_ID: &[u8; 24] = b"bulletin-tx-storage-vmig";
-
 	/// `TransactionInfo` layout at v2 (no `extrinsic_index`). Used only for
 	/// decoding pre-migration entries; never written.
 	#[derive(Encode, Decode, Clone, Debug, MaxEncodedLen)]
@@ -503,7 +489,7 @@ pub mod v3 {
 		type Identifier = MigrationId<24>;
 
 		fn id() -> Self::Identifier {
-			MigrationId { pallet_id: *MIGRATIONS_ID, version_from: 2, version_to: 3 }
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 2, version_to: 3 }
 		}
 
 		fn step(
@@ -788,4 +774,233 @@ pub mod v5 {
 		Pallet<T>,
 		<T as polkadot_sdk_frame::deps::frame_system::Config>::DbWeight,
 	>;
+}
+
+/// Migration v5→v6: translate the pre-slot single-window `Authorizations` map into the
+/// slot-based [`crate::pallet::Authorizations`] map **in place** (both decode the same
+/// `"Authorizations"` prefix).
+///
+/// Stepped: each step processes one entry. Still-active entries become one fresh slot
+/// inheriting the allowances (used counters reset); expired or zero-allowance entries are
+/// removed and their provider reference released. Storage version flips to `6` once the
+/// iterator is exhausted.
+///
+/// The legacy `expiration` was a parachain block; slots use relay blocks. The clocks are
+/// not aligned, so every surviving entry gets a fresh `DefaultAuthorizationWindow` window
+/// starting at `relay_now`.
+pub mod v6 {
+	use super::*;
+	use crate::{
+		pallet::{Authorizations, Pallet},
+		Authorization, AuthorizationExtent, AuthorizationScopeFor, TimedAuthorization, WeightInfo,
+	};
+	use polkadot_sdk_frame::{
+		deps::frame_support::{
+			migrations::{MigrationId, SteppedMigration, SteppedMigrationError},
+			storage::types::StorageMap,
+			traits::{ConstU32, StorageInstance},
+			weights::WeightMeter,
+			Blake2_128Concat, BoundedVec,
+		},
+		prelude::{BlockNumberFor, Saturating, StorageVersion},
+	};
+
+	/// Pre-slot `Authorization` shape: one window per scope. Production code only decodes
+	/// existing entries; the benchmark and tests write it through [`LegacyAuthorizations`].
+	#[derive(Encode, Decode, MaxEncodedLen, scale_info::TypeInfo)]
+	pub struct LegacyAuthorization<BlockNumber, Extra> {
+		pub extent: AuthorizationExtent<Extra>,
+		pub expiration: BlockNumber,
+	}
+
+	pub type LegacyAuthorizationFor<T> =
+		LegacyAuthorization<BlockNumberFor<T>, <T as Config>::AuthorizationExtra>;
+
+	/// Hand-rolled prefix so the alias decodes the live `"Authorizations"` keys as
+	/// [`LegacyAuthorization`].
+	pub struct LegacyAuthorizationsInstance<T>(PhantomData<T>);
+	impl<T: Config> StorageInstance for LegacyAuthorizationsInstance<T> {
+		fn pallet_prefix() -> &'static str {
+			<Pallet<T> as polkadot_sdk_frame::deps::frame_support::traits::PalletInfoAccess>::name()
+		}
+		const STORAGE_PREFIX: &'static str = "Authorizations";
+	}
+
+	/// View over the live `"Authorizations"` prefix that decodes values as
+	/// [`LegacyAuthorization`].
+	pub type LegacyAuthorizations<T> = StorageMap<
+		LegacyAuthorizationsInstance<T>,
+		Blake2_128Concat,
+		AuthorizationScopeFor<T>,
+		LegacyAuthorizationFor<T>,
+		polkadot_sdk_frame::deps::frame_support::pallet_prelude::OptionQuery,
+	>;
+
+	/// Stepped migration from storage version 5 to 6.
+	pub struct MigrateV5ToV6<T: Config>(PhantomData<T>);
+
+	/// Upper bound on the cursor's hashed-key length: `Blake2_128Concat` yields
+	/// `16 + encoded_key` bytes and an `AuthorizationScope` encodes to 33.
+	const CURSOR_MAX_LEN: u32 = 128;
+
+	impl<T: Config> SteppedMigration for MigrateV5ToV6<T> {
+		type Cursor = BoundedVec<u8, ConstU32<CURSOR_MAX_LEN>>;
+		type Identifier = MigrationId<24>;
+
+		fn id() -> Self::Identifier {
+			MigrationId { pallet_id: *super::MIGRATIONS_ID, version_from: 5, version_to: 6 }
+		}
+
+		fn step(
+			cursor: Option<Self::Cursor>,
+			meter: &mut WeightMeter,
+		) -> Result<Option<Self::Cursor>, SteppedMigrationError> {
+			use polkadot_sdk_frame::deps::frame_support::storage::IterableStorageMap;
+
+			let relay_now = Pallet::<T>::relay_now();
+			if relay_now.is_zero() {
+				// Genesis sentinel: only seen on misconfigured try-runtime snapshots. Fail
+				// loudly rather than write slot windows from `0`.
+				tracing::error!(
+					target: LOG_TARGET,
+					"v5->v6: relay block number unavailable; cannot run migration",
+				);
+				return Err(SteppedMigrationError::Failed);
+			}
+
+			let required = T::WeightInfo::migrate_v5_to_v6_step();
+			if meter.remaining().any_lt(required) {
+				return Err(SteppedMigrationError::InsufficientWeight { required });
+			}
+
+			let parachain_now = Pallet::<T>::now();
+			let new_expiration = relay_now.saturating_add(T::DefaultAuthorizationWindow::get());
+
+			let mut previous_key: Option<Vec<u8>> = cursor.map(|c| c.into_inner());
+
+			loop {
+				if meter.try_consume(required).is_err() {
+					break;
+				}
+
+				// In-place rewrite: read each entry under the legacy decoder and write the
+				// slot shape at the same key.
+				let next = Authorizations::<T>::translate_next::<LegacyAuthorizationFor<T>, _>(
+					previous_key.take(),
+					|scope, legacy| {
+						if legacy.expiration <= parachain_now || legacy.extent.bytes_allowance == 0
+						{
+							// The grant took a provider reference; release it with the entry.
+							Pallet::<T>::authorization_removed(&scope);
+							return None;
+						}
+						let slot = TimedAuthorization {
+							extent: AuthorizationExtent {
+								bytes: 0,
+								transactions: 0,
+								extra: Default::default(),
+								bytes_allowance: legacy.extent.bytes_allowance,
+								transactions_allowance: legacy.extent.transactions_allowance,
+							},
+							starts_at: relay_now,
+							expiration: new_expiration,
+						};
+						let mut slots = BoundedVec::new();
+						slots.try_push(slot).expect(
+							"MaxAuthorizationSlots > 0 by integrity_test; one slot fits; qed",
+						);
+						// The provider reference taken at grant time carries over unchanged.
+						Some(Authorization::<T> { slots })
+					},
+				);
+
+				match next {
+					Some(key) => previous_key = Some(key),
+					None => {
+						// Never downgrade — this MBM can be re-run against state already
+						// at/beyond v6 (e.g. by try-runtime, whose id isn't in `Historic`).
+						use polkadot_sdk_frame::prelude::GetStorageVersion;
+						if Pallet::<T>::on_chain_storage_version() < 6 {
+							StorageVersion::new(6).put::<Pallet<T>>();
+						}
+						return Ok(None);
+					},
+				}
+			}
+
+			let cursor = previous_key
+				.map(BoundedVec::try_from)
+				.transpose()
+				.map_err(|_| SteppedMigrationError::Failed)?;
+			Ok(cursor)
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn pre_upgrade() -> Result<Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			let mut total: u32 = 0;
+			let mut zero_allowance: u32 = 0;
+			for (_, legacy) in LegacyAuthorizations::<T>::iter() {
+				total = total.saturating_add(1);
+				if legacy.extent.bytes_allowance == 0 {
+					zero_allowance = zero_allowance.saturating_add(1);
+				}
+			}
+			tracing::info!(
+				target: LOG_TARGET,
+				total,
+				zero_allowance,
+				"v5->v6 pre_upgrade: legacy entries",
+			);
+			Ok((total, zero_allowance).encode())
+		}
+
+		#[cfg(feature = "try-runtime")]
+		fn post_upgrade(
+			state: Vec<u8>,
+		) -> Result<(), polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+			use polkadot_sdk_frame::prelude::GetStorageVersion;
+
+			let (total, zero_allowance) = <(u32, u32)>::decode(&mut &state[..])
+				.map_err(|_| "Failed to decode pre_upgrade state")?;
+
+			let mut new_count: u32 = 0;
+			for (_, auth) in Authorizations::<T>::iter() {
+				new_count = new_count.saturating_add(1);
+				polkadot_sdk_frame::prelude::ensure!(
+					!auth.slots.is_empty(),
+					"v5->v6 post_upgrade: Authorization has empty slots",
+				);
+				for slot in auth.slots.iter() {
+					polkadot_sdk_frame::prelude::ensure!(
+						slot.extent.bytes == 0 &&
+							slot.extent.transactions == 0 &&
+							slot.extent.extra == Default::default(),
+						"v5->v6 post_upgrade: translated slot has non-zero used counters",
+					);
+				}
+			}
+			polkadot_sdk_frame::prelude::ensure!(
+				new_count <= total,
+				"v5->v6 post_upgrade: more slot entries than legacy entries",
+			);
+			let drops = total.saturating_sub(new_count);
+			polkadot_sdk_frame::prelude::ensure!(
+				drops >= zero_allowance,
+				"v5->v6 post_upgrade: drops < known zero-allowance drops",
+			);
+			polkadot_sdk_frame::prelude::ensure!(
+				Pallet::<T>::on_chain_storage_version() >= StorageVersion::new(6),
+				"v5->v6 post_upgrade: storage version not bumped",
+			);
+			tracing::info!(
+				target: LOG_TARGET,
+				total,
+				new_count,
+				drops,
+				zero_allowance,
+				"v5->v6 post_upgrade: ok",
+			);
+			Ok(())
+		}
+	}
 }
