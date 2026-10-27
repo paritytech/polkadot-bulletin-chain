@@ -1469,8 +1469,8 @@ export class AsyncBulletinClient implements BulletinClientInterface {
   /**
    * Cancel a renewal registration.
    *
-   * The chain rejects this while the registration's next cycle is still
-   * prepaid, so it only succeeds once the prepaid cycle has fired.
+   * Disabling while the next cycle is still prepaid forfeits the prepayment:
+   * the allowance consumed at registration is not refunded.
    */
   disableAutoRenew(contentHash: Uint8Array): CallBuilder {
     return new CallBuilder(async (options) => {
