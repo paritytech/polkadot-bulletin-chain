@@ -112,7 +112,7 @@ If no slot qualifies, `renew` returns `PermanentAllowanceExceeded` (when at leas
 
 Both extrinsics resolve a window:
 
-- **Default form** (`authorize_account`, `authorize_preimage`): `starts_at = relay_now`, `expiration = relay_now + DefaultAuthorizationWindow`.
+- **Default form** (`authorize_account`, `authorize_preimage`): the window of the scope's latest-expiring **active** slot, so repeated grants add to it; when no slot is active, `starts_at = relay_now`, `expiration = relay_now + DefaultAuthorizationWindow`. This is what keeps per-claim top-ups from spending the slot bound.
 - **Explicit form** (`authorize_account_window`, `authorize_preimage_window`): caller supplies `(starts_at: Option<u32>, expiration: u32)`. `starts_at = None` means "active immediately" (`relay_now`). The window is validated by `ensure_valid_window`:
   - `expiration > effective_starts_at`
   - `expiration > relay_now`

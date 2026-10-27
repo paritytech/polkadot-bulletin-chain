@@ -469,13 +469,14 @@ pub mod pallet {
 		// this index.
 
 		/// Authorize an account to store up to `bytes` of arbitrary data in `transactions`
-		/// boost-tier transactions over the default window
-		/// `[relay_now, relay_now + DefaultAuthorizationWindow)`.
+		/// boost-tier transactions.
 		///
-		/// If a slot with that exact window already exists, `bytes` and `transactions` are
-		/// **added** to its caps (consumed counters preserved). Otherwise a new slot is added;
-		/// fails with [`Error::TooManySlots`] when the per-scope bound is reached. To target a
-		/// specific window, use [`authorize_account_window`](Self::authorize_account_window).
+		/// If the account has an active slot, `bytes` and `transactions` are **added** to its
+		/// caps (consumed counters preserved; the latest-expiring one when several are active).
+		/// Otherwise a new slot over `[relay_now, relay_now + DefaultAuthorizationWindow)` is
+		/// added; fails with [`Error::TooManySlots`] when the per-scope bound is reached. To
+		/// target a specific window, use
+		/// [`authorize_account_window`](Self::authorize_account_window).
 		///
 		/// The origin for this call must be the pallet's `Authorizer`. Emits
 		/// [`AccountAuthorized`](Event::AccountAuthorized) when successful.
@@ -527,13 +528,12 @@ pub mod pallet {
 			)
 		}
 
-		/// Authorize anyone to store a preimage of the given content hash over the default
-		/// window.
+		/// Authorize anyone to store a preimage of the given content hash.
 		///
-		/// If a slot with that window already exists, `max_size` is **added** to its
-		/// `bytes_allowance`. Otherwise a new slot is added with `transactions_allowance = 2`
-		/// so the store-then-renew flow fits. To target a specific window, use
-		/// [`authorize_preimage_window`](Self::authorize_preimage_window).
+		/// If the hash has an active slot, `max_size` is **added** to its `bytes_allowance`.
+		/// Otherwise a new slot over the default window is added with
+		/// `transactions_allowance = 2` so the store-then-renew flow fits. To target a specific
+		/// window, use [`authorize_preimage_window`](Self::authorize_preimage_window).
 		///
 		/// Parameters:
 		///
@@ -1172,16 +1172,28 @@ pub mod pallet {
 			Ok(())
 		}
 
-		/// `expiration = None` selects the default window from `relay_now`; `Some` is the
-		/// explicit `_window` form, validated by [`Self::ensure_valid_window`].
+		/// `expiration = None` is the default form: the window of the latest-expiring active slot
+		/// at `scope`, so repeated grants add to it, or a fresh default window from `relay_now`
+		/// when none is active. `Some` is the explicit `_window` form, validated by
+		/// [`Self::ensure_valid_window`].
 		fn resolve_window(
+			scope: &AuthorizationScopeFor<T>,
 			relay_now: RelayBlockNumberFor<T>,
 			starts_at: Option<RelayBlockNumberFor<T>>,
 			expiration: Option<RelayBlockNumberFor<T>>,
 		) -> Result<(RelayBlockNumberFor<T>, RelayBlockNumberFor<T>), Error<T>> {
 			match expiration {
-				None =>
-					Ok((relay_now, relay_now.saturating_add(T::DefaultAuthorizationWindow::get()))),
+				None => {
+					let active = Self::get_active_authorization(scope).and_then(|auth| {
+						auth.active_slots(relay_now)
+							.max_by_key(|slot| slot.expiration)
+							.map(|slot| (slot.starts_at, slot.expiration))
+					});
+					Ok(active.unwrap_or((
+						relay_now,
+						relay_now.saturating_add(T::DefaultAuthorizationWindow::get()),
+					)))
+				},
 				Some(expiration) => {
 					let starts_at = starts_at.unwrap_or(relay_now);
 					Self::ensure_valid_window(relay_now, starts_at, expiration)?;
@@ -1201,18 +1213,14 @@ pub mod pallet {
 			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(bytes > 0, Error::<T>::BadDataSize);
 			let relay_now = Self::ensure_relay_now()?;
-			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			let scope = AuthorizationScope::Account(who.clone());
+			let (starts_at, expiration) =
+				Self::resolve_window(&scope, relay_now, starts_at, expiration)?;
 			// Charge the budget only once the request is known to be well-formed.
 			if let Some(ctx) = maybe_authorizer {
 				Self::consume_authorizer_budget(&ctx.authorizer, transactions, bytes)?;
 			}
-			Self::add_slot(
-				AuthorizationScope::Account(who.clone()),
-				transactions,
-				bytes,
-				starts_at,
-				expiration,
-			)?;
+			Self::add_slot(scope, transactions, bytes, starts_at, expiration)?;
 			Self::deposit_event(Event::AccountAuthorized {
 				who,
 				transactions,
@@ -1235,17 +1243,13 @@ pub mod pallet {
 			let maybe_authorizer = T::Authorizer::ensure_origin(origin)?;
 			ensure!(max_size > 0, Error::<T>::BadDataSize);
 			let relay_now = Self::ensure_relay_now()?;
-			let (starts_at, expiration) = Self::resolve_window(relay_now, starts_at, expiration)?;
+			let scope = AuthorizationScope::Preimage(content_hash);
+			let (starts_at, expiration) =
+				Self::resolve_window(&scope, relay_now, starts_at, expiration)?;
 			if let Some(ctx) = maybe_authorizer {
 				Self::consume_authorizer_budget(&ctx.authorizer, 1, max_size)?;
 			}
-			Self::add_slot(
-				AuthorizationScope::Preimage(content_hash),
-				2,
-				max_size,
-				starts_at,
-				expiration,
-			)?;
+			Self::add_slot(scope, 2, max_size, starts_at, expiration)?;
 			Self::deposit_event(Event::PreimageAuthorized {
 				content_hash,
 				max_size,

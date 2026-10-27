@@ -426,3 +426,97 @@ fn scale_roundtrip_is_stable() {
 		assert_eq!(slots.iter().map(|s| s.expiration).collect::<Vec<_>>(), vec![150, 200]);
 	});
 }
+
+/// Default-form grants in later relay blocks add to the active slot instead of opening a new
+/// window each time; once the slot expires, the next grant opens a fresh default window.
+#[test]
+fn default_grants_merge_into_active_slot() {
+	new_test_ext().execute_with(|| {
+		// Events are only recorded from block 1 on.
+		run_to_block(1, || None);
+		let who = 1u64;
+		set_relay_now(1);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 100));
+		let call = Call::store { data: vec![0u8; 60] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &call));
+
+		set_relay_now(2);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 2, 200));
+		set_relay_now(3);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 3, 300));
+
+		let slots = slots_for(AuthorizationScope::Account(who));
+		assert_eq!(slots.len(), 1, "grants in later blocks merge into the active slot");
+		assert_eq!((slots[0].starts_at, slots[0].expiration), (1, 11));
+		assert_eq!(slots[0].extent.bytes_allowance, 600);
+		assert_eq!(slots[0].extent.transactions_allowance, 6);
+		assert_eq!(slots[0].extent.bytes, 60, "used counters are preserved");
+		assert_eq!(slots[0].extent.transactions, 1);
+		System::assert_last_event(
+			crate::Event::AccountAuthorized {
+				who,
+				transactions: 3,
+				bytes: 300,
+				starts_at: 1,
+				expiration: 11,
+			}
+			.into(),
+		);
+
+		// Expired: the next grant opens a fresh default window.
+		set_relay_now(11);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 50));
+		let slots = slots_for(AuthorizationScope::Account(who));
+		assert_eq!(slots.len(), 1);
+		assert_eq!((slots[0].starts_at, slots[0].expiration), (11, 21));
+		assert_eq!(slots[0].extent.bytes_allowance, 50);
+		assert_eq!(slots[0].extent.bytes, 0);
+	});
+}
+
+/// With two active slots, a default-form grant lands on the latest-expiring one.
+#[test]
+fn default_grant_merges_into_latest_expiring_active_slot() {
+	new_test_ext().execute_with(|| {
+		let who = 1u64;
+		set_relay_now(100);
+		for expiration in [200u32, 300] {
+			assert_ok!(TransactionStorage::authorize_account_window(
+				RuntimeOrigin::root(),
+				who,
+				1,
+				100,
+				Some(100),
+				expiration,
+			));
+		}
+		set_relay_now(150);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 1, 100));
+		let slots = slots_for(AuthorizationScope::Account(who));
+		assert_eq!(slots.len(), 2);
+		assert_eq!(slots[0].expiration, 200);
+		assert_eq!(slots[0].extent.bytes_allowance, 100);
+		assert_eq!(slots[1].expiration, 300);
+		assert_eq!(slots[1].extent.bytes_allowance, 200);
+	});
+}
+
+/// Same for preimages: repeated `authorize_preimage` calls raise the active slot's cap.
+#[test]
+fn default_preimage_grants_merge_into_active_slot() {
+	new_test_ext().execute_with(|| {
+		let hash = [7u8; 32];
+		set_relay_now(1);
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 1000));
+		set_relay_now(5);
+		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 500));
+		let slots = Authorizations::get(AuthorizationScope::Preimage(hash))
+			.expect("auth exists")
+			.slots
+			.into_inner();
+		assert_eq!(slots.len(), 1);
+		assert_eq!((slots[0].starts_at, slots[0].expiration), (1, 11));
+		assert_eq!(slots[0].extent.bytes_allowance, 1500);
+		assert_eq!(slots[0].extent.transactions_allowance, 4);
+	});
+}
