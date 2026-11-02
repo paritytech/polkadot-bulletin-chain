@@ -63,6 +63,12 @@ use testnet_parachains_constants::westend::{consensus::*, currency::*, fee::Weig
 
 /// Override SDK's SLOT_DURATION: 24 seconds (4 relay chain slots).
 const SLOT_DURATION: u64 = 24_000;
+/// Build one relay block behind the tip so a depth-1 relay fork cannot orphan parachain blocks.
+const RELAY_PARENT_OFFSET: u32 = 1;
+/// Override SDK's UNINCLUDED_SEGMENT_CAPACITY: inclusion is observed at the relay parent,
+/// `RELAY_PARENT_OFFSET` relay blocks behind the tip, so `BLOCK_PROCESSING_VELOCITY *
+/// RELAY_PARENT_OFFSET` more blocks are still pending.
+const UNINCLUDED_SEGMENT_CAPACITY: u32 = (3 + RELAY_PARENT_OFFSET) * BLOCK_PROCESSING_VELOCITY;
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
 #[cfg(feature = "runtime-benchmarks")]
@@ -331,7 +337,7 @@ impl cumulus_pallet_parachain_system::Config for Runtime {
 	type ReservedXcmpWeight = ReservedXcmpWeight;
 	type CheckAssociatedRelayNumber = RelayNumberMonotonicallyIncreases;
 	type ConsensusHook = ConsensusHook;
-	type RelayParentOffset = ConstU32<0>;
+	type RelayParentOffset = ConstU32<RELAY_PARENT_OFFSET>;
 	type SchedulingSignatureVerifier = ();
 }
 
@@ -688,7 +694,7 @@ impl_runtime_apis! {
 
 	impl cumulus_primitives_core::RelayParentOffsetApi<Block> for Runtime {
 		fn relay_parent_offset() -> u32 {
-			0
+			RELAY_PARENT_OFFSET
 		}
 
 		fn max_claim_queue_offset() -> u8 {
