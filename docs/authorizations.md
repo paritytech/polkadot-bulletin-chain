@@ -76,12 +76,27 @@ Extends `expiration` by another `AuthorizationPeriod` and leaves all consumed co
 Implemented by the [`AllowanceBasedPriority`][ext] transaction extension via a runtime-selected `BoostStrategy`:
 
 - `check_authorization` saturates `bytes` and `transactions` upward and never rejects.
-- The boost only applies to **signed account-scoped `store` / `store_with_cid_config`**. All renew flavours and preimage-scoped stores get `0`.
+- The boost applies to **signed account-scoped `store` / `store_with_cid_config`** while in-budget.
 - The strategy is fed the **post-this-tx** extent so the decision is "would this leave the holder in-budget on both axes?".
 - `FlatBoost` (default in both runtimes): `ALLOWANCE_PRIORITY_BOOST` while in-budget, `0` once over.
 - `ProportionalBoost` (alternative): scales with the tighter of the byte- and tx-budget remainders.
 
-In-budget `store` txs sort strictly above over-budget ones. Pool nonce / arrival ordering breaks ties.
+Preimage stores (signed or unsigned) always get `ALLOWANCE_PRIORITY_BOOST`, added in the pallet's preimage store validation. Every renew-family call (`renew`, `force_renew`, `enable_auto_renew`, `disable_auto_renew`) gets the same level through the runtime's `RenewTxParams`; the hard cap rejects an over-quota renew, so no budget check is needed.
+
+### Priority levels
+
+| Level | Transactions | Priority |
+|---|---|---|
+| 1 | `apply_authorized_upgrade` (frame-system) | `MAX` |
+| 2 | Cleanup (`remove_expired_*`, `remove_exhausted_authorizer`) | `MAX / 2` |
+| 3 | `authorize_account`, `authorize_preimage`, `refresh_*_authorization` | `MAX / 4` |
+| 4 | In-budget store, preimage store, renew family | `1 + MAX / 8` |
+| 5 | Over-budget store, fee-paying calls | `1`; fee-paying calls add their payment priority (tip-based) |
+| 6 | HOP promotion | `0` |
+
+Within a level, `NonceCheckWithQueueBonus` (replaces `CheckNonce`, same identifier and encoding) adds `MAX_QUEUE_BONUS` (1e12) minus `QUEUE_BONUS_STEP` (1e6) for each tx the signer has queued ahead in the pool (tx nonce − account nonce). Each signer's next tx ranks first, so one account can't fill a whole block while others wait. Bare txs get the full bonus; unsigned general txs (HOP promotion) get none.
+
+The step is larger than the payment priority of an untipped call (`max txs per block`), so queue position decides between over-budget stores and fee-paying calls; a tip lifts a call once `tip × max txs per block` exceeds a step. The largest possible penalty (`u32` nonce × step ≈ 4.3e15) is far below the gap between levels (`MAX / 8`), so queue position never moves a tx to another level.
 
 [ext]: ../pallets/transaction-storage/src/extension.rs
 
