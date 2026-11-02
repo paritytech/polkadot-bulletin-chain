@@ -281,7 +281,7 @@ impl xcm_executor::Config for XcmConfig {
 	type MessageExporter = ();
 	type UniversalAliases = Nothing;
 	type CallDispatcher = RuntimeCall;
-	type SafeCallFilter = EverythingBut<crate::storage::StorageCallInspector>;
+	type SafeCallFilter = EverythingBut<crate::storage::XcmBlockedCalls>;
 	type Aliasers = TrustedAliasers;
 	type TransactionalProcessor = FrameTransactionalProcessor;
 	type HrmpNewChannelOpenRequestHandler = ();
