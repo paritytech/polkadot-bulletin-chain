@@ -140,8 +140,8 @@ test-zombienet-auto-renew runtime="westend" group="all":
         --features bulletin-chain-zombienet-sdk-tests/zombie-auto-renew-tests \
         -- --test-threads=1 --nocapture "${filter_args[@]}"
 
-# Zombienet HOP-promotion suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
-test-zombienet-hop runtime="westend" filter="parachain_hop_promotion":
+# Zombienet HOP suite. runtime ∈ westend | paseo; filter is the cargo-test substring.
+test-zombienet-hop runtime="westend" filter="parachain_hop":
     #!/usr/bin/env bash
     set -euo pipefail
     POLKADOT_BIN_DIR="$(just binaries-polkadot)"
@@ -153,6 +153,17 @@ test-zombienet-hop runtime="westend" filter="parachain_hop_promotion":
     export POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
     export PARACHAIN_CHAIN_SPEC_PATH="$PWD/zombienet/bulletin-{{runtime}}-spec.json"
     export PARACHAIN_CHAIN_ID="${PARACHAIN_CHAIN_ID:-bulletin-{{runtime}}}"
+    # A filter matching zero tests exits 0; fail loudly instead (e.g. a newly added
+    # test whose name falls outside the filter would otherwise go silently green).
+    test_list=$(cargo test --release -p bulletin-chain-zombienet-sdk-tests \
+        --features bulletin-chain-zombienet-sdk-tests/zombie-hop-tests \
+        -- --list "{{filter}}")
+    match_count=$(grep -c ': test$' <<< "$test_list" || true)
+    if [ "$match_count" -eq 0 ]; then
+        echo "filter '{{filter}}' matched no tests" >&2
+        exit 1
+    fi
+    echo "running $match_count HOP test(s) matching '{{filter}}'"
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-hop-tests \
         "{{filter}}" \
