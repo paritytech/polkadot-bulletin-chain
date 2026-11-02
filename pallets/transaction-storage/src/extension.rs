@@ -493,7 +493,10 @@ where
 		// Boost against the post-this-tx state so a single oversized tx is demoted on entry.
 		let priority = match origin.caller().clone().try_into() {
 			Ok(Origin::<T>::Authorized { who, scope: AuthorizationScope::Account(_) }) => {
-				let mut extent = Pallet::<T>::account_authorization_extent(who);
+				let mut extent =
+					Pallet::<T>::get_active_authorization(&AuthorizationScope::Account(who))
+						.map(|auth| auth.usage(Pallet::<T>::relay_now()))
+						.unwrap_or_default();
 				extent.bytes = extent.bytes.saturating_add(this_tx_bytes);
 				extent.transactions = extent.transactions.saturating_add(1);
 				B::boost(extent)

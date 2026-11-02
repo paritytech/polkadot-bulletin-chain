@@ -30,10 +30,16 @@ parameter_types! {
 const CLEANUP_PRIORITY: TransactionPriority = TransactionPriority::MAX;
 /// Below `MAX` so `AllowanceBasedPriority` can add its boost without saturating `u64`.
 const STORE_PRIORITY: TransactionPriority = TransactionPriority::MAX / 4;
+/// Relay-chain blocks per day (6s blocks).
+pub const DAYS_RELAY: u32 = 14_400;
+
 const TX_LONGEVITY: TransactionLongevity = crate::DAYS as TransactionLongevity;
 
 parameter_types! {
-	pub const AuthorizationPeriod: crate::BlockNumber = 14 * crate::DAYS;
+	/// Slot windows are measured in relay blocks (6s).
+	pub const DefaultAuthorizationWindow: u32 = 14 * DAYS_RELAY;
+	pub const MaxStartsAtFuture: u32 = 30 * DAYS_RELAY;
+	pub const MaxAuthorizationSlots: u32 = 2;
 	pub const StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("TransactionStorageStore", STORE_PRIORITY, TX_LONGEVITY);
 	pub const RenewTxParams: ValidTransactionParams =
@@ -103,7 +109,11 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 	type MaxBlockTransactions = crate::ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	/// Max transaction size per block needs to be aligned with `BlockLength`.
 	type MaxTransactionSize = crate::ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider =
+		cumulus_pallet_parachain_system::RelaychainDataProvider<Runtime>;
 	type AuthorizerRegistrarOrigin = frame_system::EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
 		EitherOf<

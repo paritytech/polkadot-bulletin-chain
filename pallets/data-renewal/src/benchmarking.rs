@@ -131,6 +131,7 @@ mod benchmarks {
 		let data = vec![0u8; <T as txs::Config>::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
+		txs::benchmarking::bump_relay_for_bench::<T>();
 		TransactionStorage::<T>::authorize_account(
 			origin,
 			caller.clone(),
@@ -158,6 +159,7 @@ mod benchmarks {
 		let data = vec![0u8; <T as txs::Config>::MaxTransactionSize::get() as usize];
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
+		txs::benchmarking::bump_relay_for_bench::<T>();
 		TransactionStorage::<T>::authorize_account(
 			origin,
 			caller.clone(),
@@ -197,6 +199,7 @@ mod benchmarks {
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
 		let bytes_allowance = <T as txs::Config>::MaxTransactionSize::get() as u64 * 10;
+		txs::benchmarking::bump_relay_for_bench::<T>();
 		TransactionStorage::<T>::authorize_account(origin, caller.clone(), 0, bytes_allowance)
 			.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 
@@ -218,7 +221,11 @@ mod benchmarks {
 		}
 
 		// `prepare` charged `data.len()` to the permanent-usage counter.
-		let extent = TransactionStorage::<T>::account_authorization_extent(caller);
+		let auth = TransactionStorage::<T>::get_active_authorization(
+			&txs::AuthorizationScope::Account(caller),
+		)
+		.expect("authorized above");
+		let extent = &auth.slots[0].extent;
 		assert_eq!(extent.extra.bytes_permanent, data.len() as u64);
 		assert_eq!(extent.bytes_allowance, bytes_allowance);
 		Ok(())
@@ -243,6 +250,7 @@ mod benchmarks {
 				let caller: T::AccountId = account("rn_caller", i, 0);
 				let origin = <T as txs::Config>::Authorizer::try_successful_origin()
 					.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
+				txs::benchmarking::bump_relay_for_bench::<T>();
 				TransactionStorage::<T>::authorize_account(
 					origin,
 					caller.clone(),

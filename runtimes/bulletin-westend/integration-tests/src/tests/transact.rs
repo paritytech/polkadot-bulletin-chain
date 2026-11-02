@@ -45,15 +45,24 @@ fn xcm_transact_store_from_asset_hub_is_blocked() {
 		type TransactionStorage = bulletin_westend_runtime::TransactionStorage;
 		type RuntimeOrigin = <BulletinWestendNet as Chain>::RuntimeOrigin;
 
+		// Slot windows run on the relay clock; move it past the genesis sentinel.
+		{
+			use sp_runtime::traits::BlockNumberProvider;
+			cumulus_pallet_parachain_system::RelaychainDataProvider::<
+				bulletin_westend_runtime::Runtime,
+			>::set_block_number(1);
+		}
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
 			ah_sovereign.clone(),
 			1,
 			data.len() as u64,
 		));
-		let extent = TransactionStorage::account_authorization_extent(ah_sovereign.clone());
-		assert_ne!(extent, Default::default(), "authorization must have been granted");
-		extent
+		let authorization = TransactionStorage::get_active_authorization(
+			&pallet_bulletin_transaction_storage::AuthorizationScope::Account(ah_sovereign.clone()),
+		);
+		assert!(authorization.is_some(), "authorization must have been granted");
+		authorization
 	});
 
 	let store_call = bulletin_westend_runtime::RuntimeCall::TransactionStorage(
@@ -107,6 +116,11 @@ fn xcm_transact_store_from_asset_hub_is_blocked() {
 			)),
 			"no data must be stored on Bulletin"
 		);
-		assert_eq!(TransactionStorage::account_authorization_extent(ah_sovereign), granted_extent);
+		assert_eq!(
+			TransactionStorage::get_active_authorization(
+				&pallet_bulletin_transaction_storage::AuthorizationScope::Account(ah_sovereign),
+			),
+			granted_extent,
+		);
 	});
 }

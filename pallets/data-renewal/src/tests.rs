@@ -22,7 +22,7 @@
 use crate::{mock::*, PendingRenewals, PermanentExtent, RenewalData, Renewals};
 use bulletin_transaction_storage_primitives::{
 	cids::{CidConfig, HashingAlgorithm},
-	EntryKind,
+	ContentHash, EntryKind,
 };
 use codec::{Decode, Encode};
 use pallet_bulletin_transaction_storage::{
@@ -39,6 +39,31 @@ use polkadot_sdk_frame::{
 	testing_prelude::*,
 };
 use sp_transaction_storage_proof::{num_chunks, registration::build_proof};
+
+/// Raw extent of the single active slot at `scope`; tests here hold at most one slot per
+/// scope unless they say otherwise. Zero when no slot is active.
+fn slot_extent(scope: AuthorizationScope<u64>) -> AuthorizationExtent<PermanentExtent> {
+	let Some(auth) = TransactionStorage::get_active_authorization(&scope) else {
+		return AuthorizationExtent::default();
+	};
+	assert_eq!(auth.slots.len(), 1, "tests in this module hold one slot per scope");
+	auth.slots[0].extent
+}
+
+fn account_extent(who: u64) -> AuthorizationExtent<PermanentExtent> {
+	slot_extent(AuthorizationScope::Account(who))
+}
+
+fn preimage_extent(hash: ContentHash) -> AuthorizationExtent<PermanentExtent> {
+	slot_extent(AuthorizationScope::Preimage(hash))
+}
+
+/// The slots stored for `who`, in storage order.
+fn slots_for(who: u64) -> Vec<txs::TimedAuthorizationFor<Test>> {
+	txs::Authorizations::<Test>::get(AuthorizationScope::Account(who))
+		.map(|auth| auth.slots.into_inner())
+		.unwrap_or_default()
+}
 
 // ---------------------------------------------------------------------------
 // Smoke tests
@@ -274,12 +299,13 @@ fn relocation_migration_try_runtime_checks_pass() {
 			&512u64.encode(),
 		);
 
-		// Pre-split authorization: extent { transactions, transactions_allowance, bytes,
-		// bytes_permanent, bytes_allowance } + expiration. The migration must leave it alone.
+		// An authorization: one slot { extent { transactions, transactions_allowance, bytes,
+		// bytes_permanent, bytes_allowance }, starts_at, expiration }. The migration must
+		// leave it alone.
 		let scope = AuthorizationScope::Account(3u64);
 		sp_io::storage::set(
 			&txs::Authorizations::<Test>::hashed_key_for(&scope),
-			&(1u32, 5u32, 100u64, 700u64, 900u64, 50u64).encode(),
+			&vec![(1u32, 5u32, 100u64, 700u64, 900u64, 0u32, 50u32)].encode(),
 		);
 
 		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
@@ -288,7 +314,8 @@ fn relocation_migration_try_runtime_checks_pass() {
 		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
 			.expect("post_upgrade checks must pass");
 
-		let extent = txs::Authorizations::<Test>::get(&scope).expect("still present").extent;
+		let extent =
+			txs::Authorizations::<Test>::get(&scope).expect("still present").slots[0].extent;
 		assert_eq!(extent.extra.bytes_permanent, 700);
 		assert_eq!(extent.bytes_allowance, 900);
 	});
@@ -319,18 +346,19 @@ fn relocation_migration_try_runtime_checks_pass_when_already_relocated() {
 	});
 }
 
-/// Live chains carry tens of thousands of authorizations written before the renewal split,
-/// and nothing reshapes them: `AuthorizationExtent::extra` was placed in the slot the old
-/// `bytes_permanent` field occupied so the two encodings coincide. Reordering the struct —
-/// or wiring an `Extra` that is not 8 bytes — silently reinterprets every one of them, so
-/// pin the encoding here rather than discovering it against a snapshot.
+/// Live chains carry authorizations written before the renewal split, which the storage
+/// pallet's v5→v6 migration decodes through `LegacyAuthorization`: `AuthorizationExtent::extra`
+/// was placed in the slot the old `bytes_permanent` field occupied so the two encodings
+/// coincide. Reordering the struct — or wiring an `Extra` that is not 8 bytes — silently
+/// reinterprets every one of them, so pin the encoding here rather than discovering it
+/// against a snapshot.
 #[test]
 fn authorization_encoding_matches_pre_split_layout() {
 	// extent { transactions, transactions_allowance, bytes, bytes_permanent, bytes_allowance }
 	// followed by `expiration`.
 	let pre_split = (1u32, 5u32, 100u64, 700u64, 900u64, 50u64).encode();
 
-	let current = txs::Authorization::<u64, PermanentExtent> {
+	let current = txs::migrations::v6::LegacyAuthorization::<u64, PermanentExtent> {
 		extent: txs::AuthorizationExtent {
 			transactions: 1,
 			transactions_allowance: 5,
@@ -710,7 +738,7 @@ fn signed_renew_uses_account_authorization() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -729,7 +757,7 @@ fn signed_renew_uses_account_authorization() {
 		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
 
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 2000 },
@@ -807,7 +835,7 @@ fn signed_renew_prefers_preimage_authorization() {
 
 		// Account auth now at the cap (still present, just fully used).
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -827,18 +855,18 @@ fn signed_renew_prefers_preimage_authorization() {
 		));
 
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(content_hash),
+			preimage_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2000,
 				transactions: 0,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 		// Account auth was unaffected by the preimage authorize.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -855,18 +883,18 @@ fn signed_renew_prefers_preimage_authorization() {
 		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
 
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(content_hash),
+			preimage_extent(content_hash),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 2000 },
 				bytes_allowance: 2000,
 				transactions: 1,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			},
 			"Preimage authorization should be consumed for renew"
 		);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -908,37 +936,37 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		// store_with_cid_config goes through check_unsigned → check_store_renew_unsigned.
 		assert_ok!(TransactionStorage::pre_dispatch(&store_call));
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			preimage_extent(sha2_hash),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2000,
 				transactions: 1,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 
 		// sha2 preimage consumed to cap; entry stays.
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			preimage_extent(sha2_hash),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2000,
 				transactions: 1,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 		// Blake2 authorization should remain unconsumed.
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(blake2_hash),
+			preimage_extent(blake2_hash),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2000,
 				transactions: 0,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 
@@ -961,13 +989,13 @@ fn preimage_authorize_store_with_cid_config_and_renew() {
 		};
 		assert_ok!(DataRenewal::pre_dispatch(&renew_call));
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(sha2_hash),
+			preimage_extent(sha2_hash),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 2000 },
 				bytes_allowance: 2000,
 				transactions: 2,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 	});
@@ -1261,7 +1289,7 @@ fn auto_renewal_consumes_authorization() {
 		// Registration prepaid the first cycle: `bytes_permanent = size` and one
 		// tx slot consumed.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 2000 },
@@ -1281,7 +1309,7 @@ fn auto_renewal_consumes_authorization() {
 
 		// Cycle 1 (prepaid) leaves the fresh authorization untouched.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -1304,7 +1332,7 @@ fn auto_renewal_consumes_authorization() {
 
 		// Cycle 2 (paid = false) charged `size` bytes_permanent + 1 tx slot.
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 2000 },
@@ -1542,8 +1570,8 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 			AuthorizationScope::Account(who),
 		)
 		.expect("auth exists");
-		let permanent_before = auth.extent.extra.bytes_permanent;
-		let transactions_before = auth.extent.transactions;
+		let permanent_before = auth.slots[0].extent.extra.bytes_permanent;
+		let transactions_before = auth.slots[0].extent.transactions;
 
 		init_block(12);
 		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
@@ -1568,8 +1596,8 @@ fn paid_cycle_refunds_on_block_slot_cap() {
 			AuthorizationScope::Account(who),
 		)
 		.expect("auth exists");
-		assert_eq!(auth.extent.extra.bytes_permanent, permanent_before);
-		assert_eq!(auth.extent.transactions, transactions_before);
+		assert_eq!(auth.slots[0].extent.extra.bytes_permanent, permanent_before);
+		assert_eq!(auth.slots[0].extent.transactions, transactions_before);
 
 		assert_ok!(TransactionStorage::do_try_state(System::block_number()));
 	});
@@ -1625,8 +1653,8 @@ fn renew_prepays_at_registration() {
 			AuthorizationScope::Account(who),
 		)
 		.unwrap();
-		assert_eq!(auth.extent.extra.bytes_permanent, 2000);
-		assert_eq!(auth.extent.transactions, 1);
+		assert_eq!(auth.slots[0].extent.extra.bytes_permanent, 2000);
+		assert_eq!(auth.slots[0].extent.transactions, 1);
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
 	});
 }
@@ -1671,7 +1699,7 @@ fn one_shot_cycle_does_not_recharge_auth() {
 		run_to_block(2, || None);
 		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
 
-		// Read raw `Authorizations` directly — the public extent helper masks expired entries.
+		// Read raw `Authorizations` directly — `get_active_authorization` masks expired slots.
 		let before = pallet_bulletin_transaction_storage::Authorizations::<Test>::get(
 			AuthorizationScope::Account(who),
 		)
@@ -1688,7 +1716,7 @@ fn one_shot_cycle_does_not_recharge_auth() {
 			AuthorizationScope::Account(who),
 		)
 		.unwrap();
-		assert_eq!((after.extent, after.expiration), (before.extent, before.expiration));
+		assert_eq!(after.slots, before.slots);
 	});
 }
 
@@ -1957,7 +1985,7 @@ fn renew_rejects_when_per_account_allowance_exceeded() {
 			crate::PERMANENT_ALLOWANCE_EXCEEDED,
 		);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			account_extent(who).extra.bytes_permanent,
 			0,
 			"rejected renew must not bump bytes_permanent",
 		);
@@ -1997,7 +2025,7 @@ fn renew_rejects_when_chain_wide_cap_reached() {
 			crate::CHAIN_PERMANENT_CAP_REACHED,
 		);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			account_extent(who).extra.bytes_permanent,
 			0,
 			"rejected renew must not bump bytes_permanent",
 		);
@@ -2242,7 +2270,7 @@ fn enable_auto_renew_rejects_expired_authorization() {
 		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
 		run_to_block(2, || None);
 
-		// AuthorizationPeriod = 10; the auth granted at block 1 expires at block 11.
+		// DefaultAuthorizationWindow = 10; the slot granted at relay block 1 expires at 11.
 		init_block(11);
 
 		let call = crate::Call::<Test>::enable_auto_renew { content_hash };
@@ -2438,7 +2466,7 @@ fn auto_renewal_fails_on_chain_wide_permanent_cap() {
 		}));
 		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 		// Per-account counters untouched — failure happened before consume.
-		assert_eq!(TransactionStorage::account_authorization_extent(who).extra.bytes_permanent, 0,);
+		assert_eq!(account_extent(who).extra.bytes_permanent, 0,);
 	});
 }
 
@@ -2514,14 +2542,8 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		// Bob — not Alice — enables auto-renew. The prepayment lands on Bob.
 		assert_ok!(enable_auto_renew_via_extension(bob, content_hash));
 		assert_eq!(crate::Renewals::<Test>::get(content_hash).unwrap().account, bob);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(alice).extra.bytes_permanent,
-			0
-		);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(bob).extra.bytes_permanent,
-			2000
-		);
+		assert_eq!(account_extent(alice).extra.bytes_permanent, 0);
+		assert_eq!(account_extent(bob).extra.bytes_permanent, 2000);
 
 		// Cycle 1 (prepaid) fires free at block 12 — re-authorize both so the
 		// chain state is clean, but the cycle won't charge anyone.
@@ -2548,14 +2570,8 @@ fn auto_renew_consumes_registrant_authorization_not_storer() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), bob, 10, 100_000,));
 		assert_ok!(apply_block_inherents_full(None));
 
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(alice).extra.bytes_permanent,
-			0
-		);
-		assert_eq!(
-			TransactionStorage::account_authorization_extent(bob).extra.bytes_permanent,
-			2000
-		);
+		assert_eq!(account_extent(alice).extra.bytes_permanent, 0);
+		assert_eq!(account_extent(bob).extra.bytes_permanent, 2000);
 		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::DataRenewed {
 			index: 0,
 			content_hash,
@@ -2589,15 +2605,15 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
 		// Registration prepaid the first cycle: `bytes_permanent → 2000`.
-		let after_register = TransactionStorage::account_authorization_extent(who);
+		let after_register = account_extent(who);
 		assert_eq!(after_register.extra.bytes_permanent, 2000);
 
-		// Refresh at block 11 (the original auth's expiration boundary), extending
-		// expiration to 21 so block 12's free cycle and the subsequent paid cycle
-		// at block 23 both see an unexpired auth — but counters must NOT reset.
-		init_block(11);
+		// Refresh at block 10 (the original slot expires at 11), extending expiration
+		// to 20 so block 12's free cycle sees an active slot — but counters must NOT
+		// reset.
+		init_block(10);
 		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who,));
-		let after_refresh = TransactionStorage::account_authorization_extent(who);
+		let after_refresh = account_extent(who);
 		assert_eq!(after_refresh, after_register, "refresh must not touch the extent");
 
 		// Cycle 1 (prepaid) fires free at block 12; carry the renew into
@@ -2606,17 +2622,18 @@ fn refresh_authorization_does_not_reset_counters_for_auto_renew() {
 		assert_ok!(apply_block_inherents_full(None));
 		assert!(!crate::Renewals::<Test>::get(content_hash).unwrap().paid);
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			account_extent(who).extra.bytes_permanent,
 			2000,
 			"prepaid cycle does not charge again",
 		);
 		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
-		// Refresh again at block 21 to keep the auth alive past block 23.
-		init_block(21);
+		// Refresh again at block 19 (before the slot expires at 20) to keep the auth
+		// alive past block 23.
+		init_block(19);
 		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who,));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			account_extent(who).extra.bytes_permanent,
 			2000,
 			"second refresh must also leave the extent untouched",
 		);
@@ -2642,13 +2659,13 @@ fn uses_preimage_authorization() {
 		let hash = blake2_256(&data);
 		assert_ok!(TransactionStorage::authorize_preimage(RuntimeOrigin::root(), hash, 2002));
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(hash),
+			preimage_extent(hash),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2002,
 				transactions: 0,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 		// Data with a non-matching hash has no preimage auth → rejected.
@@ -2660,13 +2677,13 @@ fn uses_preimage_authorization() {
 		// Entry persists with the remainder (2002 - 2000 = 2 bytes); the
 		// transaction count is exhausted so further stores still fail.
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(hash),
+			preimage_extent(hash),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
 				bytes_allowance: 2002,
 				transactions: 1,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 		assert_ok!(Into::<RuntimeCall>::into(call).dispatch(RuntimeOrigin::none()));
@@ -2677,13 +2694,13 @@ fn uses_preimage_authorization() {
 		};
 		assert_ok!(DataRenewal::pre_dispatch(&call));
 		assert_eq!(
-			TransactionStorage::preimage_authorization_extent(hash),
+			preimage_extent(hash),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 2000 },
 				bytes_allowance: 2002,
 				transactions: 2,
-				transactions_allowance: 1,
+				transactions_allowance: 2,
 			}
 		);
 	});
@@ -2729,7 +2746,7 @@ fn refresh_does_not_reset_consumed_counters() {
 		// Authorize: all counters start at 0.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -2744,7 +2761,7 @@ fn refresh_does_not_reset_consumed_counters() {
 		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
 		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 0 },
@@ -2763,7 +2780,7 @@ fn refresh_does_not_reset_consumed_counters() {
 		};
 		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 2000 },
@@ -2777,7 +2794,7 @@ fn refresh_does_not_reset_consumed_counters() {
 		// Refresh: all consumed counters preserved; only expiration moves.
 		assert_ok!(TransactionStorage::refresh_account_authorization(RuntimeOrigin::root(), who));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 2000,
 				extra: PermanentExtent { bytes_permanent: 2000 },
@@ -2849,7 +2866,7 @@ fn chain_wide_cap_self_corrects_after_age_out() {
 			"counter must self-correct as data ages out"
 		);
 
-		// Renew now succeeds again. Mock `AuthorizationPeriod = 10`, so the original
+		// Renew now succeeds again. Mock `DefaultAuthorizationWindow = 10`, so the original
 		// authorization (granted at block 1) expired at block 11. Re-authorize for the
 		// new window before driving another store/renew.
 		run_to_block(14, proof_provider);
@@ -2921,10 +2938,10 @@ fn permanent_storage_near_cap_fires_on_rising_edge_only() {
 	});
 }
 
-/// `authorize_account` on an expired-but-present entry resets **all** consumed counters,
-/// including this pallet's `extra.bytes_permanent`. The new window's renew quota is
-/// independent of any renewed bytes still on chain from the old window; those are
-/// tracked by the chain-wide `PermanentStorageUsed` counter and aged out on expiry.
+/// `authorize_account` after the only slot expired prunes it and starts a fresh slot with
+/// all consumed counters at zero, including this pallet's `extra.bytes_permanent`. The new
+/// slot's renew quota is independent of any renewed bytes still on chain from the old one;
+/// those are tracked by the chain-wide `PermanentStorageUsed` counter and aged out on expiry.
 #[test]
 fn authorize_account_after_expiry_resets_bytes_permanent() {
 	new_test_ext().execute_with(|| {
@@ -2935,15 +2952,15 @@ fn authorize_account_after_expiry_resets_bytes_permanent() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
 		txs::Authorizations::<Test>::mutate(AuthorizationScope::Account(who), |maybe_auth| {
 			let auth = maybe_auth.as_mut().expect("authorization present");
-			auth.extent.extra.bytes_permanent = 2000;
-			// Force expiry without advancing blocks.
-			auth.expiration = 1;
+			auth.slots[0].extent.extra.bytes_permanent = 2000;
+			// Force expiry without advancing the relay clock.
+			auth.slots[0].expiration = 1;
 		});
 
 		// Re-authorize: cap is re-granted, all consumed counters reset to 0.
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 1000));
 		assert_eq!(
-			TransactionStorage::account_authorization_extent(who),
+			account_extent(who),
 			AuthorizationExtent {
 				bytes: 0,
 				bytes_allowance: 1000,
@@ -2969,8 +2986,8 @@ fn remove_expired_account_authorization_succeeds_with_outstanding_renewals() {
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 0, 4000));
 		txs::Authorizations::<Test>::mutate(AuthorizationScope::Account(who), |maybe_auth| {
 			let auth = maybe_auth.as_mut().expect("authorization present");
-			auth.extent.extra.bytes_permanent = 2000;
-			auth.expiration = 1;
+			auth.slots[0].extent.extra.bytes_permanent = 2000;
+			auth.slots[0].expiration = 1;
 		});
 
 		assert_ok!(TransactionStorage::remove_expired_account_authorization(
@@ -2997,11 +3014,12 @@ fn active_authorization_exposes_the_permanent_extent() {
 
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 5, 4000));
 		let auth = active().expect("active authorization");
-		// Granted at block 1, `AuthorizationPeriod` is 10 in the mock.
-		assert_eq!(auth.expiration, 11);
-		assert_eq!(auth.extent.bytes_allowance, 4000);
-		assert_eq!(auth.extent.transactions_allowance, 5);
-		assert_eq!(auth.extent.extra, PermanentExtent { bytes_permanent: 0 });
+		// Granted at relay block 1; `DefaultAuthorizationWindow` is 10 in the mock.
+		assert_eq!(auth.slots.len(), 1);
+		assert_eq!(auth.slots[0].expiration, 11);
+		assert_eq!(auth.slots[0].extent.bytes_allowance, 4000);
+		assert_eq!(auth.slots[0].extent.transactions_allowance, 5);
+		assert_eq!(auth.slots[0].extent.extra, PermanentExtent { bytes_permanent: 0 });
 
 		// Past expiry nothing is reported.
 		run_to_block(100, || None);
@@ -3034,10 +3052,10 @@ fn can_renew_rejects_when_chain_wide_cap_reached() {
 }
 
 /// A pre-split `Authorization` — written when `bytes_permanent` was an inline field —
-/// decodes through the current type with every field in the right place. This is what makes
-/// the relocation migration able to leave `Authorizations` untouched.
+/// decodes through the storage pallet's legacy alias with every field in the right place.
+/// This is what the v5→v6 slot migration relies on to translate live entries.
 #[test]
-fn pre_split_authorization_decodes_as_current_layout() {
+fn pre_split_authorization_decodes_through_legacy_alias() {
 	new_test_ext().execute_with(|| {
 		let scope = AuthorizationScope::Account(7u64);
 
@@ -3046,7 +3064,7 @@ fn pre_split_authorization_decodes_as_current_layout() {
 		let raw_key = txs::Authorizations::<Test>::hashed_key_for(&scope);
 		sp_io::storage::set(&raw_key, &(3u32, 10u32, 500u64, 2000u64, 4000u64, 99u64).encode());
 
-		let read = txs::Authorizations::<Test>::get(&scope).expect("decodes");
+		let read = txs::migrations::v6::LegacyAuthorizations::<Test>::get(&scope).expect("decodes");
 		assert_eq!(read.extent.transactions, 3);
 		assert_eq!(read.extent.transactions_allowance, 10);
 		assert_eq!(read.extent.bytes, 500);
@@ -3206,5 +3224,184 @@ fn try_state_holds_for_paid_registration_of_force_renewed_content() {
 		));
 		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 4000);
 		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+	});
+}
+
+// ---- per-slot renew accounting ----
+
+/// Renew capacity is checked per slot, earliest-expiring first, with no cross-slot subsidy:
+/// when the earliest slot cannot fit the renew, the next active slot is charged instead.
+/// Store always lands on the earliest slot regardless of its caps (saturating).
+#[test]
+fn renew_picks_earliest_expiring_slot_with_capacity() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		set_relay_now(100);
+		let who = 1u64;
+		let data = vec![7u8; 2000];
+		// Two slots: A (1500 bytes, earlier expiry), B (3000 bytes).
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::root(),
+			who,
+			5,
+			1500,
+			Some(100),
+			200,
+		));
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::root(),
+			who,
+			5,
+			3000,
+			Some(100),
+			300,
+		));
+
+		// A 2000-byte store targets the earliest slot regardless of cap; A's `bytes`
+		// saturates above its allowance.
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		let slots = slots_for(who);
+		assert_eq!(slots[0].expiration, 200);
+		assert_eq!(slots[0].extent.bytes, 2000, "store saturated slot A above its cap");
+		assert_eq!(slots[1].extent.bytes, 0);
+
+		run_to_block(2, || None);
+		set_relay_now(100);
+
+		// Renew of 2000 bytes: slot A has `bytes_permanent + 2000 > 1500`, so slot B is
+		// charged.
+		let renew_call = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 1, index: 0 },
+		};
+		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
+		let slots = slots_for(who);
+		assert_eq!(slots[0].extent.extra.bytes_permanent, 0, "renew did not borrow slot A");
+		assert_eq!(slots[1].extent.extra.bytes_permanent, 2000);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+	});
+}
+
+/// `bytes_permanent` is a per-slot hard cap: a renew never uses another slot's headroom
+/// when the chosen slot is full, and rejects when no single slot fits.
+#[test]
+fn bytes_permanent_does_not_borrow_across_slots() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		set_relay_now(100);
+		let who = 1u64;
+		let data = vec![42u8; 2000];
+		// Slot A: 2000-byte cap, `bytes_permanent` already at the cap.
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			2000,
+			Some(100),
+			200,
+		));
+		txs::Authorizations::<Test>::mutate(AuthorizationScope::Account(who), |maybe_auth| {
+			let auth = maybe_auth.as_mut().expect("auth exists");
+			auth.slots[0].extent.extra.bytes_permanent = 2000;
+		});
+
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store { data };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(2, || None);
+		set_relay_now(100);
+
+		// Only slot A: no slot fits → per-slot hard cap.
+		let renew_call = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 1, index: 0 },
+		};
+		assert_noop!(
+			DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call),
+			crate::PERMANENT_ALLOWANCE_EXCEEDED,
+		);
+
+		// Slot B (later expiration): big and unused. The renew lands there, leaving A alone.
+		assert_ok!(TransactionStorage::authorize_account_window(
+			RuntimeOrigin::root(),
+			who,
+			2,
+			100_000,
+			Some(100),
+			300,
+		));
+		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
+		let slots = slots_for(who);
+		assert_eq!(slots[0].extent.extra.bytes_permanent, 2000, "slot A's renew axis untouched");
+		assert_eq!(slots[1].extent.extra.bytes_permanent, 2000);
+	});
+}
+
+/// `bytes` (store) and `bytes_permanent` (renew) are independent axes, both bounded per
+/// slot by `bytes_allowance`: an account granted `N` bytes can store up to `N` (saturating
+/// beyond) AND renew up to `N` (hard-capped).
+#[test]
+fn store_and_renew_axes_are_independent() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1u64;
+		let n: u64 = 10_000;
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 100, n));
+
+		// store n bytes — bytes axis at cap; bytes_permanent untouched.
+		let store_call = pallet_bulletin_transaction_storage::Call::<Test>::store {
+			data: vec![0u8; n as usize],
+		};
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &store_call));
+		assert_ok!(Into::<RuntimeCall>::into(store_call).dispatch(RuntimeOrigin::none()));
+		run_to_block(2, || None);
+		assert_eq!(
+			account_extent(who),
+			AuthorizationExtent {
+				bytes: n,
+				extra: PermanentExtent { bytes_permanent: 0 },
+				bytes_allowance: n,
+				transactions: 1,
+				transactions_allowance: 100,
+			}
+		);
+
+		// renew n bytes — bytes_permanent axis at cap; bytes unchanged.
+		let renew_call = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 1, index: 0 },
+		};
+		assert_ok!(DataRenewal::pre_dispatch_renewal_signed(&who, &renew_call));
+		assert_eq!(
+			account_extent(who),
+			AuthorizationExtent {
+				bytes: n,
+				extra: PermanentExtent { bytes_permanent: n },
+				bytes_allowance: n,
+				transactions: 2,
+				transactions_allowance: 100,
+			}
+		);
+
+		// A 1-byte store still succeeds — store saturates and bumps `transactions`
+		// regardless of priority.
+		let extra_store =
+			pallet_bulletin_transaction_storage::Call::<Test>::store { data: vec![1u8] };
+		assert_ok!(TransactionStorage::pre_dispatch_signed(&who, &extra_store));
+		assert_ok!(Into::<RuntimeCall>::into(extra_store).dispatch(RuntimeOrigin::none()));
+		assert_eq!(account_extent(who).bytes, n + 1);
+		assert_eq!(account_extent(who).transactions, 3);
+		run_to_block(3, || None);
+
+		// A 1-byte renew is gated by the per-slot `bytes_permanent + 1 > bytes_allowance` cap.
+		let small_renew = crate::Call::<Test>::force_renew {
+			entry: TransactionRef::Position { block: 2, index: 0 },
+		};
+		assert_noop!(
+			DataRenewal::pre_dispatch_renewal_signed(&who, &small_renew),
+			crate::PERMANENT_ALLOWANCE_EXCEEDED,
+		);
+		// Slot still present (drained ≠ pruned); chain-wide counter unchanged.
+		assert!(txs::Authorizations::<Test>::contains_key(AuthorizationScope::Account(who)));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), n);
 	});
 }

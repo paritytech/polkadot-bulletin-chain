@@ -356,8 +356,10 @@ fn authorize_rejects_expired_account_authorization() {
 		let data = vec![1u8; 100];
 		authorize_account(Sr25519Keyring::Alice.to_account_id(), 1, data.len() as u64);
 
-		// Run past the auth period (10 blocks in mock).
+		// Slot expiry runs on the relay clock: move it past the mock's
+		// `DefaultAuthorizationWindow` (10 relay blocks from relay block 1).
 		run_to_block(20);
+		MockRelayBlockNumber::set(&20);
 
 		let (signer, sig) = signed_by(Sr25519Keyring::Alice, &data, TEST_TIMESTAMP_MS);
 		let call = make_promote_call(data, signer, sig, TEST_TIMESTAMP_MS);

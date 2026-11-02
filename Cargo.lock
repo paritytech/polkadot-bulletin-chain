@@ -2188,6 +2188,7 @@ version = "0.1.0"
 dependencies = [
  "asset-hub-westend-runtime",
  "bulletin-westend-runtime",
+ "cumulus-pallet-parachain-system",
  "cumulus-primitives-core",
  "emulated-integration-tests-common",
  "frame-support",

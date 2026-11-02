@@ -44,10 +44,12 @@ pub trait WeightInfo {
 	fn store(l: u32) -> Weight;
 	fn store_with_cid_config(l: u32, ) -> Weight;
 	fn authorize_account() -> Weight;
+	fn authorize_account_window() -> Weight;
 	fn add_authorizer() -> Weight;
 	fn remove_authorizer() -> Weight;
 	fn refresh_account_authorization() -> Weight;
 	fn authorize_preimage() -> Weight;
+	fn authorize_preimage_window() -> Weight;
 	fn refresh_preimage_authorization() -> Weight;
 	fn remove_expired_account_authorization() -> Weight;
 	fn remove_expired_preimage_authorization() -> Weight;
@@ -56,6 +58,7 @@ pub trait WeightInfo {
 	fn apply_block_inherents() -> Weight;
 	fn on_initialize_with_expiry(n: u32) -> Weight;
 	fn migrate_v2_to_v3_step() -> Weight;
+	fn migrate_v5_to_v6_step() -> Weight;
 }
 
 /// Weights for pallet_bulletin_transaction_storage using the Substrate node and recommended hardware.
@@ -110,6 +113,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 3593))
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(3))
+	}
+	/// Placeholder until benchmarked: same shape as `authorize_account`.
+	fn authorize_account_window() -> Weight {
+		Self::authorize_account()
 	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(67), added: 2542, mode: `MaxEncodedLen`)
@@ -166,6 +173,10 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	/// Placeholder until benchmarked: same shape as `authorize_preimage`.
+	fn authorize_preimage_window() -> Weight {
+		Self::authorize_preimage()
 	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:0)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(67), added: 2542, mode: `MaxEncodedLen`)
@@ -313,6 +324,13 @@ impl<T: frame_system::Config> WeightInfo for SubstrateWeight<T> {
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(2))
 	}
+	/// Placeholder until benchmarked: one `Authorizations` entry per step (iterator step +
+	/// raw fetch, one re-insert).
+	fn migrate_v5_to_v6_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
 }
 
 // For backwards compatibility and tests
@@ -337,6 +355,10 @@ impl WeightInfo for () {
 			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(3))
 	}
+	/// Placeholder until benchmarked: same shape as `authorize_account`.
+	fn authorize_account_window() -> Weight {
+		Self::authorize_account()
+	}
 	fn add_authorizer() -> Weight {
 		Weight::from_parts(19_873_000, 0)
 			.saturating_add(Weight::from_parts(0, 3593))
@@ -360,6 +382,10 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(RocksDbWeight::get().reads(2))
 			.saturating_add(RocksDbWeight::get().writes(2))
+	}
+	/// Placeholder until benchmarked: same shape as `authorize_preimage`.
+	fn authorize_preimage_window() -> Weight {
+		Self::authorize_preimage()
 	}
 	fn refresh_preimage_authorization() -> Weight {
 		Weight::from_parts(20_043_000, 0)
@@ -414,5 +440,12 @@ impl WeightInfo for () {
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(RocksDbWeight::get().reads(3))
 			.saturating_add(RocksDbWeight::get().writes(2))
+	}
+	/// Placeholder until benchmarked: one `Authorizations` entry per step (iterator step +
+	/// raw fetch, one re-insert).
+	fn migrate_v5_to_v6_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(RocksDbWeight::get().reads(2))
+			.saturating_add(RocksDbWeight::get().writes(1))
 	}
 }

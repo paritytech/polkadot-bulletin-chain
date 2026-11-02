@@ -22,7 +22,7 @@ use crate::{
 };
 use bulletin_pallets_common::NoCurrency;
 use polkadot_sdk_frame::{
-	deps::{frame_support, frame_system},
+	deps::{frame_support, frame_system, sp_runtime::traits::BlockNumberProvider},
 	prelude::*,
 	runtime::prelude::*,
 	testing_prelude::*,
@@ -77,7 +77,10 @@ impl frame_system::Config for Test {
 }
 
 parameter_types! {
-	pub const AuthorizationPeriod: BlockNumberFor<Test> = 10;
+	/// In mock relay blocks; tests advance relay time with [`set_relay_now`].
+	pub const DefaultAuthorizationWindow: u32 = 10;
+	pub const MaxStartsAtFuture: u32 = 100;
+	pub const MaxAuthorizationSlots: u32 = 2;
 	pub const StoreTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("Store", PRIORITY, LONGEVITY);
 	pub const AuthorizeTxParams: ValidTransactionParams =
@@ -88,6 +91,25 @@ parameter_types! {
 		ValidTransactionParams::new("ExpiredPreimageAuth", PRIORITY, LONGEVITY);
 	pub const RemoveExhaustedAuthorizerTxParams: ValidTransactionParams =
 		ValidTransactionParams::new("ExhaustedAuthorizer", PRIORITY, LONGEVITY);
+	pub storage MockRelayBlockNumber: u32 = 1;
+}
+
+pub struct MockRelayBlockNumberProvider;
+impl BlockNumberProvider for MockRelayBlockNumberProvider {
+	type BlockNumber = u32;
+
+	fn current_block_number() -> u32 {
+		MockRelayBlockNumber::get()
+	}
+
+	#[cfg(any(feature = "std", feature = "runtime-benchmarks", test))]
+	fn set_block_number(n: u32) {
+		MockRelayBlockNumber::set(&n);
+	}
+}
+
+pub fn set_relay_now(n: u32) {
+	MockRelayBlockNumber::set(&n);
 }
 
 impl pallet_bulletin_transaction_storage::Config for Test {
@@ -99,7 +121,10 @@ impl pallet_bulletin_transaction_storage::Config for Test {
 	type WeightInfo = ();
 	type MaxBlockTransactions = ConstU32<{ DEFAULT_MAX_BLOCK_TRANSACTIONS }>;
 	type MaxTransactionSize = ConstU32<{ DEFAULT_MAX_TRANSACTION_SIZE }>;
-	type AuthorizationPeriod = AuthorizationPeriod;
+	type DefaultAuthorizationWindow = DefaultAuthorizationWindow;
+	type MaxStartsAtFuture = MaxStartsAtFuture;
+	type MaxAuthorizationSlots = MaxAuthorizationSlots;
+	type RelayChainBlockNumberProvider = MockRelayBlockNumberProvider;
 	type AuthorizerRegistrarOrigin = EnsureRoot<Self::AccountId>;
 	type Authorizer = EitherOf<
 		AsAuthorizer<EnsureRoot<Self::AccountId>, Self::AccountId, BlockNumberFor<Self>>,
@@ -131,7 +156,10 @@ pub fn new_test_ext() -> TestExternalities {
 	}
 	.build_storage()
 	.unwrap();
-	t.into()
+	let mut ext: TestExternalities = t.into();
+	// Genesis runs with relay = 0; move past the sentinel so `ensure_relay_now` passes.
+	ext.execute_with(|| MockRelayBlockNumber::set(&1));
+	ext
 }
 
 pub fn run_to_block(n: u64, f: impl Fn() -> Option<TransactionStorageProof> + 'static) {

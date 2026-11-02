@@ -100,6 +100,10 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(T::DbWeight::get().reads(3))
 			.saturating_add(T::DbWeight::get().writes(3))
 	}
+	/// Placeholder until benchmarked: same shape as `authorize_account`.
+	fn authorize_account_window() -> Weight {
+		Self::authorize_account()
+	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:1)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(67), added: 2542, mode: `MaxEncodedLen`)
 	/// Storage: `System::Account` (r:1 w:1)
@@ -155,6 +159,10 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 			.saturating_add(Weight::from_parts(0, 3550))
 			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(2))
+	}
+	/// Placeholder until benchmarked: same shape as `authorize_preimage`.
+	fn authorize_preimage_window() -> Weight {
+		Self::authorize_preimage()
 	}
 	/// Storage: `TransactionStorage::AllowedAuthorizers` (r:1 w:0)
 	/// Proof: `TransactionStorage::AllowedAuthorizers` (`max_values`: None, `max_size`: Some(67), added: 2542, mode: `MaxEncodedLen`)
@@ -287,6 +295,13 @@ impl<T: frame_system::Config> pallet_bulletin_transaction_storage::WeightInfo fo
 		Weight::from_parts(147_000_000, 0)
 			.saturating_add(Weight::from_parts(0, 94048))
 			.saturating_add(T::DbWeight::get().reads(4))
+			.saturating_add(T::DbWeight::get().writes(1))
+	}
+	/// Placeholder until benchmarked: one `Authorizations` entry per step (iterator step +
+	/// raw fetch, one re-insert).
+	fn migrate_v5_to_v6_step() -> Weight {
+		Weight::from_parts(10_000_000, 1_000)
+			.saturating_add(T::DbWeight::get().reads(2))
 			.saturating_add(T::DbWeight::get().writes(1))
 	}
 }

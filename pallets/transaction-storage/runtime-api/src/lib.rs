@@ -18,7 +18,8 @@ use scale_info::TypeInfo;
 /// has an unexpired authorization entry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Encode, Decode, TypeInfo)]
 pub struct AccountAuthorization<BlockNumber> {
-	/// Block at which this account's authorization expires.
+	/// Relay-chain block at which the account's latest active authorization slot expires.
+	/// Slot windows run on the relay clock, not the parachain's.
 	pub expires_at: BlockNumber,
 	/// Total byte cap granted by the authorizer.
 	pub bytes_allowance: u64,
