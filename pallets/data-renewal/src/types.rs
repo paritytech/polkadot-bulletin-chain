@@ -56,8 +56,7 @@ pub struct PermanentExtent {
 /// from a one-shot (`renew`). `paid` marks the prepaid first cycle: both
 /// constructors set it to `true` (the extension's `pre_dispatch` charges the
 /// slot at registration); the next cycle delivers free and flips it to `false`
-/// for recurring entries. Signed `disable_auto_renew` is rejected while `paid`
-/// is `true` — without this, an owner could pocket the prepaid slot.
+/// for recurring entries. Disabling while `paid` forfeits the prepayment.
 #[derive(Clone, Debug, PartialEq, Eq, Encode, Decode, scale_info::TypeInfo, MaxEncodedLen)]
 pub struct RenewalData<AccountId> {
 	/// Account whose authorization is consumed on each (non-prepaid) cycle.
@@ -67,4 +66,6 @@ pub struct RenewalData<AccountId> {
 	pub recurring: bool,
 	/// `true` while the prepaid first cycle hasn't fired yet.
 	pub paid: bool,
+	/// Size of the registered entry, charged to `PermanentStorageUsed` while `paid`.
+	pub size: u32,
 }

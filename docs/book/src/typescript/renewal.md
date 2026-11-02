@@ -43,7 +43,7 @@ const contentHash = result.cid.multihash.digest; // Uint8Array
 
 await client.enableAutoRenew(contentHash).send();
 
-// Only succeeds after the prepaid cycle has fired.
+// Disabling while the first cycle is still prepaid forfeits the prepayment.
 await client.disableAutoRenew(contentHash).send();
 ```
 
@@ -123,10 +123,7 @@ api.tx.TransactionStorage.enable_auto_renew({ content_hash: contentHashHex });
 
 On current runtimes these calls live on `api.tx.DataRenewal` instead; `client.renew` / `forceRenew` / `enableAutoRenew` resolve the pallet for you.
 
-```typescript
-```
-
-`disable_auto_renew` is refused while the registration is still prepaid (`CannotDisablePrepaidAutoRenewal`) — it only succeeds after the first cycle has consumed the prepayment.
+Disabling while the registration is still prepaid forfeits the prepayment.
 
 The raw `store` extrinsic takes only `{ data }`; use `store_with_cid_config` for a non-default CID:
 
