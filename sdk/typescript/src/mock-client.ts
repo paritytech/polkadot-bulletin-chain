@@ -65,6 +65,8 @@ export type MockOperation =
     }
   | { type: "renew"; entry: TransactionRef }
   | { type: "force_renew"; entry: TransactionRef }
+  | { type: "enable_auto_renew"; contentHash: Uint8Array }
+  | { type: "disable_auto_renew"; contentHash: Uint8Array }
   | { type: "store_preimage_auth"; dataSize: number; cid: string }
   | { type: "remove_expired_account_authorization"; who: string }
   | {
@@ -334,6 +336,20 @@ export class MockBulletinClient implements BulletinClientInterface {
         type: "force_renew",
         entry: toTransactionRef(ref),
       })
+      return mockReceipt()
+    })
+  }
+
+  enableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({ type: "enable_auto_renew", contentHash })
+      return mockReceipt()
+    })
+  }
+
+  disableAutoRenew(contentHash: Uint8Array): CallBuilder {
+    return new CallBuilder(async () => {
+      this.operations.push({ type: "disable_auto_renew", contentHash })
       return mockReceipt()
     })
   }

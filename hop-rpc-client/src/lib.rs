@@ -6,8 +6,11 @@
 
 pub use pallet_bulletin_hop_promotion::HOP_SUBMIT_CONTEXT;
 
-/// Domain separator for `hop_claim` / `hop_ack` recipient signatures.
+/// Domain separator for `hop_claim` recipient signatures.
 pub const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
+
+/// Domain separator for `hop_ack` recipient signatures.
+pub const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
 
 pub fn blake2_256(data: &[u8]) -> [u8; 32] {
 	use blake2::{digest::consts::U32, Blake2b, Digest};
@@ -22,7 +25,12 @@ pub fn blake2_256(data: &[u8]) -> [u8; 32] {
 /// `blake2_256(HOP_SUBMIT_CONTEXT || blake2_256(data) || submit_timestamp.to_le_bytes())`.
 pub fn submit_signing_payload(data: &[u8], submit_timestamp_ms: u64) -> [u8; 32] {
 	let data_hash = blake2_256(data);
-	pallet_bulletin_hop_promotion::signing_payload(&data_hash, submit_timestamp_ms)
+	submit_signing_payload_from_hash(&data_hash, submit_timestamp_ms)
+}
+
+/// `blake2_256(HOP_SUBMIT_CONTEXT || data_hash || submit_timestamp.to_le_bytes())`.
+pub fn submit_signing_payload_from_hash(data_hash: &[u8; 32], submit_timestamp_ms: u64) -> [u8; 32] {
+	pallet_bulletin_hop_promotion::signing_payload(data_hash, submit_timestamp_ms)
 }
 
 /// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
@@ -90,6 +98,10 @@ mod tests {
 		let data_hash = blake2_256(data);
 		assert_eq!(
 			submit_signing_payload(data, ts),
+			pallet_bulletin_hop_promotion::signing_payload(&data_hash, ts),
+		);
+		assert_eq!(
+			submit_signing_payload_from_hash(&data_hash, ts),
 			pallet_bulletin_hop_promotion::signing_payload(&data_hash, ts),
 		);
 	}

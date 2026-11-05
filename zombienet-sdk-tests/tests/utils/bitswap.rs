@@ -16,8 +16,11 @@ use litep2p::{
 	Litep2p, Litep2pEvent, PeerId, ProtocolName,
 };
 use prost::Message;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
+
+const CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(1);
+const CONNECTION_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
 
 mod bitswap_schema {
 	include!(concat!(env!("OUT_DIR"), "/bitswap.message.rs"));
@@ -302,37 +305,19 @@ pub async fn fetch_via_bitswap(
 
 	tracing::debug!("Target peer ID: {:?}", peer_id);
 
-	let (cmd_tx, cmd_rx) = mpsc::channel(8);
-
-	let protocol = BitswapClientProtocol::new(cmd_rx);
-
-	let config = Litep2pConfigBuilder::new()
-		.with_keypair(Keypair::generate())
-		.with_user_protocol(Box::new(protocol))
-		.with_websocket(WebSocketConfig {
-			listen_addresses: vec!["/ip4/127.0.0.1/tcp/0/ws".parse().unwrap()],
-			..Default::default()
-		})
-		.with_keep_alive_timeout(Duration::from_secs(60))
-		.build();
-
-	let mut litep2p =
-		Litep2p::new(config).map_err(|e| anyhow!("Failed to create litep2p: {:?}", e))?;
-
-	tracing::debug!("Dialing {}", multiaddr);
-	litep2p
-		.dial_address(multiaddr.clone())
-		.await
-		.map_err(|e| anyhow!("Failed to dial: {:?}", e))?;
-
-	let connected =
-		tokio::time::timeout(Duration::from_secs(30), wait_for_connection(&mut litep2p, peer_id))
-			.await
-			.map_err(|_| anyhow!("Timeout waiting for connection"))?;
-
-	if !connected {
-		anyhow::bail!("Failed to establish connection");
-	}
+	// A dial can fail right after a previous connection to the same node closed; retry
+	// within the fetch budget instead of failing on the first attempt.
+	let connection_deadline = Instant::now() + Duration::from_secs(timeout_secs);
+	let (mut litep2p, cmd_tx) = loop {
+		match bitswap_peer_connection(&multiaddr, peer_id).await {
+			Ok(connection) => break connection,
+			Err(error) if Instant::now() + CONNECTION_RETRY_DELAY < connection_deadline => {
+				tracing::warn!("bitswap connection to {peer_id} failed, retrying: {error:#}");
+				tokio::time::sleep(CONNECTION_RETRY_DELAY).await;
+			},
+			Err(error) => return Err(error),
+		}
+	};
 
 	tracing::info!("Connected to peer, sending bitswap request");
 
@@ -376,6 +361,40 @@ pub async fn fetch_via_bitswap(
 	.map_err(|_| anyhow!("Timeout waiting for bitswap response"))??;
 
 	Ok(result)
+}
+
+async fn bitswap_peer_connection(
+	multiaddr: &Multiaddr,
+	peer_id: PeerId,
+) -> Result<(Litep2p, mpsc::Sender<BitswapClientCommand>)> {
+	let (cmd_tx, cmd_rx) = mpsc::channel(8);
+	let config = Litep2pConfigBuilder::new()
+		.with_keypair(Keypair::generate())
+		.with_user_protocol(Box::new(BitswapClientProtocol::new(cmd_rx)))
+		.with_websocket(WebSocketConfig {
+			listen_addresses: vec!["/ip4/127.0.0.1/tcp/0/ws".parse().unwrap()],
+			..Default::default()
+		})
+		.with_keep_alive_timeout(Duration::from_secs(60))
+		.build();
+	let mut litep2p =
+		Litep2p::new(config).map_err(|e| anyhow!("Failed to create litep2p: {:?}", e))?;
+
+	tracing::debug!("Dialing {}", multiaddr);
+	litep2p
+		.dial_address(multiaddr.clone())
+		.await
+		.map_err(|e| anyhow!("Failed to dial: {:?}", e))?;
+	let connected = tokio::time::timeout(
+		CONNECTION_ATTEMPT_TIMEOUT,
+		wait_for_connection(&mut litep2p, peer_id),
+	)
+	.await
+	.map_err(|_| anyhow!("Timeout waiting for connection"))?;
+	if !connected {
+		anyhow::bail!("Failed to establish connection");
+	}
+	Ok((litep2p, cmd_tx))
 }
 
 async fn wait_for_connection(litep2p: &mut Litep2p, target_peer: PeerId) -> bool {

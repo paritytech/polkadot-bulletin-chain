@@ -95,6 +95,40 @@ export async function lookupCidOnChain(
   return map.get(hash) ?? null;
 }
 
+/** A `Renewals` entry: one registration per content hash. */
+export interface RenewalRegistration {
+  account: string;
+  /** Recurring auto-renewal, versus a one-shot scheduled `renew`. */
+  recurring: boolean;
+  /** Next cycle is prepaid; the chain refuses `disable_auto_renew` until it fires. */
+  paid: boolean;
+}
+
+/**
+ * `Renewals[content_hash]`, or null when unregistered or the runtime ships no
+ * renewal pallet.
+ *
+ * The counter moved from `TransactionStorage` to `DataRenewal`; PAPI namespaces
+ * are truthy proxies for any name, so probe by call and fall back.
+ */
+export async function fetchRenewalRegistration(
+  api: Api,
+  contentHash: HexString,
+): Promise<RenewalRegistration | null> {
+  const hash = contentHash as SizedHex<32>;
+  const raw = await Promise.resolve()
+    .then(() => api.query.DataRenewal.Renewals.getValue(hash))
+    // biome-ignore lint/suspicious/noExplicitAny: pre-split runtime fallback
+    .catch(() => (api.query as any).TransactionStorage.Renewals.getValue(hash))
+    .catch(() => null);
+  if (!raw) return null;
+  return {
+    account: raw.account,
+    recurring: raw.recurring,
+    paid: raw.paid,
+  };
+}
+
 export interface ResolveCidOptions {
   /**
    * Pre-known `content_hash` → location pairs (e.g. browser upload history).

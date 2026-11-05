@@ -1,7 +1,8 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-only
 
-import { createClient, PolkadotClient, PolkadotSigner, TypedApi } from "polkadot-api";
+import { createClient, PolkadotClient, TypedApi } from "polkadot-api";
+import type { SignerTxCreator } from "polkadot-api/tx-creator";
 import { getWsProvider, WsEvent } from "polkadot-api/ws";
 import { getSmProvider } from "polkadot-api/sm-provider";
 import { startFromWorker } from "polkadot-api/smoldot/from-worker";
@@ -364,11 +365,11 @@ export const [useSudoKey] = bind(sudoKeySubject, undefined);
  * const bulletinClient = createBulletinClient?.(signer);
  * ```
  */
-export function useCreateBulletinClient(): ((signer: PolkadotSigner) => AsyncBulletinClient) | undefined {
+export function useCreateBulletinClient(): ((signer: SignerTxCreator) => AsyncBulletinClient) | undefined {
   const api = useApi();
   const client = useClient();
   if (!api || !client) return undefined;
-  return (signer: PolkadotSigner) => new AsyncBulletinClient(api, signer, client.submit);
+  return (signer: SignerTxCreator) => new AsyncBulletinClient(api, signer, client.submit);
 }
 
 // Direct access to subjects for non-React code
