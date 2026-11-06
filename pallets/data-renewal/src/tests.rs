@@ -2459,8 +2459,9 @@ fn auto_renew_obeys_updated_retention_period() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Extend RetentionPeriod from 10 → 20.
+		// Extend RetentionPeriod from 10 → 20; it takes effect once block 2 finalizes.
 		pallet_bulletin_transaction_storage::RetentionPeriod::<Test>::put(20u64);
+		run_to_block(3, || None);
 
 		// Block 12 was the OLD renewal boundary. With RP=20, `obsolete = 12 - 21 = 0`
 		// (saturating). Transactions[1] must NOT be pulled.
@@ -2484,6 +2485,46 @@ fn auto_renew_obeys_updated_retention_period() {
 			content_hash,
 			account: who,
 		}));
+	});
+}
+
+/// Lowering `RetentionPeriod` must not skip the sweep of a block holding a registered
+/// entry, so its renewal still fires.
+#[test]
+fn auto_renew_fires_after_retention_period_is_lowered() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		run_to_block(2, || None);
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data.clone()));
+		run_to_block(3, || None);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+
+		let proof = move || {
+			let target = System::block_number().saturating_sub(
+				pallet_bulletin_transaction_storage::Pallet::<Test>::retention_period(),
+			);
+			pallet_bulletin_transaction_storage::Transactions::<Test>::get(target).and_then(|txs| {
+				build_proof(
+					System::parent_hash().as_ref(),
+					txs.iter().map(|_| data.clone()).collect(),
+				)
+				.unwrap()
+			})
+		};
+		run_to_block(10, proof.clone());
+		pallet_bulletin_transaction_storage::RetentionPeriod::<Test>::put(3u64);
+		run_to_block(40, proof);
+
+		assert!(System::events().iter().any(|e| matches!(
+			e.event,
+			RuntimeEvent::DataRenewal(crate::Event::DataRenewed { content_hash: h, .. }) if h == content_hash
+		)));
+		assert!(pallet_bulletin_transaction_storage::Transactions::<Test>::get(2).is_none());
+		assert_eq!(pallet_bulletin_transaction_storage::Pallet::<Test>::retention_period(), 3);
 	});
 }
 

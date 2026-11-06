@@ -121,7 +121,8 @@ test-zombienet-auto-renew runtime="westend" group="all":
         mixed-3)
             filter_args=(--exact \
                 auto_renew_storage::parachain_check_proof_fails_under_pruning_test \
-                auto_renew_storage::parachain_on_initialize_cleanup_test)
+                auto_renew_storage::parachain_on_initialize_cleanup_test \
+                auto_renew_storage::parachain_retention_period_live_change_test)
             ;;
         *)
             filter_args=("{{group}}")
