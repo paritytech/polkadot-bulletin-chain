@@ -100,6 +100,40 @@ pub async fn connect_ws(ws_url: &str) -> Result<jsonrpsee::ws_client::WsClient> 
 	Ok(client)
 }
 
+/// `connect_ws` with linear backoff, for long-running loops that own one connection.
+///
+/// `WsClient` never reconnects: once the transport dies - the node restarts, the ingress
+/// drops the stream - every later request fails with `RestartNeeded` forever. A DNS blip
+/// at dial time is just as terminal. Either one silently takes a worker out for the whole
+/// run unless it redials, so long-lived workers must call this rather than `connect_ws`.
+pub async fn connect_ws_retry(
+	ws_url: &str,
+	attempts: usize,
+) -> Result<jsonrpsee::ws_client::WsClient> {
+	let attempts = attempts.max(1);
+	let mut last_err = None;
+	for attempt in 1..=attempts {
+		match connect_ws(ws_url).await {
+			Ok(client) => {
+				if attempt > 1 {
+					tracing::info!("connected to {ws_url} on attempt {attempt}/{attempts}");
+				}
+				return Ok(client);
+			},
+			Err(e) => {
+				if attempt < attempts {
+					tracing::warn!(
+						"connect to {ws_url} failed (attempt {attempt}/{attempts}): {e}; retrying"
+					);
+					tokio::time::sleep(std::time::Duration::from_secs(attempt.min(5) as u64)).await;
+				}
+				last_err = Some(e);
+			},
+		}
+	}
+	Err(last_err.expect("at least one attempt is made")).context(format!("connecting to {ws_url}"))
+}
+
 /// Compute blake2b-256 hash (same as the runtime's `content_hash` for `store` calls).
 pub fn blake2b_256(data: &[u8]) -> [u8; 32] {
 	use blake2::digest::{consts::U32, Digest};
