@@ -19,7 +19,7 @@
 //! THIS FILE WAS AUTO-GENERATED USING THE SUBSTRATE BENCHMARK CLI VERSION 64.0.0
 //! DATE: 2026-11-09, STEPS: `50`, REPEAT: `20`, LOW RANGE: `[]`, HIGH RANGE: `[]`
 //! WORST CASE MAP SIZE: `1000000`
-//! HOSTNAME: `d100aa5a3bc9`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
+//! HOSTNAME: `33167ca5be2e`, CPU: `Intel(R) Xeon(R) CPU @ 2.60GHz`
 //! WASM-EXECUTION: `Compiled`, CHAIN: `None`, DB CACHE: 1024
 
 // Executed Command:
@@ -61,11 +61,11 @@ impl<T: frame_system::Config> pallet_bulletin_hop_promotion::WeightInfo for Weig
 		// Proof Size summary in bytes:
 		//  Measured:  `390`
 		//  Estimated: `45519`
-		// Minimum execution time: 57_643_000 picoseconds.
-		Weight::from_parts(58_591_000, 0)
+		// Minimum execution time: 57_518_000 picoseconds.
+		Weight::from_parts(58_233_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 7
-			.saturating_add(Weight::from_parts(1_474, 0).saturating_mul(d.into()))
+			// Standard Error: 4
+			.saturating_add(Weight::from_parts(1_385, 0).saturating_mul(d.into()))
 			.saturating_add(T::DbWeight::get().reads(3))
 	}
 	/// Storage: `TransactionStorage::BlockTransactions` (r:1 w:0)
@@ -81,11 +81,11 @@ impl<T: frame_system::Config> pallet_bulletin_hop_promotion::WeightInfo for Weig
 		// Proof Size summary in bytes:
 		//  Measured:  `444`
 		//  Estimated: `45519`
-		// Minimum execution time: 61_955_000 picoseconds.
-		Weight::from_parts(62_942_000, 0)
+		// Minimum execution time: 62_505_000 picoseconds.
+		Weight::from_parts(63_846_000, 0)
 			.saturating_add(Weight::from_parts(0, 45519))
-			// Standard Error: 7
-			.saturating_add(Weight::from_parts(1_490, 0).saturating_mul(d.into()))
+			// Standard Error: 4
+			.saturating_add(Weight::from_parts(1_372, 0).saturating_mul(d.into()))
 			.saturating_add(T::DbWeight::get().reads(4))
 	}
 }
