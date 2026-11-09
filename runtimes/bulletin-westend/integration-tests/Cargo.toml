@@ -46,6 +46,7 @@ runtime-benchmarks = [
 	"asset-hub-westend-runtime/runtime-benchmarks",
 	"bulletin-westend-runtime/runtime-benchmarks",
 	"cumulus-primitives-core/runtime-benchmarks",
+	"emulated-integration-tests-common/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
@@ -61,6 +62,7 @@ runtime-benchmarks = [
 try-runtime = [
 	"asset-hub-westend-runtime/try-runtime",
 	"bulletin-westend-runtime/try-runtime",
+	"emulated-integration-tests-common/try-runtime",
 	"frame-support/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-message-queue/try-runtime",
