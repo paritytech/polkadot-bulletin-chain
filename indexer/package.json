@@ -1,0 +1,27 @@
+{
+  "name": "bulletin-indexer",
+  "version": "0.1.0",
+  "description": "Subscribes to finalised Bulletin blocks, decodes TransactionStorage events, exposes /metrics for SRE Prometheus to scrape.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "papi:generate": "papi add -w wss://paseo-bulletin-next-rpc.polkadot.io bulletin",
+    "start": "tsx src/indexer.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@polkadot-api/descriptors": "file:.papi/descriptors",
+    "polkadot-api": "^2.1.2",
+    "prom-client": "^15.1.3"
+  },
+  "devDependencies": {
+    "@polkadot-api/cli": "^0.21.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
