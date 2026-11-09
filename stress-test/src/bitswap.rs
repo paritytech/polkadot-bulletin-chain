@@ -29,6 +29,8 @@ mod bitswap_schema {
 
 const BITSWAP_PROTOCOL: &str = "/ipfs/bitswap/1.2.0";
 
+pub const MAX_WANTLIST_CIDS: usize = 16;
+
 enum BitswapCommand {
 	/// Fetch one or more blocks. Response is one Vec<u8> per requested CID.
 	Fetch {
@@ -347,6 +349,12 @@ impl BitswapClient {
 		cids: &[cid::Cid],
 		timeout_duration: Duration,
 	) -> Result<Vec<Vec<u8>>> {
+		if cids.len() > MAX_WANTLIST_CIDS {
+			anyhow::bail!(
+				"wantlist of {} CIDs exceeds the limit of {MAX_WANTLIST_CIDS}",
+				cids.len()
+			);
+		}
 		let cid_bytes_list: Vec<Vec<u8>> = cids.iter().map(|c| c.to_bytes()).collect();
 		let (response_tx, response_rx) = oneshot::channel();
 
