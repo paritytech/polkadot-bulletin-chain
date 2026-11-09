@@ -108,13 +108,32 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore bulletin chain specs cache
+        id: restore-specs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
+
+      # Heals evicted cache entries so failed-only reruns don't dead-end on the
+      # skipped prepare job; the winning leg's save serves the rest.
+      - name: Regenerate chain specs on cache miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::bulletin-specs cache miss for ${GITHUB_SHA} (evicted?); regenerating in this job"
+          just chain-spec westend
+          just chain-spec paseo
+
+      - name: Save bulletin chain specs cache on miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
 
       - name: Run zombienet auto-renew tests
         env:
@@ -168,13 +187,32 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore bulletin chain specs cache
+        id: restore-specs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
+
+      # Heals evicted cache entries so failed-only reruns don't dead-end on the
+      # skipped prepare job; the winning leg's save serves the rest.
+      - name: Regenerate chain specs on cache miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::bulletin-specs cache miss for ${GITHUB_SHA} (evicted?); regenerating in this job"
+          just chain-spec westend
+          just chain-spec paseo
+
+      - name: Save bulletin chain specs cache on miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
 
       - name: Run zombienet sync tests
         env:
@@ -226,13 +264,32 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore bulletin chain specs cache
+        id: restore-specs
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             zombienet/bulletin-westend-spec.json
             zombienet/bulletin-paseo-spec.json
           key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
+
+      # Heals evicted cache entries so failed-only reruns don't dead-end on the
+      # skipped prepare job; the winning leg's save serves the rest.
+      - name: Regenerate chain specs on cache miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::bulletin-specs cache miss for ${GITHUB_SHA} (evicted?); regenerating in this job"
+          just chain-spec westend
+          just chain-spec paseo
+
+      - name: Save bulletin chain specs cache on miss
+        if: steps.restore-specs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            zombienet/bulletin-westend-spec.json
+            zombienet/bulletin-paseo-spec.json
+          key: bulletin-specs-${{ runner.os }}-${{ github.sha }}
 
       - name: Run zombienet HOP tests
         env:
