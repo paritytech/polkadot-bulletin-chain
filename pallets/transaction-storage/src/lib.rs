@@ -76,6 +76,8 @@ parameter_types! {
 pub const DEFAULT_MAX_TRANSACTION_SIZE: u32 = 2 * 1024 * 1024;
 /// Default maximum number of indexed transactions in a block.
 pub const DEFAULT_MAX_BLOCK_TRANSACTIONS: u32 = 512;
+/// Most existing blocks checked per block while lowering the effective retention period.
+pub const MAX_RETENTION_LOWERING_CHECKS: u32 = 32;
 
 /// Encountered an impossible situation, implies a bug.
 pub const IMPOSSIBLE: InvalidTransaction = InvalidTransaction::Custom(0);
@@ -282,6 +284,15 @@ pub mod pallet {
 		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
 			let mut weight = Weight::zero();
 
+			// First block after the upgrade that introduced `EffectiveRetentionPeriod`: pin it
+			// before anything in this block can change the requested period.
+			if EffectiveRetentionPeriod::<T>::get().is_none() {
+				let requested = RetentionPeriod::<T>::get();
+				if !requested.is_zero() {
+					EffectiveRetentionPeriod::<T>::put(requested);
+				}
+			}
+
 			// Drop obsolete roots. The proof for `obsolete` will be checked later in this
 			// block, so we drop `obsolete` - 1.
 			let period = Self::retention_period();
@@ -327,6 +338,12 @@ pub mod pallet {
 			// the constant component captures the RetentionPeriod read and the
 			// reservation for `on_finalize`.
 			weight.saturating_accrue(T::WeightInfo::on_initialize_with_expiry(num_expiring));
+			// Pinning above, plus `step_retention_period` in `on_finalize`: both periods, the
+			// bounded emptiness checks, and one write each.
+			weight.saturating_accrue(
+				T::DbWeight::get()
+					.reads_writes(3u64.saturating_add(MAX_RETENTION_LOWERING_CHECKS.into()), 2),
+			);
 
 			weight
 		}
@@ -357,6 +374,7 @@ pub mod pallet {
 			assert!(proof_ok, "Storage proof must be checked once in the block");
 
 			Self::seal_block(n);
+			Self::step_retention_period(n);
 		}
 
 		#[cfg(feature = "try-runtime")]
@@ -791,13 +809,21 @@ pub mod pallet {
 	/// Storage fee per transaction.
 	pub type EntryFee<T: Config> = StorageValue<_, BalanceOf<T>>;
 
-	/// Number of blocks for which stored data must be retained.
+	/// Requested number of blocks for which stored data must be retained.
 	///
-	/// Data older than `RetentionPeriod` blocks is eligible for removal unless it
-	/// has been explicitly renewed. Validators are required to prove possession of
-	/// data corresponding to block `N - RetentionPeriod` when producing block `N`.
+	/// Can be changed at any time (e.g. via `set_storage`); the chain moves
+	/// [`EffectiveRetentionPeriod`] towards it at block ends, one safe step at a time.
 	#[pallet::storage]
 	pub type RetentionPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
+
+	/// Retention period in force for the current block.
+	///
+	/// Data older than this is eligible for removal unless it has been renewed.
+	/// Validators prove possession of block `N - EffectiveRetentionPeriod` when
+	/// producing block `N`. Only changed in `on_finalize`, so the node (which reads it
+	/// from the parent block) and the runtime always agree within a block.
+	#[pallet::storage]
+	pub type EffectiveRetentionPeriod<T: Config> = StorageValue<_, BlockNumberFor<T>, OptionQuery>;
 
 	// Intermediates
 	//
@@ -856,6 +882,7 @@ pub mod pallet {
 			ByteFee::<T>::put(self.byte_fee);
 			EntryFee::<T>::put(self.entry_fee);
 			RetentionPeriod::<T>::put(self.retention_period);
+			EffectiveRetentionPeriod::<T>::put(self.retention_period);
 			let expiration = T::AuthorizationPeriod::get();
 			for (who, transactions_allowance, bytes_allowance) in &self.account_authorizations {
 				let scope = AuthorizationScope::Account(who.clone());
@@ -1391,9 +1418,49 @@ pub mod pallet {
 			EntryFee::<T>::get()
 		}
 
-		/// Get RetentionPeriod storage information from the outside of this pallet.
+		/// Retention period in force for the current block ([`EffectiveRetentionPeriod`]).
 		pub fn retention_period() -> BlockNumberFor<T> {
-			RetentionPeriod::<T>::get()
+			EffectiveRetentionPeriod::<T>::get().unwrap_or_else(RetentionPeriod::<T>::get)
+		}
+
+		/// Move [`EffectiveRetentionPeriod`] towards [`RetentionPeriod`] for the next block.
+		///
+		/// Only steps that keep every proof target and sweep consistent are taken:
+		/// - Raise: at once if nothing was swept yet, else by one per block, so the next proof
+		///   target never points at an already-swept block.
+		/// - Lower: as far as the blocks the sweep would skip hold no transactions, checking at
+		///   most [`MAX_RETENTION_LOWERING_CHECKS`] existing blocks per block.
+		fn step_retention_period(n: BlockNumberFor<T>) {
+			let requested = RetentionPeriod::<T>::get();
+			let current = Self::retention_period();
+			if requested.is_zero() || requested == current {
+				return;
+			}
+			let next = if requested > current {
+				if n.saturating_sub(current) <= One::one() {
+					requested
+				} else {
+					current.saturating_add(One::one())
+				}
+			} else {
+				// Lowering `next` by one makes the sweep skip block `n - next`. Blocks up to
+				// zero don't exist, so the first `next >= n` steps are free.
+				let free_floor = n.saturating_sub(One::one());
+				let mut next =
+					if current > free_floor { requested.max(free_floor) } else { current };
+				let mut checks = 0;
+				while next > requested && checks < MAX_RETENTION_LOWERING_CHECKS {
+					checks += 1;
+					if Transactions::<T>::contains_key(n.saturating_sub(next)) {
+						break;
+					}
+					next = next.saturating_sub(One::one());
+				}
+				next
+			};
+			if next != current {
+				EffectiveRetentionPeriod::<T>::put(next);
+			}
 		}
 
 		/// Whether `content_hash` is currently stored on-chain — i.e. some
@@ -1934,7 +2001,8 @@ impl<T: Config> Pallet<T> {
 #[cfg(any(test, feature = "std", feature = "try-runtime"))]
 impl<T: Config> Pallet<T> {
 	pub fn do_try_state(n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
-		ensure!(!Self::retention_period().is_zero(), "RetentionPeriod must not be zero");
+		ensure!(!RetentionPeriod::<T>::get().is_zero(), "RetentionPeriod must not be zero");
+		ensure!(!Self::retention_period().is_zero(), "EffectiveRetentionPeriod must not be zero");
 		Self::check_transactions_integrity()?;
 		Self::check_no_stale_transactions(n)?;
 		Self::check_authorizations_integrity()?;
