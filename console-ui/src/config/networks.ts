@@ -27,6 +27,8 @@ export interface MonitoringLinks {
   sentryChainProbeSpan?: string;
   /** Substrate telemetry view. */
   telemetry?: string;
+  /** Metrics that collators opt in to share (HOP, Bitswap, peers). */
+  collatorMetrics?: string;
   /** Block explorer (Subscan etc.). */
   explorer?: string;
   /** Operational runbook. */
@@ -290,6 +292,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
+      collatorMetrics: "https://bulletin-metrics.security.parity.io",
     },
   },
   custom: {
