@@ -116,9 +116,11 @@ async fn main() -> Result<()> {
 	// Step 4: Demonstrate chunked storage with DAG-PB manifest
 	info!("\n--- Step 3: Chunked Storage with DAG-PB Manifest ---");
 
-	// Create larger data that will be chunked (3 MiB)
+	// Create larger data that will be chunked (3 MiB). The 32-bit counter keeps the chunks
+	// distinct; identical chunks share a content hash and collide in the transaction pool.
 	let large_data_size = 3 * 1024 * 1024; // 3 MiB
-	let large_data: Vec<u8> = (0..large_data_size).map(|i| (i % 256) as u8).collect();
+	let large_data: Vec<u8> =
+		(0..large_data_size / 4).flat_map(|i| (i as u32).to_le_bytes()).collect();
 	info!("Large data size: {} bytes ({} MiB)", large_data.len(), large_data.len() / 1024 / 1024);
 
 	// Configure chunking

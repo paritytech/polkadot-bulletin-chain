@@ -106,7 +106,7 @@ function printChainInfo({ runtimeVersion, lastUpgrade }) {
 
 // --- Upgrade methods ---
 
-async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
+async function upgradeWithSetCode(client, signer, wasmCode) {
     const unsafeApi = client.getUnsafeApi();
 
     const setCodeCall = unsafeApi.tx.System.set_code({
@@ -118,7 +118,7 @@ async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
     // Step 1: Mandatory dry-run validation
     console.log('\nStep 1: Dry-run validation...');
     try {
-        const fees = await tx.getEstimatedFees(signerAddress);
+        const fees = await tx.getEstimatedFees(signer);
         console.log(`  Estimated fees: ${fees}`);
         console.log('  Dry-run passed!');
     } catch (error) {
@@ -127,11 +127,11 @@ async function upgradeWithSetCode(client, signer, wasmCode, signerAddress) {
 
     // Step 2: Submit
     console.log('\nStep 2: Submitting sudo.sudo(system.setCode)...');
-    const result = await tx.signAndSubmit(signer);
+    const result = await tx.createAndSubmit(signer);
     console.log(`Success! Block: ${result.block.hash}`);
 }
 
-async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAddress) {
+async function upgradeWithAuthorize(client, signer, wasmCode, codeHash) {
     const unsafeApi = client.getUnsafeApi();
     const hashHex = toHex(codeHash);
 
@@ -153,7 +153,7 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
     // Step 1: Mandatory dry-run validation
     console.log(`\nStep 1: Dry-run validation for authorize_upgrade (hash: ${hashHex})...`);
     try {
-        const fees = await authorizeTx.getEstimatedFees(signerAddress);
+        const fees = await authorizeTx.getEstimatedFees(signer);
         console.log(`  Estimated fees: ${fees}`);
         console.log('  Dry-run passed!');
     } catch (error) {
@@ -162,7 +162,7 @@ async function upgradeWithAuthorize(client, signer, wasmCode, codeHash, signerAd
 
     // Step 2: Authorize (needs sudo or governance origin)
     console.log('\nStep 2: Submitting authorize_upgrade...');
-    const result1 = await authorizeTx.signAndSubmit(signer);
+    const result1 = await authorizeTx.createAndSubmit(signer);
     console.log(`  Authorized! Block: ${result1.block.hash}`);
 
     // Step 3: Apply as unsigned extrinsic (no signer/fees needed for the large WASM payload).
@@ -248,9 +248,9 @@ async function main() {
         console.log(`Current runtime: ${current.spec_name} v${current.spec_version}`);
 
         if (method === 'setCode') {
-            await upgradeWithSetCode(client, signer, wasmCode, address);
+            await upgradeWithSetCode(client, signer, wasmCode);
         } else {
-            await upgradeWithAuthorize(client, signer, wasmCode, codeHash, address);
+            await upgradeWithAuthorize(client, signer, wasmCode, codeHash);
         }
 
         await verifyUpgrade(client, current.spec_version);

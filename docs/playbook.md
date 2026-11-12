@@ -62,6 +62,8 @@ The release includes:
 
 ### Step 6: Apply Runtime Upgrade
 
+**Before applying:** every collator must already run with `--authoring slot-based`. The runtime enforces `RelayParentOffset = 1`, which the lookahead collator cannot satisfy, so a lookahead collator stops proposing after the upgrade.
+
 **If `<UPGRADE_METHOD>` = sudo:**
 
 **Option A - Automated (Recommended):**

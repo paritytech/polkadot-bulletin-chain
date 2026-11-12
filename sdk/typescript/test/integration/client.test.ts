@@ -19,7 +19,7 @@ import {
   ss58Address,
 } from "@polkadot-labs/hdkd-helpers"
 import { createClient, type PolkadotClient } from "polkadot-api"
-import { getPolkadotSigner } from "polkadot-api/signer"
+import { getTxCreator } from "polkadot-api/tx-creator"
 import { getWsProvider } from "polkadot-api/ws"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import {
@@ -62,7 +62,7 @@ describe("AsyncBulletinClient Integration Tests", {
     // Create signer (Alice for dev chain)
     const derive = sr25519CreateDerive(DEV_MINI_SECRET)
     const aliceKeyPair = derive("//Alice")
-    const signer = getPolkadotSigner(
+    const signer = getTxCreator(
       aliceKeyPair.publicKey,
       "Sr25519",
       aliceKeyPair.sign,
@@ -77,7 +77,7 @@ describe("AsyncBulletinClient Integration Tests", {
     // as the only one (//Alice passes on westend solely via its patched
     // zombienet spec, and fails with BadSigner on paseo).
     const eveKeyPair = derive("//Eve")
-    const eveSigner = getPolkadotSigner(
+    const eveSigner = getTxCreator(
       eveKeyPair.publicKey,
       "Sr25519",
       eveKeyPair.sign,
@@ -225,7 +225,7 @@ describe("AsyncBulletinClient Integration Tests", {
       // Verify chunkIndex is set on tx status events for chunk submissions
       const chunkTxEvents = events.filter(
         (e) =>
-          (e.type === "signed" ||
+          (e.type === "created" ||
             e.type === "broadcasted" ||
             e.type === "in_block") &&
           e.chunkIndex !== undefined,

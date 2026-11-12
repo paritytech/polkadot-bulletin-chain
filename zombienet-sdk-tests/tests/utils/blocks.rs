@@ -6,8 +6,62 @@
 //! test file doesn't ship its own copy.
 
 use super::events::count_event;
-use anyhow::{anyhow, Result};
-use subxt::{blocks::Block, config::substrate::SubstrateConfig, utils::H256, OnlineClient};
+use anyhow::{anyhow, Context, Result};
+use std::time::{Duration, Instant};
+use subxt::{
+	backend::rpc::RpcClient, blocks::Block, config::substrate::SubstrateConfig,
+	ext::subxt_rpcs::client::rpc_params, utils::H256, OnlineClient,
+};
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum BlockAvailability {
+	Missing,
+	HeaderOnly,
+	Full { extrinsic_count: usize },
+}
+
+/// What a node stores for `block_number`: `chain_getBlock` returns `null` for a block whose
+/// header was imported without its body.
+pub async fn block_availability(rpc: &RpcClient, block_number: u64) -> Result<BlockAvailability> {
+	let block_hash: Option<String> = rpc
+		.request("chain_getBlockHash", rpc_params![block_number])
+		.await
+		.context("chain_getBlockHash RPC")?;
+	let Some(block_hash) = block_hash else { return Ok(BlockAvailability::Missing) };
+	let block: serde_json::Value = rpc
+		.request("chain_getBlock", rpc_params![block_hash])
+		.await
+		.context("chain_getBlock RPC")?;
+	if block.is_null() {
+		return Ok(BlockAvailability::HeaderOnly);
+	}
+	let extrinsic_count = block
+		.pointer("/block/extrinsics")
+		.and_then(serde_json::Value::as_array)
+		.map(Vec::len)
+		.with_context(|| format!("chain_getBlock response lacks block.extrinsics: {block}"))?;
+	Ok(BlockAvailability::Full { extrinsic_count })
+}
+
+pub async fn wait_for_block_body(
+	rpc: &RpcClient,
+	block_number: u64,
+	timeout_secs: u64,
+) -> Result<usize> {
+	let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+	loop {
+		let availability = block_availability(rpc, block_number).await?;
+		if let BlockAvailability::Full { extrinsic_count } = availability {
+			return Ok(extrinsic_count);
+		}
+		if Instant::now() >= deadline {
+			anyhow::bail!(
+				"block {block_number} has no body after {timeout_secs}s ({availability:?})"
+			);
+		}
+		tokio::time::sleep(Duration::from_secs(2)).await;
+	}
+}
 
 const FINALIZED_POLL_INTERVAL_SECS: u64 = 2;
 const FINALIZED_POLL_TIMEOUT_SECS: u64 = 120;

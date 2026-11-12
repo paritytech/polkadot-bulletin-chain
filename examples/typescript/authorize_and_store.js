@@ -16,7 +16,7 @@
 
 import { cryptoWaitReady } from '@polkadot/util-crypto';
 import { Keyring } from '@polkadot/keyring';
-import { getPolkadotSigner } from '@polkadot-api/signer';
+import { getTxCreator } from 'polkadot-api/tx-creator';
 import { createClient } from 'polkadot-api';
 import { getWsProvider } from 'polkadot-api/ws';
 import { bulletin } from '../.papi/descriptors/dist/index.js';
@@ -31,7 +31,7 @@ const SEED = args[1] || '//Eve';
 function createSignerFromSeed(seed) {
     const keyring = new Keyring({ type: 'sr25519' });
     const account = keyring.addFromUri(seed);
-    const signer = getPolkadotSigner(
+    const signer = getTxCreator(
         account.publicKey,
         'Sr25519',
         (input) => account.sign(input),

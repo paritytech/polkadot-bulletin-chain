@@ -1,54 +1,226 @@
 // Copyright (C) Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
-//! HOP (Hand-Off Protocol) promotion end-to-end: `hop_submit` -> wait for the on-chain
-//! `Stored` event -> wait `RetentionPeriod` -> assert `ProofChecked` covers our blob, and
-//! bitswap serves the original content via the published CID. A pre-promotion bitswap
-//! probe asserts the blob is *not* yet served — guarding against a stale col11 entry
-//! leaking through.
+//! HOP (Hand-Off Protocol) end-to-end over three blobs, asserting `sc-hop`'s
+//! `substrate_hop_*` Prometheus metrics and `sp_hop::HopRuntimeApi` along the way.
+//!
+//! Acking removes the entry, so one blob cannot cover both the ack path and the
+//! promotion path:
+//!
+//! * **A** — `hop_submit` -> `hop_claim` -> `hop_ack`; leaves the pool via ack.
+//! * **B** — `hop_submit` -> promotion -> on-chain `Stored` -> `ProofChecked` + bitswap. A
+//!   pre-promotion bitswap probe asserts the blob is *not* yet served, guarding against a stale
+//!   col11 entry leaking through.
+//! * **C** — `hop_submit` from an account with no authorization; the RPC is rejected.
+//!
+//! Metrics are per-node. Every read targets `collator-1`, the node that received the
+//! submits and whose maintenance task performs the promotions.
+//!
+//! [`parachain_hop_unpromoted_expiry_test`] covers the data-loss counter on its own
+//! network: it needs `buffer < retention`, which contradicts blob B above.
+//!
+//! [`parachain_hop_pool_integrity_test`] covers the remaining `_rpc_errors_total` and
+//! `_pool_removed_total` reasons on a third network.
 
 use crate::{
 	test_log,
 	utils::{
-		assert_proof_checked_at, authorize_account_via_sudo_finalized, blake2_256,
+		assert_hop_metrics_registered, assert_proof_checked_at,
+		authorize_account_via_sudo_finalized, blake2_256,
 		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		hop_submit, initialize_network, now_ms, set_retention_period_finalized,
-		verify_bitswap_fetch, verify_parachain_binaries, wait_for_session_change_on_node,
-		NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, hash_to_cid, hop_ack,
+		hop_api, hop_claim, hop_claim_raw, hop_metric, hop_pool_status, hop_rpc_error_code,
+		hop_rpc_error_metric, hop_submit, initialize_network, now_ms, override_alice_authorization,
+		set_retention_period_finalized, verify_bitswap_fetch, verify_parachain_binaries,
+		wait_for_finalized_quiescence, wait_for_session_change_on_node, wait_hop_metric,
+		AuthorizationOverride, HopCounters, FINALIZED_TRANSACTION_TIMEOUT_SECS,
+		HOP_POOL_BYTES_METRIC, HOP_POOL_ENTRIES_METRIC, HOP_POOL_FULL_ERROR_CODE,
+		HOP_POOL_MAX_BYTES_METRIC, HOP_PROMOTIONS_CONFIRMED_METRIC, HOP_PROMOTION_BACKLOG_METRIC,
+		HOP_RATE_LIMIT_ERROR_CODE, HOP_REMOVED_ACKED_METRIC, HOP_REMOVED_CORRUPT_METRIC,
+		HOP_REMOVED_EXPIRED_PROMOTED_METRIC, HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC,
+		HOP_REMOVED_STARTUP_DROPPED_METRIC, HOP_USER_QUOTA_ERROR_CODE, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
 use std::time::Duration;
-use subxt::{config::substrate::SubstrateConfig, OnlineClient};
-use subxt_signer::sr25519::dev;
+use subxt::{backend::rpc::RpcClient, config::substrate::SubstrateConfig, OnlineClient};
+use subxt_signer::sr25519::{dev, Keypair};
 
 /// Short on-chain retention so the proof block lands within the test window.
 const RETENTION_PERIOD: u32 = 10;
 /// HOP entry expiration; the proof must be promotable *immediately*, so
-/// `HOP_PROMOTION_BUFFER_SECS > HOP_RETENTION_SECS`.
-const HOP_RETENTION_SECS: u64 = 10;
+/// `HOP_PROMOTION_BUFFER_SECS > HOP_RETENTION_SECS`. A later maintenance tick marks the
+/// entry promoted only if it runs before expiry, so this spans several
+/// `HOP_CHECK_INTERVAL_SECS`.
+const HOP_RETENTION_SECS: u64 = 30;
 const HOP_PROMOTION_BUFFER_SECS: u64 = 60;
 /// Maintenance loop cadence — promotion lands within ~one tick of submission.
 const HOP_CHECK_INTERVAL_SECS: u64 = 5;
 
+/// Inverted against the promotion test: with `buffer < retention` a fresh entry stays
+/// outside the promotion window for `retention - buffer` seconds, which is the room
+/// [`parachain_hop_unpromoted_expiry_test`] needs to expire the authorization before the
+/// first promotion attempt.
+///
+/// The 30s gap is far more than the authorization override needs, and leaves the entry
+/// inside the window — and so counted in `_promotion_backlog` — for the remaining 60s.
+const UNPROMOTED_HOP_RETENTION_SECS: u64 = 90;
+const UNPROMOTED_HOP_PROMOTION_BUFFER_SECS: u64 = 60;
+
+/// `can_account_promote` never debits these, but `authorize_account` refuses to write a
+/// zero-extent entry.
+const AUTH_TRANSACTIONS: u32 = 10;
+const AUTH_BYTES: u64 = (TEST_DATA_SIZE as u64) * 8;
+
 const SESSION_CHANGE_TIMEOUT_SECS: u64 = 300;
 const PROMOTION_TIMEOUT_SECS: u64 = 120;
 const BITSWAP_TIMEOUT_SECS: u64 = 20;
+/// Metric assertions poll the Prometheus endpoint; generous under CI load.
+const HOP_METRIC_TIMEOUT_SECS: u64 = 120;
+/// Must outlast `UNPROMOTED_HOP_RETENTION_SECS` plus one cleanup tick.
+const UNPROMOTED_EXPIRY_TIMEOUT_SECS: u64 = 240;
 
-fn get_para_node_args() -> Vec<String> {
+/// `parachain_hop_pool_integrity_test` never wants a promotion or an expiry: retention
+/// outlasts the test and the promotion window only opens `buffer` before that.
+const INTEGRITY_HOP_RETENTION_SECS: u64 = 900;
+const INTEGRITY_HOP_PROMOTION_BUFFER_SECS: u64 = 10;
+/// Low enough that the burst phase's back-to-back submits drain the bucket on any runner: at
+/// this refill rate the 60 submits trip the limiter unless they take over 80 s in total. The
+/// phases before the burst make fewer submits than the bucket holds, so they are not throttled.
+const INTEGRITY_SUBMIT_RATE_PER_MIN: u32 = 30;
+const INTEGRITY_SUBMIT_BURST: u32 = 20;
+/// MiB. `user < pool` is required: the pool check runs before the per-user charge, so an
+/// equal pair would make `PoolFull` mask `UserQuotaExceeded` permanently.
+const INTEGRITY_MAX_POOL_MIB: u64 = 2;
+const INTEGRITY_MAX_USER_MIB: u64 = 1;
+/// Large enough that a per-user cap is reached in a handful of submits.
+const CAP_BLOB_SIZE: usize = 256 * 1024;
+/// A sender that places this many blobs without rejection means the caps are misconfigured;
+/// `INTEGRITY_MAX_USER_MIB` needs 4.
+const CAP_MAX_SUBMITS: usize = 16;
+/// Attempts include waits for rate-limit tokens, so this is well above `CAP_MAX_SUBMITS`.
+const CAP_MAX_ATTEMPTS: usize = 64;
+
+/// Submit `CAP_BLOB_SIZE` blobs as `signer` until one is rejected for a capacity reason,
+/// returning the JSON-RPC error code.
+///
+/// The preceding burst phase leaves the token bucket empty, so a rate-limited submit is
+/// transient here and is waited out rather than reported as the rejection.
+async fn fill_until_rejected(env: &HopEnv, signer: &Keypair, tag: &str) -> Result<i32> {
+	let mut submit_count = 0usize;
+	for attempt in 0..CAP_MAX_ATTEMPTS {
+		let pattern = format!("HOP_CAP_{tag}_{attempt}_{}_", now_ms()).into_bytes();
+		let data = generate_test_data(CAP_BLOB_SIZE, &pattern);
+		match env.submit_as(signer, &data).await {
+			Ok(_) => {
+				submit_count += 1;
+				if submit_count >= CAP_MAX_SUBMITS {
+					anyhow::bail!("{tag} placed {submit_count} blobs without being rejected");
+				}
+			},
+			Err(error) => match hop_rpc_error_code(&error) {
+				Some(HOP_RATE_LIMIT_ERROR_CODE) => tokio::time::sleep(Duration::from_secs(1)).await,
+				Some(error_code) => return Ok(error_code),
+				None => return Err(error),
+			},
+		}
+	}
+	anyhow::bail!("{tag} made {CAP_MAX_ATTEMPTS} attempts without a capacity rejection")
+}
+
+/// `<data_dir>/blobs/<first-2-hex>/<hex>.blob`, sharded on the hash's first byte.
+fn hop_blob_path(data_dir: &std::path::Path, content_hash: &[u8; 32]) -> std::path::PathBuf {
+	let hex = hex::encode(content_hash);
+	data_dir.join("blobs").join(&hex[..2]).join(format!("{hex}.blob"))
+}
+
+fn hop_node_args(retention_secs: u64, promotion_buffer_secs: u64) -> Vec<String> {
 	vec![
 		"--ipfs-server".into(),
 		"--enable-hop".into(),
 		"--hop-disable-rate-limit".into(),
-		format!("--hop-retention-secs={}", HOP_RETENTION_SECS),
-		format!("--hop-promotion-buffer-secs={}", HOP_PROMOTION_BUFFER_SECS),
+		format!("--hop-retention-secs={}", retention_secs),
+		format!("--hop-promotion-buffer-secs={}", promotion_buffer_secs),
 		format!("--hop-check-interval={}", HOP_CHECK_INTERVAL_SECS),
 		format!("{},hop=trace,txpool=debug", NODE_LOG_CONFIG),
 		// Arguments after "--" are passed to the embedded relay chain client.
 		"--".into(),
 		"--network-backend=libp2p".into(),
 	]
+}
+
+fn get_para_node_args() -> Vec<String> {
+	hop_node_args(HOP_RETENTION_SECS, HOP_PROMOTION_BUFFER_SECS)
+}
+
+/// Network, clients, and Alice's keypair and nonce for the tests in this file. Alice is
+/// authorized at genesis.
+struct HopEnv {
+	network: zombienet_sdk::Network<zombienet_sdk::LocalFileSystem>,
+	collator1: zombienet_sdk::NetworkNode,
+	client: OnlineClient<SubstrateConfig>,
+	/// One connection for every HOP JSON-RPC call in the test.
+	rpc: RpcClient,
+	alice: Keypair,
+	alice_id: [u8; 32],
+	next_nonce: u64,
+}
+
+impl HopEnv {
+	async fn spawn(para_args: Vec<String>) -> Result<Self> {
+		verify_parachain_binaries()?;
+
+		let config = build_parachain_network_config_three_relay_validators(para_args)?;
+		let network = initialize_network(config).await?;
+		network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+
+		let relay_alice = network.get_node("alice").context("get relay alice")?;
+		wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
+
+		let collator1 = network.get_node("collator-1").context("get collator-1")?.clone();
+		let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+		let rpc = collator1.rpc().await?;
+
+		// A disabled registry degrades to no-op metrics and absent series read as 0, so
+		// every "counter is zero" assertion would pass vacuously. Ticks prove it is wired.
+		assert_hop_metrics_registered(&collator1, HOP_METRIC_TIMEOUT_SECS).await?;
+
+		let alice = dev::alice();
+		let alice_id = alice.public_key().0;
+		let next_nonce = get_alice_nonce(&collator1).await?;
+		Ok(Self { network, collator1, client, rpc, alice, alice_id, next_nonce })
+	}
+
+	fn take_nonce(&mut self) -> u64 {
+		let nonce = self.next_nonce;
+		self.next_nonce += 1;
+		nonce
+	}
+
+	/// HOP never debits the storage extent, so any non-zero grant is enough for
+	/// `can_account_promote`.
+	async fn authorize(&mut self, account: &[u8; 32]) -> Result<()> {
+		let nonce = self.take_nonce();
+		authorize_account_via_sudo_finalized(
+			&self.client,
+			account,
+			AUTH_TRANSACTIONS,
+			AUTH_BYTES,
+			nonce,
+		)
+		.await
+	}
+
+	/// Submit `data` naming Alice as the sole recipient.
+	async fn submit(&self, data: &[u8]) -> Result<u64> {
+		hop_submit(&self.rpc, &self.alice, data, &[self.alice_id], now_ms()).await
+	}
+
+	/// Submit `data` signed by, and addressed to, `signer`.
+	async fn submit_as(&self, signer: &Keypair, data: &[u8]) -> Result<u64> {
+		hop_submit(&self.rpc, signer, data, &[signer.public_key().0], now_ms()).await
+	}
 }
 
 /// Subscribe to best blocks and return the number of the first one whose events contain
@@ -82,6 +254,15 @@ async fn wait_for_promoted(
 	)
 }
 
+/// Distinct test data per blob, salted with wall-clock so re-runs don't collide on
+/// content hash.
+fn blob(label: &str) -> (Vec<u8>, [u8; 32]) {
+	let pattern = format!("HOP_PROMOTION_TEST_{label}_{}_", now_ms()).into_bytes();
+	let data = generate_test_data(TEST_DATA_SIZE, &pattern);
+	let content_hash = blake2_256(&data);
+	(data, content_hash)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	const TEST: &str = "para_hop_promotion";
@@ -95,61 +276,132 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 		HOP_PROMOTION_BUFFER_SECS,
 	);
 
-	verify_parachain_binaries()?;
-
-	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
-	let network = initialize_network(config).await?;
-	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
-
-	let relay_alice = network.get_node("alice").context("get relay alice")?;
-	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
-
-	let collator1 = network.get_node("collator-1").context("get collator-1")?;
-	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let mut env = HopEnv::spawn(get_para_node_args()).await?;
+	let collator1 = env.collator1.clone();
+	let multiaddr = collator1.multiaddr().to_string();
 
 	// Small `RetentionPeriod` so the proof block lands within the test window.
-	let mut nonce = get_alice_nonce(collator1).await?;
-	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
-	nonce += 1;
+	let nonce = env.take_nonce();
+	set_retention_period_finalized(&env.client, RETENTION_PERIOD, nonce).await?;
 
-	// `can_account_promote` only requires Alice's authorization to exist + be unexpired —
-	// the per-extent counters aren't debited by HOP, but `authorize_account` won't write a
-	// zero-extent entry, so pass a generous amount.
-	let alice = dev::alice();
-	authorize_account_via_sudo_finalized(
-		&client,
-		&alice.public_key().0,
-		10,
-		(TEST_DATA_SIZE as u64) * 8,
-		nonce,
+	// ── Blob C: submit from an unauthorized account ──
+	// Bob is in neither `accountAuthorizations` nor `allowedAuthorizers` at genesis
+	// (Alice is authorized, Eve is the authorizer), so he cannot promote. `sc-hop`
+	// consults `can_account_promote` before touching the pool, so the rejected submit
+	// never becomes an entry — it shows up only in `_rpc_errors_total`.
+	test_log!(TEST, "--- Blob C: unauthorized submit ---");
+	let (data_c, _) = blob("C");
+	let bob = dev::bob();
+
+	let max_size = hop_api::max_promotion_size(&env.client).await?;
+	assert!(
+		max_size as usize >= TEST_DATA_SIZE,
+		"max_promotion_size ({}) is below the test payload size ({})",
+		max_size,
+		TEST_DATA_SIZE,
+	);
+	assert!(
+		!hop_api::can_account_promote(&env.client, &bob.public_key().0, TEST_DATA_SIZE as u32)
+			.await?,
+		"can_account_promote is true for an unauthorized account",
+	);
+
+	let submit_c = env.submit_as(&bob, &data_c).await;
+	assert!(submit_c.is_err(), "unauthorized hop_submit succeeded: {:?}", submit_c);
+	tracing::info!("unauthorized hop_submit rejected: {:#}", submit_c.unwrap_err());
+
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_submit", "not_authorized"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"unauthorized submit was not counted",
 	)
 	.await?;
 
-	// Salt with a wall-clock suffix so re-runs don't collide on content hash.
-	let mut pattern = b"HOP_PROMOTION_TEST_".to_vec();
-	pattern.extend_from_slice(format!("{}_", now_ms()).as_bytes());
-	let data = generate_test_data(TEST_DATA_SIZE, &pattern);
-	let content_hash = blake2_256(&data);
-	let (hash_hex, cid) = content_hash_and_cid(&data);
-	tracing::info!("test data: {} bytes, content_hash={}, CID={}", data.len(), hash_hex, cid);
+	// Claim/ack a hash that was never submitted, to reach the `hop_claim` / `hop_ack`
+	// method labels. Both map any recipient mismatch onto `NotFound`, so an unknown hash
+	// and a wrong signer are indistinguishable by design.
+	const ABSENT_HASH: [u8; 32] = [0xCD; 32];
+	let claim_absent = hop_claim(&env.rpc, &env.alice, &ABSENT_HASH).await;
+	assert!(claim_absent.is_err(), "hop_claim succeeded for an absent hash");
+	let ack_absent = hop_ack(&env.rpc, &env.alice, &ABSENT_HASH).await;
+	assert!(ack_absent.is_err(), "hop_ack succeeded for an absent hash");
 
-	let multiaddr = collator1.multiaddr().to_string();
-	let ws_uri = collator1.ws_uri().to_string();
+	for method in ["hop_claim", "hop_ack"] {
+		wait_hop_metric(
+			&collator1,
+			&hop_rpc_error_metric(method, "not_found"),
+			|errors| errors >= 1,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{method} on an absent hash was not counted"),
+		)
+		.await?;
+	}
+	test_log!(TEST, "✓ Blob C, claim and ack failures counted in _rpc_errors_total");
+
+	assert!(
+		hop_api::can_account_promote(&env.client, &env.alice_id, TEST_DATA_SIZE as u32).await?,
+		"can_account_promote is false for Alice, who is authorized at genesis",
+	);
+
+	let baseline = HopCounters::read(&collator1).await?;
+	let max_bytes = hop_metric(&collator1, HOP_POOL_MAX_BYTES_METRIC).await?;
+	assert!(max_bytes > 0, "substrate_hop_pool_max_bytes is 0");
+
+	// ── Blob A: submit -> claim -> ack ──
+	// Claim and ack immediately: with `hop_retention_secs` this short, an entry left
+	// sitting would be promoted by the next maintenance tick and then expire.
+	test_log!(TEST, "--- Blob A: submit -> claim -> ack ---");
+	let (data_a, hash_a) = blob("A");
+	let entry_count = env.submit(&data_a).await?;
+	tracing::info!("hop_submit A OK; pool entry_count={}", entry_count);
+	assert!(entry_count >= 1, "pool reported {} entries right after submit", entry_count);
+
+	let claim_bytes = hop_claim(&env.rpc, &env.alice, &hash_a).await?;
+	assert_eq!(
+		claim_bytes,
+		data_a,
+		"hop_claim returned {} bytes != submitted blob",
+		claim_bytes.len()
+	);
+	hop_ack(&env.rpc, &env.alice, &hash_a).await?;
+
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_ACKED_METRIC,
+		move |ack_count| ack_count > baseline.removed_acked,
+		HOP_METRIC_TIMEOUT_SECS,
+		"ack did not increment _pool_removed_total{reason=\"acked\"}",
+	)
+	.await?;
+	test_log!(TEST, "✓ Blob A claimed, acked and removed from the pool");
+
+	// ── Blob B: promotion path ──
+	test_log!(TEST, "--- Blob B: promotion ---");
+	let (data_b, hash_b) = blob("B");
+	let hash_hex = hex::encode(hash_b);
+	tracing::info!(
+		"blob B: {} bytes, content_hash={}, CID={}",
+		data_b.len(),
+		hash_hex,
+		hash_to_cid(&hash_b),
+	);
 
 	// Bitswap probe BEFORE promotion: blob lives only in the HOP pool, col11 has no entry.
-	let before_match = verify_bitswap_fetch(&multiaddr, &data, BITSWAP_TIMEOUT_SECS)
+	let before_match = verify_bitswap_fetch(&multiaddr, &data_b, BITSWAP_TIMEOUT_SECS)
 		.await
 		.unwrap_or(false);
 	tracing::info!("bitswap BEFORE promotion: match={}", before_match);
 
 	// `hop_submit` -> maintenance task promotes -> `TransactionStorage::Stored` on-chain.
-	let entry_count = hop_submit(&ws_uri, &alice, &data, &[alice.public_key().0], now_ms()).await?;
-	tracing::info!("hop_submit OK; pool entry_count={}", entry_count);
-	let store_block = wait_for_promoted(&client, &content_hash, PROMOTION_TIMEOUT_SECS).await?;
+	let entry_count = env.submit(&data_b).await?;
+	tracing::info!("hop_submit B OK; pool entry_count={}", entry_count);
+	let store_block = wait_for_promoted(&env.client, &hash_b, PROMOTION_TIMEOUT_SECS).await?;
 	tracing::info!("✓ HOP promotion landed at block {}", store_block);
 
 	// Bitswap probe AFTER promotion: blob is now on-chain; bitswap *should* match.
-	let after_match = verify_bitswap_fetch(&multiaddr, &data, BITSWAP_TIMEOUT_SECS)
+	let after_match = verify_bitswap_fetch(&multiaddr, &data_b, BITSWAP_TIMEOUT_SECS)
 		.await
 		.unwrap_or(false);
 	tracing::info!("bitswap AFTER promotion: match={}", after_match);
@@ -157,14 +409,14 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 	// Tie `ProofChecked` to our blob: the inherent at N proves `Transactions[N - RP]`, so
 	// confirm the content hash is still indexed at `store_block` when the proof fires.
 	let proof_block = store_block + RETENTION_PERIOD as u64;
-	let proof_hash = finalized_block_hash_at(&client, proof_block).await?;
-	let indexed_at = canonical_store_block(&client, proof_hash, &content_hash).await?;
+	let proof_hash = finalized_block_hash_at(&env.client, proof_block).await?;
+	let indexed_at = canonical_store_block(&env.client, proof_hash, &hash_b).await?;
 	assert_eq!(
 		indexed_at, store_block,
 		"HOP blob indexed at {} but proof at {} reads Transactions[{}]",
 		indexed_at, proof_block, store_block,
 	);
-	assert_proof_checked_at(&client, proof_block, "HOP-promoted blob").await?;
+	assert_proof_checked_at(&env.client, proof_block, "HOP-promoted blob").await?;
 	tracing::info!("✓ ProofChecked at block {} covers HOP blob {}", proof_block, hash_hex);
 
 	// BEFORE is expected to be `false` (blob lives only in the HOP pool, no col11 entry yet).
@@ -181,7 +433,471 @@ async fn parachain_hop_promotion_bitswap_test() -> Result<()> {
 		store_block, proof_block,
 	);
 
+	// ── Runtime API: promotion is visible, and the extrinsic builder is well-formed ──
+	assert!(
+		hop_api::is_promoted_on_chain(&env.client, proof_hash, &hash_b).await?,
+		"is_promoted_on_chain is false at block {} for a blob promoted at block {}",
+		proof_block,
+		store_block,
+	);
+	assert!(
+		!hop_api::is_promoted_on_chain(&env.client, proof_hash, &[0xAB; 32]).await?,
+		"is_promoted_on_chain is true for an unrelated hash",
+	);
+
+	let extrinsic =
+		hop_api::create_promotion_extrinsic(&env.client, &env.alice, &data_b, now_ms()).await?;
+	assert!(
+		extrinsic.len() > data_b.len(),
+		"create_promotion_extrinsic returned {} bytes for a {}-byte blob",
+		extrinsic.len(),
+		data_b.len(),
+	);
+	// `data` must stay the last call argument: `do_store` indexes the trailing
+	// `data.len()` bytes of the encoded extrinsic under the blob's content hash.
+	assert!(
+		extrinsic.ends_with(&data_b),
+		"create_promotion_extrinsic does not end with the blob — `data` is no longer the \
+		 last call argument, which corrupts the indexed bytes",
+	);
+	test_log!(TEST, "✓ HopRuntimeApi: promotion visible, extrinsic ends with the blob");
+
+	// ── Promotion + expiry metrics ──
+	wait_hop_metric(
+		&collator1,
+		HOP_PROMOTIONS_CONFIRMED_METRIC,
+		move |confirmation_count| confirmation_count > baseline.promotions_confirmed,
+		HOP_METRIC_TIMEOUT_SECS,
+		"promotion was not counted",
+	)
+	.await?;
+	wait_hop_metric(
+		&collator1,
+		HOP_PROMOTION_BACKLOG_METRIC,
+		|backlog| backlog == 0,
+		HOP_METRIC_TIMEOUT_SECS,
+		"promotion backlog did not drain",
+	)
+	.await?;
+	// Retention is `HOP_RETENTION_SECS`; the proof wait above already spent longer than
+	// that, so the promoted entry ages out inside the test window.
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_EXPIRED_PROMOTED_METRIC,
+		move |expiry_count| expiry_count > baseline.removed_expired_promoted,
+		HOP_METRIC_TIMEOUT_SECS,
+		"promoted entry did not age out of the pool",
+	)
+	.await?;
+
+	// The pool is empty once A is acked and B has promoted and expired.
+	for (metric, what) in [(HOP_POOL_ENTRIES_METRIC, "entries"), (HOP_POOL_BYTES_METRIC, "bytes")] {
+		wait_hop_metric(
+			&collator1,
+			metric,
+			|value| value == 0,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("pool {what} did not return to zero"),
+		)
+		.await?;
+	}
+
+	// Cross-check the pool's own view against the gauges just asserted.
+	let status = hop_pool_status(&env.rpc).await?;
+	assert_eq!(
+		(status.entry_count, status.total_bytes, status.max_bytes),
+		(0, 0, max_bytes),
+		"hop_poolStatus disagrees with the pool gauges",
+	);
+
+	let final_counters = HopCounters::read(&collator1).await?;
+	tracing::info!("final HOP counters: {:?}", final_counters);
+
+	// Direct blob-loss assertion: nothing may leave the pool unpromoted. `sc-hop`
+	// documents this series as an upper bound on loss, so compare against zero rather
+	// than an expected count. Blob C never entered the pool, so it cannot appear here;
+	// the counter is exercised from the other side by
+	// `parachain_hop_unpromoted_expiry_test`.
+	assert_eq!(
+		final_counters.removed_expired_unpromoted, 0,
+		"{} entries expired unpromoted — HOP dropped data",
+		final_counters.removed_expired_unpromoted,
+	);
+	// Two blobs reached the pool (A and B); C was rejected before insertion. The counter
+	// tracks accounted size, which includes per-recipient overhead, hence `>=`.
+	let insert_byte_count = final_counters.inserted_bytes - baseline.inserted_bytes;
+	let submit_byte_count = (data_a.len() + data_b.len()) as u64;
+	assert!(
+		insert_byte_count >= submit_byte_count,
+		"pool recorded {} inserted bytes for two {}-byte blobs",
+		insert_byte_count,
+		TEST_DATA_SIZE,
+	);
+
 	test_log!(TEST, "=== HOP promotion bitswap test PASSED ===");
-	network.destroy().await?;
+	env.network.destroy().await?;
+	Ok(())
+}
+
+/// A pooled blob whose account authorization lapses before the promotion window opens is
+/// dropped, not stored: `_pool_removed_total{reason="expired_unpromoted"}` is the only
+/// signal for that loss.
+///
+/// Promotion never re-checks authorization itself — `sc-hop` builds the extrinsic and
+/// hands it to `submit_local`, where the pool's `authorize_promote` hook rejects it with
+/// `BadSigner`. `mark_promoted` is reached only once `is_promoted_on_chain` confirms the
+/// extrinsic landed, so a rejected submission leaves the entry unpromoted and
+/// `_promotions_confirmed_total` untouched.
+///
+/// Needs its own network: `buffer < retention` keeps the fresh entry out of the promotion
+/// window while the authorization is expired, and that inverts what
+/// `parachain_hop_promotion_bitswap_test` requires.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_hop_unpromoted_expiry_test() -> Result<()> {
+	const TEST: &str = "para_hop_unpromoted_expiry";
+	crate::utils::init_logging();
+
+	test_log!(
+		TEST,
+		"=== HOP unpromoted expiry (hop_retention={}s, hop_buffer={}s) ===",
+		UNPROMOTED_HOP_RETENTION_SECS,
+		UNPROMOTED_HOP_PROMOTION_BUFFER_SECS,
+	);
+
+	let mut env = HopEnv::spawn(hop_node_args(
+		UNPROMOTED_HOP_RETENTION_SECS,
+		UNPROMOTED_HOP_PROMOTION_BUFFER_SECS,
+	))
+	.await?;
+	let collator1 = env.collator1.clone();
+	let baseline = HopCounters::read(&collator1).await?;
+
+	// Submit while the authorization is still valid, so the blob reaches the pool.
+	let (data_d, hash_d) = blob("D");
+	let entry_count = env.submit(&data_d).await?;
+	tracing::info!("hop_submit D OK; pool entry_count={}", entry_count);
+	assert!(entry_count >= 1, "pool reported {} entries right after submit", entry_count);
+
+	// Promotion attempts start `retention - buffer` seconds after submit, so D is still
+	// pooled here.
+	assert!(
+		hop_metric(&collator1, HOP_POOL_ENTRIES_METRIC).await? >= 1,
+		"substrate_hop_pool_entries is 0 while an entry is pooled",
+	);
+	let pool_byte_count = hop_metric(&collator1, HOP_POOL_BYTES_METRIC).await?;
+	assert!(
+		pool_byte_count >= data_d.len() as u64,
+		"substrate_hop_pool_bytes is {} for a pooled {}-byte blob",
+		pool_byte_count,
+		data_d.len(),
+	);
+
+	// Expire the authorization out from under the pooled entry. `authorize_account` can
+	// neither shrink an entry nor set a custom expiration, hence the storage override. The
+	// node's promotion check reads the best block, which contains the override well before
+	// the promotion window opens at `retention - buffer` seconds after submit.
+	let nonce = env.take_nonce();
+	override_alice_authorization(
+		&env.client,
+		AuthorizationOverride {
+			transactions: 0,
+			transactions_allowance: AUTH_TRANSACTIONS,
+			bytes: 0,
+			bytes_permanent: 0,
+			bytes_allowance: AUTH_BYTES,
+			expiration: 1,
+		},
+		nonce,
+	)
+	.await?;
+
+	// `in_promotion_window` counts entries that are unpromoted, within `buffer` of expiry
+	// and still under `MAX_PROMOTION_ATTEMPTS`. D qualifies only from `retention - buffer`
+	// seconds after submit until it expires, so this wait comes before the finality wait.
+	wait_hop_metric(
+		&collator1,
+		HOP_PROMOTION_BACKLOG_METRIC,
+		|backlog| backlog >= 1,
+		UNPROMOTED_EXPIRY_TIMEOUT_SECS,
+		"promotion backlog never counted the pooled entry",
+	)
+	.await?;
+	test_log!(TEST, "✓ Blob D counted in _promotion_backlog");
+
+	// Runtime API calls read the latest *finalized* block, so the expiry is invisible
+	// until finality catches up with the override.
+	wait_for_finalized_quiescence(&collator1, FINALIZED_TRANSACTION_TIMEOUT_SECS).await?;
+	assert!(
+		!hop_api::can_account_promote(&env.client, &env.alice_id, TEST_DATA_SIZE as u32).await?,
+		"can_account_promote is still true after expiring the authorization",
+	);
+	test_log!(TEST, "✓ Authorization expired under pooled blob D");
+
+	// Every promotion attempt now fails in the pool, so the entry ages out unpromoted.
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_EXPIRED_UNPROMOTED_METRIC,
+		move |expiry_count| expiry_count > baseline.removed_expired_unpromoted,
+		UNPROMOTED_EXPIRY_TIMEOUT_SECS,
+		"pooled entry did not expire unpromoted",
+	)
+	.await?;
+
+	let final_counters = HopCounters::read(&collator1).await?;
+	tracing::info!("final HOP counters: {:?}", final_counters);
+
+	assert_eq!(
+		final_counters.promotions_confirmed, baseline.promotions_confirmed,
+		"promotion was confirmed for a blob whose authorization had expired",
+	);
+	assert_eq!(
+		final_counters.removed_expired_promoted, baseline.removed_expired_promoted,
+		"entry was counted as expiring promoted",
+	);
+	let latest_finalized_hash = env.client.blocks().at_latest().await?.hash();
+	assert!(
+		!hop_api::is_promoted_on_chain(&env.client, latest_finalized_hash, &hash_d).await?,
+		"is_promoted_on_chain is true for a blob that was never promoted",
+	);
+	for (metric, what) in [
+		(HOP_POOL_ENTRIES_METRIC, "pool entries"),
+		(HOP_PROMOTION_BACKLOG_METRIC, "promotion backlog"),
+	] {
+		wait_hop_metric(
+			&collator1,
+			metric,
+			|value| value == 0,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{what} did not return to zero"),
+		)
+		.await?;
+	}
+
+	test_log!(TEST, "=== HOP unpromoted expiry test PASSED ===");
+	env.network.destroy().await?;
+	Ok(())
+}
+
+/// `_rpc_errors_total` reasons for malformed, duplicate, already-claimed, rate-limited and
+/// over-capacity requests, plus the two `_pool_removed_total` reasons that need the pool's
+/// files changed on disk.
+///
+/// Runs on its own network: `--hop-data-dir` is pinned so the test can locate a blob on
+/// disk, rate limiting is left enabled so the limiter can be tripped, and the promotion
+/// window never opens inside the test window so nothing is promoted or expired.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_hop_pool_integrity_test() -> Result<()> {
+	const TEST: &str = "para_hop_pool_integrity";
+	crate::utils::init_logging();
+
+	test_log!(TEST, "=== HOP pool integrity + RPC error reasons ===");
+
+	// Unique per run so a stale dir from an earlier run cannot be recovered at startup.
+	let data_dir = tempfile::Builder::new().prefix("bulletin-hop-").tempdir()?;
+	let args = vec![
+		"--enable-hop".into(),
+		format!("--hop-data-dir={}", data_dir.path().display()),
+		format!("--hop-retention-secs={}", INTEGRITY_HOP_RETENTION_SECS),
+		format!("--hop-promotion-buffer-secs={}", INTEGRITY_HOP_PROMOTION_BUFFER_SECS),
+		format!("--hop-check-interval={}", HOP_CHECK_INTERVAL_SECS),
+		// Rate limiting stays on so the burst phase can trip it.
+		format!("--hop-submit-rate-per-min={}", INTEGRITY_SUBMIT_RATE_PER_MIN),
+		format!("--hop-submit-burst={}", INTEGRITY_SUBMIT_BURST),
+		format!("--hop-max-pool-size={}", INTEGRITY_MAX_POOL_MIB),
+		format!("--hop-max-user-size={}", INTEGRITY_MAX_USER_MIB),
+		// The submit-rate limiter is the one under test; keep the bandwidth limiter well
+		// clear of the megabytes the capacity phases push.
+		"--hop-bandwidth-per-min-mib=1024".into(),
+		"--hop-bandwidth-burst-mib=1024".into(),
+		format!("{},hop=trace", NODE_LOG_CONFIG),
+		"--".into(),
+		"--network-backend=libp2p".into(),
+	];
+
+	let mut env = HopEnv::spawn(args).await?;
+	let collator1 = env.collator1.clone();
+
+	// ── Malformed submits ──
+	let (data_e, _) = blob("E");
+	for (label, result) in [
+		("empty_data", hop_submit(&env.rpc, &env.alice, &[], &[env.alice_id], now_ms()).await),
+		("no_recipients", hop_submit(&env.rpc, &env.alice, &data_e, &[], now_ms()).await),
+		(
+			"duplicate_recipient",
+			hop_submit(&env.rpc, &env.alice, &data_e, &[env.alice_id, env.alice_id], now_ms())
+				.await,
+		),
+	] {
+		assert!(result.is_err(), "{label} submit unexpectedly succeeded");
+		wait_hop_metric(
+			&collator1,
+			&hop_rpc_error_metric("hop_submit", label),
+			|errors| errors >= 1,
+			HOP_METRIC_TIMEOUT_SECS,
+			&format!("{label} submit was not counted"),
+		)
+		.await?;
+	}
+
+	// A second submit of the same blob is a duplicate.
+	env.submit(&data_e).await?;
+	assert!(env.submit(&data_e).await.is_err(), "duplicate submit unexpectedly succeeded");
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_submit", "duplicate_entry"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"duplicate submit was not counted",
+	)
+	.await?;
+
+	// `decode_hash` rejects anything that is not 32 bytes, before any pool lookup.
+	assert!(
+		hop_claim_raw(&env.rpc, &[0u8; 31]).await.is_err(),
+		"hop_claim accepted a 31-byte hash",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_claim", "invalid_hash_length"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"short hash was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Malformed submit and claim reasons counted");
+
+	// ── already_claimed ──
+	// The gate is the recipient's `claimed` flag, which only `ack` sets — claiming twice
+	// in a row succeeds twice. Two recipients are required: with one, the ack removes the
+	// entry outright and the follow-up claim sees `NotFound` instead.
+	let (data_h, hash_h) = blob("H");
+	let bob_id = dev::bob().public_key().0;
+	hop_submit(&env.rpc, &env.alice, &data_h, &[env.alice_id, bob_id], now_ms()).await?;
+	assert_eq!(
+		hop_claim(&env.rpc, &env.alice, &hash_h).await?,
+		data_h,
+		"first claim did not return the blob",
+	);
+	hop_ack(&env.rpc, &env.alice, &hash_h).await?;
+	assert!(
+		hop_claim(&env.rpc, &env.alice, &hash_h).await.is_err(),
+		"claim after ack unexpectedly succeeded",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_claim", "already_claimed"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"claim after ack was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Claim after ack counted as already_claimed");
+
+	// ── corrupt: rewrite the blob so its content hash no longer matches ──
+	let (data_f, hash_f) = blob("F");
+	env.submit(&data_f).await?;
+	let blob_f = hop_blob_path(data_dir.path(), &hash_f);
+	std::fs::write(&blob_f, b"not the blob you are looking for")
+		.with_context(|| format!("overwrite {}", blob_f.display()))?;
+	// The integrity check purges the entry and reports `NotFound` to the caller.
+	assert!(hop_claim(&env.rpc, &env.alice, &hash_f).await.is_err(), "claim of a corrupt blob");
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_CORRUPT_METRIC,
+		|corrupt| corrupt >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"corrupt blob was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Corrupt blob purged and counted");
+
+	let (orphan_data, orphan_hash) = blob("G");
+	env.submit(&orphan_data).await?;
+
+	// ── rate_limited: exhaust the submit bucket ──
+	// Runs after the phases that need unthrottled submits; `fill_until_rejected` waits until
+	// the drained bucket refills.
+	let mut burst_error_codes = Vec::new();
+	for index in 0..(INTEGRITY_SUBMIT_BURST * 3) {
+		let (data, _) = blob(&format!("R{index}"));
+		if let Err(error) = env.submit(&data).await {
+			burst_error_codes.push(hop_rpc_error_code(&error));
+		}
+	}
+	assert!(
+		burst_error_codes.contains(&Some(HOP_RATE_LIMIT_ERROR_CODE)),
+		"submit burst returned no rate-limit error code: {burst_error_codes:?}",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_submit", "rate_limited"),
+		|rejection_count| rejection_count >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"submit burst did not trip the rate limiter",
+	)
+	.await?;
+	test_log!(TEST, "✓ Rate limiter tripped and counted");
+
+	// ── user_quota_exceeded, then pool_full ──
+	// Runs after every phase that needs a successful submit, including the orphan blob: once
+	// the pool is full, `PoolFull` hides `UserQuotaExceeded` and `DuplicateEntry`. Alice
+	// reaches her own cap while the pool still has room; further senders then push the pool
+	// itself over.
+	assert_eq!(
+		fill_until_rejected(&env, &env.alice, "alice").await?,
+		HOP_USER_QUOTA_ERROR_CODE,
+		"alice's fill did not stop at her quota",
+	);
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_submit", "user_quota_exceeded"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"per-user cap was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Per-user cap counted as user_quota_exceeded");
+
+	for (signer, tag, stop_error_code) in [
+		(dev::bob(), "bob", HOP_USER_QUOTA_ERROR_CODE),
+		(dev::charlie(), "charlie", HOP_POOL_FULL_ERROR_CODE),
+	] {
+		env.authorize(&signer.public_key().0).await?;
+		assert_eq!(
+			fill_until_rejected(&env, &signer, tag).await?,
+			stop_error_code,
+			"{tag}'s fill stopped with an unexpected error code",
+		);
+	}
+	wait_hop_metric(
+		&collator1,
+		&hop_rpc_error_metric("hop_submit", "pool_full"),
+		|errors| errors >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"pool cap was not counted",
+	)
+	.await?;
+	test_log!(TEST, "✓ Pool cap counted as pool_full");
+
+	// ── startup_dropped: leave a `.meta` with no `.blob`, then restart ──
+	// Recorded while recovering the pool from disk, so it must come last: the restart
+	// resets every counter asserted above.
+	std::fs::remove_file(hop_blob_path(data_dir.path(), &orphan_hash))
+		.context("remove blob to orphan its meta")?;
+
+	collator1.restart(None).await?;
+	assert_hop_metrics_registered(&collator1, HOP_METRIC_TIMEOUT_SECS).await?;
+	wait_hop_metric(
+		&collator1,
+		HOP_REMOVED_STARTUP_DROPPED_METRIC,
+		|drop_count| drop_count >= 1,
+		HOP_METRIC_TIMEOUT_SECS,
+		"orphan meta was not dropped at startup",
+	)
+	.await?;
+	test_log!(TEST, "✓ Orphan meta dropped at startup and counted");
+
+	test_log!(TEST, "=== HOP pool integrity test PASSED ===");
+	env.network.destroy().await?;
 	Ok(())
 }
