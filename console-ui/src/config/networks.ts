@@ -113,6 +113,10 @@ function grafanaLink(chain: string, node?: string): string {
   return `${GRAFANA_OPERATION_HEALTH}?${params.join("&")}`;
 }
 
+function collatorMetricsLink(chain: string): string {
+  return `https://bulletin-metrics.security.parity.io/d/bulletin-collators/bulletin-collators?var-chain=${chain}`;
+}
+
 const GRAFANA_BITSWAP =
   "https://grafana.teleport.parity.io/d/bitswap-1/bitswap-server-insights";
 
@@ -292,7 +296,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
-      collatorMetrics: "https://bulletin-metrics.security.parity.io",
+      collatorMetrics: collatorMetricsLink("bulletin-polkadot"),
     },
   },
   custom: {
