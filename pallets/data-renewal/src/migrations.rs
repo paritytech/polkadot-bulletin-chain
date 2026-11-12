@@ -354,7 +354,8 @@ pub mod v2 {
 
 		#[cfg(feature = "try-runtime")]
 		fn pre_upgrade(
-		) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError> {
+		) -> Result<alloc::vec::Vec<u8>, polkadot_sdk_frame::deps::sp_runtime::TryRuntimeError>
+		{
 			use polkadot_sdk_frame::prelude::ensure;
 
 			let mut total: u64 = 0;
