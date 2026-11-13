@@ -685,13 +685,17 @@ impl<T: Config> Pallet<T> {
 	}
 
 	/// `true` iff `renew(entry)` would currently pass validation for `who`: `entry`
-	/// resolves, size in range, unexpired authorization, and both hard caps clear.
+	/// resolves, no renewal is registered for it yet, size in range, unexpired
+	/// authorization, and both hard caps clear.
 	pub fn can_renew(who: &T::AccountId, entry: &TransactionRef<BlockNumberFor<T>>) -> bool {
 		let Ok(info) =
 			pallet_bulletin_transaction_storage::Pallet::<T>::resolve_transaction_ref(entry)
 		else {
 			return false;
 		};
+		if Renewals::<T>::contains_key(info.content_hash) {
+			return false;
+		}
 		if !pallet_bulletin_transaction_storage::Pallet::<T>::data_size_ok(info.size as usize) {
 			return false;
 		}
