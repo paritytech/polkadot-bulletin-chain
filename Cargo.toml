@@ -48,7 +48,7 @@ pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "p
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "50.0.0", default-features = false }
 frame-executive = { version = "49.0.0", default-features = false }
-frame-support = { version = "49.0.1", default-features = false }
+frame-support = { version = "49.1.0", default-features = false }
 frame-system = { version = "49.0.0", default-features = false }
 frame-system-benchmarking = { version = "50.0.0", default-features = false }
 frame-system-rpc-runtime-api = { version = "44.0.0", default-features = false }
@@ -84,17 +84,17 @@ pallet-timestamp = { version = "49.0.0", default-features = false }
 pallet-transaction-payment = { version = "50.0.0", default-features = false }
 pallet-transaction-payment-rpc-runtime-api = { version = "50.0.0", default-features = false }
 
-pallet-xcm = { version = "31.0.0", default-features = false }
+pallet-xcm = { version = "31.1.0", default-features = false }
 xcm = { version = "25.0.0", package = "staging-xcm", default-features = false }
 xcm-builder = { version = "31.0.0", package = "staging-xcm-builder", default-features = false }
-xcm-executor = { version = "29.0.1", package = "staging-xcm-executor", default-features = false }
+xcm-executor = { version = "29.0.2", package = "staging-xcm-executor", default-features = false }
 
 # Parachains common primitives (needed by runtimes)
 parachains-common = { version = "39.0.0", default-features = false }
 
 # XCM emulator framework for integration tests
-asset-hub-westend-runtime = { version = "0.57.0", default-features = true }
-emulated-integration-tests-common = { version = "41.0.0", default-features = true }
+asset-hub-westend-runtime = { version = "0.59.0", default-features = true }
+emulated-integration-tests-common = { version = "43.0.0", default-features = true }
 westend-runtime = { version = "40.0.0", default-features = true }
 xcm-emulator = { version = "0.38.0", default-features = true }
 

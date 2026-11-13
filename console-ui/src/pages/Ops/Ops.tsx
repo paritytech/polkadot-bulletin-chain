@@ -58,6 +58,14 @@ function group(monitoring: MonitoringLinks | undefined, endpoint: string | undef
       description: "Live list of every node running this chain (version, block height, peers).",
     });
   }
+  if (monitoring.collatorMetrics) {
+    chainHealth.push({
+      label: "Collator Metrics",
+      href: monitoring.collatorMetrics,
+      icon: Activity,
+      description: "Opt-in metrics shared by collators: HOP pool, Bitswap, peers, versions.",
+    });
+  }
   if (endpoint) {
     chainHealth.push({
       label: "PolkadotJS Apps",
