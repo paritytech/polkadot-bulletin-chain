@@ -38,7 +38,7 @@ The renew-family extrinsics:
 - `force_renew(entry: TransactionRef)` — synchronous renewal. `TransactionRef::Position { block, index }` or `TransactionRef::ContentHash(_)`.
 - `renew(entry: TransactionRef)` — one-shot scheduler. Pre-pays the renewal at registration (same charge as `force_renew`); cycle delivers without re-charging.
 - `enable_auto_renew(content_hash)` — recurring scheduler. Pre-pays the first cycle at registration (same charge as `force_renew`); cycle 1 delivers without re-charging, cycle 2 onward charges per cycle.
-- `disable_auto_renew(content_hash)` — cancels the registration. Signed callers are rejected with `CannotDisablePrepaidAutoRenewal` while the registration is in its prepaid window (`paid: true`); they must wait for the first cycle to consume the prepayment. Root can disable regardless (governance/cleanup), but the prepayment is forfeit.
+- `disable_auto_renew(content_hash)` — cancels the registration. Only the registering account (or Root) can disable. Disabling while the registration is still prepaid (`paid: true`) forfeits the prepayment.
 
 `store`, `store_with_cid_config`, `force_renew`, `renew`, `enable_auto_renew`, and `disable_auto_renew` are unconditionally feeless. Authorization is the sole economic gate. Wrapper calls (e.g. `utility::batch`) are rejected by `ValidateStorageCalls`.
 
@@ -199,6 +199,8 @@ A user across many accounts (Sybil-like) is bounded by the chain-wide cap (Examp
 ## Migration
 
 `STORAGE_VERSION = 5`. Migrations are only relevant for the Paseo/Westend testnets carrying pre-existing on-chain state forward; see the `pallet_bulletin_transaction_storage::migrations::{v1, v2, v3, v4, v5}` modules for the wiring. The v4 step re-encodes each `AutoRenewals` entry from `{ account }` to `{ account, recurring, paid }`. All pre-existing entries were written by the old non-prepaying `enable_auto_renew`, so they migrate as `{ recurring: true, paid: false }` — their next `do_process_pending_renewals` cycle charges per-cycle, preserving their on-chain behaviour across the upgrade. The v5 step re-encodes each `AllowedAuthorizers` entry's `AuthorizerBudget` (dropping `authorization_period`, adding `feeless: true`) and bumps the authorizer's System provider reference.
+
+`pallet_bulletin_data_renewal` is at storage version 2. Its v2 step appends `size` to each `Renewals` entry, backfilled from the entry's on-chain target, so disabling a prepaid registration can release its `PermanentStorageUsed` charge without a lookup.
 
 ## Capacity planning operational steps
 
