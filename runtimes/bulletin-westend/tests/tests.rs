@@ -2038,3 +2038,84 @@ fn non_sudo_cannot_add_authorizer() {
 			assert_eq!(applied.map(|_| ()), Err(DispatchError::BadOrigin));
 		});
 }
+
+#[test]
+fn relay_proof_request_includes_the_validator_collators_randomness_key() {
+	use cumulus_primitives_core::{
+		relay_chain::well_known_keys::ONE_EPOCH_AGO_RANDOMNESS,
+		runtime_decl_for_key_to_include_in_relay_proof::KeyToIncludeInRelayProofV1,
+		RelayStorageKey,
+	};
+	// GIVEN the runtime wires pallet-validator-collators, which reads the relay chain epoch
+	// randomness from every relay chain state proof
+	// WHEN a collator asks the runtime which relay chain keys to prove
+	let keys = Runtime::keys_to_prove().keys;
+	// THEN the randomness key is requested
+	assert!(keys.contains(&RelayStorageKey::Top(ONE_EPOCH_AGO_RANDOMNESS.to_vec())));
+}
+
+#[test]
+fn asset_hub_message_sets_the_validators_and_another_sibling_one_does_not() {
+	use bulletin_westend_runtime::xcm_config::{AssetHubLocation, XcmConfig};
+	use codec::Decode;
+
+	let era = 7u32;
+	let validators =
+		vec![Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Bob.to_account_id()];
+	// GIVEN `set_validators` encoded as Asset Hub Westend encodes it, with the hard-coded
+	// `ValidatorCollators` index 25 and call index 0
+	let call = (25u8, 0u8, era, validators.clone()).encode();
+	assert_eq!(
+		RuntimeCall::decode(&mut &call[..]).unwrap(),
+		RuntimeCall::ValidatorCollators(pallet_validator_collators::Call::set_validators {
+			era,
+			validators: validators
+				.iter()
+				.cloned()
+				.collect::<std::collections::BTreeSet<_>>()
+				.try_into()
+				.unwrap(),
+		}),
+	);
+	let received = || {
+		System::events().into_iter().any(|record| {
+			record.event ==
+				RuntimeEvent::ValidatorCollators(
+					pallet_validator_collators::Event::ValidatorSetReceived { era, count: 2 },
+				)
+		})
+	};
+	let send_from = |origin: Location| {
+		let message = Xcm::<RuntimeCall>(vec![
+			UnpaidExecution { weight_limit: Unlimited, check_origin: None },
+			Transact {
+				origin_kind: OriginKind::Xcm,
+				fallback_max_weight: None,
+				call: call.clone().into(),
+			},
+		]);
+		let mut id = [0u8; 32];
+		xcm_executor::XcmExecutor::<XcmConfig>::prepare_and_execute(
+			origin,
+			message,
+			&mut id,
+			Weight::MAX,
+			// No weight credit, so the message must pass the barrier, which admits unpaid
+			// execution from every sibling.
+			Weight::zero(),
+		)
+	};
+
+	ExtBuilder::<Runtime>::default().build().execute_with(|| {
+		// WHEN another sibling sends the message Asset Hub sends
+		// THEN the barrier admits it but `SetOrigin` rejects its origin, so the set is not stored
+		let _ = send_from(PeopleLocation::get());
+		assert!(!received());
+
+		// WHEN Asset Hub sends it, as an unpaid `Transact` with the `Xcm` origin kind
+		// THEN it executes with Asset Hub's location as origin, which `SetOrigin` accepts, so the
+		// set is stored
+		assert_ok!(send_from(AssetHubLocation::get()).ensure_complete());
+		assert!(received());
+	});
+}
