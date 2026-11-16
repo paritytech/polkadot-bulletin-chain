@@ -31,15 +31,23 @@ fn genesis() -> Storage {
 			..Default::default()
 		},
 		collator_selection: asset_hub_westend_runtime::CollatorSelectionConfig {
-			invulnerables: collators::invulnerables().iter().cloned().map(|(acc, _)| acc).collect(),
+			invulnerables: collators::invulnerables()
+				.iter()
+				.cloned()
+				.map(|(acc, _, _)| acc)
+				.collect(),
 			candidacy_bond: ED * 16,
 			..Default::default()
 		},
 		session: asset_hub_westend_runtime::SessionConfig {
 			keys: collators::invulnerables()
 				.into_iter()
-				.map(|(acc, aura)| {
-					(acc.clone(), acc, asset_hub_westend_runtime::SessionKeys { aura })
+				.map(|(acc, aura, authority_discovery)| {
+					(
+						acc.clone(),
+						acc,
+						asset_hub_westend_runtime::SessionKeys { aura, authority_discovery },
+					)
 				})
 				.collect(),
 			..Default::default()

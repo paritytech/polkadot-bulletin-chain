@@ -5,3 +5,4 @@
 
 pub mod teleports;
 pub mod transact;
+pub mod validator_collators;
