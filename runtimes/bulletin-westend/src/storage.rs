@@ -4,7 +4,7 @@
 //! Storage-specific configurations.
 
 use super::{
-	xcm_config::IsSiblingParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
+	xcm_config::IsAuthorizerParachain, AccountId, Runtime, RuntimeCall, RuntimeEvent,
 	RuntimeHoldReason,
 };
 use alloc::{vec, vec::Vec};
@@ -130,8 +130,8 @@ impl pallet_bulletin_transaction_storage::Config for Runtime {
 					Self::AccountId,
 					crate::BlockNumber,
 				>,
-				// Any sibling parachain can handle authorizations.
-				AsAuthorizer<EnsureXcm<IsSiblingParachain>, Self::AccountId, crate::BlockNumber>,
+				// Allowlisted sibling parachains (People) can handle authorizations.
+				AsAuthorizer<EnsureXcm<IsAuthorizerParachain>, Self::AccountId, crate::BlockNumber>,
 			>,
 			// Test accounts can also authorize for testing purposes.
 			AsAuthorizer<
