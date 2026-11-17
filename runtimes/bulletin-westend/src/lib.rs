@@ -477,25 +477,6 @@ pub type CollatorSelectionUpdateOrigin = EitherOfDiverse<
 	EnsureXcm<IsVoiceOfBody<GovernanceLocation, StakingAdminBodyId>>,
 >;
 
-// TODO: use `parachains_common::impls::KickThreshold` once the pinned polkadot-sdk commit includes
-// https://github.com/paritytech/polkadot-sdk/pull/13873.
-parameter_types! {
-	/// The blocks between two turns of the same collator in the largest collator set, plus one
-	/// slot, then the first whole number of sessions above that, since candidates are only kicked
-	/// at session start. A candidate authors a block within that time and is not kicked as stale.
-	pub KickThreshold: BlockNumber = {
-		use frame_support::traits::Get;
-		let collators =
-			<<Runtime as pallet_validator_collators::Config>::MaxValidators as Get<u32>>::get() +
-			<<Runtime as pallet_collator_selection::Config>::MaxInvulnerables as Get<u32>>::get() +
-			<<Runtime as pallet_collator_selection::Config>::MaxCandidates as Get<u32>>::get();
-		let blocks_per_slot = (SLOT_DURATION / RELAY_CHAIN_SLOT_DURATION_MILLIS as u64) as u32 *
-			BLOCK_PROCESSING_VELOCITY;
-		let round = (collators + 1) * blocks_per_slot;
-		PERIOD * (round / PERIOD + 1)
-	};
-}
-
 impl pallet_collator_selection::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
@@ -504,7 +485,9 @@ impl pallet_collator_selection::Config for Runtime {
 	type MaxCandidates = ConstU32<100>;
 	type MinEligibleCollators = ConstU32<4>;
 	type MaxInvulnerables = ConstU32<20>;
-	type KickThreshold = KickThreshold;
+	// TODO: revisit with https://github.com/paritytech/polkadot-sdk/pull/13873. One session is
+	// enough only while every collator gets a turn in each session.
+	type KickThreshold = ConstU32<PERIOD>;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
 	type ValidatorIdOf = pallet_collator_selection::IdentityCollator;
 	type ValidatorRegistration = Session;
