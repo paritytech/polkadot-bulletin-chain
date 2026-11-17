@@ -3,13 +3,18 @@
 
 //! Teleport tests for WND between Asset Hub Westend and Bulletin Westend.
 //!
-//! Bulletin Westend's XCM config accepts teleports of the relay chain native
-//! token from the relay chain and sibling system parachains (see
-//! `TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>`).
-//! Asset Hub Westend's `TrustedTeleporters` also uses `ConcreteAssetFromSystem`,
-//! which accepts any sibling parachain with a `ParaId` below 2000 as a system
-//! parachain. Both parachain ids are below 2000, so teleports are accepted on
-//! both sides in both directions.
+//! Bulletin Westend trusts the relay chain and sibling system parachains to teleport WND
+//! (`ConcreteAssetFromSystem`), so it trusts Asset Hub. Asset Hub Westend trusts only sibling
+//! parachains with an id below 2000 the same way, and Bulletin Westend is para 2487, so Asset Hub
+//! neither sends WND teleports to Bulletin nor accepts them from it.
+//! https://github.com/paritytech/polkadot-sdk/pull/13890 adds Bulletin Westend to Asset Hub
+//! Westend's trusted teleporters. In the long term
+//! https://github.com/paritytech/polkadot-bulletin-chain/issues/857 moves Bulletin Westend to a
+//! system parachain id, as on Polkadot.
+//!
+//! The tests expect teleports to work and are ignored until the pinned polkadot-sdk includes
+//! https://github.com/paritytech/polkadot-sdk/pull/13890 or
+//! https://github.com/paritytech/polkadot-bulletin-chain/issues/857 lands, whichever comes first.
 
 use crate::{
 	chains::{asset_hub_westend::PARA_ID as ASSET_HUB_PARA_ID, AssetHubWestend},
@@ -42,6 +47,7 @@ type BulletinWestendNet = BulletinWestend<WestendMockNet>;
 /// 3. Bob's balance on Bulletin increases (WND minted on the receiving chain, because Bulletin
 ///    trusts Asset Hub as a system-parachain teleporter).
 #[test]
+#[ignore = "needs paritytech/polkadot-sdk#13890 or paritytech/polkadot-bulletin-chain#857"]
 fn teleport_wnd_from_asset_hub_to_bulletin() {
 	WestendMockNet::reset();
 
@@ -114,11 +120,12 @@ fn teleport_wnd_from_asset_hub_to_bulletin() {
 ///
 /// This test verifies that:
 /// 1. Alice on Bulletin can initiate a teleport to Asset Hub (both chains trust each other as
-///    system-parachain teleporters of WND).
+///    teleporters of WND).
 /// 2. Alice's balance on Bulletin decreases (WND burned locally).
 /// 3. Bob's balance on Asset Hub increases, and Asset Hub's teleport-tracking checking account
 ///    burns exactly the teleported amount.
 #[test]
+#[ignore = "needs paritytech/polkadot-sdk#13890 or paritytech/polkadot-bulletin-chain#857"]
 fn teleport_wnd_from_bulletin_to_asset_hub() {
 	WestendMockNet::reset();
 
