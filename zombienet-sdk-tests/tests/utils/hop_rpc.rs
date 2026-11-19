@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Raw HOP JSON-RPC client (`hop_submit`, `hop_claim`, `hop_ack`, `hop_poolStatus`).
-//! Mirrors the on-chain construction of `MultiSigner`/`MultiSignature` + the signing
-//! payloads so the test driver can stand in for `sc-hop`'s SDK side without pulling
-//! it in.
+//! Uses [`bulletin_hop_rpc_client`] for signing payloads and SCALE encoding so
+//! stress-test and zombienet drivers share one implementation.
 
-use super::crypto::blake2_256;
 use anyhow::{anyhow, Context, Result};
+use bulletin_hop_rpc_client::{
+	hex0x, now_ms, op_signing_payload, scale_multi_signature_sr25519, scale_multi_signer_sr25519,
+	sr25519_scale, submit_signing_payload as client_submit_signing_payload,
+	submit_signing_payload_from_hash, HOP_ACK_CONTEXT, HOP_CLAIM_CONTEXT,
+};
 use subxt::{
 	backend::rpc::RpcClient,
 	ext::subxt_rpcs::{
@@ -17,47 +20,14 @@ use subxt::{
 };
 use subxt_signer::sr25519::Keypair;
 
-/// Must remain byte-identical to `pallet-bulletin-hop-promotion::HOP_SUBMIT_CONTEXT`.
-const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
-/// Must remain byte-identical to `sc_hop::types::HOP_CLAIM_CONTEXT`.
-const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
-/// Must remain byte-identical to `sc_hop::types::HOP_ACK_CONTEXT`.
-const HOP_ACK_CONTEXT: &[u8] = b"hop-ack-v1:";
-
 pub const HOP_POOL_FULL_ERROR_CODE: i32 = 1002;
 pub const HOP_USER_QUOTA_ERROR_CODE: i32 = 1011;
 pub const HOP_RATE_LIMIT_ERROR_CODE: i32 = 1020;
 
-/// `blake2_256(HOP_SUBMIT_CONTEXT || blake2_256(data) || submit_timestamp_ms.to_le_bytes())` —
-/// must remain byte-identical to the pallet's reconstruction.
+/// `blake2_256(HOP_SUBMIT_CONTEXT || data_hash || submit_timestamp_ms.to_le_bytes())` —
+/// delegates to [`bulletin_hop_rpc_client`].
 pub(super) fn submit_signing_payload(data_hash: &[u8; 32], submit_timestamp_ms: u64) -> [u8; 32] {
-	let mut buf = Vec::with_capacity(HOP_SUBMIT_CONTEXT.len() + 32 + 8);
-	buf.extend_from_slice(HOP_SUBMIT_CONTEXT);
-	buf.extend_from_slice(data_hash);
-	buf.extend_from_slice(&submit_timestamp_ms.to_le_bytes());
-	blake2_256(&buf)
-}
-
-/// `blake2_256(context || content_hash)` — `sc-hop`'s claim/ack signing payload. The
-/// signer must be one of the recipients named at submit time.
-fn hash_signing_payload(context: &[u8], content_hash: &[u8; 32]) -> [u8; 32] {
-	let mut buf = Vec::with_capacity(context.len() + 32);
-	buf.extend_from_slice(context);
-	buf.extend_from_slice(content_hash);
-	blake2_256(&buf)
-}
-
-/// SCALE: variant index 1 + raw bytes. Used for both `MultiSigner::Sr25519`
-/// (1 + 32 bytes) and `MultiSignature::Sr25519` (1 + 64 bytes).
-fn sr25519_scale(bytes: &[u8]) -> Vec<u8> {
-	let mut out = Vec::with_capacity(1 + bytes.len());
-	out.push(1u8);
-	out.extend_from_slice(bytes);
-	out
-}
-
-fn hex0x(bytes: &[u8]) -> String {
-	format!("0x{}", hex::encode(bytes))
+	submit_signing_payload_from_hash(data_hash, submit_timestamp_ms)
 }
 
 fn decode_hex(what: &str, hex: &str) -> Result<Vec<u8>> {
@@ -81,11 +51,10 @@ pub async fn hop_submit(
 	recipients: &[[u8; 32]],
 	submit_timestamp_ms: u64,
 ) -> Result<u64> {
-	let data_hash = blake2_256(data);
-	let payload = submit_signing_payload(&data_hash, submit_timestamp_ms);
-	let signature_scale = sr25519_scale(&signer.sign(&payload).0);
-	let signer_scale = sr25519_scale(&signer.public_key().0);
-	let recipients_hex: Vec<String> = recipients.iter().map(|r| hex0x(&sr25519_scale(r))).collect();
+	let payload = client_submit_signing_payload(data, submit_timestamp_ms);
+	let signature_scale = scale_multi_signature_sr25519(&signer.sign(&payload).0);
+	let signer_scale = scale_multi_signer_sr25519(&signer.public_key().0);
+	let recipients_hex: Vec<String> = recipients.iter().map(|r| hex0x(&scale_multi_signer_sr25519(r))).collect();
 
 	let mut params: RpcParams = rpc_params![hex0x(data), recipients_hex];
 	for p in [hex0x(&signature_scale), hex0x(&signer_scale)] {
@@ -137,8 +106,8 @@ pub async fn hop_claim(
 	recipient: &Keypair,
 	content_hash: &[u8; 32],
 ) -> Result<Vec<u8>> {
-	let payload = hash_signing_payload(HOP_CLAIM_CONTEXT, content_hash);
-	let signature_scale = sr25519_scale(&recipient.sign(&payload).0);
+	let payload = op_signing_payload(HOP_CLAIM_CONTEXT, content_hash);
+	let signature_scale = scale_multi_signature_sr25519(&recipient.sign(&payload).0);
 
 	let hex: String = rpc
 		.request("hop_claim", rpc_params![hex0x(content_hash), hex0x(&signature_scale)])
@@ -160,8 +129,8 @@ pub async fn hop_claim_raw(rpc: &RpcClient, raw_hash: &[u8]) -> Result<Vec<u8>> 
 /// Acknowledge receipt via `hop_ack`, signing as `recipient`. Marks the recipient
 /// claimed; the entry is removed once every recipient has acked.
 pub async fn hop_ack(rpc: &RpcClient, recipient: &Keypair, content_hash: &[u8; 32]) -> Result<()> {
-	let payload = hash_signing_payload(HOP_ACK_CONTEXT, content_hash);
-	let signature_scale = sr25519_scale(&recipient.sign(&payload).0);
+	let payload = op_signing_payload(HOP_ACK_CONTEXT, content_hash);
+	let signature_scale = scale_multi_signature_sr25519(&recipient.sign(&payload).0);
 
 	rpc.request::<serde_json::Value>(
 		"hop_ack",
@@ -172,13 +141,8 @@ pub async fn hop_ack(rpc: &RpcClient, recipient: &Keypair, content_hash: &[u8; 3
 	Ok(())
 }
 
-/// Wall-clock now in milliseconds since the unix epoch. Bound into the submit
-/// signing payload; the runtime rejects promotions whose timestamp falls outside
-/// `SubmitTimestampTolerance` of on-chain time.
-pub fn now_ms() -> u64 {
-	use std::time::{SystemTime, UNIX_EPOCH};
-	SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.map(|d| d.as_millis() as u64)
-		.unwrap_or(0)
+pub fn content_hash(data: &[u8]) -> [u8; 32] {
+	bulletin_hop_rpc_client::blake2_256(data)
 }
+
+pub use bulletin_hop_rpc_client::now_ms;
