@@ -690,27 +690,26 @@ fn xcm_payment_api_works() {
 fn governance_authorize_upgrade_works() {
 	use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
 
-	// no - random para (passes barrier since any sibling parachain gets unpaid execution,
-	// but fails at Transact with BadOrigin since it's not a governance origin)
+	// no - random para: not allowlisted, so the Barrier rejects its unpaid execution
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(12334)))),
-		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
 	);
 	// ok - AssetHub
 	assert_ok!(parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 		Runtime,
 		RuntimeOrigin,
 	>(GovernanceOrigin::Location(Location::new(1, Parachain(ASSET_HUB_ID)))));
-	// no - Collectives (passes barrier but not a governance origin)
+	// no - Collectives: not allowlisted, so the Barrier rejects its unpaid execution
 	assert_err!(
 		parachains_runtimes_test_utils::test_cases::can_governance_authorize_upgrade::<
 			Runtime,
 			RuntimeOrigin,
 		>(GovernanceOrigin::Location(Location::new(1, Parachain(COLLECTIVES_ID)))),
-		Either::Right(InstructionError { index: 1, error: XcmError::BadOrigin })
+		Either::Right(InstructionError { index: 0, error: XcmError::Barrier })
 	);
 	// no - Collectives Voice of Fellows plurality
 	assert_err!(
@@ -856,11 +855,7 @@ fn people_chain_can_authorize_storage_with_transact() {
 }
 
 #[test]
-fn people_next_chain_can_authorize_storage_with_transact() {
-	// PeopleNext chain (parachain 5140) should be able to authorize storage via XCM Transact,
-	// similar to the People chain.
-	let people_next_location = Location::new(1, [Parachain(5140)]);
-
+fn non_allowlisted_parachain_cannot_authorize_storage_with_transact() {
 	let account = Sr25519Keyring::Ferdie;
 	let authorize_call = RuntimeCall::TransactionStorage(
 		pallet_bulletin_transaction_storage::Call::<Runtime>::authorize_account {
@@ -880,21 +875,19 @@ fn people_next_chain_can_authorize_storage_with_transact() {
 		.with_tracing()
 		.build()
 		.execute_with(|| {
-			assert_ok!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
-				(people_next_location, OriginKind::Xcm),
+			assert!(RuntimeHelper::<Runtime, AllPalletsWithoutSystem>::execute_as_origin(
+				(Location::new(1, [Parachain(5140)]), OriginKind::Xcm),
 				authorize_call,
 				None
 			)
-			.ensure_complete());
-
-			// Check event.
-			System::assert_has_event(RuntimeEvent::TransactionStorage(
-				pallet_bulletin_transaction_storage::Event::AccountAuthorized {
-					who: account.to_account_id(),
-					transactions: 0,
-					bytes: 1024,
-				},
-			));
+			.ensure_complete()
+			.is_err());
+			assert!(!System::events().iter().any(|r| matches!(
+				r.event,
+				RuntimeEvent::TransactionStorage(
+					pallet_bulletin_transaction_storage::Event::AccountAuthorized { .. }
+				)
+			)));
 		})
 }
 

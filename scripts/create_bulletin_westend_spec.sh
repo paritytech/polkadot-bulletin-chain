@@ -9,7 +9,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-PARA_ID="${PARACHAIN_ID:-2487}"
+PARA_ID="${PARACHAIN_ID:-1010}"
 SPEC_PATH="$ROOT_DIR/zombienet/bulletin-westend-spec.json"
 
 # Idempotent on cache hit: if the spec already exists, skip the (~4-min) runtime build.
