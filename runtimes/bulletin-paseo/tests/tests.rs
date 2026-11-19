@@ -90,7 +90,10 @@ fn construct_extrinsic(
 		>::default(),
 		pallet_bulletin_transaction_storage::extension::AllowanceBasedPriority::<Runtime>::default(
 		),
-		frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+		(
+			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+			pallet_storage_provider::CheckChallengeResponse::<Runtime>::new(),
+		),
 	);
 	let tx_ext: TxExtension =
 		cumulus_pallet_weight_reclaim::StorageWeightReclaim::<Runtime, _>::from(inner);
