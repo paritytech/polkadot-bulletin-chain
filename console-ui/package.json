@@ -36,26 +36,26 @@
     "clsx": "^2.1.1",
     "helia": "^7.1.16",
     "ipfs-unixfs": "^12.0.0",
-    "lucide-react": "^1.66.0",
+    "lucide-react": "^1.70.0",
     "multiformats": "^14.0.4",
     "polkadot-api": "^3.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
     "rxjs": "^7.8.1",
-    "smoldot": "^3.7.0",
+    "smoldot": "^3.8.0",
     "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@playwright/test": "~1.61.1",
     "@polkadot-api/cli": "^0.22.5",
-    "@tailwindcss/vite": "^4.3.3",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "typescript-lsp": "^0.0.7",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   }
 }
