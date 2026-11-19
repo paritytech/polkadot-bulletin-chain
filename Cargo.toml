@@ -46,8 +46,8 @@ pallet-bulletin-transaction-storage = { version = "0.1.0", path = "pallets/trans
 pallet-bulletin-transaction-storage-runtime-api = { version = "0.1.0", path = "pallets/transaction-storage/runtime-api", default-features = false }
 
 # Web3 Storage
-pallet-storage-provider = { git = "https://github.com/paritytech/web3-storage.git", tag = "v0.5.0-paseo", default-features = false }
-storage-primitives = { git = "https://github.com/paritytech/web3-storage.git", tag = "v0.5.0-paseo", default-features = false }
+pallet-storage-provider = { git = "https://github.com/paritytech/web3-storage.git", tag = "v0.5.1-paseo", default-features = false }
+storage-primitives = { git = "https://github.com/paritytech/web3-storage.git", tag = "v0.5.1-paseo", default-features = false }
 
 # Polkadot SDK crates (shared git revision)
 frame-benchmarking = { version = "50.0.0", default-features = false }

@@ -9378,7 +9378,7 @@ dependencies = [
 [[package]]
 name = "pallet-storage-provider"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.0-paseo#50b009b7270d4f4dea5967081659c7687daa3198"
+source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.1-paseo#680738da2880943c72856d093c216c65d6b9679c"
 dependencies = [
  "bitvec",
  "frame-benchmarking",
@@ -14736,7 +14736,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "storage-primitives"
 version = "0.1.0"
-source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.0-paseo#50b009b7270d4f4dea5967081659c7687daa3198"
+source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.1-paseo#680738da2880943c72856d093c216c65d6b9679c"
 dependencies = [
  "parity-scale-codec",
  "polkadot-ckb-merkle-mountain-range",
