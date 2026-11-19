@@ -7,24 +7,35 @@
 #[cfg(any(
 	feature = "zombie-sync-tests",
 	feature = "zombie-auto-renew-tests",
-	feature = "zombie-hop-tests"
+	feature = "zombie-hop-tests",
+	feature = "zombie-priority-tests"
 ))]
 mod auto_renew_storage;
 #[cfg(any(
 	feature = "zombie-sync-tests",
 	feature = "zombie-auto-renew-tests",
-	feature = "zombie-hop-tests"
+	feature = "zombie-hop-tests",
+	feature = "zombie-priority-tests"
 ))]
 mod hop_promotion_storage;
 #[cfg(any(
 	feature = "zombie-sync-tests",
 	feature = "zombie-auto-renew-tests",
-	feature = "zombie-hop-tests"
+	feature = "zombie-hop-tests",
+	feature = "zombie-priority-tests"
 ))]
 mod parachain_sync_storage;
 #[cfg(any(
 	feature = "zombie-sync-tests",
 	feature = "zombie-auto-renew-tests",
-	feature = "zombie-hop-tests"
+	feature = "zombie-hop-tests",
+	feature = "zombie-priority-tests"
+))]
+mod priority_pool;
+#[cfg(any(
+	feature = "zombie-sync-tests",
+	feature = "zombie-auto-renew-tests",
+	feature = "zombie-hop-tests",
+	feature = "zombie-priority-tests"
 ))]
 mod utils;
