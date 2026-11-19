@@ -2317,3 +2317,190 @@ fn to_account_authorization_maps_every_field() {
 	assert_eq!(summary.bytes_allowance, 5);
 	assert_eq!(summary.expires_at, 6);
 }
+
+/// Live `RetentionPeriod` changes (#829). Blocks are driven like a node does it: the proof
+/// target is read at the start of the block, and an archive node proves any block it stored.
+mod retention_period_change {
+	use super::*;
+	use crate::{mock::AllPalletsWithSystem, TransactionStorageProof};
+	use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
+
+	type Stored = Rc<RefCell<BTreeSet<u64>>>;
+
+	fn data_for(block: u64) -> Vec<u8> {
+		let mut data = vec![7u8; 2000];
+		data[..8].copy_from_slice(&block.to_le_bytes());
+		data
+	}
+
+	fn store_now(stored: &Stored) {
+		let n = System::block_number();
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data_for(n)));
+		stored.borrow_mut().insert(n);
+	}
+
+	fn node_proof(stored: &Stored, target: u64) -> Option<TransactionStorageProof> {
+		(target > 0 && stored.borrow().contains(&target))
+			.then(|| build_proof(System::parent_hash().as_ref(), vec![data_for(target)]).unwrap())
+			.flatten()
+	}
+
+	std::thread_local! {
+		/// Proof target of the open block, as the node computed it when the block started.
+		static TARGET: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+	}
+
+	/// Advance to block `n`, building each block's proof like a node: the target uses the
+	/// period seen at the start of the block, not one written later in it.
+	fn run_as_node(n: u64, stored: &Stored) {
+		let s = stored.clone();
+		System::run_to_block_with::<AllPalletsWithSystem>(
+			n,
+			RunToBlockHooks::default()
+				.after_initialize(|bn: u64| {
+					TARGET.set(bn.saturating_sub(TransactionStorage::retention_period()));
+				})
+				.before_finalize(move |_| {
+					let proof = node_proof(&s, TARGET.get());
+					TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof)
+						.unwrap();
+				}),
+		);
+	}
+
+	fn stores_in(stored: &Stored, blocks: impl IntoIterator<Item = u64>) {
+		for b in blocks {
+			run_as_node(b, stored);
+			store_now(stored);
+		}
+	}
+
+	#[test]
+	fn lowering_mid_block_takes_effect_from_next_block() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			stores_in(&stored, [5]);
+			run_as_node(11, &stored);
+			// Inherent ran with period 10 (target 1, empty); then e.g. sudo lowers it.
+			assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), None));
+			RetentionPeriod::put(6);
+			assert_eq!(TransactionStorage::retention_period(), 10);
+			// Finalizing block 11 must not re-target block 5.
+			run_as_node(12, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 6);
+		});
+	}
+
+	#[test]
+	fn change_before_inherent_does_not_affect_current_block() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			stores_in(&stored, [1, 5]);
+			run_as_node(11, &stored);
+			// Node built the proof for 11 - 10 = 1; e.g. governance XCM then lowers the period.
+			let proof = node_proof(&stored, 1);
+			RetentionPeriod::put(6);
+			assert_ok!(TransactionStorage::apply_block_inherents(RuntimeOrigin::none(), proof));
+		});
+	}
+
+	#[test]
+	fn raising_after_cleanup_steps_one_block_at_a_time() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			stores_in(&stored, 10..=15);
+			run_as_node(28, &stored);
+			RetentionPeriod::put(18);
+			// Each step keeps the proof target on a block that still has its record.
+			for (block, expected) in (29..=36).zip(11..=18) {
+				run_as_node(block, &stored);
+				assert_eq!(TransactionStorage::retention_period(), expected, "block {block}");
+			}
+			run_as_node(80, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 18);
+			assert_ok!(TransactionStorage::do_try_state(80));
+		});
+	}
+
+	#[test]
+	fn raising_before_any_cleanup_applies_at_once() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			run_as_node(3, &stored);
+			RetentionPeriod::put(20);
+			run_as_node(4, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 20);
+		});
+	}
+
+	#[test]
+	fn lowering_only_skips_empty_blocks() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			stores_in(&stored, [10, 12, 13, 14, 16, 17]);
+			run_as_node(20, &stored);
+			RetentionPeriod::put(7);
+			for (block, expected) in [(21, 10), (22, 9), (24, 9), (25, 8), (26, 8), (27, 7)] {
+				run_as_node(block, &stored);
+				assert_eq!(TransactionStorage::retention_period(), expected, "block {block}");
+			}
+			run_as_node(40, &stored);
+			assert!(Transactions::iter().next().is_none(), "every stored block is cleaned up");
+			assert_ok!(TransactionStorage::do_try_state(40));
+		});
+	}
+
+	#[test]
+	fn lowering_on_a_fresh_chain_applies_at_once() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			run_as_node(2, &stored);
+			RetentionPeriod::put(300);
+			run_as_node(3, &stored);
+			RetentionPeriod::put(4);
+			run_as_node(4, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 4);
+		});
+	}
+
+	#[test]
+	fn lowering_checks_a_bounded_number_of_blocks_per_block() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			run_as_node(2, &stored);
+			RetentionPeriod::put(300);
+			run_as_node(400, &stored);
+			RetentionPeriod::put(10);
+			run_as_node(401, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 300 - 32);
+		});
+	}
+
+	#[test]
+	fn zero_request_is_ignored() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			run_as_node(2, &stored);
+			RetentionPeriod::put(0);
+			run_as_node(5, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 10);
+		});
+	}
+
+	#[test]
+	fn first_block_after_upgrade_pins_the_period() {
+		new_test_ext().execute_with(|| {
+			let stored = Stored::default();
+			stores_in(&stored, [5]);
+			run_as_node(10, &stored);
+			// State as left by a runtime without `EffectiveRetentionPeriod`.
+			super::super::EffectiveRetentionPeriod::<Test>::kill();
+			run_as_node(11, &stored);
+			assert_eq!(super::super::EffectiveRetentionPeriod::<Test>::get(), Some(10));
+			// A mid-block change in that first block must not re-target block 5.
+			RetentionPeriod::put(6);
+			run_as_node(12, &stored);
+			assert_eq!(TransactionStorage::retention_period(), 6);
+		});
+	}
+}
