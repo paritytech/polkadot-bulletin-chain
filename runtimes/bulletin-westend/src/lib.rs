@@ -503,14 +503,19 @@ impl pallet_collator_selection::Config for Runtime {
 	type WeightInfo = weights::pallet_collator_selection::WeightInfo<Runtime>;
 }
 
+/// Room in a report for authors that left the collators since the previous report, so one report
+/// usually clears them. Their counts are dropped at report time anyway, and entries beyond
+/// `MaxEntriesPerReport` wait for the next report, so the exact value is not critical.
+const LEFT_AUTHORS_BUFFER: u32 = 30;
+
 parameter_types! {
-	/// The validators of a set, the invulnerables and candidates of collator selection, and a
-	/// buffer for the authors that leave the collators before the next report.
+	/// The validators of a set, the invulnerables and candidates of collator selection, and
+	/// [`LEFT_AUTHORS_BUFFER`].
 	pub MaxEntriesPerReport: u32 =
 		testnet_parachains_constants::westend::staking::MAX_VALIDATOR_SET
 			+ <<Runtime as pallet_collator_selection::Config>::MaxInvulnerables as frame_support::traits::Get<u32>>::get()
 			+ <<Runtime as pallet_collator_selection::Config>::MaxCandidates as frame_support::traits::Get<u32>>::get()
-			+ 30;
+			+ LEFT_AUTHORS_BUFFER;
 	// Validators contribute no collators until governance raises the cap.
 	// A drawn validator's collator must hold the data stored for `RetentionPeriod`. Without it, its
 	// blocks lack the storage proof that `pallet-bulletin-transaction-storage` checks in
