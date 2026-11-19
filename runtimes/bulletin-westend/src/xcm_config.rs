@@ -6,6 +6,7 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
+use alloc::{vec, vec::Vec};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -26,7 +27,7 @@ use parachains_common::{
 use polkadot_parachain_primitives::primitives::Sibling;
 use polkadot_runtime_common::xcm_sender::ExponentialPrice;
 use sp_runtime::traits::AccountIdConversion;
-use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID, PEOPLE_ID};
 use xcm::latest::{prelude::*, WESTEND_GENESIS_HASH};
 use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
@@ -119,11 +120,20 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
-/// Filter that matches any sibling parachain origin.
-pub struct IsSiblingParachain;
-impl Contains<Location> for IsSiblingParachain {
+parameter_types! {
+	/// Sibling parachains allowed to authorize storage via XCM. Storage-backed so root can
+	/// update it via `system.set_storage` without a runtime upgrade.
+	pub storage AllowedParachainIds: Vec<u32> = vec![PEOPLE_ID];
+}
+
+/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`].
+pub struct IsAuthorizerParachain;
+impl Contains<Location> for IsAuthorizerParachain {
 	fn contains(location: &Location) -> bool {
-		matches!(location.unpack(), (1, [Parachain(_)]))
+		match location.unpack() {
+			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
+			_ => false,
+		}
 	}
 }
 
@@ -154,9 +164,7 @@ pub type Barrier = TrailingSetTopicAsId<(
 					ParentOrParentsPlurality,
 					FellowsPlurality,
 					Equals<GovernanceLocation>,
-					// Allow any sibling parachain for unpaid execution, since there
-					// are multiple People testnet chains.
-					IsSiblingParachain,
+					IsAuthorizerParachain,
 				),
 				// Barriers run before any fee is taken: this must stay computation-only.
 				// Do not pass `TrustedAliasers` here.
