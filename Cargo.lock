@@ -2087,6 +2087,7 @@ dependencies = [
  "pallet-migrations",
  "pallet-session",
  "pallet-skip-feeless-payment",
+ "pallet-storage-provider",
  "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
@@ -2123,6 +2124,7 @@ dependencies = [
  "staging-xcm",
  "staging-xcm-builder",
  "staging-xcm-executor",
+ "storage-primitives",
  "substrate-wasm-builder",
  "tracing",
  "xcm-runtime-apis",
@@ -9374,6 +9376,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-storage-provider"
+version = "0.1.0"
+source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.1-paseo#680738da2880943c72856d093c216c65d6b9679c"
+dependencies = [
+ "bitvec",
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-api",
+ "sp-core 43.0.0",
+ "sp-io",
+ "sp-runtime",
+ "storage-primitives",
+]
+
+[[package]]
 name = "pallet-sudo"
 version = "50.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14711,6 +14732,20 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "storage-primitives"
+version = "0.1.0"
+source = "git+https://github.com/paritytech/web3-storage.git?tag=v0.5.1-paseo#680738da2880943c72856d093c216c65d6b9679c"
+dependencies = [
+ "parity-scale-codec",
+ "polkadot-ckb-merkle-mountain-range",
+ "primitive-types 0.13.1",
+ "scale-info",
+ "serde",
+ "sp-crypto-hashing",
+ "sp-io",
+]
 
 [[package]]
 name = "str0m"

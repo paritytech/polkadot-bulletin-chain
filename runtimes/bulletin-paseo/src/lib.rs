@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![recursion_limit = "256"]
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -18,6 +19,7 @@ pub mod fast_runtime_binary {
 mod genesis_config_presets;
 pub mod paseo_constants;
 pub mod storage;
+pub mod web3_storage;
 mod weights;
 pub mod xcm_config;
 
@@ -123,7 +125,10 @@ pub type TxExtension = cumulus_pallet_weight_reclaim::StorageWeightReclaim<
 			Runtime,
 			pallet_bulletin_transaction_storage::extension::FlatBoost,
 		>,
-		frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
+		(
+			frame_metadata_hash_extension::CheckMetadataHash<Runtime>,
+			pallet_storage_provider::CheckChallengeResponse<Runtime>,
+		),
 	),
 >;
 
@@ -253,6 +258,7 @@ impl frame_system::Config for Runtime {
 	/// The action to take on a Runtime Upgrade
 	type OnSetCode = cumulus_pallet_parachain_system::ParachainSetCode<Self>;
 	type MaxConsumers = ConstU32<16>;
+	type OnKilledAccount = StorageProvider;
 
 	type SingleBlockMigrations = migrations::SingleBlockMigrations;
 	type MultiBlockMigrator = MultiBlockMigrations;
@@ -567,7 +573,10 @@ where
 				Runtime,
 				pallet_bulletin_transaction_storage::extension::FlatBoost,
 			>::default(),
-			frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+			(
+				frame_metadata_hash_extension::CheckMetadataHash::<Runtime>::new(false),
+				pallet_storage_provider::CheckChallengeResponse::<Runtime>::new(),
+			),
 		))
 	}
 }
@@ -622,6 +631,10 @@ mod runtime {
 	#[runtime::pallet_index(42)]
 	pub type DataRenewal = pallet_bulletin_data_renewal;
 
+	// Web3 Storage
+	#[runtime::pallet_index(50)]
+	pub type StorageProvider = pallet_storage_provider;
+
 	// Collator support. The order of these 5 are important and shall not change.
 	#[runtime::pallet_index(20)]
 	pub type Authorship = pallet_authorship;
@@ -663,6 +676,7 @@ mod benches {
 		[pallet_bulletin_transaction_storage, TransactionStorage]
 		[pallet_bulletin_data_renewal, DataRenewal]
 		[pallet_bulletin_hop_promotion, HopPromotion]
+		[pallet_storage_provider, StorageProvider]
 		[cumulus_pallet_xcmp_queue, XcmpQueue]
 		[pallet_xcm, PalletXcmExtrinsicsBenchmark::<Runtime>]
 		[pallet_message_queue, MessageQueue]
@@ -987,6 +1001,90 @@ impl_runtime_apis! {
 			entry: pallet_bulletin_transaction_storage::TransactionRef<BlockNumber>,
 		) -> bool {
 			DataRenewal::can_renew(&account, &entry)
+		}
+	}
+
+	impl pallet_storage_provider::runtime_api::StorageProviderApi<Block, AccountId, pallet_storage_provider::BlockNumberFor<Runtime>, Balance> for Runtime {
+		fn provider_info(provider: AccountId) -> Option<pallet_storage_provider::runtime_api::ProviderInfoResponse> {
+			StorageProvider::query_provider_info(&provider)
+		}
+
+		fn providers(offset: u32, limit: u32) -> Vec<(AccountId, pallet_storage_provider::runtime_api::ProviderInfoResponse)> {
+			StorageProvider::query_providers(offset, limit)
+		}
+
+		fn bucket_info(bucket_id: storage_primitives::BucketId) -> Option<pallet_storage_provider::runtime_api::BucketResponse> {
+			StorageProvider::query_bucket_info(bucket_id)
+		}
+
+		fn bucket_ids(offset: u32, limit: u32) -> Vec<storage_primitives::BucketId> {
+			StorageProvider::query_bucket_ids(offset, limit)
+		}
+
+		fn bucket_providers(bucket_id: storage_primitives::BucketId) -> Vec<AccountId> {
+			StorageProvider::query_bucket_providers(bucket_id)
+		}
+
+		fn agreement_info(bucket_id: storage_primitives::BucketId, provider: AccountId) -> Option<pallet_storage_provider::runtime_api::AgreementResponse> {
+			StorageProvider::query_agreement_info(bucket_id, &provider)
+		}
+
+		fn bucket_agreements(bucket_id: storage_primitives::BucketId) -> Vec<pallet_storage_provider::runtime_api::AgreementResponse> {
+			StorageProvider::query_bucket_agreements(bucket_id)
+		}
+
+		fn provider_agreements(provider: AccountId) -> Vec<pallet_storage_provider::runtime_api::AgreementResponse> {
+			StorageProvider::query_provider_agreements(&provider)
+		}
+
+		fn challenges_at(block: pallet_storage_provider::BlockNumberFor<Runtime>) -> Vec<pallet_storage_provider::runtime_api::ChallengeResponse> {
+			StorageProvider::query_challenges_at(block)
+		}
+
+		fn bucket_challenges(bucket_id: storage_primitives::BucketId) -> Vec<pallet_storage_provider::runtime_api::ChallengeResponse> {
+			StorageProvider::query_bucket_challenges(bucket_id)
+		}
+
+		fn provider_challenges(provider: AccountId) -> Vec<pallet_storage_provider::runtime_api::ChallengeResponse> {
+			StorageProvider::query_provider_challenges(&provider)
+		}
+
+		fn challenger_challenges(challenger: AccountId) -> Vec<pallet_storage_provider::runtime_api::ChallengeResponse> {
+			StorageProvider::query_challenger_challenges(&challenger)
+		}
+
+		fn can_accept_bytes(provider: AccountId, additional_bytes: u64) -> bool {
+			StorageProvider::query_can_accept_bytes(&provider, additional_bytes)
+		}
+
+		fn find_matching_providers(
+			requirements: pallet_storage_provider::runtime_api::StorageRequirements,
+			limit: u32,
+		) -> Vec<pallet_storage_provider::runtime_api::MatchedProvider> {
+			StorageProvider::query_find_matching_providers(requirements, limit)
+		}
+
+		fn providers_with_capacity(
+			bytes_needed: u64,
+			offset: u32,
+			limit: u32,
+		) -> Vec<(AccountId, pallet_storage_provider::runtime_api::ProviderInfoResponse)> {
+			StorageProvider::query_providers_with_capacity(bytes_needed, offset, limit)
+		}
+
+		fn challenge_candidates(
+			max_reputation: u8,
+			limit: u32,
+		) -> Vec<pallet_storage_provider::runtime_api::ChallengeCandidate> {
+			StorageProvider::query_challenge_candidates(max_reputation, limit)
+		}
+
+		fn current_anchor_block() -> pallet_storage_provider::BlockNumberFor<Runtime> {
+			StorageProvider::current_anchor_block()
+		}
+
+		fn anchor_block_time_millis() -> u64 {
+			StorageProvider::anchor_block_time_millis()
 		}
 	}
 
