@@ -156,6 +156,7 @@ mod benchmarks {
 			.map_err(|_| BenchmarkError::Stop("unable to compute origin"))?;
 		let caller: T::AccountId = whitelisted_caller();
 		let data = vec![0u8; <T as txs::Config>::MaxTransactionSize::get() as usize];
+		let data_len = data.len();
 		let content_hash = sp_io::hashing::blake2_256(&data);
 
 		TransactionStorage::<T>::authorize_account(
@@ -167,21 +168,18 @@ mod benchmarks {
 		.map_err(|_| BenchmarkError::Stop("unable to authorize account"))?;
 		TransactionStorage::<T>::store(RawOrigin::None.into(), data)?;
 		run_to_block::<T>(1u32.into());
+		// `enable_auto_renew` leaves the registration prepaid (`paid: true`), which is the
+		// worst case: `disable_auto_renew` then also refunds `PermanentStorageUsed`. The
+		// extension is bypassed here, so seed the counter the way `pre_dispatch` would have.
 		DataRenewal::<T>::enable_auto_renew(authorized_origin::<T>(caller.clone()), content_hash)
 			.map_err(|_| BenchmarkError::Stop("unable to enable auto-renew"))?;
-		// `enable_auto_renew` leaves the entry `paid: true`, which blocks signed
-		// `disable_auto_renew`. Flip to the post-first-cycle state so the benchmark
-		// measures the path real owners actually hit.
-		Renewals::<T>::mutate(content_hash, |entry| {
-			if let Some(data) = entry {
-				data.paid = false;
-			}
-		});
+		PermanentStorageUsed::<T>::put(data_len as u64);
 
 		#[extrinsic_call]
 		_(authorized_origin::<T>(caller.clone()), content_hash);
 
 		assert_last_event::<T>(Event::AutoRenewalDisabled { content_hash, who: caller }.into());
+		assert_eq!(PermanentStorageUsed::<T>::get(), 0);
 		Ok(())
 	}
 
@@ -262,7 +260,8 @@ mod benchmarks {
 					block_chunks: 0,
 					meta: Default::default(),
 				};
-				let renewal_data = RenewalData { account: caller, recurring: true, paid: false };
+				let renewal_data =
+					RenewalData { account: caller, recurring: true, paid: false, size: 1 };
 				pending
 					.try_push((content_hash, tx_info, renewal_data))
 					.map_err(|_| BenchmarkError::Stop("unable to push pending renewal"))?;

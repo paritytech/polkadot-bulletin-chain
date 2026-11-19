@@ -63,11 +63,12 @@ const AuthorizationCodec = Struct({
 /** (BlockNumber, u32) — stored in TransactionByContentHash */
 const BlockAndIndexCodec = Tuple(u32, u32);
 
-/** DataRenewal RenewalData { account: AccountId(32), recurring: bool, paid: bool } */
+/** DataRenewal RenewalData { account: AccountId(32), recurring: bool, paid: bool, size: u32 } */
 const RenewalDataCodec = Struct({
   account: Bytes(32),
   recurring: u8, // SCALE bool: 0x00 / 0x01
   paid: u8, // SCALE bool: 0x00 / 0x01
+  size: u32,
 });
 
 /**
@@ -255,6 +256,7 @@ async function main() {
     account: authorizer.publicKey,
     recurring: 1,
     paid: 1,
+    size: testData.length,
   });
   await provider.send("dev_setStorage", [[[renewalsKey, renewalValue]]], false);
 

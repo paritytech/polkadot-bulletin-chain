@@ -100,7 +100,7 @@ export interface RenewalRegistration {
   account: string;
   /** Recurring auto-renewal, versus a one-shot scheduled `renew`. */
   recurring: boolean;
-  /** Next cycle is prepaid; the chain refuses `disable_auto_renew` until it fires. */
+  /** Next cycle is prepaid; disabling now forfeits it. */
   paid: boolean;
 }
 

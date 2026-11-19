@@ -98,10 +98,7 @@ pub const AUTO_RENEWAL_NOT_ENABLED: InvalidTransaction = InvalidTransaction::Cus
 pub const NOT_AUTO_RENEWAL_OWNER: InvalidTransaction = InvalidTransaction::Custom(10);
 /// `renew` / `enable_auto_renew`: a renewal is already registered for this content hash.
 pub const RENEWAL_ALREADY_ENABLED: InvalidTransaction = InvalidTransaction::Custom(11);
-/// `disable_auto_renew`: the registration has been prepaid for its next cycle and
-/// cannot be disabled by the owner until the cycle fires and consumes the prepayment.
-/// Root can still disable for governance cleanup.
-pub const CANNOT_DISABLE_PREPAID_AUTO_RENEWAL: InvalidTransaction = InvalidTransaction::Custom(12);
+// `Custom(12)` is retired (was `CANNOT_DISABLE_PREPAID_AUTO_RENEWAL`); do not reuse.
 
 /// Percent of `MaxPermanentStorageSize` at which the pallet emits
 /// [`Event::PermanentStorageNearCap`] (rising-edge only). Off-chain governance consumers
@@ -150,16 +147,14 @@ pub mod pallet {
 		AutoRenewalNotEnabled,
 		/// Caller is not the owner of the auto-renewal registration.
 		NotAutoRenewalOwner,
-		/// `disable_auto_renew` rejected: the registration has been prepaid for its next
-		/// cycle and cannot be disabled by the owner until the cycle fires and consumes
-		/// the prepayment. Root can still disable for governance cleanup.
+		/// Unused; kept so later indices stay stable.
 		CannotDisablePrepaidAutoRenewal,
 		/// Data size of the renewed entry is not in the allowed range. Appended last: the
 		/// earlier indices are wire-visible.
 		BadDataSize,
 	}
 
-	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(2);
 
 	#[pallet::pallet]
 	#[pallet::storage_version(STORAGE_VERSION)]
@@ -285,7 +280,7 @@ pub mod pallet {
 
 			Renewals::<T>::insert(
 				content_hash,
-				RenewalData { account: who.clone(), recurring: false, paid: true },
+				RenewalData { account: who.clone(), recurring: false, paid: true, size: info.size },
 			);
 			Self::deposit_event(Event::RenewalEnabled { content_hash, who, recurring: false });
 			Ok(())
@@ -347,21 +342,22 @@ pub mod pallet {
 					content_hash,
 				)
 				.ok_or(Error::<T>::RenewedNotFound)?;
-			pallet_bulletin_transaction_storage::Pallet::<T>::transaction_info(block, index)
-				.ok_or(Error::<T>::RenewedNotFound)?;
+			let info =
+				pallet_bulletin_transaction_storage::Pallet::<T>::transaction_info(block, index)
+					.ok_or(Error::<T>::RenewedNotFound)?;
 
 			Renewals::<T>::insert(
 				content_hash,
-				RenewalData { account: who.clone(), recurring: true, paid: true },
+				RenewalData { account: who.clone(), recurring: true, paid: true, size: info.size },
 			);
 			Self::deposit_event(Event::RenewalEnabled { content_hash, who, recurring: true });
 			Ok(())
 		}
 
-		/// Disable auto-renewal. Signed callers must own the registration AND
-		/// wait for the prepaid first cycle to have fired (else
-		/// [`Error::CannotDisablePrepaidAutoRenewal`]). Root bypasses both
-		/// checks.
+		/// Disable auto-renewal. Signed callers must own the registration; Root
+		/// bypasses the check. Disabling a prepaid registration forfeits the
+		/// owner's prepayment but releases its chain-wide `PermanentStorageUsed`
+		/// charge.
 		#[pallet::call_index(3)]
 		#[pallet::weight(<T as Config>::WeightInfo::disable_auto_renew())]
 		#[pallet::feeless_if(|_origin: &OriginFor<T>, _content_hash: &ContentHash| -> bool { true })]
@@ -376,13 +372,20 @@ pub mod pallet {
 			match caller {
 				AuthorizedCaller::Signed { who, .. } => {
 					ensure!(renewal_data.account == who, Error::<T>::NotAutoRenewalOwner);
-					ensure!(!renewal_data.paid, Error::<T>::CannotDisablePrepaidAutoRenewal);
 				},
 				AuthorizedCaller::Root => {},
 				AuthorizedCaller::Unsigned => return Err(DispatchError::BadOrigin),
 			}
 
 			Renewals::<T>::remove(content_hash);
+			// A prepaid registration charged `size` to `PermanentStorageUsed` at registration
+			// and will now never fire, so release it. No `PendingRenewals` check: it is filled
+			// in `on_initialize` and drained by the mandatory inherent before any signed
+			// extrinsic runs, so a dispatchable never observes a queued entry.
+			if renewal_data.paid {
+				let size: u64 = renewal_data.size.into();
+				Self::update_permanent_storage_used(|used| used.saturating_sub(size));
+			}
 			Self::deposit_event(Event::AutoRenewalDisabled {
 				content_hash,
 				who: renewal_data.account,
@@ -532,8 +535,7 @@ impl<T: Config> Pallet<T> {
 						Renewals::<T>::remove(content_hash);
 					} else if was_paid {
 						// Recurring: consume the prepayment so subsequent cycles
-						// charge per-cycle, and unblock `disable_auto_renew` for the
-						// owner now that the prepaid renewal has been delivered.
+						// charge per-cycle.
 						Renewals::<T>::mutate(content_hash, |entry| {
 							if let Some(data) = entry {
 								data.paid = false;
@@ -703,7 +705,8 @@ impl<T: Config> Pallet<T> {
 impl<T: Config> Pallet<T> {
 	/// try-state invariants:
 	/// - `PermanentStorageUsed <= Σ Renew entry sizes + Σ paid registration sizes` (prepaid
-	///   registrations are charged before their `Renew` entry exists).
+	///   registrations are charged before their `Renew` entry exists; the size is recorded on the
+	///   registration).
 	/// - `PermanentStorageUsed <= MaxPermanentStorageSize`.
 	#[cfg(any(feature = "try-runtime", test))]
 	pub(crate) fn do_try_state(_n: BlockNumberFor<T>) -> Result<(), sp_runtime::TryRuntimeError> {
@@ -721,29 +724,17 @@ impl<T: Config> Pallet<T> {
 			},
 		);
 
-		let mut prepaid_sum: u64 = 0;
-		for (content_hash, registration) in Renewals::<T>::iter() {
-			if !registration.paid {
-				continue;
-			}
-			let (block, index) =
-				pallet_bulletin_transaction_storage::Pallet::<T>::lookup_by_content_hash(
-					content_hash,
-				)
-				.ok_or("paid Renewals registration has no on-chain target")?;
-			let info =
-				pallet_bulletin_transaction_storage::Pallet::<T>::transaction_info(block, index)
-					.ok_or("paid Renewals registration target has no TransactionInfo")?;
-			prepaid_sum = prepaid_sum.saturating_add(info.size as u64);
-		}
+		let prepaid_sum: u64 = Renewals::<T>::iter()
+			.filter(|(_, registration)| registration.paid)
+			.fold(0u64, |acc, (_, registration)| acc.saturating_add(registration.size as u64));
 
 		let expected = renewed_sum.saturating_add(prepaid_sum);
 
 		// `used` gates admission, so under-counting is what lets renewed bytes past the cap;
 		// over-counting only rejects early. Live state drifts both ways through history this
 		// pallet did not create — pre-counter `Renew` entries were never charged, and Root
-		// dropping a prepaid registration never decrements — so the equality is enforced only
-		// where state is built from nothing.
+		// dropping a prepaid registration used not to decrement — so the equality is enforced
+		// only where state is built from nothing.
 		#[cfg(test)]
 		ensure!(
 			used == expected,
@@ -867,12 +858,14 @@ impl<T: Config> txs_benchmarking::BenchmarkHelper<T> for RenewalBenchmarkHelper 
 
 	fn register_worst_case_entry(content_hash: ContentHash) {
 		// Recurring and awaiting its cycle, so the lookup hits and the entry queues.
+		// `size` is only consumed on the `paid` path.
 		Renewals::<T>::insert(
 			content_hash,
 			RenewalData {
 				account: frame_benchmarking::account("renewal_owner", 0, 0),
 				recurring: true,
 				paid: false,
+				size: 0,
 			},
 		);
 	}

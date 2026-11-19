@@ -30,11 +30,7 @@ use pallet_bulletin_transaction_storage::{
 	TransactionRef,
 };
 use polkadot_sdk_frame::{
-	deps::{
-		frame_support::{storage::storage_prefix, traits::OnRuntimeUpgrade},
-		sp_io,
-		sp_runtime::traits::Dispatchable,
-	},
+	deps::{frame_support::traits::OnRuntimeUpgrade, sp_io, sp_runtime::traits::Dispatchable},
 	hashing::blake2_256,
 	testing_prelude::*,
 };
@@ -52,7 +48,7 @@ fn pallet_compiles_and_storage_is_separate_from_transaction_storage() {
 		use polkadot_sdk_frame::deps::frame_support::traits::GetStorageVersion;
 		assert_eq!(
 			crate::Pallet::<Test>::on_chain_storage_version(),
-			polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(1),
+			polkadot_sdk_frame::deps::frame_support::traits::StorageVersion::new(2),
 		);
 	});
 }
@@ -68,7 +64,7 @@ fn on_obsolete_callback_queues_pending_renewals_for_is_latest_entries_with_regis
 		let content_hash: ContentHash = BlakeTwo256::hash(b"smoke-hash").into();
 		Renewals::<Test>::insert(
 			content_hash,
-			RenewalData { account: acct, recurring: true, paid: false },
+			RenewalData { account: acct, recurring: true, paid: false, size: 16 },
 		);
 		let info = TransactionInfo {
 			chunk_root: BlakeTwo256::hash(b"chunk-root"),
@@ -100,7 +96,7 @@ fn on_obsolete_callback_skips_stale_shadow_entries() {
 		let content_hash: ContentHash = BlakeTwo256::hash(b"stale-hash").into();
 		Renewals::<Test>::insert(
 			content_hash,
-			RenewalData { account: acct, recurring: true, paid: false },
+			RenewalData { account: acct, recurring: true, paid: false, size: 16 },
 		);
 		let info = TransactionInfo {
 			chunk_root: BlakeTwo256::hash(b"chunk-root"),
@@ -118,205 +114,78 @@ fn on_obsolete_callback_skips_stale_shadow_entries() {
 	});
 }
 
-#[test]
-fn relocation_migration_moves_legacy_entries_under_new_prefix() {
-	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-		let old_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
-		let hash = [0xAAu8; 32];
-		let mut key = old_prefix.to_vec();
-		key.extend_from_slice(&sp_io::hashing::blake2_128(&hash));
-		key.extend_from_slice(&hash);
-		let value = RenewalData::<u64> { account: 9, recurring: true, paid: false };
-		sp_io::storage::set(&key, &value.encode());
+// ---------------------------------------------------------------------------
+// v1 -> v2 migration
+// ---------------------------------------------------------------------------
 
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-
-		assert!(sp_io::storage::get(&key).is_none());
-		assert_eq!(Renewals::<Test>::iter().count(), 1);
-		// Idempotent: re-running finds nothing left under the old prefix.
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-		assert_eq!(Renewals::<Test>::iter().count(), 1);
-		assert_eq!(Renewals::<Test>::get(hash), Some(value));
-	});
+/// Writes a raw v1 `Renewals` value at the key the pallet reads.
+fn put_v1_renewal(hash: [u8; 32], value: &crate::migrations::v2::V1RenewalData<u64>) {
+	sp_io::storage::set(&Renewals::<Test>::hashed_key_for(hash), &value.encode());
 }
 
-/// A pre-v4 `AutoRenewals` entry (bare `{ account }`, no `recurring`/`paid`) is
-/// reshaped to the current `RenewalData` layout during relocation — the case a
-/// plain `move_prefix` could not handle. Covers a chain still at tx-storage v3.
-#[test]
-fn relocation_migration_reshapes_legacy_v3_layout() {
-	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
-	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-		let old_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
-		let hash = [0xBBu8; 32];
-		let mut key = old_prefix.to_vec();
-		key.extend_from_slice(&sp_io::hashing::blake2_128(&hash));
-		key.extend_from_slice(&hash);
-		// v3 layout: just the account, no `recurring`/`paid` fields.
-		let account: u64 = 7;
-		sp_io::storage::set(&key, &account.encode());
-
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-
-		assert!(sp_io::storage::get(&key).is_none(), "old-prefix entry must be removed");
-		assert_eq!(Renewals::<Test>::iter().count(), 1);
-		let entry = Renewals::<Test>::get(hash).expect("entry relocated under new prefix");
-		assert_eq!(
-			entry,
-			RenewalData::<u64> { account, recurring: true, paid: false },
-			"v3 entry must be reshaped to recurring & prepaid",
-		);
-	});
+/// Stores 2000 bytes at block 1 and returns their content hash, leaving the chain at block 2.
+fn store_v2_migration_target(who: u64) -> [u8; 32] {
+	run_to_block(1, || None);
+	let data = vec![0u8; 2000];
+	let content_hash = blake2_256(&data);
+	assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+	assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+	run_to_block(2, || None);
+	content_hash
 }
 
-/// The `PermanentStorageUsed` counter is relocated to the key the pallet actually reads.
-///
-/// Asserted through the storage item rather than a hand-built prefix: the whole failure
-/// mode being guarded against is the migration writing to a key the pallet never reads,
-/// which a prefix-vs-prefix comparison cannot detect.
 #[test]
-fn relocation_migration_moves_permanent_storage_used() {
-	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
+fn v2_migration_fills_size_from_on_chain_target() {
+	use crate::migrations::v2::{MigrateV1ToV2, V1RenewalData};
+	use polkadot_sdk_frame::deps::frame_support::traits::{GetStorageVersion, StorageVersion};
 	new_test_ext().execute_with(|| {
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-		let old_key = storage_prefix(b"TransactionStorage", b"PermanentStorageUsed");
-		sp_io::storage::set(&old_key, &4_096u64.encode());
+		let who = 1;
+		let content_hash = store_v2_migration_target(who);
+		let orphan = [0xAAu8; 32];
+		put_v1_renewal(content_hash, &V1RenewalData { account: who, recurring: true, paid: true });
+		put_v1_renewal(orphan, &V1RenewalData { account: 9, recurring: false, paid: false });
+		StorageVersion::new(1).put::<crate::Pallet<Test>>();
 
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
+		let _ = MigrateV1ToV2::<Test>::on_runtime_upgrade();
 
 		assert_eq!(
-			crate::PermanentStorageUsed::<Test>::get(),
-			4_096,
-			"counter must be readable through the storage item after relocation",
+			Renewals::<Test>::get(content_hash),
+			Some(RenewalData { account: who, recurring: true, paid: true, size: 2000 }),
 		);
-		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
+		// No on-chain target: kept, with nothing to refund.
+		assert_eq!(
+			Renewals::<Test>::get(orphan),
+			Some(RenewalData { account: 9, recurring: false, paid: false, size: 0 }),
+		);
+		assert_eq!(crate::Pallet::<Test>::on_chain_storage_version(), StorageVersion::new(2));
 	});
 }
 
-/// `PendingRenewals` is relocated byte-exactly to the key the pallet reads.
-///
-/// The value is produced by encoding through the storage item itself and then moved to the
-/// legacy prefix, so the test never has to name the (`Config`-dependent) value type.
-#[test]
-fn relocation_migration_moves_pending_renewals() {
-	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::{
-		frame_support::traits::StorageVersion,
-		sp_runtime::traits::{BlakeTwo256, Hash},
-	};
-	new_test_ext().execute_with(|| {
-		let content_hash: ContentHash = BlakeTwo256::hash(b"pending-relocation").into();
-		let info = TransactionInfo {
-			chunk_root: BlakeTwo256::hash(b"chunk-root"),
-			content_hash,
-			hashing: HashingAlgorithm::Blake2b256,
-			cid_codec: 0x55,
-			size: 16,
-			extrinsic_index: 0,
-			block_chunks: 1,
-			meta: EntryKind::Renew,
-		};
-		PendingRenewals::<Test>::mutate(|pending| {
-			pending
-				.try_push((
-					content_hash,
-					info,
-					RenewalData { account: 5, recurring: true, paid: false },
-				))
-				.expect("bound is >= 1");
-		});
-
-		// Relocate the encoded value back to the legacy prefix to build the pre-migration
-		// state, then reset the version gate.
-		let new_key = PendingRenewals::<Test>::hashed_key();
-		let raw = sp_io::storage::get(&new_key).expect("just written").to_vec();
-		sp_io::storage::clear(&new_key);
-		let old_key = storage_prefix(b"TransactionStorage", b"PendingAutoRenewals");
-		sp_io::storage::set(&old_key, &raw);
-		StorageVersion::new(0).put::<crate::Pallet<Test>>();
-
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-
-		let pending = PendingRenewals::<Test>::get();
-		assert_eq!(pending.len(), 1, "pending entry must be readable through the storage item");
-		assert_eq!(pending[0].0, content_hash);
-		assert!(sp_io::storage::get(&old_key).is_none(), "old key must be cleared");
-	});
-}
-
-/// `pre_upgrade`/`post_upgrade` accept a full legacy state: an `AutoRenewals` entry, both
-/// relocated `StorageValue`s, and a pre-split `Authorizations` entry. Exercises the
-/// try-runtime checks themselves, which are otherwise compiled out.
 #[cfg(feature = "try-runtime")]
 #[test]
-fn relocation_migration_try_runtime_checks_pass() {
-	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
+fn v2_migration_try_runtime_checks_pass() {
+	use crate::migrations::v2::{MigrateV1ToV2, V1RenewalData};
+	use polkadot_sdk_frame::deps::frame_support::traits::StorageVersion;
 	new_test_ext().execute_with(|| {
-		// Legacy `AutoRenewals` entry.
-		let hash: ContentHash = BlakeTwo256::hash(b"try-runtime-relocation").into();
-		let auto_prefix = storage_prefix(b"TransactionStorage", b"AutoRenewals");
-		let mut auto_key = auto_prefix.to_vec();
-		auto_key.extend_from_slice(&sp_io::hashing::blake2_128(hash.as_ref()));
-		auto_key.extend_from_slice(hash.as_ref());
-		sp_io::storage::set(
-			&auto_key,
-			&RenewalData::<u64> { account: 3, recurring: false, paid: true }.encode(),
-		);
+		let who = 1;
+		let content_hash = store_v2_migration_target(who);
+		put_v1_renewal(content_hash, &V1RenewalData { account: who, recurring: true, paid: true });
+		put_v1_renewal([0xAAu8; 32], &V1RenewalData { account: 9, recurring: true, paid: false });
+		StorageVersion::new(1).put::<crate::Pallet<Test>>();
 
-		// Both relocated `StorageValue`s. `PendingRenewals` is left absent, which is
-		// the real-world case the `on_finalize` drain invariant guarantees.
-		sp_io::storage::set(
-			&storage_prefix(b"TransactionStorage", b"PermanentStorageUsed"),
-			&512u64.encode(),
-		);
-
-		// Pre-split authorization: extent { transactions, transactions_allowance, bytes,
-		// bytes_permanent, bytes_allowance } + expiration. The migration must leave it alone.
-		let scope = AuthorizationScope::Account(3u64);
-		sp_io::storage::set(
-			&txs::Authorizations::<Test>::hashed_key_for(&scope),
-			&(1u32, 5u32, 100u64, 700u64, 900u64, 50u64).encode(),
-		);
-
-		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
-			.expect("pre_upgrade must accept legacy state");
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
-			.expect("post_upgrade checks must pass");
-
-		let extent = txs::Authorizations::<Test>::get(&scope).expect("still present").extent;
-		assert_eq!(extent.extra.bytes_permanent, 700);
-		assert_eq!(extent.bytes_allowance, 900);
+		let state = MigrateV1ToV2::<Test>::pre_upgrade().expect("pre_upgrade must accept v1 state");
+		let _ = MigrateV1ToV2::<Test>::on_runtime_upgrade();
+		MigrateV1ToV2::<Test>::post_upgrade(state).expect("post_upgrade checks must pass");
 	});
 }
 
-/// The try-runtime checks must also pass on a chain that already ran the relocation and has
-/// taken renewals since: the old prefix is empty, so the scan moves nothing, and the entries
-/// under the new prefix are the chain's own — not evidence of a dropped entry.
-#[cfg(feature = "try-runtime")]
+/// The migration relies on v1 being an encoded prefix of v2.
 #[test]
-fn relocation_migration_try_runtime_checks_pass_when_already_relocated() {
-	use bulletin_transaction_storage_primitives::ContentHash;
-	use polkadot_sdk_frame::deps::sp_runtime::traits::{BlakeTwo256, Hash};
-	new_test_ext().execute_with(|| {
-		let hash: ContentHash = BlakeTwo256::hash(b"already-relocated").into();
-		Renewals::<Test>::insert(
-			hash,
-			RenewalData::<u64> { account: 7, recurring: true, paid: false },
-		);
-
-		let state = crate::migrations::RelocateFromTransactionStorage::<Test>::pre_upgrade()
-			.expect("pre_upgrade must accept already-relocated state");
-		let _ = crate::migrations::RelocateFromTransactionStorage::<Test>::on_runtime_upgrade();
-		crate::migrations::RelocateFromTransactionStorage::<Test>::post_upgrade(state)
-			.expect("post_upgrade checks must pass");
-
-		assert!(Renewals::<Test>::get(hash).is_some(), "pre-existing entry must survive");
-	});
+fn renewal_data_v2_encoding_is_v1_plus_size() {
+	use crate::migrations::v2::V1RenewalData;
+	let v1 = V1RenewalData::<u64> { account: 7, recurring: true, paid: false };
+	let v2 = RenewalData::<u64> { account: 7, recurring: true, paid: false, size: 2000 };
+	assert_eq!(v2.encode(), [v1.encode(), 2000u32.encode()].concat());
 }
 
 /// Live chains carry tens of thousands of authorizations written before the renewal split,
@@ -384,9 +253,7 @@ fn enable_auto_renew_works() {
 }
 
 /// Owner-only `disable_auto_renew`: a non-owner is rejected at extension time
-/// with `NOT_AUTO_RENEWAL_OWNER`; the owner can disable only after the prepaid
-/// cycle has consumed the prepayment (we flip `paid = false` directly to
-/// simulate that for this test).
+/// with `NOT_AUTO_RENEWAL_OWNER`.
 #[test]
 fn disable_auto_renew_validate_signed_gates_on_ownership() {
 	new_test_ext().execute_with(|| {
@@ -406,10 +273,6 @@ fn disable_auto_renew_validate_signed_gates_on_ownership() {
 		run_to_block(2, || None);
 
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
-		// Owner can't disable while still in the prepaid window.
-		Renewals::<Test>::mutate(content_hash, |entry| {
-			entry.as_mut().unwrap().paid = false;
-		});
 
 		let call = crate::Call::<Test>::disable_auto_renew { content_hash };
 		assert_eq!(
@@ -422,7 +285,7 @@ fn disable_auto_renew_validate_signed_gates_on_ownership() {
 	});
 }
 
-/// Root bypasses the owner gate and the prepaid window.
+/// Root bypasses the owner gate.
 #[test]
 fn disable_auto_renew_root_override() {
 	new_test_ext().execute_with(|| {
@@ -441,7 +304,6 @@ fn disable_auto_renew_root_override() {
 		run_to_block(2, || None);
 
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
-		// `paid = true` would block signed disable, but root bypasses it.
 		assert_ok!(DataRenewal::disable_auto_renew(RuntimeOrigin::root(), content_hash));
 		assert!(Renewals::<Test>::get(content_hash).is_none());
 	});
@@ -500,7 +362,7 @@ fn pending_auto_renewals_populated_only_for_registered_items() {
 		// Only `hash_a` registers for auto-renew.
 		Renewals::<Test>::insert(
 			hash_a,
-			RenewalData { account: alice, recurring: true, paid: false },
+			RenewalData { account: alice, recurring: true, paid: false, size: 100 },
 		);
 
 		let info_a = TransactionInfo {
@@ -1098,16 +960,7 @@ fn disable_auto_renew_works() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(owner, content_hash));
 
-		// Even the owner cannot disable while the registration is in its prepaid
-		// window: `enable_auto_renew` charges the next cycle up front, and we
-		// don't let that prepayment be reclaimed.
-		assert_noop!(
-			disable_auto_renew_via_extension(owner, content_hash),
-			crate::Error::<Test>::CannotDisablePrepaidAutoRenewal,
-		);
-
-		// Fire the first cycle to consume the prepayment, after which the
-		// registration sits at `paid = false` and the owner can disable.
+		// Fire the first cycle to consume the prepayment.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
 			RuntimeOrigin::root(),
@@ -1121,13 +974,12 @@ fn disable_auto_renew_works() {
 			"cycle should consume prepayment"
 		);
 
-		// Non-owner is still rejected after the prepayment is consumed.
+		// Non-owner is rejected.
 		assert_noop!(
 			disable_auto_renew_via_extension(other, content_hash),
 			crate::Error::<Test>::NotAutoRenewalOwner,
 		);
 
-		// Owner can now disable.
 		assert_ok!(disable_auto_renew_via_extension(owner, content_hash));
 
 		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
@@ -1366,10 +1218,9 @@ fn auto_renewal_fails_when_authorization_exhausted() {
 
 #[test]
 fn auto_renew_permissionless_transfer() {
-	// Alice stores and enables auto-renew, waits out the prepaid window so the
-	// first cycle consumes her prepayment, then disables. Bob enables instead.
-	// Anyone can take over keeping data alive on Bulletin, permissionlessly —
-	// but only after the original registrant's pre-paid cycle has fired.
+	// Alice stores and enables auto-renew, lets the first cycle consume her
+	// prepayment, then disables. Bob enables instead. Anyone can take over
+	// keeping data alive on Bulletin, permissionlessly.
 	new_test_ext().execute_with(|| {
 		run_to_block(1, || None);
 		let alice = 1;
@@ -1393,12 +1244,6 @@ fn auto_renew_permissionless_transfer() {
 		assert_eq!(renewal.account, alice);
 		assert!(renewal.paid);
 
-		// Alice cannot disable during the prepaid window.
-		assert_noop!(
-			disable_auto_renew_via_extension(alice, content_hash),
-			crate::Error::<Test>::CannotDisablePrepaidAutoRenewal,
-		);
-
 		// Fire the first cycle to consume Alice's prepayment.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(
@@ -1414,7 +1259,7 @@ fn auto_renew_permissionless_transfer() {
 		// `Transactions[12]` (mirrors what `on_finalize` does in a live chain).
 		pallet_bulletin_transaction_storage::Pallet::<Test>::seal_block_transactions(12);
 
-		// Alice can now disable.
+		// Alice disables.
 		assert_ok!(disable_auto_renew_via_extension(alice, content_hash));
 		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
 
@@ -2275,17 +2120,14 @@ fn enable_auto_renew_rejects_insufficient_capacity() {
 	});
 }
 
-/// `disable_auto_renew` dispatched in the same block as the renewal does NOT prevent the
-/// renewal. `on_initialize` captures the entry into `PendingRenewals` as a snapshot;
-/// `do_process_pending_renewals` then iterates that vec without re-reading
-/// `AutoRenewals[hash]`. So disabling between `on_initialize` and `apply_block_inherents`
-/// in the renewal block is a no-op for the in-flight cycle — the caller still sees one
-/// final `DataRenewed` event. Subsequent cycles are correctly suppressed because
-/// `AutoRenewals[hash]` is gone for the next on_initialize sweep.
+/// `PendingRenewals` is a snapshot: `on_initialize` captures the entry and
+/// `do_process_pending_renewals` iterates that vec without re-reading `Renewals[hash]`, so
+/// removing the registration mid-cycle does not cancel the captured cycle — the caller
+/// still sees one final `DataRenewed` event, and later cycles are suppressed because
+/// `Renewals[hash]` is gone for the next sweep. (Inherents run before signed extrinsics on
+/// a real chain, so this ordering is only reachable from the test harness.)
 ///
-/// This is only reachable once the registration has cleared its prepaid window
-/// (`disable_auto_renew` rejects the owner while `paid: true`), so we exercise it
-/// on cycle 2.
+/// Exercised on cycle 2, a per-cycle charged renewal, so no prepaid refund is involved.
 #[test]
 fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 	new_test_ext().execute_with(|| {
@@ -2299,7 +2141,7 @@ fn disable_auto_renew_in_renewal_block_does_not_prevent_renewal() {
 		run_to_block(2, || None);
 		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
 
-		// Cycle 1: fire to consume the prepayment so the owner can `disable` later.
+		// Cycle 1: fire to consume the prepayment.
 		init_block(12);
 		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
 		assert_ok!(apply_block_inherents_full(None));
@@ -2358,8 +2200,7 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 		init_block(12);
 		assert_eq!(crate::PendingRenewals::<Test>::get().len(), 1);
 
-		// Root disables in the normal section — bypasses both the owner check and the
-		// prepaid-window check.
+		// Root disables in the normal section, bypassing the owner check.
 		assert_ok!(DataRenewal::disable_auto_renew(RuntimeOrigin::root(), content_hash));
 		assert!(
 			crate::Renewals::<Test>::get(content_hash).is_none(),
@@ -2378,6 +2219,72 @@ fn root_disable_in_prepaid_renewal_block_is_not_undone_by_cycle() {
 			crate::Renewals::<Test>::get(content_hash).is_none(),
 			"Root's disable must survive the cycle — no silent re-arming via the paid-flip path",
 		);
+	});
+}
+
+/// Owner disables a prepaid `enable_auto_renew` registration: the prepayment is forfeit
+/// (`bytes_permanent` stays charged), but the chain-wide charge is released and no
+/// cycle fires.
+#[test]
+fn disable_prepaid_auto_renew_releases_chain_charge() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(enable_auto_renew_via_extension(who, content_hash));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+
+		assert_ok!(disable_auto_renew_via_extension(who, content_hash));
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
+		System::assert_has_event(RuntimeEvent::DataRenewal(crate::Event::AutoRenewalDisabled {
+			content_hash,
+			who,
+		}));
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			2000,
+		);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
+
+		// The retention boundary passes without a renewal.
+		init_block(12);
+		assert!(crate::PendingRenewals::<Test>::get().is_empty());
+		assert_ok!(apply_block_inherents_full(None));
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+	});
+}
+
+/// Same as above for a one-shot `renew` registration.
+#[test]
+fn disable_prepaid_one_shot_renew_releases_chain_charge() {
+	new_test_ext().execute_with(|| {
+		run_to_block(1, || None);
+		let who = 1;
+		let data = vec![0u8; 2000];
+		let content_hash = blake2_256(&data);
+
+		assert_ok!(TransactionStorage::authorize_account(RuntimeOrigin::root(), who, 10, 100_000));
+		assert_ok!(TransactionStorage::store(RuntimeOrigin::none(), data));
+		run_to_block(2, || None);
+		assert_ok!(renew_via_extension(who, TransactionRef::Position { block: 1, index: 0 }));
+		assert!(crate::Renewals::<Test>::get(content_hash).unwrap().paid);
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 2000);
+
+		assert_ok!(disable_auto_renew_via_extension(who, content_hash));
+		assert!(crate::Renewals::<Test>::get(content_hash).is_none());
+		assert_eq!(crate::PermanentStorageUsed::<Test>::get(), 0);
+		assert_eq!(
+			TransactionStorage::account_authorization_extent(who).extra.bytes_permanent,
+			2000,
+		);
+		assert_ok!(DataRenewal::do_try_state(System::block_number()));
 	});
 }
 

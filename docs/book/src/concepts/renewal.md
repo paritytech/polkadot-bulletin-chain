@@ -34,7 +34,7 @@ Registers the data — by content hash, not a `TransactionRef` — for **recurri
 - Emits `RenewalEnabled { content_hash, who, recurring: true }`.
 - Emits `DataRenewed { index, content_hash, account }` at each cycle.
 
-Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. While the registration is still prepaid it is refused with `CannotDisablePrepaidAutoRenewal` — disabling becomes possible after the first cycle has fired.
+Use `disable_auto_renew(content_hash)` to stop recurring renewal. It emits `AutoRenewalDisabled { content_hash, who }`. Disabling while the registration is still prepaid forfeits the prepayment.
 
 ## Retention Period
 
