@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![recursion_limit = "256"]
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -23,6 +24,7 @@ pub mod xcm_config;
 extern crate alloc;
 
 use alloc::{vec, vec::Vec};
+use codec::Encode;
 use cumulus_pallet_parachain_system::RelayNumberMonotonicallyIncreases;
 use cumulus_primitives_core::{AggregateMessageOrigin, ParaId};
 use frame_support::{
@@ -30,7 +32,7 @@ use frame_support::{
 	dispatch::DispatchClass,
 	genesis_builder_helper::{build_state, get_preset},
 	parameter_types,
-	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, TransformOrigin},
+	traits::{ConstBool, ConstU32, ConstU64, ConstU8, EitherOfDiverse, Equals, TransformOrigin},
 	weights::{ConstantMultiplier, Weight},
 	PalletId,
 };
@@ -69,10 +71,9 @@ const RELAY_PARENT_OFFSET: u32 = 1;
 const UNINCLUDED_SEGMENT_CAPACITY: u32 = (3 + RELAY_PARENT_OFFSET) * BLOCK_PROCESSING_VELOCITY;
 use weights::{BlockExecutionWeight, ExtrinsicBaseWeight, RocksDbWeight};
 use xcm::{prelude::*, Version as XcmVersion};
-#[cfg(feature = "runtime-benchmarks")]
-use xcm_config::AssetHubLocation;
 use xcm_config::{
-	FellowshipLocation, GovernanceLocation, TokenRelayLocation, XcmOriginToTransactDispatchOrigin,
+	AssetHubLocation, FellowshipLocation, GovernanceLocation, TokenRelayLocation,
+	XcmOriginToTransactDispatchOrigin,
 };
 use xcm_runtime_apis::{
 	dry_run::{CallDryRunEffects, Error as XcmDryRunApiError, XcmDryRunEffects},
@@ -135,7 +136,7 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = ();
+	pub type Unreleased = (cumulus_pallet_parachain_system::migration::MigrateV3ToV4<Runtime>,);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -175,7 +176,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_029,
+	spec_version: 1_000_030,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -270,7 +271,7 @@ impl pallet_timestamp::Config for Runtime {
 
 impl pallet_authorship::Config for Runtime {
 	type FindAuthor = pallet_session::FindAccountFromAuthorIndex<Self, Aura>;
-	type EventHandler = (CollatorSelection,);
+	type EventHandler = (CollatorSelection, ValidatorCollators);
 }
 
 parameter_types! {
@@ -290,8 +291,6 @@ impl pallet_balances::Config for Runtime {
 	type ReserveIdentifier = [u8; 8];
 	type RuntimeHoldReason = RuntimeHoldReason;
 	type RuntimeFreezeReason = RuntimeFreezeReason;
-	type FreezeIdentifier = ();
-	type MaxFreezes = ConstU32<0>;
 	type DoneSlashHandler = ();
 }
 
@@ -320,7 +319,7 @@ parameter_types! {
 impl cumulus_pallet_parachain_system::Config for Runtime {
 	type WeightInfo = weights::cumulus_pallet_parachain_system::WeightInfo<Runtime>;
 	type RuntimeEvent = RuntimeEvent;
-	type OnSystemEvent = ();
+	type OnSystemEvent = ValidatorCollators;
 	type SelfParaId = parachain_info::Pallet<Runtime>;
 	type DmpQueue = frame_support::traits::EnqueueWithOrigin<MessageQueue, RelayOrigin>;
 	type OutboundXcmpMessageSource = XcmpQueue;
@@ -444,9 +443,10 @@ impl pallet_session::Config for Runtime {
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
 	// we don't have stash and controller, thus we don't need the convert as well.
 	type ValidatorIdOf = pallet_collator_selection::IdentityCollator;
-	type ShouldEndSession = pallet_session::PeriodicSessions<ConstU32<PERIOD>, ConstU32<OFFSET>>;
+	type ShouldEndSession = ValidatorCollators;
 	type NextSessionRotation = pallet_session::PeriodicSessions<ConstU32<PERIOD>, ConstU32<OFFSET>>;
-	type SessionManager = CollatorSelection;
+	type SessionManager =
+		pallet_session::UnionSessionManager<CollatorSelection, ValidatorCollators>;
 	// Essentially just Aura, but let's be pedantic.
 	type SessionHandler = <SessionKeys as sp_runtime::traits::OpaqueKeys>::KeyTypeIdProviders;
 	type Keys = SessionKeys;
@@ -477,6 +477,12 @@ pub type CollatorSelectionUpdateOrigin = EitherOfDiverse<
 	EnsureXcm<IsVoiceOfBody<GovernanceLocation, StakingAdminBodyId>>,
 >;
 
+parameter_types! {
+	/// The blocks the chain authors in one Aura slot.
+	pub const BlocksPerAuraSlot: u32 =
+		(SLOT_DURATION / RELAY_CHAIN_SLOT_DURATION_MILLIS as u64) as u32 * BLOCK_PROCESSING_VELOCITY;
+}
+
 impl pallet_collator_selection::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type Currency = Balances;
@@ -485,12 +491,122 @@ impl pallet_collator_selection::Config for Runtime {
 	type MaxCandidates = ConstU32<100>;
 	type MinEligibleCollators = ConstU32<4>;
 	type MaxInvulnerables = ConstU32<20>;
-	// should be a multiple of session or things will get inconsistent
-	type KickThreshold = ConstU32<PERIOD>;
+	type KickThreshold = parachains_common::impls::KickThreshold<
+		Runtime,
+		<Runtime as pallet_validator_collators::Config>::MaxValidators,
+		BlocksPerAuraSlot,
+		ConstU32<PERIOD>,
+	>;
 	type ValidatorId = <Self as frame_system::Config>::AccountId;
 	type ValidatorIdOf = pallet_collator_selection::IdentityCollator;
 	type ValidatorRegistration = Session;
 	type WeightInfo = weights::pallet_collator_selection::WeightInfo<Runtime>;
+}
+
+/// Room in a report for authors that left the collators since the previous report, so one report
+/// usually clears them. Their counts are dropped at report time anyway, and entries beyond
+/// `MaxEntriesPerReport` wait for the next report, so the exact value is not critical.
+const LEFT_AUTHORS_BUFFER: u32 = 30;
+
+parameter_types! {
+	/// The validators of a set, the invulnerables and candidates of collator selection, and
+	/// [`LEFT_AUTHORS_BUFFER`].
+	pub MaxEntriesPerReport: u32 =
+		testnet_parachains_constants::westend::staking::MAX_VALIDATOR_SET
+			+ <<Runtime as pallet_collator_selection::Config>::MaxInvulnerables as frame_support::traits::Get<u32>>::get()
+			+ <<Runtime as pallet_collator_selection::Config>::MaxCandidates as frame_support::traits::Get<u32>>::get()
+			+ LEFT_AUTHORS_BUFFER;
+	// Validators contribute no collators until governance raises the cap.
+	// A drawn validator's collator must hold the data stored for `RetentionPeriod`. Without it, its
+	// blocks lack the storage proof that `pallet-bulletin-transaction-storage` checks in
+	// `on_finalize`, so its slots produce no block.
+	pub const DefaultMaxCollators: pallet_validator_collators::CollatorDraw =
+		pallet_validator_collators::CollatorDraw::None;
+}
+
+impl pallet_validator_collators::Config for Runtime {
+	type SetOrigin = EitherOfDiverse<EnsureRoot<AccountId>, EnsureXcm<Equals<AssetHubLocation>>>;
+	type UpdateOrigin = CollatorSelectionUpdateOrigin;
+	type ValidatorRegistration = Session;
+	type MaxValidators =
+		ConstU32<{ testnet_parachains_constants::westend::staking::MAX_VALIDATOR_SET }>;
+	type MaxEntriesPerReport = MaxEntriesPerReport;
+	type PeriodicSession = pallet_session::PeriodicSessions<ConstU32<PERIOD>, ConstU32<OFFSET>>;
+	type BlockReporter = ReportBlocksToAssetHub;
+	type DefaultMaxCollators = DefaultMaxCollators;
+	type DefaultReportPeriod = ConstU32<{ 10 * MINUTES * BLOCK_PROCESSING_VELOCITY }>;
+	type UnixTime = Timestamp;
+	type DefaultExpectedEraDuration =
+		ConstU64<{ testnet_parachains_constants::westend::staking::EXPECTED_ERA_DURATION_MILLIS }>;
+	type DefaultReportMargin = ConstU64<300_000>;
+	type MaxReportMargin = ConstU64<1_800_000>;
+	type WeightInfo = weights::pallet_validator_collators::WeightInfo<Runtime>;
+}
+
+// `bulletin-westend-integration-tests` decodes this encoding on the Asset Hub Westend runtime and
+// fails if it drifts.
+#[derive(Encode)]
+enum AssetHubRuntimePallets {
+	// index of `StakingPointsConverter` in the Asset Hub Westend runtime.
+	#[codec(index = 28)]
+	StakingPointsConverter(StakingPointsConverterCalls),
+}
+
+#[derive(Encode)]
+enum StakingPointsConverterCalls {
+	// index of `fn report_authored_blocks` in `pallet-staking-async-points-converter`.
+	#[codec(index = 1)]
+	ReportAuthoredBlocks { blocks: Vec<(AccountId, u32)> },
+}
+
+/// Sends the block counts to Asset Hub as an unpaid `Transact` of `report_authored_blocks`, which
+/// Asset Hub dispatches with this chain's sibling parachain origin.
+pub struct ReportBlocksToAssetHub;
+
+impl ReportBlocksToAssetHub {
+	/// The encoded Asset Hub call that reports `blocks`.
+	pub fn encoded_call(blocks: &[(AccountId, u32)]) -> Vec<u8> {
+		AssetHubRuntimePallets::StakingPointsConverter(
+			StakingPointsConverterCalls::ReportAuthoredBlocks { blocks: blocks.to_vec() },
+		)
+		.encode()
+	}
+}
+
+impl pallet_validator_collators::ReportAuthoredBlocks<AccountId> for ReportBlocksToAssetHub {
+	fn report(blocks: &[(AccountId, u32)]) -> Result<(), ()> {
+		let xcm = Xcm(vec![
+			UnpaidExecution { weight_limit: Unlimited, check_origin: None },
+			Transact {
+				origin_kind: OriginKind::Native,
+				fallback_max_weight: None,
+				call: Self::encoded_call(blocks).into(),
+			},
+		]);
+		send_xcm::<xcm_config::XcmRouter>(AssetHubLocation::get(), xcm)
+			.map(|_| ())
+			.map_err(|error| {
+				tracing::warn!(
+					target: "runtime::validator-collators",
+					?error,
+					"failed to report the blocks of {} authors",
+					blocks.len(),
+				);
+			})
+	}
+
+	#[cfg(feature = "std")]
+	fn max_message_size() -> Option<usize> {
+		Some(
+			testnet_parachains_constants::westend::staking::LAST_KNOWN_HRMP_MAX_MESSAGE_SIZE
+				as usize,
+		)
+	}
+
+	#[cfg(feature = "runtime-benchmarks")]
+	fn ensure_successful_report(_: &[(AccountId, u32)]) {
+		ParachainSystem::open_outbound_hrmp_channel_for_benchmarks_or_tests(AssetHubParaId::get())
+	}
 }
 
 impl pallet_skip_feeless_payment::Config for Runtime {
@@ -633,6 +749,10 @@ mod runtime {
 	pub type Aura = pallet_aura;
 	#[runtime::pallet_index(24)]
 	pub type AuraExt = cumulus_pallet_aura_ext;
+	// Asset Hub Westend, built in `paritytech/polkadot-sdk`, hard-codes this index to send the
+	// validator set.
+	#[runtime::pallet_index(25)]
+	pub type ValidatorCollators = pallet_validator_collators;
 
 	// XCM & related
 	#[runtime::pallet_index(30)]
@@ -658,6 +778,7 @@ mod benches {
 		[pallet_timestamp, Timestamp]
 		[pallet_balances, Balances]
 		[pallet_collator_selection, CollatorSelection]
+		[pallet_validator_collators, ValidatorCollators]
 		[pallet_session, SessionBench::<Runtime>]
 		[pallet_bulletin_transaction_storage, TransactionStorage]
 		[pallet_bulletin_data_renewal, DataRenewal]
@@ -1264,6 +1385,14 @@ impl_runtime_apis! {
 	impl cumulus_primitives_core::GetParachainInfo<Block> for Runtime {
 		fn parachain_id() -> ParaId {
 			ParachainInfo::parachain_id()
+		}
+	}
+
+	impl cumulus_primitives_core::KeyToIncludeInRelayProof<Block> for Runtime {
+		fn keys_to_prove() -> cumulus_primitives_core::RelayProofRequest {
+			cumulus_primitives_core::RelayProofRequest {
+				keys: ValidatorCollators::relay_keys_to_prove(),
+			}
 		}
 	}
 }
