@@ -115,6 +115,7 @@ xcm-runtime-apis = { git = "https://github.com/paritytech/polkadot-sdk", rev = "
 
 # Additional FRAME pallets used by westend runtime
 pallet-aura = { git = "https://github.com/paritytech/polkadot-sdk", rev = "53c308902a647f972125b331c1fef48e92c1abfc", default-features = false }
+pallet-authority-discovery = { git = "https://github.com/paritytech/polkadot-sdk", rev = "53c308902a647f972125b331c1fef48e92c1abfc", default-features = false }
 pallet-balances = { git = "https://github.com/paritytech/polkadot-sdk", rev = "53c308902a647f972125b331c1fef48e92c1abfc", default-features = false }
 pallet-collator-selection = { git = "https://github.com/paritytech/polkadot-sdk", rev = "53c308902a647f972125b331c1fef48e92c1abfc", default-features = false }
 pallet-message-queue = { git = "https://github.com/paritytech/polkadot-sdk", rev = "53c308902a647f972125b331c1fef48e92c1abfc", default-features = false }

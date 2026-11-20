@@ -101,12 +101,15 @@ pub fn bulletin_genesis() -> sp_runtime::Storage {
 		session: bulletin_westend_runtime::SessionConfig {
 			keys: collators::invulnerables()
 				.into_iter()
-				.map(|(acc, aura, _)| (acc.clone(), acc, SessionKeys { aura }))
+				.map(|(acc, aura, authority_discovery)| {
+					(acc.clone(), acc, SessionKeys { aura, authority_discovery })
+				})
 				.collect(),
 			..Default::default()
 		},
 		aura: Default::default(),
 		aura_ext: Default::default(),
+		authority_discovery: Default::default(),
 		polkadot_xcm: bulletin_westend_runtime::PolkadotXcmConfig {
 			safe_xcm_version: Some(xcm::latest::VERSION),
 			..Default::default()
