@@ -190,9 +190,6 @@ impl<T: Config> Pallet<T> {
 				if &renewal_data.account != who {
 					return Err(crate::NOT_AUTO_RENEWAL_OWNER.into());
 				}
-				if renewal_data.paid {
-					return Err(crate::CANNOT_DISABLE_PREPAID_AUTO_RENEWAL.into());
-				}
 				let scope = AuthorizationScope::Account(who.clone());
 				let valid = if want_valid {
 					<T as Config>::RenewTxParams::get().untagged()

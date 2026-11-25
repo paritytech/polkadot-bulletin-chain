@@ -154,8 +154,7 @@ const SUCCESS_DESCRIPTIONS: Record<RenewAction, string> = {
 
 /**
  * Badge for an existing `Renewals` entry, with a disable action for recurring
- * ones. The chain refuses `disable_auto_renew` while the next cycle is still
- * prepaid, so the button waits for that cycle to fire rather than failing.
+ * ones. Disabling while the next cycle is still prepaid forfeits that cycle.
  */
 function RegistrationBadge({
   registration,
@@ -176,10 +175,10 @@ function RegistrationBadge({
           variant="ghost"
           size="sm"
           onClick={onDisable}
-          disabled={busy || registration.paid}
+          disabled={busy}
           title={
             registration.paid
-              ? "Cannot disable until the prepaid cycle fires"
+              ? "Disabling now forfeits the prepaid cycle"
               : undefined
           }
         >
