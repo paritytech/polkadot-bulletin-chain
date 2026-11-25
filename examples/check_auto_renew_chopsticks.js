@@ -159,14 +159,16 @@ async function main() {
   console.log(`  Forked at block #${startBlock}`);
 
   // ── Override RetentionPeriod to 1 block (so expiry triggers in 2 blocks) ──
-  // Also set ProofChecked to true to satisfy TransactionStorage::on_finalize
-  // (Chopsticks doesn't produce real storage proofs).
+  // EffectiveRetentionPeriod is the value in force; setting only RetentionPeriod
+  // would move it there gradually. Also set ProofChecked to true to satisfy
+  // TransactionStorage::on_finalize (Chopsticks doesn't produce real storage proofs).
   logStep(1, "Overriding RetentionPeriod and mocking ProofChecked...");
   const retentionPeriod = 1;
   const proofCheckedKey = storageKey("TransactionStorage", "ProofChecked");
   await provider.send("dev_setStorage", [
     [
       [storageKey("TransactionStorage", "RetentionPeriod"), encodeHex(u32, retentionPeriod)],
+      [storageKey("TransactionStorage", "EffectiveRetentionPeriod"), encodeHex(u32, retentionPeriod)],
       [proofCheckedKey, "0x01"],
     ]
   ], false);

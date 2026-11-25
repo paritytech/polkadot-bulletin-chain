@@ -8,12 +8,13 @@ use crate::{
 	test_log,
 	utils::{
 		arg_value, assert_proof_checked_at, authorize_account_via_sudo,
-		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
-		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
-		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
-		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, omni_node_exit_and_log, override_alice_authorization,
+		authorize_account_via_sudo_finalized, authorize_and_store_data, authorize_and_store_items,
+		blake2_256, block_hash_at, build_parachain_network_config_three_relay_validators,
+		canonical_store_block, content_hash_and_cid, count_event, current_best_block,
+		current_finalized_block, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		omni_node_exit_and_log, override_alice_authorization,
 		parachain_network_config_with_retention_period, resolve_canonical_store_block,
 		set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
@@ -446,6 +447,101 @@ async fn parachain_check_proof_fails_under_pruning_test() -> Result<()> {
 	}
 
 	test_log!(TEST, "=== Parachain check_proof fails under pruning PASSED ===");
+	network.destroy().await?;
+	Ok(())
+}
+
+async fn effective_retention_period_at(
+	client: &OnlineClient<SubstrateConfig>,
+	block: u64,
+) -> Result<u32> {
+	let addr = subxt::dynamic::storage(
+		"TransactionStorage",
+		"EffectiveRetentionPeriod",
+		Vec::<Value>::new(),
+	);
+	let hash = block_hash_at(client, block).await?;
+	let value = client
+		.storage()
+		.at(hash)
+		.fetch(&addr)
+		.await?
+		.context("EffectiveRetentionPeriod not set")?;
+	Ok(value.as_type::<u32>()?)
+}
+
+/// Live `RetentionPeriod` changes keep the chain producing (#159, #829). Raising after the
+/// stored blocks were swept used to target a swept block whose body the collator still had,
+/// failing the mandatory proof inherent; lowering could skip non-empty blocks. The period in
+/// force must move towards the request one block at a time on the raise and reach it.
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_retention_period_live_change_test() -> Result<()> {
+	const TEST: &str = "para_retention_live_change";
+	const RAISED: u32 = RETENTION_PERIOD + 8;
+	const LOWERED: u32 = 4;
+	crate::utils::init_logging();
+	verify_parachain_binaries()?;
+
+	let config = build_parachain_network_config_three_relay_validators(get_para_node_args())?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+	let relay_alice = network.get_node("alice").context("Failed to get relay alice node")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
+	let collator1 = network.get_node("collator-1").context("Failed to get collator-1 node")?;
+	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+
+	let mut nonce = get_alice_nonce(collator1).await?;
+	set_retention_period_finalized(&client, RETENTION_PERIOD, nonce).await?;
+	nonce += 1;
+
+	// One item per block, then let every stored block age out of the window.
+	let (items, next_nonce) = authorize_and_store_items(
+		collator1,
+		PARACHAIN_TEST_DATA_PATTERN,
+		&[TEST_DATA_SIZE; 6],
+		nonce,
+	)
+	.await?;
+	nonce = next_nonce;
+	let last_store = items.iter().map(|i| i.block_number).max().context("no items stored")?;
+	wait_for_block_height(
+		collator1,
+		last_store + RETENTION_PERIOD as u64 + 2,
+		BLOCK_PRODUCTION_TIMEOUT_SECS,
+	)
+	.await?;
+
+	// Raise: the effective period steps up by at most one per block, and blocks keep coming.
+	set_retention_period(&client, RAISED, nonce).await?;
+	nonce += 1;
+	let raised_at = current_best_block(&client).await?.number() as u64;
+	let raised_until = raised_at + (RAISED - RETENTION_PERIOD) as u64 + 4;
+	wait_for_block_height(collator1, raised_until, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await
+		.context("block production stopped after raising RetentionPeriod")?;
+	let mut previous = effective_retention_period_at(&client, raised_at).await?;
+	for block in raised_at + 1..=raised_until {
+		let current = effective_retention_period_at(&client, block).await?;
+		assert!(
+			current == previous || current == previous + 1,
+			"effective period jumped from {previous} to {current} at block {block}"
+		);
+		previous = current;
+	}
+	assert_eq!(previous, RAISED, "effective period should reach the raised value");
+	test_log!(TEST, "Raise {} -> {} applied without halting", RETENTION_PERIOD, RAISED);
+
+	// Lower: blocks keep coming and the effective period reaches the request.
+	set_retention_period(&client, LOWERED, nonce).await?;
+	let lowered_at = current_best_block(&client).await?.number() as u64;
+	let lowered_until = lowered_at + (RAISED - LOWERED) as u64 + 4;
+	wait_for_block_height(collator1, lowered_until, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await
+		.context("block production stopped after lowering RetentionPeriod")?;
+	assert_eq!(effective_retention_period_at(&client, lowered_until).await?, LOWERED);
+	test_log!(TEST, "Lower {} -> {} applied without halting", RAISED, LOWERED);
+
+	test_log!(TEST, "=== Parachain RetentionPeriod live change PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
