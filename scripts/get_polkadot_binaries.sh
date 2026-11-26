@@ -12,7 +12,7 @@
 #   frame-omni-bencher   → frame-omni-bencher
 #   chain-spec-builder   → chain-spec-builder
 #   try-runtime          → try-runtime
-#   zombienet            → zombienet  (release-tag only; source-build not supported)
+#   zombienet            → zombie-cli (zombienet-sdk; release-tag only; source-build not supported)
 #
 # Each group reads `<GROUP>_VERSION` env (uppercase, dashes → underscores):
 #   POLKADOT_NODE_VERSION, FRAME_OMNI_BENCHER_VERSION, CHAIN_SPEC_BUILDER_VERSION,
@@ -100,8 +100,8 @@ configure_group() {
 			;;
 		zombienet)
 			VERSION_VAR="ZOMBIENET_VERSION"
-			BINARIES="zombienet"
-			RELEASE_REPO="paritytech/zombienet"
+			BINARIES="zombie-cli"
+			RELEASE_REPO="paritytech/zombienet-sdk"
 			SOURCE_URL=""
 			SOURCE_DIR=""
 			;;
@@ -146,8 +146,8 @@ release_asset_name() {
 			;;
 		zombienet)
 			case "$PLATFORM" in
-				linux-x86_64)   echo "zombienet-linux-x64" ;;
-				darwin-aarch64) echo "zombienet-macos-arm64" ;;
+				linux-x86_64)   echo "zombie-cli-x86_64-unknown-linux-musl" ;;
+				darwin-aarch64) echo "zombie-cli-aarch64-apple-darwin" ;;
 			esac
 			;;
 	esac

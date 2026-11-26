@@ -2,7 +2,7 @@
 #
 # cd <root dir>
 # ./scripts/create_bulletin_westend_spec.sh
-# POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain zombienet -p native spawn ./zombienet/bulletin-westend-local.toml
+# POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain zombie-cli spawn -p native ./zombienet/bulletin-westend-local.toml
 
 [settings]
 node_spawn_timeout = 240

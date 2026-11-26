@@ -3357,9 +3357,9 @@ async fn parachain_long_running_pruning_soak_test() -> Result<()> {
 	Ok(())
 }
 
-// Restart-with-modified-args scenarios. zombienet-sdk-0.3.13 has no API to restart a node
-// with modified args (`NetworkNode::restart()` reuses the original), so we SIGTERM the
-// collator process and re-spawn `polkadot-omni-node` directly with the new `--blocks-pruning`.
+// Restart-with-modified-args scenarios. The collator process is stopped with SIGTERM and
+// `polkadot-omni-node` is re-spawned directly with the new `--blocks-pruning`, to capture its
+// exit code and log.
 
 const PRUNE_RESTART_INITIAL_BLOCKS_TARGET: u64 = 50;
 const PRUNE_RESTART_INITIAL_BLOCKS_TIMEOUT_SECS: u64 = 600;
