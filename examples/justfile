@@ -88,7 +88,7 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
     ZOMBIENET_BIN_DIR="$(cd "$ROOT_DIR" && just binaries-zombienet)"
     POLKADOT_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot"
     POLKADOT_PARACHAIN_BINARY_PATH="$POLKADOT_BIN_DIR/polkadot-omni-node"
-    ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombienet"
+    ZOMBIENET_BIN="$ZOMBIENET_BIN_DIR/zombie-cli"
 
     # Pick spec script + zombienet TOML based on the runtime
     SPEC_ENV=()
@@ -123,9 +123,9 @@ bulletin-parachain-zombienet-start test_dir runtime="bulletin-westend-runtime":
         POLKADOT_PARACHAIN_BINARY_PATH : $POLKADOT_PARACHAIN_BINARY_PATH
     EOF
     # Zombienet resolves chain_spec_path relative to CWD, so run from repo root
-    (cd "$ROOT_DIR" && yes y | POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
+    (cd "$ROOT_DIR" && POLKADOT_BINARY_PATH=$POLKADOT_BINARY_PATH \
         POLKADOT_PARACHAIN_BINARY_PATH=$POLKADOT_PARACHAIN_BINARY_PATH \
-        $ZOMBIENET_BIN -p native spawn --dir {{ test_dir }} "$ROOT_DIR/$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
+        $ZOMBIENET_BIN spawn -p native --dir {{ test_dir }} "$ROOT_DIR/$ZOMBIENET_TOML" > {{ test_dir }}/zombienet.log 2>&1) &
 
     ZOMBIENET_PID=$!
     echo $ZOMBIENET_PID > {{ test_dir }}/zombienet.pid
@@ -648,14 +648,14 @@ run-test-authorize-and-store test_dir runtime mode="ws" ws_url="ws://127.0.0.1:1
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
         RELAY_CHAINSPEC_PATH="{{ test_dir }}/bob/cfg/westend-local.json"
-        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
+        # zombie-cli names the parachain chainspec by <para_id>.json,
         # and the containing directory by the collator name used in each toml.
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-westend-collator-2/cfg/1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-paseo-collator-2/cfg/1501.json"
         elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-polkadot-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="{{ test_dir }}/bulletin-polkadot-collator-2/cfg/1010.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
@@ -864,15 +864,15 @@ run-authorize-and-store runtime mode="ws" ipfs_mode="kubo-docker": npm-install
     # Run the script with parameters
     if [ "{{ mode }}" = "smoldot" ]; then
         # Parachain: relay chain (required) + parachain spec (optional).
-        # Zombienet names the parachain chainspec by <relay>-<para_id>.json,
+        # zombie-cli names the parachain chainspec by <para_id>.json,
         # and the containing directory by the collator name used in each toml.
         RELAY_CHAINSPEC_PATH="$TEST_DIR/bob/cfg/westend-local.json"
         if [ "{{ runtime }}" = "bulletin-westend-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-westend-collator-2/cfg/1010.json"
         elif [ "{{ runtime }}" = "bulletin-paseo-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/westend-local-1501.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-paseo-collator-2/cfg/1501.json"
         elif [ "{{ runtime }}" = "bulletin-polkadot-runtime" ]; then
-            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-polkadot-collator-2/cfg/westend-local-1010.json"
+            PARACHAIN_CHAINSPEC_PATH="$TEST_DIR/bulletin-polkadot-collator-2/cfg/1010.json"
         else
             echo "❌ Unhandled runtime: {{ runtime }}"
             exit 1
