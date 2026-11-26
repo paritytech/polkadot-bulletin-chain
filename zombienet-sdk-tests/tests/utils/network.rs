@@ -7,7 +7,9 @@ use super::config::*;
 use anyhow::{anyhow, Context, Result};
 use std::{path::PathBuf, process::Stdio, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use zombienet_sdk::{LocalFileSystem, Network, NetworkConfig, NetworkConfigBuilder};
+use zombienet_sdk::{
+	GlobalSettingsBuilder, LocalFileSystem, Network, NetworkConfig, NetworkConfigBuilder,
+};
 
 pub fn arg_value(args: &[String], name: &str) -> Option<String> {
 	let name_with_equals = format!("{name}=");
@@ -221,15 +223,22 @@ fn parachain_network_config(
 					.with_args(para_args)
 			})
 		})
-		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-			Ok(val) => gs.with_base_dir(val),
-			_ => gs,
-		})
+		.with_global_settings(global_settings)
 		.build()
 		.map_err(|errs| {
 			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
 			anyhow!("config errs: {message}")
 		})
+}
+
+/// Some tests stop and re-spawn nodes outside zombienet, which its watcher would treat as a
+/// crash and tear the network down.
+fn global_settings(gs: GlobalSettingsBuilder) -> GlobalSettingsBuilder {
+	let gs = gs.with_tear_down_on_failure(false);
+	match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
+		Ok(val) => gs.with_base_dir(val),
+		_ => gs,
+	}
 }
 
 fn retention_period_genesis_overrides(retention_period: u32) -> serde_json::Value {
@@ -295,10 +304,7 @@ pub fn build_parachain_network_config_three_collators(
 						.with_args(para_args3)
 				})
 		})
-		.with_global_settings(|gs| match std::env::var("ZOMBIENET_SDK_BASE_DIR") {
-			Ok(val) => gs.with_base_dir(val),
-			_ => gs,
-		})
+		.with_global_settings(global_settings)
 		.build()
 		.map_err(|errs| {
 			let message = errs.into_iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
