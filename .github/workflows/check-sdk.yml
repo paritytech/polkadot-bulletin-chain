@@ -13,9 +13,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
-
 jobs:
   changes:
     uses: ./.github/workflows/check-changed-files.yml
@@ -23,14 +20,19 @@ jobs:
       contents: read
       pull-requests: read
 
+  set-image:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
+    uses: ./.github/workflows/set-image.yml
+
   rust-sdk:
     name: Rust SDK
     if: needs.changes.outputs.should-run == 'true'
-    needs: [changes]
+    needs: [changes, set-image]
     runs-on: parity-default
     timeout-minutes: 30
     container:
-      image: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
       SKIP_WASM_BUILD: 1
     steps:
