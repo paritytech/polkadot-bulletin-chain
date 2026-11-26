@@ -49,6 +49,7 @@ use parachains_common::{
 };
 use polkadot_runtime_common::{BlockHashCount, SlowAdjustingFeeUpdate};
 use sp_api::impl_runtime_apis;
+use sp_authority_discovery::AuthorityId as AuthorityDiscoveryId;
 use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -136,7 +137,14 @@ pub mod migrations {
 	use super::*;
 
 	/// Unreleased migrations. Add new ones here:
-	pub type Unreleased = (cumulus_pallet_parachain_system::migration::MigrateV3ToV4<Runtime>,);
+	pub type Unreleased = (
+		cumulus_pallet_parachain_system::migration::MigrateV3ToV4<Runtime>,
+		ad_migration::AppendAuthorityDiscoveryKeys<
+			Runtime,
+			AdMigrationVersion,
+			ad_migration::KeysTranslator,
+		>,
+	);
 
 	/// Migrations/checks that do not need to be versioned and can run on every update.
 	pub type Permanent = (
@@ -168,7 +176,16 @@ pub type Executive = frame_executive::Executive<
 impl_opaque_keys! {
 	pub struct SessionKeys {
 		pub aura: Aura,
+		pub authority_discovery: AuthorityDiscovery,
 	}
+}
+
+mod ad_migration {
+	use super::*;
+	pub use parachains_common::ad_migration::*;
+	use parachains_common::impl_keys_translator;
+
+	impl_keys_translator!(SessionKeys, AuraId, AuthorityDiscoveryId);
 }
 
 #[sp_version::runtime_version]
@@ -176,7 +193,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
 	spec_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	impl_name: alloc::borrow::Cow::Borrowed("bulletin-westend"),
 	authoring_version: 1,
-	spec_version: 1_000_030,
+	spec_version: 1_000_031,
 	impl_version: 1,
 	apis: RUNTIME_API_VERSIONS,
 	transaction_version: 1,
@@ -191,6 +208,7 @@ const MAX_BLOCK_LENGTH: u32 = 10 * 1024 * 1024;
 
 parameter_types! {
 	pub const Version: RuntimeVersion = VERSION;
+	pub const AdMigrationVersion: codec::Compact<u32> = codec::Compact::<u32>(1_000_031);
 	/// 10 MiB (allows 9 MiB for normal transactions with 90% NORMAL_DISPATCH_RATIO)
 	pub RuntimeBlockLength: BlockLength =
 		BlockLength::builder()
@@ -462,6 +480,10 @@ impl pallet_aura::Config for Runtime {
 	type MaxAuthorities = ConstU32<100_000>;
 	type AllowMultipleBlocksPerSlot = ConstBool<true>;
 	type SlotDuration = ConstU64<SLOT_DURATION>;
+}
+
+impl pallet_authority_discovery::Config for Runtime {
+	type MaxAuthorities = ConstU32<1000>;
 }
 
 parameter_types! {
@@ -753,6 +775,8 @@ mod runtime {
 	// validator set.
 	#[runtime::pallet_index(25)]
 	pub type ValidatorCollators = pallet_validator_collators;
+	#[runtime::pallet_index(26)]
+	pub type AuthorityDiscovery = pallet_authority_discovery;
 
 	// XCM & related
 	#[runtime::pallet_index(30)]
@@ -886,6 +910,12 @@ impl_runtime_apis! {
 	impl sp_offchain::OffchainWorkerApi<Block> for Runtime {
 		fn offchain_worker(header: &<Block as BlockT>::Header) {
 			Executive::offchain_worker(header)
+		}
+	}
+
+	impl sp_authority_discovery::AuthorityDiscoveryApi<Block> for Runtime {
+		fn authorities() -> Vec<AuthorityDiscoveryId> {
+			pallet_authority_discovery::Pallet::<Runtime>::current_authorities().to_vec()
 		}
 	}
 
