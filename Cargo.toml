@@ -61,6 +61,7 @@ sp-block-builder = { version = "45.0.0", default-features = false }
 sp-consensus-babe = { version = "0.51.0", default-features = false }
 sp-consensus-beefy = { version = "33.0.0", default-features = false }
 sp-core = { version = "44.0.0", default-features = false }
+sp-externalities = { version = "0.35.0", default-features = false }
 sp-genesis-builder = { version = "0.26.0", default-features = false }
 sp-hop = { version = "0.5.0", default-features = false }
 sp-inherents = { version = "45.0.0", default-features = false }
@@ -70,6 +71,7 @@ sp-keystore = { version = "0.50.0", default-features = false }
 sp-offchain = { version = "45.0.0", default-features = false }
 sp-runtime = { version = "50.0.0", default-features = false }
 sp-session = { version = "47.0.0", default-features = false }
+sp-staking = { version = "47.0.0", default-features = false }
 sp-storage = { version = "25.0.0", default-features = false }
 sp-transaction-pool = { version = "45.0.0", default-features = false }
 sp-transaction-storage-proof = { version = "45.0.0", default-features = false }
@@ -114,7 +116,11 @@ pallet-aura = { version = "50.0.0", default-features = false }
 pallet-balances = { version = "52.0.0", default-features = false }
 pallet-collator-selection = { version = "32.0.0", default-features = false }
 pallet-message-queue = { version = "54.0.0", default-features = false }
+pallet-staking-async = { version = "0.18.0", default-features = false }
+pallet-staking-async-points-converter = { version = "0.2.0", default-features = false }
 pallet-utility = { version = "51.0.0", default-features = false }
+pallet-validator-collators = { version = "0.2.0", default-features = false }
+pallet-validator-set-announcer = { version = "0.2.0", default-features = false }
 pallet-xcm-benchmarks = { version = "32.0.0", default-features = false }
 
 # Substrate tooling

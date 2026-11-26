@@ -3,13 +3,9 @@
 
 //! Teleport tests for WND between Asset Hub Westend and Bulletin Westend.
 //!
-//! Bulletin Westend's XCM config accepts teleports of the relay chain native
-//! token from the relay chain and sibling system parachains (see
-//! `TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>`).
-//! Asset Hub Westend's `TrustedTeleporters` also uses `ConcreteAssetFromSystem`,
-//! which accepts any sibling parachain with a `ParaId` below 2000 as a system
-//! parachain. Both parachain ids are below 2000, so teleports are accepted on
-//! both sides in both directions.
+//! Bulletin Westend trusts the relay chain and sibling system parachains to teleport WND
+//! (`ConcreteAssetFromSystem`), so it trusts Asset Hub. Asset Hub Westend trusts sibling parachains
+//! with an id below 2000 the same way, and Bulletin Westend (para 2487) explicitly for WND.
 
 use crate::{
 	chains::{asset_hub_westend::PARA_ID as ASSET_HUB_PARA_ID, AssetHubWestend},
@@ -114,7 +110,7 @@ fn teleport_wnd_from_asset_hub_to_bulletin() {
 ///
 /// This test verifies that:
 /// 1. Alice on Bulletin can initiate a teleport to Asset Hub (both chains trust each other as
-///    system-parachain teleporters of WND).
+///    teleporters of WND).
 /// 2. Alice's balance on Bulletin decreases (WND burned locally).
 /// 3. Bob's balance on Asset Hub increases, and Asset Hub's teleport-tracking checking account
 ///    burns exactly the teleported amount.
