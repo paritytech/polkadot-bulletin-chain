@@ -152,26 +152,10 @@ cd polkadot-bulletin-chain   # make sure you are inside the project directory fo
 
 ### Download Zombienet
 
+Fetches `zombie-cli` (zombienet-sdk) at `ZOMBIENET_VERSION` from `.github/env`:
+
 ```shell
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-
-if [ "$OS" = "Linux" ]; then
-  zb_os=linux
-else
-  zb_os=macos
-fi
-
-if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
-  zb_arch=arm64
-else
-  zb_arch=x64
-fi
-
-zb_bin="zombienet-${zb_os}-${zb_arch}"
-
-wget "https://github.com/paritytech/zombienet/releases/download/v1.3.133/${zb_bin}"
-chmod +x "${zb_bin}"
+ZOMBIE_CLI="$(just binaries-zombienet)/zombie-cli"
 ```
 
 ### Run Kubo
@@ -230,7 +214,7 @@ cp target/release/polkadot-parachain ~/local_bridge_testing/bin
 ./scripts/create_bulletin_westend_spec.sh
 POLKADOT_BINARY_PATH=~/local_bridge_testing/bin/polkadot \
   POLKADOT_PARACHAIN_BINARY_PATH=~/local_bridge_testing/bin/polkadot-parachain \
-  ./$(ls zombienet-*-*) -p native spawn ./zombienet/bulletin-westend-local.toml
+  "$ZOMBIE_CLI" spawn -p native ./zombienet/bulletin-westend-local.toml
 ```
 
 #### Connect IPFS Nodes

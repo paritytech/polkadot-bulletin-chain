@@ -100,8 +100,8 @@ pub async fn spawn_parachain_network_multi_node() -> Result<zombienet_sdk::Netwo
 		.with_relaychain(|rc| {
 			rc.with_chain(relay_chain.as_str())
 				.with_default_command(relay_binary_str.as_str())
-				.with_node(|node| node.with_name("alice").validator(true).with_args(relay_args))
-				.with_node(|node| node.with_name("bob").validator(true).with_args(relay_args2))
+				.with_validator(|node| node.with_name("alice").with_args(relay_args))
+				.with_validator(|node| node.with_name("bob").with_args(relay_args2))
 		})
 		.with_parachain(|parachain| {
 			parachain
