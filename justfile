@@ -36,7 +36,7 @@ binaries-chain-spec-builder:
 binaries-try-runtime:
     @./scripts/get_polkadot_binaries.sh try-runtime
 
-# Fetch zombienet release binary (driven by ZOMBIENET_VERSION). Release-tag only.
+# Fetch zombie-cli release binary from zombienet-sdk (driven by ZOMBIENET_VERSION). Release-tag only.
 binaries-zombienet:
     @./scripts/get_polkadot_binaries.sh zombienet
 
