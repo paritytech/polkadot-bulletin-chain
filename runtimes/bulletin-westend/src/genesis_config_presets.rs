@@ -18,7 +18,7 @@ const BULLETIN_WESTEND_ED: Balance = ExistentialDeposit::get();
 pub const BULLETIN_PARA_ID: ParaId = ParaId::new(1010);
 
 fn bulletin_westend_genesis(
-	invulnerables: Vec<(AccountId, AuraId)>,
+	invulnerables: Vec<(AccountId, AuraId, AuthorityDiscoveryId)>,
 	endowed_accounts: Vec<AccountId>,
 	endowment: Balance,
 	id: ParaId,
@@ -32,18 +32,14 @@ fn bulletin_westend_genesis(
 		},
 		parachain_info: ParachainInfoConfig { parachain_id: id },
 		collator_selection: CollatorSelectionConfig {
-			invulnerables: invulnerables.iter().cloned().map(|(acc, _)| acc).collect(),
+			invulnerables: invulnerables.iter().cloned().map(|(acc, _, _)| acc).collect(),
 			candidacy_bond: BULLETIN_WESTEND_ED * 16,
 		},
 		session: SessionConfig {
 			keys: invulnerables
 				.into_iter()
-				.map(|(acc, aura)| {
-					(
-						acc.clone(),          // account id
-						acc,                  // validator id
-						SessionKeys { aura }, // session keys
-					)
+				.map(|(acc, aura, authority_discovery)| {
+					(acc.clone(), acc, SessionKeys { aura, authority_discovery })
 				})
 				.collect(),
 		},
@@ -63,8 +59,16 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 		sp_genesis_builder::LOCAL_TESTNET_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
 			vec![
-				(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into()),
-				(Sr25519Keyring::Bob.to_account_id(), Sr25519Keyring::Bob.public().into()),
+				(
+					Sr25519Keyring::Alice.to_account_id(),
+					Sr25519Keyring::Alice.public().into(),
+					Sr25519Keyring::Alice.public().into(),
+				),
+				(
+					Sr25519Keyring::Bob.to_account_id(),
+					Sr25519Keyring::Bob.public().into(),
+					Sr25519Keyring::Bob.public().into(),
+				),
 			],
 			Sr25519Keyring::well_known().map(|k| k.to_account_id()).collect(),
 			WND * 1_000_000,
@@ -78,7 +82,11 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 		),
 		sp_genesis_builder::DEV_RUNTIME_PRESET => bulletin_westend_genesis(
 			// initial collators.
-			vec![(Sr25519Keyring::Alice.to_account_id(), Sr25519Keyring::Alice.public().into())],
+			vec![(
+				Sr25519Keyring::Alice.to_account_id(),
+				Sr25519Keyring::Alice.public().into(),
+				Sr25519Keyring::Alice.public().into(),
+			)],
 			vec![
 				Sr25519Keyring::Alice.to_account_id(),
 				Sr25519Keyring::Bob.to_account_id(),

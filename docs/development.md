@@ -23,7 +23,7 @@ Five env vars in `.github/env` pin the version of each group:
 | `FRAME_OMNI_BENCHER_VERSION` | `frame-omni-bencher` |
 | `CHAIN_SPEC_BUILDER_VERSION` | `chain-spec-builder` |
 | `TRY_RUNTIME_VERSION` | `try-runtime` |
-| `ZOMBIENET_VERSION` | `zombienet` (release-tag only) |
+| `ZOMBIENET_VERSION` | `zombie-cli` from zombienet-sdk (release-tag only) |
 
 Each value is either:
 - **a release tag** (e.g. `polkadot-stable2606`) — script downloads the prebuilt asset for your platform (Linux x86_64 or macOS arm64) and verifies its `.sha256` companion file, OR
@@ -43,7 +43,7 @@ just binaries-polkadot              # fetch / build polkadot + workers + omni-no
 just binaries-chain-spec-builder    # fetch / build chain-spec-builder
 just binaries-bencher               # frame-omni-bencher
 just binaries-try-runtime           # try-runtime CLI
-just binaries-zombienet             # zombienet (release-only)
+just binaries-zombienet             # zombie-cli (release-only)
 just binaries-all                   # cold-cache convenience: every group
 
 just chain-spec westend             # build runtime + emit zombienet/bulletin-westend-spec.json

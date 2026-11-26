@@ -205,6 +205,7 @@ jobs:
           name: failed-zombienet-logs-${{ matrix.runtime.name }}
           path: |
             ${{ env.TEST_DIR }}/*.log
+            ${{ env.TEST_DIR }}/*/*.log
 
   integration-tests-complete:
     name: All integration tests passed

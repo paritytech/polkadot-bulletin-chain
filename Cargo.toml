@@ -113,6 +113,7 @@ xcm-runtime-apis = { version = "0.18.0", default-features = false }
 
 # Additional FRAME pallets used by westend runtime
 pallet-aura = { version = "50.0.0", default-features = false }
+pallet-authority-discovery = { version = "51.0.0", default-features = false }
 pallet-balances = { version = "52.0.0", default-features = false }
 pallet-collator-selection = { version = "32.0.0", default-features = false }
 pallet-message-queue = { version = "54.0.0", default-features = false }
