@@ -16,20 +16,18 @@ use chains::{AssetHubWestend, Westend};
 use cumulus_primitives_core::ParaId;
 use emulated_integration_tests_common::{
 	accounts::{self, ALICE, BOB},
-	impl_accounts_helpers_for_parachain, impl_assert_events_helpers_for_parachain,
+	collators, impl_accounts_helpers_for_parachain, impl_assert_events_helpers_for_parachain,
 	impl_xcm_helpers_for_parachain,
 	xcm_emulator::decl_test_parachains,
 };
 use frame_support::traits::OnInitialize;
-use parachains_common::{AuraId, Balance};
-use sp_core::sr25519;
-use sp_keyring::Sr25519Keyring;
+use parachains_common::Balance;
 use xcm_emulator::{
 	decl_test_networks, decl_test_sender_receiver_accounts_parameter_types, Parachain,
 };
 
 /// Bulletin Westend parachain ID.
-pub const BULLETIN_PARA_ID: u32 = 1010;
+pub const BULLETIN_PARA_ID: u32 = testnet_parachains_constants::westend::locations::BULLETIN_ID;
 
 /// Initial balance for test accounts.
 pub const INITIAL_BALANCE: Balance = 100_000_000_000_000; // 100 WND
@@ -96,21 +94,18 @@ pub fn bulletin_genesis() -> sp_runtime::Storage {
 			..Default::default()
 		},
 		collator_selection: bulletin_westend_runtime::CollatorSelectionConfig {
-			invulnerables: vec![],
+			invulnerables: collators::invulnerables().into_iter().map(|(acc, _, _)| acc).collect(),
 			candidacy_bond: 0,
 			desired_candidates: 0,
 		},
 		session: bulletin_westend_runtime::SessionConfig {
-			keys: vec![(
-				Sr25519Keyring::Alice.to_account_id(),
-				Sr25519Keyring::Alice.to_account_id(),
-				SessionKeys { aura: AuraId::from(sr25519::Public::from_raw([0u8; 32])) },
-			)],
+			keys: collators::invulnerables()
+				.into_iter()
+				.map(|(acc, aura, _)| (acc.clone(), acc, SessionKeys { aura }))
+				.collect(),
 			..Default::default()
 		},
-		aura: bulletin_westend_runtime::AuraConfig {
-			authorities: vec![AuraId::from(sr25519::Public::from_raw([0u8; 32]))],
-		},
+		aura: Default::default(),
 		aura_ext: Default::default(),
 		polkadot_xcm: bulletin_westend_runtime::PolkadotXcmConfig {
 			safe_xcm_version: Some(xcm::latest::VERSION),
