@@ -116,12 +116,14 @@ test-zombienet-auto-renew runtime="westend" group="all":
         mixed-2)
             filter_args=(--exact \
                 auto_renew_storage::parachain_auto_renew_many_items_prune_eviction_test \
-                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test)
+                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test \
+                auto_renew_storage::parachain_auto_renew_pruning_equals_retention_test)
             ;;
         mixed-3)
             filter_args=(--exact \
                 auto_renew_storage::parachain_check_proof_fails_under_pruning_test \
-                auto_renew_storage::parachain_on_initialize_cleanup_test)
+                auto_renew_storage::parachain_on_initialize_cleanup_test \
+                auto_renew_storage::parachain_auto_renew_reference_handoff_without_finality_lag_test)
             ;;
         *)
             filter_args=("{{group}}")
