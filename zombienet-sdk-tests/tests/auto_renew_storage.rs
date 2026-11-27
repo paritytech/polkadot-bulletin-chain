@@ -3595,7 +3595,9 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 const STORING_RESTART_BLOCKS_PRUNING: u32 = PRUNE_RESTART_RETENTION_PERIOD;
 const STORING_BLOCKS_BEFORE_RESTART: u64 = 3 * PRUNE_RESTART_RETENTION_PERIOD as u64;
 const STORING_BLOCKS_AFTER_RESTART: u64 = 3 * PRUNE_RESTART_RETENTION_PERIOD as u64;
-const STORING_AUTH_TX_SLOTS: u32 = 500;
+/// About three stores per 6 s block, so one is always pending when a block is built.
+const STORE_INTERVAL_MS: u64 = 2000;
+const STORING_AUTH_TX_SLOTS: u32 = 1000;
 /// The test network has a single collator, so a stall this long means it stopped authoring.
 const BLOCK_STALL_TIMEOUT_SECS: u64 = 90;
 const RESPAWN_RPC_TIMEOUT_SECS: u64 = 120;
@@ -3677,10 +3679,12 @@ async fn alice_next_nonce(rpc: &subxt::backend::rpc::RpcClient) -> Result<u64> {
 	Ok(rpc.request("system_accountNextIndex", rpc_params![alice]).await?)
 }
 
-/// Submit one `store` per new best block until at least `min_blocks` blocks have been seen
-/// and the best block is at least `min_height`. Fails if no new block arrives within
+/// Submit a `store` every [`STORE_INTERVAL_MS`] until at least `min_blocks` best blocks have
+/// been seen and the best block is at least `min_height`. A timer rather than one store per
+/// best-block notification: notifications can arrive after the next block is built, which
+/// leaves that block without a store. Fails if no new block arrives within
 /// [`BLOCK_STALL_TIMEOUT_SECS`]. Returns the next nonce and the last best block seen.
-async fn store_each_block(
+async fn store_continuously(
 	client: &OnlineClient<SubstrateConfig>,
 	mut nonce: u64,
 	min_blocks: u64,
@@ -3689,42 +3693,50 @@ async fn store_each_block(
 	label: &str,
 ) -> Result<(u64, u64)> {
 	let mut sub = client.blocks().subscribe_best().await?;
+	let mut tick = tokio::time::interval(std::time::Duration::from_millis(STORE_INTERVAL_MS));
+	tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+	let stall = std::time::Duration::from_secs(BLOCK_STALL_TIMEOUT_SECS);
 	let (mut last, mut seen) = (0u64, 0u64);
+	let mut last_progress = std::time::Instant::now();
 	loop {
-		let block = tokio::time::timeout(
-			std::time::Duration::from_secs(BLOCK_STALL_TIMEOUT_SECS),
-			sub.next(),
-		)
-		.await
-		.map_err(|_| {
-			anyhow::anyhow!(
-				"[{label}] no new best block for {BLOCK_STALL_TIMEOUT_SECS}s after block {last}"
-			)
-		})?
-		.ok_or_else(|| anyhow::anyhow!("[{label}] best-block subscription ended"))??;
-		let n = block.number() as u64;
-		if n <= last {
-			continue;
-		}
-		last = n;
-		seen += 1;
-
-		let data =
-			generate_test_data(TEST_DATA_SIZE, format!("RESTART_STORE_{:06}_", *seq).as_bytes());
-		let call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
-		let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
-		client
-			.tx()
-			.sign_and_submit(&call, &dev::alice(), params)
-			.await
-			.with_context(|| format!("[{label}] store at block {n} (nonce {nonce})"))?;
-		nonce += 1;
-		*seq += 1;
-		if n.is_multiple_of(5) {
-			tracing::info!("[{label}] block {n}: {} stores submitted", *seq);
-		}
-		if seen >= min_blocks && n >= min_height {
-			return Ok((nonce, n));
+		tokio::select! {
+			_ = tick.tick() => {
+				if last_progress.elapsed() > stall {
+					anyhow::bail!(
+						"[{label}] no new best block for {BLOCK_STALL_TIMEOUT_SECS}s after block {last}"
+					);
+				}
+				let data = generate_test_data(
+					TEST_DATA_SIZE,
+					format!("RESTART_STORE_{:06}_", *seq).as_bytes(),
+				);
+				let call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
+				let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+				client
+					.tx()
+					.sign_and_submit(&call, &dev::alice(), params)
+					.await
+					.with_context(|| format!("[{label}] store after block {last} (nonce {nonce})"))?;
+				nonce += 1;
+				*seq += 1;
+			},
+			block = sub.next() => {
+				let block =
+					block.ok_or_else(|| anyhow::anyhow!("[{label}] best-block subscription ended"))??;
+				let n = block.number() as u64;
+				if n <= last {
+					continue;
+				}
+				last = n;
+				seen += 1;
+				last_progress = std::time::Instant::now();
+				if n.is_multiple_of(5) {
+					tracing::info!("[{label}] block {n}: {} stores submitted", *seq);
+				}
+				if seen >= min_blocks && n >= min_height {
+					return Ok((nonce, n));
+				}
+			},
 		}
 	}
 }
@@ -3817,7 +3829,7 @@ async fn parachain_restart_archive_to_pruning_while_storing_test() -> Result<()>
 	.await?;
 	let phase1_start = current_best_block(&client).await?.number() as u64;
 	let mut seq = 0u64;
-	let (_, last_seen_before) = store_each_block(
+	let (_, last_seen_before) = store_continuously(
 		&client,
 		nonce + 1,
 		STORING_BLOCKS_BEFORE_RESTART,
@@ -3871,7 +3883,7 @@ async fn parachain_restart_archive_to_pruning_while_storing_test() -> Result<()>
 
 	// Phase 3: keep storing every block; the single collator must keep authoring.
 	let nonce = alice_next_nonce(&rpc).await?;
-	let (_, last_seen_after) = store_each_block(
+	let (_, last_seen_after) = store_continuously(
 		&client,
 		nonce,
 		STORING_BLOCKS_AFTER_RESTART,
