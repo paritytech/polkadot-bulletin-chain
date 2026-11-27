@@ -138,7 +138,7 @@ const DEFAULT_TX_TIMEOUT_MS = 180_000; // 180 seconds or 30 blocks
 
 const TX_MODE_CONFIG = {
     [TX_MODE_IN_BLOCK]: {
-        match: (ev) => ev.type === "txBestBlocksState" && ev.found,
+        match: (ev) => ev.type === "inBestBlock",
         log: (txName, ev) => `📦 ${txName} included in block: ${ev.block.hash}`,
     },
     [TX_MODE_IN_POOL]: {
@@ -169,7 +169,7 @@ export async function waitForTransaction(tx, signer = null, txName, txMode = TX_
         const bareTx = await tx.getBareTx();
         observable = client.submitAndWatch(bareTx);
     } else {
-        observable = tx.signSubmitAndWatch(signer, txOpts);
+        observable = tx.createSubmitAndWatch(signer, txOpts);
     }
 
     return new Promise((resolve, reject) => {

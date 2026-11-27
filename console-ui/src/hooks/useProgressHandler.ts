@@ -16,8 +16,8 @@ export function useProgressHandler(
     (event: ProgressEvent) => {
       console.log("SDK progress:", event);
       switch (event.type) {
-        case TxStatus.Signed:
-          setTxStatus("Transaction signed...");
+        case TxStatus.Created:
+          setTxStatus("Transaction created...");
           break;
         case TxStatus.Broadcasted:
           setTxStatus("Broadcasting to network...");

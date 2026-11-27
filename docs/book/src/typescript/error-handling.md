@@ -122,11 +122,8 @@ const result = await client
   .store(data)
   .withCallback((event) => {
     switch (event.type) {
-      case TxStatus.Signed:
-        console.log(`Transaction signed: ${event.txHash}`)
-        break
-      case TxStatus.Validated:
-        console.log('Transaction validated and added to pool')
+      case TxStatus.Created:
+        console.log(`Transaction created: ${event.txHash}`)
         break
       case TxStatus.Broadcasted:
         console.log('Transaction broadcast to peers')
@@ -153,8 +150,7 @@ const result = await client
 
 | Event | Value | Fields | Description |
 |---|---|---|---|
-| `Signed` | `"signed"` | `txHash`, `chunkIndex?` | Transaction signed and ready |
-| `Validated` | `"validated"` | `chunkIndex?` | Validated by the node |
+| `Created` | `"created"` | `txHash`, `chunkIndex?` | Transaction created and ready |
 | `Broadcasted` | `"broadcasted"` | `chunkIndex?` | Broadcast to network peers |
 | `InBlock` | `"in_block"` | `blockHash`, `blockNumber`, `txIndex?`, `chunkIndex?` | Included in a best block |
 | `Finalized` | `"finalized"` | `blockHash`, `blockNumber`, `txIndex?`, `chunkIndex?` | Finalized (irreversible) |

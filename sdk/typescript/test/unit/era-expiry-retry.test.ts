@@ -32,7 +32,7 @@ const invalidError = (type: string) =>
 const setup = () => {
   const observers: Observer[] = []
   const makeTx = () => ({
-    signSubmitAndWatch: () => ({
+    createSubmitAndWatch: () => ({
       subscribe: (obs: Observer) => {
         observers.push(obs)
         return { unsubscribe: () => {} }
@@ -40,7 +40,6 @@ const setup = () => {
     }),
     getBareTx: async () => new Uint8Array(),
     decodedCall: {},
-    signAndSubmit: async () => ({ txHash: "0x01" }),
   })
   const api = {
     tx: {
@@ -71,8 +70,7 @@ describe("mortality era expiry retry", () => {
     await vi.waitFor(() => expect(observers).toHaveLength(2))
     observers[1].next({
       txHash: "0x01",
-      type: "txBestBlocksState",
-      found: true,
+      type: "inBestBlock",
       block: { hash: "0xbe57", number: 10, index: 0 },
     })
 

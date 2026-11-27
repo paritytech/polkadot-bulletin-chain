@@ -13,9 +13,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  CI_IMAGE: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
-
 jobs:
   changes:
     uses: ./.github/workflows/check-changed-files.yml
@@ -23,21 +20,26 @@ jobs:
       contents: read
       pull-requests: read
 
+  set-image:
+    if: needs.changes.outputs.should-run == 'true'
+    needs: [changes]
+    uses: ./.github/workflows/set-image.yml
+
   rust-sdk:
     name: Rust SDK
     if: needs.changes.outputs.should-run == 'true'
-    needs: [changes]
+    needs: [changes, set-image]
     runs-on: parity-default
     timeout-minutes: 30
     container:
-      image: "paritytech/ci-unified:bullseye-1.88.0-2025-06-27-v202507112050"
+      image: ${{ needs.set-image.outputs.CI_IMAGE }}
     env:
       SKIP_WASM_BUILD: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: "bulletin-cache-sdk-rust"
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -63,7 +65,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm

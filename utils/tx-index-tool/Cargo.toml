@@ -37,7 +37,7 @@ fdlimit = { workspace = true }
 
 # `trace --rpc-url` cross-checks the database against chain state. Metadata-driven, so events
 # and calls come back named rather than as raw bytes. Same version the zombienet tests use.
-subxt = { version = "0.43", default-features = false, features = ["jsonrpsee", "native"] }
+subxt = { version = "0.44", default-features = false, features = ["jsonrpsee", "native"] }
 # Only to drive subxt; `chain.rs` builds a current-thread runtime so the CLI stays sync.
 tokio = { version = "1", features = ["rt", "time"] }
 

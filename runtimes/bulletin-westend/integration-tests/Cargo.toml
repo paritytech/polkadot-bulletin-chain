@@ -10,11 +10,19 @@ publish = false
 [dependencies]
 codec = { workspace = true, default-features = true }
 frame-support = { workspace = true, default-features = true }
+pallet-authorship = { workspace = true, default-features = true }
 pallet-message-queue = { workspace = true, default-features = true }
+pallet-session = { workspace = true, default-features = true }
+pallet-staking-async = { workspace = true, default-features = true }
+pallet-staking-async-points-converter = { workspace = true, default-features = true }
+pallet-validator-set-announcer = { workspace = true, default-features = true }
 pallet-xcm = { workspace = true, default-features = true }
 sp-core = { workspace = true, default-features = true }
+sp-externalities = { workspace = true, default-features = true }
 sp-keyring = { workspace = true, default-features = true }
+sp-keystore = { workspace = true, default-features = true }
 sp-runtime = { workspace = true, default-features = true }
+sp-staking = { workspace = true, default-features = true }
 xcm = { workspace = true, default-features = true }
 xcm-executor = { workspace = true, default-features = true }
 
@@ -40,19 +48,27 @@ parachains-common = { workspace = true, default-features = true }
 bulletin-westend-runtime = { workspace = true, default-features = true }
 cumulus-primitives-core = { workspace = true, default-features = true }
 pallet-bulletin-transaction-storage = { workspace = true, default-features = true }
+pallet-validator-collators = { workspace = true, default-features = true }
 
 [features]
 runtime-benchmarks = [
 	"asset-hub-westend-runtime/runtime-benchmarks",
 	"bulletin-westend-runtime/runtime-benchmarks",
 	"cumulus-primitives-core/runtime-benchmarks",
+	"emulated-integration-tests-common/runtime-benchmarks",
 	"frame-support/runtime-benchmarks",
 	"pallet-bulletin-transaction-storage/runtime-benchmarks",
 	"pallet-message-queue/runtime-benchmarks",
+	"pallet-session/runtime-benchmarks",
+	"pallet-staking-async-points-converter/runtime-benchmarks",
+	"pallet-staking-async/runtime-benchmarks",
+	"pallet-validator-collators/runtime-benchmarks",
+	"pallet-validator-set-announcer/runtime-benchmarks",
 	"pallet-xcm/runtime-benchmarks",
 	"parachains-common/runtime-benchmarks",
 	"polkadot-primitives/runtime-benchmarks",
 	"sp-runtime/runtime-benchmarks",
+	"sp-staking/runtime-benchmarks",
 	"westend-runtime-constants/runtime-benchmarks",
 	"westend-runtime/runtime-benchmarks",
 	"xcm-executor/runtime-benchmarks",
@@ -61,9 +77,16 @@ runtime-benchmarks = [
 try-runtime = [
 	"asset-hub-westend-runtime/try-runtime",
 	"bulletin-westend-runtime/try-runtime",
+	"emulated-integration-tests-common/try-runtime",
 	"frame-support/try-runtime",
+	"pallet-authorship/try-runtime",
 	"pallet-bulletin-transaction-storage/try-runtime",
 	"pallet-message-queue/try-runtime",
+	"pallet-session/try-runtime",
+	"pallet-staking-async-points-converter/try-runtime",
+	"pallet-staking-async/try-runtime",
+	"pallet-validator-collators/try-runtime",
+	"pallet-validator-set-announcer/try-runtime",
 	"pallet-xcm/try-runtime",
 	"parachains-common/try-runtime",
 	"sp-runtime/try-runtime",

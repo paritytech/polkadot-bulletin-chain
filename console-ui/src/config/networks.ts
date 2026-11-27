@@ -27,6 +27,8 @@ export interface MonitoringLinks {
   sentryChainProbeSpan?: string;
   /** Substrate telemetry view. */
   telemetry?: string;
+  /** Metrics that collators opt in to share (HOP, Bitswap, peers). */
+  collatorMetrics?: string;
   /** Block explorer (Subscan etc.). */
   explorer?: string;
   /** Operational runbook. */
@@ -109,6 +111,10 @@ function grafanaLink(chain: string, node?: string): string {
   const params = [`var-chain=${chain}`, GRAFANA_COMMON_QS];
   if (node) params.push(`var-node=${node}`);
   return `${GRAFANA_OPERATION_HEALTH}?${params.join("&")}`;
+}
+
+function collatorMetricsLink(chain: string): string {
+  return `https://bulletin-metrics.security.parity.io/d/bulletin-collators/bulletin-collators?var-chain=${chain}`;
 }
 
 const GRAFANA_BITSWAP =
@@ -290,6 +296,7 @@ export const BULLETIN_NETWORKS: Record<string, Network> = {
       sentryChunkUploadSpan: SENTRY_CHUNK_UPLOAD_SPAN,
       sentryChainProbeSpan: SENTRY_CHAIN_PROBE_SPAN,
       telemetry: TELEMETRY_POLKADOT,
+      collatorMetrics: collatorMetricsLink("bulletin-polkadot"),
     },
   },
   custom: {

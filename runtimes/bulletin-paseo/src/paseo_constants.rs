@@ -62,9 +62,15 @@ pub mod consensus {
 
 	/// Parameters enabling async backing functionality.
 	pub mod async_backing {
+		/// Build one relay block behind the tip so a depth-1 relay fork cannot orphan parachain
+		/// blocks.
+		pub const RELAY_PARENT_OFFSET: u32 = 1;
 		/// Maximum number of blocks simultaneously accepted by the Runtime, not yet included into
-		/// the relay chain.
-		pub const UNINCLUDED_SEGMENT_CAPACITY: u32 = 3;
+		/// the relay chain. Inclusion is observed at the relay parent, `RELAY_PARENT_OFFSET` relay
+		/// blocks behind the tip, so `BLOCK_PROCESSING_VELOCITY * RELAY_PARENT_OFFSET` more blocks
+		/// are still pending.
+		pub const UNINCLUDED_SEGMENT_CAPACITY: u32 =
+			(3 + RELAY_PARENT_OFFSET) * super::BLOCK_PROCESSING_VELOCITY;
 	}
 }
 

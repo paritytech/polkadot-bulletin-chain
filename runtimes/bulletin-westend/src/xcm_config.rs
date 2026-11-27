@@ -6,6 +6,7 @@ use super::{
 	ParachainSystem, PolkadotXcm, Runtime, RuntimeCall, RuntimeEvent, RuntimeHoldReason,
 	RuntimeOrigin, TransactionByteFee, WeightToFee, XcmpQueue,
 };
+use alloc::{vec, vec::Vec};
 use frame_support::{
 	parameter_types,
 	traits::{
@@ -26,7 +27,7 @@ use parachains_common::{
 use polkadot_parachain_primitives::primitives::Sibling;
 use polkadot_runtime_common::xcm_sender::ExponentialPrice;
 use sp_runtime::traits::AccountIdConversion;
-use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID};
+use westend_runtime_constants::system_parachain::{ASSET_HUB_ID, COLLECTIVES_ID, PEOPLE_ID};
 use xcm::latest::{prelude::*, WESTEND_GENESIS_HASH};
 use xcm_builder::{
 	AccountId32Aliases, AliasChildLocation, AliasOriginRootUsingFilter,
@@ -119,11 +120,20 @@ impl Contains<Location> for ParentOrParentsPlurality {
 	}
 }
 
-/// Filter that matches any sibling parachain origin.
-pub struct IsSiblingParachain;
-impl Contains<Location> for IsSiblingParachain {
+parameter_types! {
+	/// Sibling parachains allowed to authorize storage via XCM. Storage-backed so root can
+	/// update it via `system.set_storage` without a runtime upgrade.
+	pub storage AllowedParachainIds: Vec<u32> = vec![PEOPLE_ID];
+}
+
+/// Filter matching sibling parachain origins listed in [`AllowedParachainIds`].
+pub struct IsAuthorizerParachain;
+impl Contains<Location> for IsAuthorizerParachain {
 	fn contains(location: &Location) -> bool {
-		matches!(location.unpack(), (1, [Parachain(_)]))
+		match location.unpack() {
+			(1, [Parachain(id)]) => AllowedParachainIds::get().contains(id),
+			_ => false,
+		}
 	}
 }
 
@@ -149,14 +159,17 @@ pub type Barrier = TrailingSetTopicAsId<(
 			AllowTopLevelPaidExecutionFrom<Everything>,
 			// Parent, its pluralities (i.e. governance bodies), Fellows plurality,
 			// and AssetHub get free execution.
-			AllowExplicitUnpaidExecutionFrom<(
-				ParentOrParentsPlurality,
-				FellowsPlurality,
-				Equals<GovernanceLocation>,
-				// Allow any sibling parachain for unpaid execution, since there
-				// are multiple People testnet chains.
-				IsSiblingParachain,
-			)>,
+			AllowExplicitUnpaidExecutionFrom<
+				(
+					ParentOrParentsPlurality,
+					FellowsPlurality,
+					Equals<GovernanceLocation>,
+					IsAuthorizerParachain,
+				),
+				// Barriers run before any fee is taken: this must stay computation-only.
+				// Do not pass `TrustedAliasers` here.
+				CheapTrustedAliasers,
+			>,
 			// Subscriptions for version tracking are OK.
 			AllowSubscriptionsFrom<ParentRelayOrSiblingParachains>,
 			// HRMP notifications from the relay chain are OK.
@@ -183,18 +196,26 @@ pub type WaivedLocations = (
 /// Trust the relay chain and other system parachains to teleport the relay chain native token.
 pub type TrustedTeleporters = ConcreteAssetFromSystem<TokenRelayLocation>;
 
-/// Defines origin aliasing rules for this chain.
+/// Aliasing rules that are pure computation, so the `AllowExplicitUnpaidExecutionFrom` barrier can
+/// evaluate them before any fee is charged.
+///
+/// Do not add storage-reading filters here: the barrier calls this once per `AliasOrigin` (up to 5)
+/// on keys the message chooses, and may then reject the message without taking a fee. That is why
+/// `AuthorizedAliasers` belongs to [`TrustedAliasers`] alone.
 ///
 /// - Allow any origin to alias into a child sub-location (equivalent to DescendOrigin),
 /// - Allow same accounts to alias into each other across system chains,
-/// - Allow AssetHub root to alias into anything,
-/// - Allow origins explicitly authorized to alias into target location.
-pub type TrustedAliasers = (
+/// - Allow AssetHub root to alias into anything.
+pub type CheapTrustedAliasers = (
 	AliasChildLocation,
 	AliasAccountId32FromSiblingSystemChain,
 	AliasOriginRootUsingFilter<AssetHubLocation, Everything>,
-	AuthorizedAliasers<Runtime>,
 );
+
+/// Defines origin aliasing rules for this chain, used by `xcm_executor::Config::Aliasers` at
+/// execution time: everything in [`CheapTrustedAliasers`], plus origins explicitly authorized by
+/// the alias target location.
+pub type TrustedAliasers = (CheapTrustedAliasers, AuthorizedAliasers<Runtime>);
 
 pub struct XcmConfig;
 impl xcm_executor::Config for XcmConfig {
