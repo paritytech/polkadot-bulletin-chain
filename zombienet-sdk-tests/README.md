@@ -46,14 +46,6 @@ PARACHAIN_ID=2000 just chain-spec westend
 The all-in-one `just test-zombienet-auto-renew` / `just test-zombienet-sync` recipes
 will fetch the binaries and generate the chain spec for you — see "Running tests" below.
 
-### LDB tests (optional)
-
-The `parachain_ldb_storage_verification_test` inspects RocksDB directly and requires the `ldb` tool:
-
-```bash
-export ROCKSDB_LDB_PATH=/path/to/ldb
-```
-
 ## Running tests
 
 Tests are gated behind feature flags (`zombie-sync-tests`, `zombie-auto-renew-tests`,
@@ -103,7 +95,7 @@ are resource-intensive.
 | `parachain_full_sync_with_pruning_test` | full | yes | Sync fails (pruned blocks) |
 | `parachain_full_sync_relay_warp_sync_test` | full + warp (relay) | no | Relay warp syncs, parachain full syncs, bitswap works |
 | `parachain_rpc_node_bitswap_test` | full | no | RPC node syncs and serves data via bitswap |
-| `parachain_ldb_storage_verification_test` | - | yes | Verifies col11 refcounting and data expiration |
+| `parachain_storage_verification_test` | - | yes | Reads col11 and `BODY_INDEX` through `tx-index-tool`: refcounting, value integrity and data expiration |
 | `parachain_hop_promotion_bitswap_test` | full | no | HOP `hop_submit` → promote → `ProofChecked` covers the blob, bitswap returns matching content via the published CID. Pre-promotion bitswap probe asserts the blob is not yet served. Also asserts the `substrate_hop_*` metrics and `HopRuntimeApi`. |
 | `parachain_hop_unpromoted_expiry_test` | - | no | A pooled blob whose account authorization expires before the promotion window ages out unpromoted and is counted in `substrate_hop_pool_removed_total{reason="expired_unpromoted"}`. |
 | `parachain_hop_pool_integrity_test` | - | no | `substrate_hop_*` counts malformed, duplicate, already-claimed, rate-limited and over-capacity requests, a corrupt blob file and an orphan `.meta` file under their reason labels. |
@@ -117,7 +109,6 @@ are resource-intensive.
 | `POLKADOT_RELAY_BINARY_PATH` | Relay chain binary | `polkadot` |
 | `POLKADOT_PARACHAIN_BINARY_PATH` | Parachain node binary | `polkadot-omni-node` |
 | `PARACHAIN_CHAIN_SPEC_PATH` | Parachain chain spec JSON | `./zombienet/bulletin-westend-spec.json` |
-| `ROCKSDB_LDB_PATH` | RocksDB `ldb` tool (LDB tests only) | `rocksdb_ldb` |
 
 ### Parachain network topology
 
@@ -150,7 +141,7 @@ PARACHAIN_CHAIN_ID=bulletin-rococo \
 - **Warp sync** gap fill downloads block bodies (`HEADER|BODY|JUSTIFICATION`) but does not execute them. Bodies go to the BODY column, not TRANSACTIONS -- synced nodes return `DONT_HAVE` via bitswap.
 - **Block pruning** deletes historical blocks. When all peers prune, fast/full sync cannot complete (no blocks to download).
 - **Warp sync with pruning** still completes because it uses GRANDPA warp proofs instead of downloading historical blocks.
-- **LDB tests** verify RocksDB column 11 (transaction storage): refcount increments on duplicate stores, data expires after the retention period.
+- **On-disk assertions** read RocksDB columns 11 (`TRANSACTION`) and 12 (`BODY_INDEX`) of a running node through [`tx-index-tool`](../utils/tx-index-tool): refcount increments on duplicate stores, values hash to their keys, data expires after the retention period.
 
 ## CI
 

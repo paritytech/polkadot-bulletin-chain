@@ -37,7 +37,7 @@ pub async fn wait_for_in_best_block(
 	anyhow::bail!("Transaction stream ended without InBestBlock status")
 }
 
-/// Use for LDB tests where database state must be consistent.
+/// Use for on-disk tests where database state must be consistent.
 pub async fn wait_for_finalized(
 	mut progress: subxt::tx::TxProgress<SubstrateConfig, OnlineClient<SubstrateConfig>>,
 ) -> Result<(subxt::utils::H256, subxt::blocks::ExtrinsicEvents<SubstrateConfig>)> {
@@ -296,7 +296,7 @@ pub async fn authorize_and_store_data(
 	Ok((block_number, nonce))
 }
 
-/// Returns (block_number, next_nonce). Waits for finalization (for LDB / sync tests where
+/// Returns (block_number, next_nonce). Waits for finalization (for on-disk / sync tests where
 /// the captured block number must be on the canonical chain *before* the test proceeds).
 pub async fn authorize_and_store_data_finalized(
 	node: &zombienet_sdk::NetworkNode,
