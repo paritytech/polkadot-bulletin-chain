@@ -14,8 +14,8 @@ use std::{
 };
 pub use tx_index_tool::DbHash;
 use tx_index_tool::{
-	dry_run, inspect_block, list_entries, open_database, trace_hash, verify_seams, KeyValueDB,
-	ListOptions, OpenMode, StorageEntry, Verdict,
+	dry_run, inspect_block, list_entries, open_database, verify_seams, KeyValueDB, ListOptions,
+	OpenMode, StorageEntry,
 };
 
 /// How long the polling assertions wait for the expected state to appear.
@@ -387,48 +387,6 @@ fn check_items_present(
 			Ok((hash, entry.counter.unwrap_or(0), entry.referring_blocks))
 		})
 		.collect()
-}
-
-/// Assert the entry has become a *dangling reference*: alive blocks still name it in their
-/// `BODY_INDEX`, but no value is stored under it.
-///
-/// This is what a renewal leaves behind when the previous reference was released before the
-/// renewal took its own: `store_or_reference` finds no local copy, falls through to
-/// `tx.reference(..)`, and that is a no-op against a counter pruning already removed — while
-/// the body index records the reference regardless. Nothing recovers from it, because a renew
-/// extrinsic carries only the hash. The chain keeps producing until the proof for one of those
-/// blocks comes due.
-///
-/// Returns the blocks left referencing nothing.
-pub async fn assert_dangling(
-	db_path: &Path,
-	tag: &str,
-	label: &str,
-	hash: DbHash,
-) -> Result<Vec<u32>> {
-	// Only the secondary catching up is being waited on — the caller has already awaited the
-	// renewal block — so this uses the short bound, not the pruning-sized one.
-	let deadline = std::time::Instant::now() + CATCH_UP_TIMEOUT;
-	loop {
-		let (verdict, blocks) = with_db(db_path, tag, |db| {
-			let report = trace_hash(db, hash)?;
-			Ok((report.verdict(), report.referring_blocks()))
-		})?;
-		if matches!(verdict, Verdict::Dangling { .. }) {
-			tracing::info!(
-				"✓ {label}: {hash:?} is a dangling reference — block(s) {blocks:?} reference a \
-				 value that is no longer stored",
-			);
-			return Ok(blocks);
-		}
-		if std::time::Instant::now() >= deadline {
-			anyhow::bail!(
-				"{label}: expected {hash:?} to become a dangling reference within \
-				 {CATCH_UP_TIMEOUT:?}; it is {verdict:?} with referring block(s) {blocks:?}",
-			);
-		}
-		tokio::time::sleep(POLL_INTERVAL).await;
-	}
 }
 
 /// Assert an entry is gone: no value, no counter row.

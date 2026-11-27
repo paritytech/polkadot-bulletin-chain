@@ -7,7 +7,7 @@
 use crate::{
 	test_log,
 	utils::{
-		arg_value, assert_absent, assert_block_references, assert_dangling, assert_items_healthy,
+		arg_value, assert_absent, assert_block_references, assert_items_healthy,
 		assert_no_refcount_drift, assert_proof_checked_at, assert_referrers,
 		assert_storage_healthy, authorize_account_via_sudo, authorize_account_via_sudo_finalized,
 		authorize_and_store_data, authorize_and_store_items, blake2_256, block_hash_at,
@@ -71,7 +71,7 @@ const HALT_DETECTION_TIMEOUT_SECS: u64 = 120;
 /// on-disk assertion reads them.
 const RENEW_FINALITY_TIMEOUT_SECS: u64 = 120;
 
-/// `--blocks-pruning` set equal to `RetentionPeriod`, shared by the two tests below — the
+/// `--blocks-pruning` set equal to `RetentionPeriod`, used by the test below — the
 /// configuration a node is most likely to be given, since `RP` is the number an operator sees.
 ///
 /// Auto-renewal fires at `RP + 1` — `on_initialize` sweeps `Transactions[n - RP - 1]` and that
@@ -90,10 +90,14 @@ const RENEW_FINALITY_TIMEOUT_SECS: u64 = 120;
 const PRUNING_EQUAL_TO_RETENTION: u32 = 20;
 /// Items stored and auto-renewed as a group.
 const RENEW_FLEET_SIZE: usize = 8;
+const REFERENCE_HANDOFF_RETENTION_PERIOD: u32 = 20;
+/// Smallest window that retains the store block `S` until the renewal block `S + RP + 1` is
+/// imported: the node prunes `S` when it finalizes `S + blocks_pruning`.
+const REFERENCE_HANDOFF_BLOCKS_PRUNING: u32 = REFERENCE_HANDOFF_RETENTION_PERIOD + 1;
 /// How long to hold the collator frozen. Block production stops, so `best` is pinned while the
 /// relay finalizes every para candidate it had already backed — which is what drives finality
 /// up to `best` and leaves pruning no lag to hide behind.
-const LOST_REF_PAUSE_SECS: u64 = 45;
+const REFERENCE_HANDOFF_FREEZE_SECS: u64 = 45;
 /// With pruning=5 + RP=10, the proof block at `S+10` lands before finality has caught up
 /// enough for pruning to actually evict col11. Bumping retention to 20 pushes the proof
 /// block out past the (finality + pruning) lag so col11 is reliably empty.
@@ -939,38 +943,38 @@ async fn parachain_auto_renew_pruning_equals_retention_test() -> Result<()> {
 	Ok(())
 }
 
-/// Reproduces the reference-handoff loss: a renewal cadence of `RP + 1` against a pruning
-/// window of `RP` or less means the store block can be released before the renewal exists.
+/// `--blocks-pruning == RetentionPeriod + 1` keeps auto-renewed data when finality has no lag.
 ///
-/// Finality lag normally masks it — pruning is driven off the finalized head while the new
-/// reference is taken at import, so the margin is
-/// `blocks_pruning - (RP + 1) + finality_lag` and a lagging chain keeps winning the race. This
-/// test removes the lag rather than waiting for it to vanish: freezing the collator pins
-/// `best` while the relay finalizes the candidates it already backed, so on resume the node
-/// finalizes the whole backlog and prunes with `finalized == best`.
+/// Auto-renewal runs at `S + RP + 1`. Pruning is driven off the finalized head while the
+/// renewal takes its reference at import, so a window of `RP` loses the value when finality
+/// reaches `S + RP` before the renewal block exists. Finality lag normally hides that. This test
+/// removes the lag: freezing the collator at best `S + RP` pins `best` while the relay finalizes
+/// the candidates it already backed, so on restart the node finalizes up to `best` before it
+/// authors the renewal block.
 ///
-/// The value then disappears while blocks still reference it, and the next renewal cannot
-/// bring it back — `store_or_reference` has no local copy, `tx.reference(..)` is a no-op
-/// against a counter that pruning removed, and the body index records the reference anyway.
-/// That is the state a collator is in `RP` blocks before it fails to author.
+/// With a window of `RP + 1` the store block stays until the renewal block is finalized. The
+/// value must stay on disk, its reference must move from the store block to the renewal block,
+/// and the chain must pass the proof for the renewal block.
 #[tokio::test(flavor = "multi_thread")]
-async fn parachain_auto_renew_reference_lost_when_finality_catches_up_test() -> Result<()> {
-	const TEST: &str = "para_reference_lost";
-	const DB_TAG: &str = "reference-lost";
+async fn parachain_auto_renew_reference_handoff_without_finality_lag_test() -> Result<()> {
+	const TEST: &str = "para_reference_handoff";
+	const DB_TAG: &str = "reference-handoff";
 	crate::utils::init_logging();
 
 	test_log!(
 		TEST,
-		"=== Reference lost when finality catches up (pruning {}, retention {}) ===",
-		PRUNING_EQUAL_TO_RETENTION,
-		PRUNING_EQUAL_TO_RETENTION
+		"=== Reference handoff without finality lag (pruning {}, retention {}) ===",
+		REFERENCE_HANDOFF_BLOCKS_PRUNING,
+		REFERENCE_HANDOFF_RETENTION_PERIOD
 	);
 
 	verify_parachain_binaries()?;
 
-	let para_args = get_para_node_args_with_pruning(PRUNING_EQUAL_TO_RETENTION);
-	let config =
-		parachain_network_config_with_retention_period(para_args, PRUNING_EQUAL_TO_RETENTION)?;
+	let para_args = get_para_node_args_with_pruning(REFERENCE_HANDOFF_BLOCKS_PRUNING);
+	let config = parachain_network_config_with_retention_period(
+		para_args,
+		REFERENCE_HANDOFF_RETENTION_PERIOD,
+	)?;
 	let network = initialize_network(config).await?;
 	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
 
@@ -985,10 +989,7 @@ async fn parachain_auto_renew_reference_lost_when_finality_catches_up_test() -> 
 	let client = &client_owned;
 
 	let mut nonce = get_alice_nonce(collator1).await?;
-	set_retention_period_finalized(client, PRUNING_EQUAL_TO_RETENTION, nonce).await?;
-	nonce += 1;
-
-	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_REFERENCE_LOST_");
+	let data = generate_test_data(TEST_DATA_SIZE, b"DATA_REFERENCE_HANDOFF_");
 	let content_hash = blake2_256(&data);
 	let key = DbHash::from(content_hash);
 	let (best_store_block, next_nonce) = authorize_and_store_data(collator1, &data, nonce).await?;
@@ -1009,15 +1010,10 @@ async fn parachain_auto_renew_reference_lost_when_finality_catches_up_test() -> 
 
 	assert_items_healthy(&db_path, DB_TAG, "before the freeze", &[data.as_slice()])?;
 
-	// Freezing must happen at exactly `store + RP`. One block earlier and finality never
-	// reaches `store + RP`, so the store block is not prunable; one block later and the
-	// renewal has already taken its own reference. With `pruning == RP` there is no wider
-	// window — that is the price of isolating the handoff from the proof requirement.
-	let proof_block = store_block + PRUNING_EQUAL_TO_RETENTION as u64;
+	let proof_block = store_block + REFERENCE_HANDOFF_RETENTION_PERIOD as u64;
 	let renewal_block = proof_block + 1;
 	tracing::info!(
-		"Waiting for best #{proof_block} — its own proof covers the store block and passes; \
-		 the renewal is at #{renewal_block}"
+		"Waiting for best #{proof_block}, one block below the renewal at #{renewal_block}"
 	);
 	wait_for_block_height(collator1, proof_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 
@@ -1027,72 +1023,51 @@ async fn parachain_auto_renew_reference_lost_when_finality_catches_up_test() -> 
 	let finalized_before = current_finalized_block(client).await?.number() as u64;
 	if best_before != proof_block {
 		anyhow::bail!(
-			"best is #{best_before}, past the one-block window at #{proof_block}: at \
-			 pruning == RP there is exactly one height where the store block is prunable and \
-			 the renewal has not yet run. Retryable — the window reopens every RP + 1 blocks."
+			"best is #{best_before}, past #{proof_block}: the renewal block already exists, so \
+			 the freeze no longer lets finality reach `best` ahead of it. Retryable."
 		);
 	}
 	tracing::info!(
 		"Freezing collator-1 for {}s at best #{best_before}, finalized #{finalized_before} \
 		 (lag {})",
-		LOST_REF_PAUSE_SECS,
+		REFERENCE_HANDOFF_FREEZE_SECS,
 		best_before.saturating_sub(finalized_before),
 	);
 
 	collator1.pause().await.context("failed to pause collator-1")?;
-	tokio::time::sleep(Duration::from_secs(LOST_REF_PAUSE_SECS)).await;
-	collator1.resume().await.context("failed to resume collator-1")?;
-	tracing::info!("Resumed collator-1 — it now finalizes the backlog and prunes with no lag");
+	tokio::time::sleep(Duration::from_secs(REFERENCE_HANDOFF_FREEZE_SECS)).await;
+	// Restart instead of SIGCONT: a resumed node's embedded relay client stays behind the relay
+	// tip and the slot-based collator does not author.
+	collator1.restart(None).await.context("failed to restart collator-1")?;
+	tracing::info!("Restarted collator-1 — it now finalizes the backlog with no lag");
 
-	// The WebSocket does not survive the freeze, so take a fresh client rather than reusing a
-	// subscription that died while the process was stopped.
-	let client_owned = collator1.wait_client().await?;
-	let client: &OnlineClient<SubstrateConfig> = &client_owned;
+	// With a window of `RP`, finalizing `S + RP` deletes the value at this point.
+	wait_for_finalized_height(collator1, proof_block, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
+	assert_items_healthy(&db_path, DB_TAG, "after finality caught up", &[data.as_slice()])?;
 
-	// Finality has reached `store + RP`, so the store block is released. It held the only
-	// reference, so value and counter both go — while `Transactions[store_block]` is still in
-	// state, waiting to be swept and renewed one block later.
-	assert_absent(&db_path, DB_TAG, "after finality caught up", key).await.context(
-		"the store block's reference survived the catch-up — the freeze may have been too \
-		 short for the relay to finalize the backlog",
-	)?;
-	let best_after = current_best_block(client).await?.number() as u64;
-	let finalized_after = current_finalized_block(client).await?.number() as u64;
-	tracing::info!(
-		"After resume: best #{best_after}, finalized #{finalized_after} (lag {}) — value gone",
-		best_after.saturating_sub(finalized_after),
-	);
-
-	// The renewal runs on schedule and cannot restore anything: it carries only the hash, and
-	// referencing a counter that pruning removed is a no-op. The body index records it anyway.
-	tracing::info!("Waiting past the renewal at #{renewal_block}");
-	wait_for_block_height(collator1, renewal_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
+	wait_for_finalized_height(collator1, renewal_block, BLOCK_PRODUCTION_TIMEOUT_SECS)
 		.await
-		.context("chain stalled before the renewal could run")?;
-	let dangling = assert_dangling(&db_path, DB_TAG, "after the renewal", key).await?;
-	tracing::info!(
-		"✓ Renewal recorded a reference it cannot honour; block(s) {dangling:?} point at \
-		 nothing while the chain keeps producing"
-	);
+		.context("chain stalled at the renewal block")?;
+	assert_referrers(
+		&db_path,
+		DB_TAG,
+		"after the renewal block is finalized",
+		key,
+		1,
+		Some(store_block as u32),
+	)
+	.await?;
 
-	// The dangling entry's own proof falls due `RP` blocks after the renewal. That is where a
-	// collator in this state stops being able to author — long after the data actually went.
-	let halt_block = renewal_block + PRUNING_EQUAL_TO_RETENTION as u64;
-	tracing::info!("Expecting the chain to stall below #{halt_block}, the dangling entry's proof");
-	match wait_for_block_height(collator1, halt_block, HALT_DETECTION_TIMEOUT_SECS).await {
-		Err(_) => tracing::info!(
-			"✓ Chain did not reach #{halt_block} within {}s — the proof for the renewal block \
-			 cannot be built, {} blocks after the value was lost",
-			HALT_DETECTION_TIMEOUT_SECS,
-			halt_block.saturating_sub(proof_block),
-		),
-		Ok(_) => anyhow::bail!(
-			"chain advanced to #{halt_block} with the value absent; a proof should not have \
-			 been constructible"
-		),
-	}
+	let renewal_proof_block = renewal_block + REFERENCE_HANDOFF_RETENTION_PERIOD as u64;
+	tracing::info!("Waiting past #{renewal_proof_block}, the proof for the renewal block");
+	wait_for_block_height(collator1, renewal_proof_block + 1, BLOCK_PRODUCTION_TIMEOUT_SECS)
+		.await
+		.context("chain stalled before the proof for the renewal block")?;
+	assert_items_healthy(&db_path, DB_TAG, "after the renewal proof", &[data.as_slice()])?;
+	verify_node_bitswap(collator1, &data, BITSWAP_TIMEOUT_SECS, "Collator-1 (after renewal)")
+		.await?;
 
-	test_log!(TEST, "=== Reference lost when finality catches up PASSED ===");
+	test_log!(TEST, "=== Reference handoff without finality lag PASSED ===");
 	network.destroy().await?;
 	Ok(())
 }
