@@ -168,6 +168,7 @@ const ITEM_SIZES: [usize; 3] = [TEST_DATA_SIZE, TEST_DATA_SIZE / 2, TEST_DATA_SI
 /// State-directory suffix for the secondary rocksdb instance the on-disk assertions open. Two
 /// secondary instances must not share one, so there is a tag per node that gets read.
 const COLLATOR_DB_TAG: &str = "collator-1";
+const SYNC_NODE_DB_TAG: &str = "sync-node";
 
 const STATE_SYNC_COMPLETE_LOG: &str = "State sync is complete, continuing with block sync.";
 const BELOW_RETENTION_ERROR: &str =
@@ -369,6 +370,7 @@ async fn parachain_fast_sync_with_pruning_test() -> Result<()> {
 	);
 	wait_for_finalized_height(collator1, pruned_height, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	expect_all_items_bitswap_dont_have(collator1, &stored_items, 30, "Collator-1").await?;
+	assert_col11_empty(&collator_db, COLLATOR_DB_TAG, "collator after pruning").await?;
 
 	// Add sync node with fast sync and pruning
 	tracing::info!("Adding sync-node with --sync=fast and --blocks-pruning");
@@ -527,6 +529,12 @@ async fn parachain_warp_sync_test() -> Result<()> {
 	}
 	verify_all_items_bitswap(sync_node, &stored_items, 30, "Sync-node").await?;
 
+	let sync_node_db = node_db_path(&network, "sync-node")?;
+	let item_data: Vec<&[u8]> = stored_items.iter().map(|item| item.data.as_slice()).collect();
+	assert_items_stored(&sync_node_db, SYNC_NODE_DB_TAG, "sync node after gap sync", &item_data)
+		.await?;
+	assert_storage_healthy(&sync_node_db, SYNC_NODE_DB_TAG, "sync node after gap sync").await?;
+
 	test_log!(TEST, "=== Parachain Warp Sync Test PASSED ===");
 	network.destroy().await?;
 	Ok(())
@@ -658,6 +666,23 @@ async fn parachain_warp_sync_with_pruning_test() -> Result<()> {
 	verify_all_items_bitswap(sync_node, &recent_items, 30, "Sync-node").await?;
 	expect_all_items_bitswap_dont_have(sync_node, &old_items, 30, "Sync-node").await?;
 	verify_all_items_bitswap(collator1, &old_items, 30, "Collator-1").await?;
+
+	let sync_node_db = node_db_path(&network, "sync-node")?;
+	let recent_item_data: Vec<&[u8]> =
+		recent_items.iter().map(|item| item.data.as_slice()).collect();
+	assert_items_stored(
+		&sync_node_db,
+		SYNC_NODE_DB_TAG,
+		"sync node after gap sync",
+		&recent_item_data,
+	)
+	.await?;
+	assert_storage_healthy(&sync_node_db, SYNC_NODE_DB_TAG, "sync node after gap sync").await?;
+	let collator_db = node_db_path(&network, "collator-1")?;
+	let all_item_data: Vec<&[u8]> =
+		old_items.iter().chain(&recent_items).map(|item| item.data.as_slice()).collect();
+	assert_items_stored(&collator_db, COLLATOR_DB_TAG, "archive collator", &all_item_data).await?;
+	assert_storage_healthy(&collator_db, COLLATOR_DB_TAG, "archive collator").await?;
 
 	test_log!(TEST, "=== Parachain Warp Sync Test (pruned sync node) PASSED ===");
 	network.destroy().await?;
@@ -942,6 +967,7 @@ async fn parachain_full_sync_with_pruning_test() -> Result<()> {
 	);
 	wait_for_finalized_height(collator1, pruned_height, BLOCK_PRODUCTION_TIMEOUT_SECS).await?;
 	expect_all_items_bitswap_dont_have(collator1, &stored_items, 30, "Collator-1").await?;
+	assert_col11_empty(&collator_db, COLLATOR_DB_TAG, "collator after pruning").await?;
 
 	// Add sync node with full sync and pruning
 	tracing::info!("Adding sync-node with --sync=full and --blocks-pruning");
