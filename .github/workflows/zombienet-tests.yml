@@ -179,8 +179,6 @@ jobs:
       - name: Run zombienet sync tests
         env:
           PARACHAIN_ID: ${{ matrix.runtime.para_id }}
-        # parachain_ldb_storage_verification_test needs rocksdb's `ldb` CLI (not in the CI
-        # image) — skipped by the just recipe.
         run: just test-zombienet-sync ${{ matrix.runtime.name }}
 
       - name: Upload logs on failure

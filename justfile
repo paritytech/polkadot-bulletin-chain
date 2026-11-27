@@ -116,12 +116,14 @@ test-zombienet-auto-renew runtime="westend" group="all":
         mixed-2)
             filter_args=(--exact \
                 auto_renew_storage::parachain_auto_renew_many_items_prune_eviction_test \
-                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test)
+                auto_renew_storage::parachain_auto_renew_under_pruning_chain_halts_test \
+                auto_renew_storage::parachain_auto_renew_pruning_equals_retention_test)
             ;;
         mixed-3)
             filter_args=(--exact \
                 auto_renew_storage::parachain_check_proof_fails_under_pruning_test \
-                auto_renew_storage::parachain_on_initialize_cleanup_test)
+                auto_renew_storage::parachain_on_initialize_cleanup_test \
+                auto_renew_storage::parachain_auto_renew_reference_handoff_without_finality_lag_test)
             ;;
         *)
             filter_args=("{{group}}")
@@ -201,8 +203,7 @@ test-zombienet-sync runtime="westend" filter="parachain_sync_storage":
     cargo test --release -p bulletin-chain-zombienet-sdk-tests \
         --features bulletin-chain-zombienet-sdk-tests/zombie-sync-tests \
         "{{filter}}" \
-        -- --test-threads=1 --nocapture \
-        --skip parachain_ldb_storage_verification_test
+        -- --test-threads=1 --nocapture
 
 
 # ---------------------------------------------------------------------------
