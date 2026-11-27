@@ -8,20 +8,21 @@ use crate::{
 	test_log,
 	utils::{
 		arg_value, assert_proof_checked_at, authorize_account_via_sudo,
-		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256, block_hash_at,
-		build_parachain_network_config_three_relay_validators, canonical_store_block,
-		content_hash_and_cid, count_event, current_best_block, current_finalized_block,
-		disable_auto_renew, enable_auto_renew, expect_all_items_bitswap_dont_have_concurrent,
-		expect_bitswap_dont_have, finalized_block_hash_at, generate_test_data, get_alice_nonce,
-		initialize_network, omni_node_exit_and_log, override_alice_authorization,
+		authorize_account_via_sudo_finalized, authorize_and_store_data, blake2_256,
+		block_availability, block_hash_at, build_parachain_network_config_three_relay_validators,
+		canonical_store_block, content_hash_and_cid, count_event, current_best_block,
+		current_finalized_block, disable_auto_renew, enable_auto_renew,
+		expect_all_items_bitswap_dont_have_concurrent, expect_bitswap_dont_have,
+		finalized_block_hash_at, generate_test_data, get_alice_nonce, initialize_network,
+		omni_node_exit_and_log, override_alice_authorization,
 		parachain_network_config_with_retention_period, resolve_canonical_store_block,
 		set_retention_period, set_retention_period_finalized, submit_force_renew,
 		submit_renew_one_shot, submit_renew_pair, submit_store_signed, top_up_alice_authorization,
 		verify_all_items_bitswap_concurrent, verify_node_bitswap, verify_parachain_binaries,
 		wait_for_block_height, wait_for_finalized_height, wait_for_finalized_quiescence,
 		wait_for_next_best_block, wait_for_session_change_on_node, AuthorizationOverride,
-		BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS, NODE_LOG_CONFIG,
-		PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
+		BlockAvailability, BLOCK_PRODUCTION_TIMEOUT_SECS, NETWORK_READY_TIMEOUT_SECS,
+		NODE_LOG_CONFIG, PARACHAIN_TEST_DATA_PATTERN, PRUNING_NODE_LOG_CONFIG, TEST_DATA_SIZE,
 	},
 };
 use anyhow::{Context, Result};
@@ -3582,6 +3583,393 @@ async fn parachain_restart_pruning_decrease_test() -> Result<()> {
 	test_log!(TEST, "=== Restart from --blocks-pruning=20 → --blocks-pruning=10 (decrease) ===");
 	run_pruning_restart_scenario("20_to_10", Some(20), Some(10)).await?;
 	test_log!(TEST, "=== finished ===");
+	Ok(())
+}
+
+// Archive → pruning restart under load: a `store` lands in every block before and after the
+// restart, so every block past the first `RetentionPeriod` owes a storage proof. After the
+// restart the collator must build those proofs from bodies kept under the new window, first
+// ones written in archive mode, then ones written under pruning.
+
+/// Equal to the retention period: the smallest window the node accepts.
+const STORING_RESTART_BLOCKS_PRUNING: u32 = PRUNE_RESTART_RETENTION_PERIOD;
+const STORING_BLOCKS_BEFORE_RESTART: u64 = 3 * PRUNE_RESTART_RETENTION_PERIOD as u64;
+const STORING_BLOCKS_AFTER_RESTART: u64 = 3 * PRUNE_RESTART_RETENTION_PERIOD as u64;
+/// About three stores per 6 s block, so one is always pending when a block is built.
+const STORE_INTERVAL_MS: u64 = 2000;
+const STORING_AUTH_TX_SLOTS: u32 = 1000;
+/// The test network has a single collator, so a stall this long means it stopped authoring.
+const BLOCK_STALL_TIMEOUT_SECS: u64 = 90;
+const RESPAWN_RPC_TIMEOUT_SECS: u64 = 120;
+const FINALITY_TIMEOUT_SECS: u64 = 300;
+const PRUNED_BODY_TIMEOUT_SECS: u64 = 300;
+
+fn archive_node_args() -> Vec<String> {
+	vec![
+		"--ipfs-server".into(),
+		PRUNING_NODE_LOG_CONFIG.into(),
+		"--".into(),
+		"--network-backend=libp2p".into(),
+	]
+}
+
+fn free_local_port() -> Result<u16> {
+	Ok(std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
+}
+
+/// [`build_respawn_args`] with the parachain RPC on `rpc_port` so the test can reach the
+/// re-spawned node. Ports after `--` belong to the embedded relay client and stay at 0.
+fn build_respawn_args_with_rpc_port(
+	orig: &[String],
+	new_pruning: Option<u32>,
+	rpc_port: u16,
+) -> Vec<String> {
+	let mut out = build_respawn_args(orig, new_pruning);
+	let para_end = out.iter().position(|a| a == "--").unwrap_or(out.len());
+	if let Some(i) = out[..para_end].iter().position(|a| a.starts_with("--rpc-port=")) {
+		out[i] = format!("--rpc-port={rpc_port}");
+	} else if let Some(i) = out[..para_end].iter().position(|a| a == "--rpc-port") {
+		out[i + 1] = rpc_port.to_string();
+	} else {
+		out.splice(para_end..para_end, ["--rpc-port".to_string(), rpc_port.to_string()]);
+	}
+	out
+}
+
+/// Fails with the tail of the node's log if the re-spawned collator has exited.
+fn ensure_running(child: &mut tokio::process::Child, log_path: &std::path::Path) -> Result<()> {
+	if let Some(status) = child.try_wait()? {
+		let log = std::fs::read_to_string(log_path).unwrap_or_default();
+		let tail: Vec<&str> = log.lines().rev().take(40).collect();
+		anyhow::bail!(
+			"re-spawned collator exited ({status}); log {}:\n{}",
+			log_path.display(),
+			tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+		);
+	}
+	Ok(())
+}
+
+async fn connect_respawned(
+	url: &str,
+	child: &mut tokio::process::Child,
+	log_path: &std::path::Path,
+) -> Result<(OnlineClient<SubstrateConfig>, subxt::backend::rpc::RpcClient)> {
+	let deadline =
+		std::time::Instant::now() + std::time::Duration::from_secs(RESPAWN_RPC_TIMEOUT_SECS);
+	loop {
+		ensure_running(child, log_path)?;
+		match subxt::backend::rpc::RpcClient::from_insecure_url(url).await {
+			Ok(rpc) => {
+				let client = OnlineClient::<SubstrateConfig>::from_rpc_client(rpc.clone()).await?;
+				return Ok((client, rpc));
+			},
+			Err(e) if std::time::Instant::now() >= deadline =>
+				anyhow::bail!("re-spawned collator RPC {url} not reachable: {e}"),
+			Err(_) => tokio::time::sleep(std::time::Duration::from_secs(1)).await,
+		}
+	}
+}
+
+/// Alice's next nonce as the node sees it: best-block state plus its pool. After a restart
+/// the pool is empty, so this is the best-block nonce.
+async fn alice_next_nonce(rpc: &subxt::backend::rpc::RpcClient) -> Result<u64> {
+	use subxt::ext::subxt_rpcs::client::rpc_params;
+	let alice = dev::alice().public_key().to_account_id().to_string();
+	Ok(rpc.request("system_accountNextIndex", rpc_params![alice]).await?)
+}
+
+/// Submit a `store` every [`STORE_INTERVAL_MS`] until at least `min_blocks` best blocks have
+/// been seen and the best block is at least `min_height`. A timer rather than one store per
+/// best-block notification: notifications can arrive after the next block is built, which
+/// leaves that block without a store. Fails if no new block arrives within
+/// [`BLOCK_STALL_TIMEOUT_SECS`]. Returns the next nonce and the last best block seen.
+async fn store_continuously(
+	client: &OnlineClient<SubstrateConfig>,
+	mut nonce: u64,
+	min_blocks: u64,
+	min_height: u64,
+	seq: &mut u64,
+	label: &str,
+) -> Result<(u64, u64)> {
+	let mut sub = client.blocks().subscribe_best().await?;
+	let mut tick = tokio::time::interval(std::time::Duration::from_millis(STORE_INTERVAL_MS));
+	tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+	let stall = std::time::Duration::from_secs(BLOCK_STALL_TIMEOUT_SECS);
+	let (mut last, mut seen) = (0u64, 0u64);
+	let mut last_progress = std::time::Instant::now();
+	loop {
+		tokio::select! {
+			_ = tick.tick() => {
+				if last_progress.elapsed() > stall {
+					anyhow::bail!(
+						"[{label}] no new best block for {BLOCK_STALL_TIMEOUT_SECS}s after block {last}"
+					);
+				}
+				let data = generate_test_data(
+					TEST_DATA_SIZE,
+					format!("RESTART_STORE_{:06}_", *seq).as_bytes(),
+				);
+				let call = tx("TransactionStorage", "store", vec![Value::from_bytes(&data)]);
+				let params = SubstrateExtrinsicParamsBuilder::new().nonce(nonce).build();
+				client
+					.tx()
+					.sign_and_submit(&call, &dev::alice(), params)
+					.await
+					.with_context(|| format!("[{label}] store after block {last} (nonce {nonce})"))?;
+				nonce += 1;
+				*seq += 1;
+			},
+			block = sub.next() => {
+				let block =
+					block.ok_or_else(|| anyhow::anyhow!("[{label}] best-block subscription ended"))??;
+				let n = block.number() as u64;
+				if n <= last {
+					continue;
+				}
+				last = n;
+				seen += 1;
+				last_progress = std::time::Instant::now();
+				if n.is_multiple_of(5) {
+					tracing::info!("[{label}] block {n}: {} stores submitted", *seq);
+				}
+				if seen >= min_blocks && n >= min_height {
+					return Ok((nonce, n));
+				}
+			},
+		}
+	}
+}
+
+async fn wait_finalized_at_least(
+	client: &OnlineClient<SubstrateConfig>,
+	target: u64,
+	timeout_secs: u64,
+) -> Result<u64> {
+	let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+	loop {
+		let finalized = current_finalized_block(client).await?.number() as u64;
+		if finalized >= target {
+			return Ok(finalized);
+		}
+		if std::time::Instant::now() >= deadline {
+			anyhow::bail!("finalized head stuck at {finalized}, wanted {target}");
+		}
+		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+	}
+}
+
+/// `(Stored, ProofChecked)` counts for every finalized block in `from..=to`.
+async fn storage_event_counts(
+	client: &OnlineClient<SubstrateConfig>,
+	from: u64,
+	to: u64,
+) -> Result<std::collections::BTreeMap<u64, (u32, u32)>> {
+	let mut hash = finalized_block_hash_at(client, to).await?;
+	let mut out = std::collections::BTreeMap::new();
+	loop {
+		let block = client.blocks().at(hash).await?;
+		let n = block.number() as u64;
+		let events = block.events().await?;
+		out.insert(n, (count_event(&events, "Stored"), count_event(&events, "ProofChecked")));
+		if n <= from || n == 0 {
+			return Ok(out);
+		}
+		hash = block.header().parent_hash;
+	}
+}
+
+/// First and last block in `from..=to` with a `Stored` event, and the blocks between them
+/// that have none.
+fn store_coverage(
+	counts: &std::collections::BTreeMap<u64, (u32, u32)>,
+	from: u64,
+	to: u64,
+) -> Option<(u64, u64, Vec<u64>)> {
+	let with_store: Vec<u64> =
+		counts.range(from..=to).filter(|(_, (s, _))| *s > 0).map(|(n, _)| *n).collect();
+	let (first, last) = (*with_store.first()?, *with_store.last()?);
+	let gaps = (first..=last).filter(|n| counts.get(n).is_none_or(|(s, _)| *s == 0)).collect();
+	Some((first, last, gaps))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn parachain_restart_archive_to_pruning_while_storing_test() -> Result<()> {
+	const TEST: &str = "restart_archive_to_pruning_storing";
+	crate::utils::init_logging();
+	let rp = PRUNE_RESTART_RETENTION_PERIOD as u64;
+	test_log!(
+		TEST,
+		"=== Store every block, restart archive → --blocks-pruning={} (RP={}), keep producing ===",
+		STORING_RESTART_BLOCKS_PRUNING,
+		rp
+	);
+	verify_parachain_binaries()?;
+
+	let config = parachain_network_config_with_retention_period(
+		archive_node_args(),
+		PRUNE_RESTART_RETENTION_PERIOD,
+	)?;
+	let network = initialize_network(config).await?;
+	network.wait_until_is_up(NETWORK_READY_TIMEOUT_SECS).await?;
+	let relay_alice = network.get_node("alice").context("alice not found")?;
+	wait_for_session_change_on_node(relay_alice, SESSION_CHANGE_TIMEOUT_SECS).await?;
+	let collator1 = network.get_node("collator-1").context("collator-1 not found")?;
+
+	// Phase 1: archive collator, a store in every block.
+	let client: OnlineClient<SubstrateConfig> = collator1.wait_client().await?;
+	let nonce = get_alice_nonce(collator1).await?;
+	authorize_account_via_sudo_finalized(
+		&client,
+		&dev::alice().public_key().0,
+		STORING_AUTH_TX_SLOTS,
+		STORING_AUTH_TX_SLOTS as u64 * TEST_DATA_SIZE as u64 * 2,
+		nonce,
+	)
+	.await?;
+	let phase1_start = current_best_block(&client).await?.number() as u64;
+	let mut seq = 0u64;
+	let (_, last_seen_before) = store_continuously(
+		&client,
+		nonce + 1,
+		STORING_BLOCKS_BEFORE_RESTART,
+		PRUNE_RESTART_INITIAL_BLOCKS_TARGET,
+		&mut seq,
+		"archive",
+	)
+	.await?;
+	test_log!(TEST, "archive phase: {} stores submitted, best {}", seq, last_seen_before);
+	drop(client);
+
+	// Phase 2: stop the collator and start it again with --blocks-pruning.
+	let orig_args: Vec<String> = collator1.args().iter().map(|s| s.to_string()).collect();
+	let base_path =
+		arg_value(&orig_args, "--base-path").context("collator-1 args lack --base-path")?;
+	let pid = find_pid_by_base_path(&base_path).context("collator-1 PID not found via ps")?;
+	test_log!(TEST, "SIGTERM collator-1 (pid {}) at best {}", pid, last_seen_before);
+	sigterm_and_wait(pid).await?;
+
+	let rpc_port = free_local_port()?;
+	let respawn_args = build_respawn_args_with_rpc_port(
+		&orig_args,
+		Some(STORING_RESTART_BLOCKS_PRUNING),
+		rpc_port,
+	);
+	let log_path = std::path::Path::new(&base_path)
+		.parent()
+		.map(|p| p.join("respawn-pruning.log"))
+		.unwrap_or_else(|| std::env::temp_dir().join("respawn-pruning.log"));
+	let log_file = std::fs::File::create(&log_path)?;
+	test_log!(TEST, "re-spawning collator-1 on rpc port {}, log {}", rpc_port, log_path.display());
+	let mut child = tokio::process::Command::new(crate::utils::get_parachain_binary_path())
+		.args(&respawn_args)
+		.stdout(std::process::Stdio::from(log_file.try_clone()?))
+		.stderr(std::process::Stdio::from(log_file))
+		.kill_on_drop(true)
+		.spawn()
+		.context("failed to re-spawn polkadot-omni-node")?;
+
+	let url = format!("ws://127.0.0.1:{rpc_port}");
+	let (client, rpc) = connect_respawned(&url, &mut child, &log_path).await?;
+	let restart_best = current_best_block(&client).await?.number() as u64;
+	let restart_finalized = current_finalized_block(&client).await?.number() as u64;
+	test_log!(
+		TEST,
+		"re-spawned node up: best {}, finalized {} (blocks above {} are authored after restart)",
+		restart_best,
+		restart_finalized,
+		restart_best
+	);
+
+	// Phase 3: keep storing every block; the single collator must keep authoring.
+	let nonce = alice_next_nonce(&rpc).await?;
+	let (_, last_seen_after) = store_continuously(
+		&client,
+		nonce,
+		STORING_BLOCKS_AFTER_RESTART,
+		restart_best + STORING_BLOCKS_AFTER_RESTART,
+		&mut seq,
+		"pruning",
+	)
+	.await?;
+	ensure_running(&mut child, &log_path)?;
+	// Proofs for the last stores fall due RP blocks later; let them finalize.
+	let verify_to = last_seen_after + rp + 2;
+	let finalized = wait_finalized_at_least(&client, verify_to, FINALITY_TIMEOUT_SECS).await?;
+	ensure_running(&mut child, &log_path)?;
+	test_log!(
+		TEST,
+		"after restart: best reached {}, finalized {} ({} blocks past the restart)",
+		last_seen_after,
+		finalized,
+		finalized - restart_best
+	);
+
+	// Every block had a store, and every block whose proof fell due checked one.
+	let counts = storage_event_counts(&client, phase1_start, verify_to).await?;
+	let (pre_first, pre_last, pre_gaps) = store_coverage(&counts, phase1_start, restart_best)
+		.context("no Stored events before the restart")?;
+	let (post_first, post_last, post_gaps) =
+		store_coverage(&counts, restart_best + 1, last_seen_after)
+			.context("no Stored events after the restart")?;
+	test_log!(
+		TEST,
+		"store coverage: before restart {}..={} ({} gaps), after {}..={} ({} gaps)",
+		pre_first,
+		pre_last,
+		pre_gaps.len(),
+		post_first,
+		post_last,
+		post_gaps.len()
+	);
+	assert!(pre_gaps.is_empty(), "blocks without a store before the restart: {pre_gaps:?}");
+	assert!(post_gaps.is_empty(), "blocks without a store after the restart: {post_gaps:?}");
+
+	let mut missing_proofs = Vec::new();
+	let mut checked_after_restart = 0u64;
+	for (&n, &(_, proofs)) in counts.range(phase1_start + rp..=verify_to) {
+		let due = counts.get(&(n - rp)).is_some_and(|(stored, _)| *stored > 0);
+		if due && proofs != 1 {
+			missing_proofs.push((n, proofs));
+		}
+		if due && proofs == 1 && n > restart_best {
+			checked_after_restart += 1;
+		}
+	}
+	assert!(
+		missing_proofs.is_empty(),
+		"(block, ProofChecked count) where a proof was due: {missing_proofs:?}"
+	);
+	assert!(
+		checked_after_restart >= STORING_BLOCKS_AFTER_RESTART,
+		"only {checked_after_restart} proofs checked after the restart"
+	);
+	test_log!(
+		TEST,
+		"{} proofs checked in blocks authored after the restart",
+		checked_after_restart
+	);
+
+	// The new window is in force: the first post-restart block loses its body.
+	let first_after = restart_best + 1;
+	let deadline =
+		std::time::Instant::now() + std::time::Duration::from_secs(PRUNED_BODY_TIMEOUT_SECS);
+	loop {
+		match block_availability(&rpc, first_after).await? {
+			BlockAvailability::HeaderOnly => break,
+			other if std::time::Instant::now() >= deadline => anyhow::bail!(
+				"block {first_after} still {other:?} with finalized past {}",
+				first_after + STORING_RESTART_BLOCKS_PRUNING as u64
+			),
+			_ => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
+		}
+	}
+	test_log!(TEST, "block {} pruned to header-only as expected", first_after);
+
+	ensure_running(&mut child, &log_path)?;
+	test_log!(TEST, "=== PASSED ===");
+	let _ = child.kill().await;
+	network.destroy().await?;
 	Ok(())
 }
 
