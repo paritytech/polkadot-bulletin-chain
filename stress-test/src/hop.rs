@@ -2,28 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use anyhow::{Context, Result};
+use bulletin_hop_rpc_client::{
+	blake2_256, hex0x, now_ms, op_signing_payload, scale_multi_signature_ed25519,
+	scale_multi_signer_ed25519, scale_multi_signature_sr25519, scale_multi_signer_sr25519,
+	submit_signing_payload, HOP_CLAIM_CONTEXT,
+};
 use ed25519_dalek::{Signer, SigningKey};
 use jsonrpsee::{core::client::ClientT, rpc_params, ws_client::WsClient};
 use rand::rngs::OsRng;
 use serde::Deserialize;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use subxt_signer::sr25519::Keypair;
-
-use crate::client;
-
-/// Domain-separator prefix the runtime uses when verifying `hop_submit` signatures.
-const HOP_SUBMIT_CONTEXT: &[u8] = b"hop-submit-v1:";
-
-/// Domain-separator prefix the runtime uses when verifying `hop_claim` signatures.
-const HOP_CLAIM_CONTEXT: &[u8] = b"hop-claim-v1:";
-
-/// `blake2_256(context || hash)` — recipients sign this for claim/ack operations.
-fn op_signing_payload(context: &[u8], hash: &[u8]) -> [u8; 32] {
-	let mut buf = Vec::with_capacity(context.len() + hash.len());
-	buf.extend_from_slice(context);
-	buf.extend_from_slice(hash);
-	client::blake2b_256(&buf)
-}
 
 // ---------------------------------------------------------------------------
 // Types matching the HOP RPC responses
@@ -64,66 +53,19 @@ impl RecipientKeypair {
 	}
 
 	/// SCALE-encoded `MultiSigner::Ed25519(pubkey)`.
-	/// MultiSigner enum variant 0 = Ed25519, so: `[0x00] ++ pubkey[32]`.
 	pub fn scale_multi_signer(&self) -> Vec<u8> {
-		let mut buf = Vec::with_capacity(33);
-		buf.push(0x00); // Ed25519 variant
-		buf.extend_from_slice(&self.public_bytes());
-		buf
+		scale_multi_signer_ed25519(&self.public_bytes())
 	}
 
 	/// Sign `msg` and return SCALE-encoded `MultiSignature::Ed25519(sig)`.
-	/// MultiSignature enum variant 0 = Ed25519, so: `[0x00] ++ sig[64]`.
 	pub fn sign_multi_signature(&self, msg: &[u8]) -> Vec<u8> {
 		let sig = self.signing_key.sign(msg);
-		let mut buf = Vec::with_capacity(65);
-		buf.push(0x00); // Ed25519 variant
-		buf.extend_from_slice(&sig.to_bytes());
-		buf
+		scale_multi_signature_ed25519(&sig.to_bytes())
 	}
 }
 
 // ---------------------------------------------------------------------------
 // Submitter helpers (sr25519, must be authorized by the runtime)
-// ---------------------------------------------------------------------------
-
-/// SCALE-encoded `MultiSigner::Sr25519(pubkey)`. Variant index 1, then 32-byte key.
-fn submitter_multi_signer(submitter: &Keypair) -> Vec<u8> {
-	let mut buf = Vec::with_capacity(33);
-	buf.push(0x01);
-	buf.extend_from_slice(&submitter.public_key().0);
-	buf
-}
-
-/// SCALE-encoded `MultiSignature::Sr25519(sig)`. Variant index 1, then 64-byte sig.
-fn submitter_multi_signature(submitter: &Keypair, msg: &[u8]) -> Vec<u8> {
-	let sig = submitter.sign(msg).0;
-	let mut buf = Vec::with_capacity(65);
-	buf.push(0x01);
-	buf.extend_from_slice(&sig);
-	buf
-}
-
-/// `blake2_256(HOP_SUBMIT_CONTEXT || blake2_256(data) || submit_timestamp.to_le_bytes())`
-/// — must match the runtime pallet's reconstruction byte-for-byte.
-fn submit_signing_payload(data: &[u8], submit_timestamp: u64) -> [u8; 32] {
-	let data_hash = client::blake2b_256(data);
-	let mut buf = Vec::with_capacity(HOP_SUBMIT_CONTEXT.len() + 32 + 8);
-	buf.extend_from_slice(HOP_SUBMIT_CONTEXT);
-	buf.extend_from_slice(&data_hash);
-	buf.extend_from_slice(&submit_timestamp.to_le_bytes());
-	client::blake2b_256(&buf)
-}
-
-fn now_ms() -> u64 {
-	SystemTime::now()
-		.duration_since(UNIX_EPOCH)
-		.expect("clock is past UNIX_EPOCH")
-		.as_millis() as u64
-}
-
-// ---------------------------------------------------------------------------
-// RPC helpers
 // ---------------------------------------------------------------------------
 
 /// Submit data to HOP pool. Returns (content_hash, submit_result, latency).
@@ -136,17 +78,17 @@ pub async fn hop_submit(
 	recipients: &[RecipientKeypair],
 	submitter: &Keypair,
 ) -> Result<([u8; 32], SubmitResult, std::time::Duration)> {
-	let data_hex = format!("0x{}", hex::encode(data));
+	let data_hex = hex0x(data);
 	let recipient_hexes: Vec<String> = recipients
 		.iter()
-		.map(|r| format!("0x{}", hex::encode(r.scale_multi_signer())))
+		.map(|r| hex0x(&r.scale_multi_signer()))
 		.collect();
 
 	let submit_timestamp = now_ms();
 	let payload = submit_signing_payload(data, submit_timestamp);
 	let signature_hex =
-		format!("0x{}", hex::encode(submitter_multi_signature(submitter, &payload)));
-	let signer_hex = format!("0x{}", hex::encode(submitter_multi_signer(submitter)));
+		hex0x(&scale_multi_signature_sr25519(&submitter.sign(&payload).0));
+	let signer_hex = hex0x(&scale_multi_signer_sr25519(&submitter.public_key().0));
 
 	let start = Instant::now();
 	let result: SubmitResult = ws
@@ -157,7 +99,7 @@ pub async fn hop_submit(
 		.await?;
 	let latency = start.elapsed();
 
-	let hash = client::blake2b_256(data);
+	let hash = blake2_256(data);
 	Ok((hash, result, latency))
 }
 
@@ -167,10 +109,10 @@ pub async fn hop_claim(
 	hash: &[u8],
 	recipient: &RecipientKeypair,
 ) -> Result<(Vec<u8>, std::time::Duration)> {
-	let hash_hex = format!("0x{}", hex::encode(hash));
+	let hash_hex = hex0x(hash);
 	let payload = op_signing_payload(HOP_CLAIM_CONTEXT, hash);
 	let signature = recipient.sign_multi_signature(&payload);
-	let sig_hex = format!("0x{}", hex::encode(&signature));
+	let sig_hex = hex0x(&signature);
 
 	let start = Instant::now();
 	let data_hex: String = ws.request("hop_claim", rpc_params![hash_hex, sig_hex]).await?;
